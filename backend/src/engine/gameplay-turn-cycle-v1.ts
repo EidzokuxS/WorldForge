@@ -1062,9 +1062,53 @@ function modelSafeSceneSummary(frame: SceneFrame): Record<string, unknown> {
   };
 }
 
-function toolContractHint(toolName: RuntimeToolName): Record<string, unknown> {
+export function toolContractHint(toolName: RuntimeToolName): Record<string, unknown> {
   const descriptor = RUNTIME_TOOL_DESCRIPTORS[toolName];
   switch (toolName) {
+    case "list_visible_affordances":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          scope: "optional current_scene|current_location|visible|known",
+          maxResults: "optional integer 1-8; prefer 4-6",
+        },
+      };
+    case "list_navigation_options":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          actorRef: "optional exact visible actor label; omit for player",
+          fromLocationRef: "optional exact current location label",
+          maxResults: "optional integer 1-8; prefer 4-6; never exceed 8",
+        },
+      };
+    case "find_location_candidates":
+    case "find_object_candidates":
+    case "find_actor_candidates":
+    case "find_poi_candidates":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          query: "short fuzzy player-facing words to match against visible/legal candidates",
+          scope: "optional current_scene|current_location|visible|known",
+          tags: ["optional 0-6 short tags"],
+          maxResults: "optional integer 1-8; prefer 3-4; never exceed 8",
+        },
+      };
+    case "inspect_known_fact":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          query: "optional short player-visible/player-known fact query",
+          ref: "optional exact visible/current ref; query or ref is required",
+          scope: "optional current_scene|current_location|visible|known",
+          maxResults: "optional integer 1-8; prefer 2-4; never exceed 8",
+        },
+      };
     case "move_to":
       return {
         toolName,
@@ -1237,6 +1281,21 @@ function toolRequestExampleForStepV1(
       evidenceRefs: step.evidenceRefs.slice(0, 3),
     };
   }
+  if (
+    step.toolNeed === "list_navigation_options"
+    || allowedToolNames.length === 1 && allowedToolNames.includes("list_navigation_options")
+  ) {
+    return {
+      version: TOOL_REQUEST_VERSION_V1,
+      stepId: step.stepId,
+      toolName: "list_navigation_options",
+      input: {
+        actorRef: "Player",
+        maxResults: 6,
+      },
+      evidenceRefs: step.evidenceRefs.slice(0, 3),
+    };
+  }
   if (step.toolNeed !== "movement") return null;
   const destination = frame.movementCandidates.find((candidate) => candidate.connected)
     ?? frame.movementCandidates[0];
@@ -1357,6 +1416,9 @@ async function runGmActionChecklistV1(input: {
     "toolNeed must be either a known state-effect kind or an exact runtime tool name.",
     "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
+    "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",
+    "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",
+    "Use toolNeed=list_navigation_options when the player asks which routes or movement options are available.",
   ].join(" ");
   const { object } = await withRole("judge", () =>
     safeGenerateObject({
@@ -1410,6 +1472,17 @@ export function selectAllowedToolNamesForStepV1(
   frame: Pick<SceneFrame, "allowedTools">,
 ): RuntimeToolName[] {
   const toolNeed = step.toolNeed?.trim();
+  if (toolNeed === "inspect_known_fact" && frame.allowedTools.includes("inspect_known_fact")) {
+    const lookupTools: RuntimeToolName[] = [
+      "inspect_known_fact",
+      "find_object_candidates",
+      "find_location_candidates",
+      "find_actor_candidates",
+      "find_poi_candidates",
+    ];
+    const allowedLookupTools = lookupTools.filter((toolName) => frame.allowedTools.includes(toolName));
+    return allowedLookupTools.length > 0 ? allowedLookupTools : ["inspect_known_fact"];
+  }
   if (toolNeed && isRuntimeToolName(toolNeed) && frame.allowedTools.includes(toolNeed)) {
     return [toolNeed];
   }
@@ -1619,6 +1692,26 @@ async function proposeToolRequestV1(input: {
   return object;
 }
 
+export function bridgeLookupRepairFeedbackV1(
+  request: Pick<GmToolRequestV1, "toolName" | "input">,
+  result: Pick<ToolResult, "success" | "error" | "contractFailure">,
+): string | null {
+  if (result.success || result.contractFailure?.retryable || !isBridgeLookupToolName(request.toolName)) {
+    return null;
+  }
+  if (request.toolName !== "inspect_known_fact") return null;
+
+  const error = result.error ?? "";
+  if (!error.includes("no_player_visible_or_known_fact")) return null;
+
+  return [
+    "inspect_known_fact found no player-visible/player-known fact for this query/ref.",
+    "If the player is checking, reading, searching, or inspecting a visible/current/inventory object, use find_object_candidates with exact visible words from scene.targetCandidates or playerInventory.",
+    "If the player is asking about a visible actor, location, or point of interest, use the matching find_*_candidates lookup tool.",
+    "Keep maxResults between 1 and 8.",
+  ].join("\n");
+}
+
 async function executeToolStepV1(input: {
   envelope: GameplayFrameEnvelopeV1;
   read: GmRead;
@@ -1689,64 +1782,67 @@ async function executeToolStepV1(input: {
         undefined,
         input.context,
       );
-  if (!result.success && result.contractFailure?.retryable) {
+  const retryFeedback = result.contractFailure?.retryable
+    ? [
+        result.contractFailure.message,
+        result.contractFailure.refHints?.length
+          ? `Legal refs/hints: ${result.contractFailure.refHints.join(", ")}`
+          : null,
+      ].filter(Boolean).join("\n")
+    : bridgeLookupRepairFeedbackV1(request, result);
+  if (!result.success && retryFeedback) {
     let retryRequest: GmToolRequestV1 | null = null;
     try {
       retryRequest = await proposeToolRequestV1({
         ...input,
-        validationFeedback: [
-          result.contractFailure.message,
-          result.contractFailure.refHints?.length
-            ? `Legal refs/hints: ${result.contractFailure.refHints.join(", ")}`
-            : null,
-        ].filter(Boolean).join("\n"),
+        validationFeedback: retryFeedback,
       });
     } catch {
       retryRequest = null;
     }
     if (retryRequest) {
-    const retryValidation = validateAndNormalizeToolRequestV1(retryRequest, input.envelope.frame, input.step);
-    if (!retryValidation.failure) {
-      const retryInput = applyToolRequestContextDefaultsV1(
-        retryRequest.toolName,
-        retryValidation.input,
-        input.read,
-      );
-      const retryResult = isBridgeLookupToolName(retryRequest.toolName)
-        ? executeBridgeCandidateTool(retryRequest.toolName, retryInput, input.context)
-        : await executeToolCall(
-            input.envelope.campaignId,
-            retryRequest.toolName,
-            retryInput,
-            input.envelope.baseTick,
-            undefined,
-            input.context,
-          );
-      if (retryResult.success) {
-        applySuccessfulToolObservationToExecutionContext({
+      const retryValidation = validateAndNormalizeToolRequestV1(retryRequest, input.envelope.frame, input.step);
+      if (!retryValidation.failure) {
+        const retryInput = applyToolRequestContextDefaultsV1(
+          retryRequest.toolName,
+          retryValidation.input,
+          input.read,
+        );
+        const retryResult = isBridgeLookupToolName(retryRequest.toolName)
+          ? executeBridgeCandidateTool(retryRequest.toolName, retryInput, input.context)
+          : await executeToolCall(
+              input.envelope.campaignId,
+              retryRequest.toolName,
+              retryInput,
+              input.envelope.baseTick,
+              undefined,
+              input.context,
+            );
+        if (retryResult.success) {
+          applySuccessfulToolObservationToExecutionContext({
+            toolName: retryRequest.toolName,
+            toolInput: retryInput,
+            result: retryResult,
+            context: input.context,
+          });
+        }
+        log.event("gm-tool-step.v1.settled", {
+          stepId: input.step.stepId,
           toolName: retryRequest.toolName,
-          toolInput: retryInput,
-          result: retryResult,
-          context: input.context,
+          success: retryResult.success,
+          error: retryResult.success ? null : retryResult.error ?? "Backend rejected the retry tool request.",
+          retried: true,
         });
+        return {
+          stepId: input.step.stepId,
+          purpose: input.step.purpose,
+          status: retryResult.success ? "accepted" : "failed",
+          toolName: retryRequest.toolName,
+          input: retryInput,
+          result: retryResult,
+          reason: retryResult.success ? undefined : retryResult.error ?? "Backend rejected the retry tool request.",
+        };
       }
-      log.event("gm-tool-step.v1.settled", {
-        stepId: input.step.stepId,
-        toolName: retryRequest.toolName,
-        success: retryResult.success,
-        error: retryResult.success ? null : retryResult.error ?? "Backend rejected the retry tool request.",
-        retried: true,
-      });
-      return {
-        stepId: input.step.stepId,
-        purpose: input.step.purpose,
-        status: retryResult.success ? "accepted" : "failed",
-        toolName: retryRequest.toolName,
-        input: retryInput,
-        result: retryResult,
-        reason: retryResult.success ? undefined : retryResult.error ?? "Backend rejected the retry tool request.",
-      };
-    }
     }
   }
   if (result.success) {

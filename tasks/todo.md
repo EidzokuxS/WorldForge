@@ -181,3 +181,20 @@ Session: `gm-v1-consequenc-slice`.
   - Re-verified after the actor receipt fix:
     - `npm --prefix backend run typecheck`
     - `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts chat.scene-plan.test.ts chat.test.ts`
+
+## Acceptance Lanes 2026-06-01
+
+- Correction applied: final 3x60 acceptance clones must come from branches/campaigns where the first player turn has not been made yet. Do not use already-played smoke campaigns as 60-turn sources.
+- Removed wrong acceptance clone `7bbd20d3-651c-4f93-bfcc-5c2ab451538d`, which had been cloned from an already-played Ashfall smoke source.
+- Created and verified zero-turn acceptance clones:
+  - Lane A / JJK movement-heavy: source `8d9f2423-c9ad-4f4d-ad96-8f0fc8e93dcc` -> clone `a4e06d79-3695-437e-bef2-b1ae64286e35`; `chat=0`, `settled_turn_packets=0`, player `Tanaka Kouta`, location `Shibuya Ward`, 8 movement options, inventory includes `Burner phone`, `Delivery manifest`, `Worn messenger bag`.
+  - Lane B / Lacquer movement-heavy: source `30e161da-db4b-4d8c-ab93-154fab7aa03f` -> clone `ba788102-b970-43f2-8221-6f0f136e23f8`; `chat=0`, `settled_turn_packets=0`, player `Mira Voss`, location `Lowwater Bazaar`, 8 movement options, inventory includes `Courier satchel`, `Sealed lacquer message tube`.
+  - Lane C / Ashfall NPC/documents: source `2badd884-f63a-456c-b832-e88439fb62b4` -> clone `b13e8cfd-468e-44ef-a464-62e13fd70a7a`; `chat=0`, `settled_turn_packets=0`, player `Mara Venn`, scene `Municipal Stores Front Counter`, active NPC `master clerk`, rich document inventory, no current movement options.
+- Lane A first-turn live acceptance:
+  - First attempt exposed a Stage 4 prompt contract gap: `list_navigation_options` was proposed with `maxResults: 10` while the backend schema caps it at 8. Fixed `toolContractHint` for bridge lookup tools so prompt contracts expose `maxResults` bounds.
+  - Second attempt exposed a real ownership mismatch: Stage 3/4 selected `inspect_known_fact` for visible inventory objects (`Delivery manifest`, `Burner phone`), and the bridge correctly rejected it with `no_player_visible_or_known_fact`.
+  - Fixed by tightening Stage 3 guidance (`find_object_candidates` for visible/current/inventory objects; `inspect_known_fact` only for player-known facts/canon claims) and allowing one Stage 4 repair within bridge lookup tools, not across mutating tools.
+  - Verified on real `/api/chat/action` against zero-turn clone `a4e06d79-3695-437e-bef2-b1ae64286e35` with action: `Я проверяю delivery manifest и burner phone, затем осматриваюсь на Shibuya Ward, чтобы выбрать самый безопасный следующий маршрут.`
+  - Result: SSE reached `narrative` and `done`; DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
+  - Latest saga `116483ab-a84a-4b77-9114-800646604263` finalized; packet `b5faf28d-afae-47aa-b42d-09915c54408e` persisted accepted tool refs `["step-1:find_object_candidates","step-2:list_navigation_options"]`; narrator attempt `3b74cb65-2afb-4bfd-951d-e132454fbcd5` succeeded.
+  - Verification: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts chat.scene-plan.test.ts chat.test.ts` passed with 113 tests.

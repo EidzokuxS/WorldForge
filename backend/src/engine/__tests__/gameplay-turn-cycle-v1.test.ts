@@ -4,6 +4,7 @@ import {
   assertRequiredToolStepsAcceptedV1,
   assertNarrationRespectsSettledPacketV1,
   assertNoExecutableGmReadPayloadV1,
+  bridgeLookupRepairFeedbackV1,
   buildLocalConsequenceResultFromActorPassV1,
   buildNarratorPromptFromSettledPacketV1,
   buildSceneFrameForecastRefsV1,
@@ -12,6 +13,7 @@ import {
   mutatingGmActionChecklistV1Schema,
   nextExecutableChecklistStepV1,
   selectAllowedToolNamesForStepV1,
+  toolContractHint,
   toolRequestSchemaForAllowedToolsV1,
   validateAndNormalizeToolRequestV1,
   type SettledTurnPacketV1,
@@ -240,6 +242,18 @@ describe("gameplay turn cycle v1 contracts", () => {
       { toolNeed: "route_check" },
       { allowedTools: ["check_route", "move_actor"] },
     )).toEqual(["check_route"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "inspect_known_fact" },
+      {
+        allowedTools: [
+          "inspect_known_fact",
+          "find_object_candidates",
+          "find_actor_candidates",
+          "add_tag",
+          "list_navigation_options",
+        ],
+      },
+    )).toEqual(["inspect_known_fact", "find_object_candidates", "find_actor_candidates"]);
   });
 
   it("selects the next dependency-ready backend step deterministically", () => {
@@ -919,6 +933,39 @@ describe("gameplay turn cycle v1 contracts", () => {
       actorId: "npc-clerk",
     });
     expect(() => assertLocalConsequencePassAcceptedV1(result)).not.toThrow();
+  });
+
+  it("exposes bridge lookup maxResults bounds to Stage 4 tool request prompts", () => {
+    expect(toolContractHint("list_navigation_options")).toMatchObject({
+      input: {
+        maxResults: expect.stringContaining("never exceed 8"),
+      },
+    });
+    expect(toolContractHint("inspect_known_fact")).toMatchObject({
+      input: {
+        maxResults: expect.stringContaining("never exceed 8"),
+      },
+    });
+  });
+
+  it("repairs inspect_known_fact misses toward visible-object bridge lookups", () => {
+    expect(bridgeLookupRepairFeedbackV1(
+      { toolName: "inspect_known_fact", input: { query: "delivery manifest" } },
+      {
+        success: false,
+        error: "no_player_visible_or_known_fact",
+        contractFailure: undefined,
+      } as never,
+    )).toContain("find_object_candidates");
+
+    expect(bridgeLookupRepairFeedbackV1(
+      { toolName: "find_object_candidates", input: { query: "delivery manifest" } },
+      {
+        success: false,
+        error: "no_player_visible_or_known_fact",
+        contractFailure: undefined,
+      } as never,
+    )).toBeNull();
   });
 
   it("fails closed for required local actor failures and keeps deferred skips audit-only", () => {
