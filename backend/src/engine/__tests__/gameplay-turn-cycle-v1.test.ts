@@ -4,6 +4,8 @@ import {
   assertRequiredToolStepsAcceptedV1,
   assertNarrationRespectsSettledPacketV1,
   assertNoExecutableGmReadPayloadV1,
+  acceptedStepContextV1,
+  attachStateReceiptsToToolStepResultV1,
   bridgeLookupRepairFeedbackV1,
   buildLocalConsequenceResultFromActorPassV1,
   buildNarratorPromptFromSettledPacketV1,
@@ -23,6 +25,7 @@ import {
 } from "../gameplay-turn-cycle-v1.js";
 import type { GmRead } from "../gm-turn-read.js";
 import type { SceneFrame } from "../scene-frame.js";
+import type { ToolResult } from "../tool-result.js";
 
 function directRead(overrides: Partial<GmRead> = {}): GmRead {
   return {
@@ -971,6 +974,68 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("futureUseKind=evidence");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("never futureUseKind=proof");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never send empty strings for optional fields");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("acceptedContext exposes a prior stateReceipts");
+  });
+
+  it("exposes backend-issued state receipts from accepted structural steps to later Stage 4 dialogue requests", () => {
+    const result: ToolResult = {
+      success: true,
+      status: "success",
+      result: {
+        entity: "petition-grade paper and small ink vial",
+        entityType: "item",
+        appliedTag: "discrepancy-form",
+        tags: ["document", "discrepancy-form"],
+      },
+      authority: {
+        toolResultId: "tool-result-1",
+        campaignId: "campaign-1",
+        sourceEntity: { type: "player", id: "player-1" },
+        baseWorldVersion: 1,
+        resultWorldVersion: 2,
+        worldTimeMinutes: 0,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["item:petition-grade-paper-and-small-ink-vial:tag"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    const withReceipts = attachStateReceiptsToToolStepResultV1({
+      toolName: "add_tag",
+      toolInput: {
+        entityName: "petition-grade paper and small ink vial",
+        entityType: "item",
+        tag: "discrepancy-form",
+      },
+      result,
+      previousSettlements: [],
+    });
+
+    expect(withReceipts.stateReceipts?.[0]).toMatchObject({
+      stateReceipt: "state_receipt_1_1",
+      tool: "add_tag",
+      key: "tag",
+      value: "discrepancy-form",
+    });
+    expect(acceptedStepContextV1([{
+      stepId: "step-1",
+      purpose: "Mark petition paper as a discrepancy form.",
+      status: "accepted",
+      toolName: "add_tag",
+      input: {
+        entityName: "petition-grade paper and small ink vial",
+        entityType: "item",
+        tag: "discrepancy-form",
+      },
+      result: withReceipts,
+    }])).toEqual([expect.objectContaining({
+      stepId: "step-1",
+      stateReceipts: expect.arrayContaining([{ stateReceipt: "state_receipt_1_1" }]),
+    })]);
   });
 
   it("repairs inspect_known_fact misses toward visible-object bridge lookups", () => {

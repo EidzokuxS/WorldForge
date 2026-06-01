@@ -9,6 +9,7 @@ import {
   runRequiredActorDecisionPass,
   type RunRequiredActorDecisionPassResult,
 } from "./actor-tools.js";
+import { attachStructuralStateReceiptsToToolResult } from "./dialogue-state-receipt.js";
 import { callOracle, type OraclePayload, type OracleResult } from "./oracle.js";
 import {
   executeBridgeCandidateTool,
@@ -178,6 +179,7 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
   "Never send empty strings for optional fields; omit the field entirely unless you have a non-empty value.",
   "For record_dialogue_outcome, futureUseKind must be one of route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other; proof is topicKind only, so documentary/proof later use maps to futureUseKind=evidence, never futureUseKind=proof.",
   "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
+  "For record_dialogue_outcome stateEffects, omit the field unless acceptedContext exposes a prior stateReceipts[].stateReceipt alias. If you use applied_now, every stateEffects entry must include effectId, status:\"applied_now\", stateReceipt copied exactly from acceptedContext, and summary.",
   "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
   "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
   "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
@@ -1203,6 +1205,12 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
             subjectText: "free text when not an exact visible ref",
             summary: "claim summary",
           }],
+          stateEffects: [{
+            effectId: "optional stable short id; omit stateEffects unless linking prior accepted structural state",
+            status: "applied_now|not_applied|asserted_only",
+            stateReceipt: "required for applied_now; exact prior acceptedContext.stateReceipts[].stateReceipt",
+            summary: "required human-readable effect summary",
+          }],
           sourceRefs: ["exact visible/current refs only"],
         },
       };
@@ -1362,7 +1370,7 @@ function gmReadRequestedRoleTextV1(read: GmRead): string | null {
   return binding.requestedRoleText;
 }
 
-function acceptedStepContextV1(
+export function acceptedStepContextV1(
   settlements: readonly GmToolStepSettlementV1[],
 ): Record<string, unknown>[] {
   return settlements
@@ -1380,6 +1388,9 @@ function acceptedStepContextV1(
             eventRefs: settlement.result.authority.eventRefs,
           }
         : null,
+      stateReceipts: settlement.result?.stateReceipts?.map((receipt) => ({
+        stateReceipt: receipt.stateReceipt,
+      })) ?? [],
       resultPreview: settlement.result?.result && typeof settlement.result.result === "object"
         ? settlement.result.result
         : typeof settlement.result?.result === "string"
@@ -1661,6 +1672,21 @@ function applyToolRequestContextDefaultsV1(
   };
 }
 
+export function attachStateReceiptsToToolStepResultV1(input: {
+  toolName: RuntimeToolName;
+  toolInput: Record<string, unknown>;
+  result: ToolResult;
+  previousSettlements: readonly GmToolStepSettlementV1[];
+}): ToolResult {
+  if (!input.result.success) return input.result;
+  return attachStructuralStateReceiptsToToolResult({
+    toolName: input.toolName,
+    candidateInput: input.toolInput,
+    result: input.result,
+    prefix: `state_receipt_${input.previousSettlements.length + 1}`,
+  });
+}
+
 async function proposeToolRequestV1(input: {
   envelope: GameplayFrameEnvelopeV1;
   read: GmRead;
@@ -1784,7 +1810,7 @@ async function executeToolStepV1(input: {
     validation.input,
     input.read,
   );
-  const result = isBridgeLookupToolName(request.toolName)
+  const rawResult = isBridgeLookupToolName(request.toolName)
     ? executeBridgeCandidateTool(request.toolName, normalizedInput, input.context)
     : await executeToolCall(
         input.envelope.campaignId,
@@ -1794,6 +1820,12 @@ async function executeToolStepV1(input: {
         undefined,
         input.context,
       );
+  const result = attachStateReceiptsToToolStepResultV1({
+    toolName: request.toolName,
+    toolInput: normalizedInput,
+    result: rawResult,
+    previousSettlements: input.previousSettlements,
+  });
   const retryFeedback = result.contractFailure?.retryable
     ? [
         result.contractFailure.message,
@@ -1820,7 +1852,7 @@ async function executeToolStepV1(input: {
           retryValidation.input,
           input.read,
         );
-        const retryResult = isBridgeLookupToolName(retryRequest.toolName)
+        const rawRetryResult = isBridgeLookupToolName(retryRequest.toolName)
           ? executeBridgeCandidateTool(retryRequest.toolName, retryInput, input.context)
           : await executeToolCall(
               input.envelope.campaignId,
@@ -1830,6 +1862,12 @@ async function executeToolStepV1(input: {
               undefined,
               input.context,
             );
+        const retryResult = attachStateReceiptsToToolStepResultV1({
+          toolName: retryRequest.toolName,
+          toolInput: retryInput,
+          result: rawRetryResult,
+          previousSettlements: input.previousSettlements,
+        });
         if (retryResult.success) {
           applySuccessfulToolObservationToExecutionContext({
             toolName: retryRequest.toolName,
