@@ -1067,6 +1067,11 @@ function checkRoute(
   const snapshot = getSnapshot(context);
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
   const aliases = buildDisplayAliases(snapshot, allFacts(snapshot));
+  const current = {
+    ref: "current_location",
+    locationName: snapshot.current.currentLocationName ?? null,
+    sceneName: snapshot.current.currentSceneScopeName ?? null,
+  };
   const destinationRef = readString(input, "destinationRef");
   if (!destinationRef) return denial(toolName, "missing_destination_ref");
   const actorRef = readString(input, "actorRef");
@@ -1095,6 +1100,7 @@ function checkRoute(
   ) {
     return observation(toolName, {
       routeStatus: "already_here",
+      current,
       destination: {
         ref: "current_location",
         type: "location",
@@ -1116,6 +1122,7 @@ function checkRoute(
   if (!route) {
     return observation(toolName, {
       routeStatus: "not_visible_or_legal",
+      current,
       reason: "route_not_visible_or_legal",
       destination: null,
       cost: null,
@@ -1127,6 +1134,7 @@ function checkRoute(
 
   return observation(toolName, {
     routeStatus: "legal",
+    current,
     destination: {
       ref: routeRef,
       type: "location",

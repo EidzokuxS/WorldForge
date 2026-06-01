@@ -1141,6 +1141,12 @@ function summarizeToolSettlementForNarration(
   }
 
   if (settlement.toolName === "check_route") {
+    const current = readRecord(payload.current);
+    const currentLabel = typeof current?.locationName === "string" && current.locationName.trim().length > 0
+      ? current.locationName.trim()
+      : typeof current?.sceneName === "string" && current.sceneName.trim().length > 0
+        ? current.sceneName.trim()
+        : null;
     const destination = readRecord(payload.destination);
     const destinationLabel = typeof destination?.label === "string" && destination.label.trim().length > 0
       ? destination.label.trim()
@@ -1151,22 +1157,34 @@ function summarizeToolSettlementForNarration(
     const pathLabels = readLabelList(payload.path, 8)
       .filter((label) => label !== "current_location");
     if (russian) {
+      const routeSentence = routeStatus === "legal" && destinationLabel
+        ? `Проверка маршрута подтвердила доступность направления: ${destinationLabel}.`
+        : destinationLabel
+          ? `Проверка маршрута к ${destinationLabel} выполнена; доступность направления не подтверждена.`
+          : "Проверка маршрута завершена.";
       return [
-        destinationLabel
-          ? `Проверка маршрута подтвердила доступность направления: ${destinationLabel}.`
-          : "Проверка маршрута завершена.",
+        currentLabel ? `Проверка маршрута выполнена из текущей сцены: ${currentLabel}.` : null,
+        routeSentence,
         routeStatus ? `Статус маршрута: ${routeStatus}.` : null,
         pathLabels.length ? `Маршрут: ${pathLabels.join(" -> ")}.` : null,
-        "Этот результат не перемещает игрока и не меняет текущую сцену.",
+        currentLabel
+          ? `Этот результат не перемещает игрока и не меняет текущую сцену; текущая сцена остаётся: ${currentLabel}. Если текст игрока называл другую исходную локацию, она не является авторитетной.`
+          : "Этот результат не перемещает игрока и не меняет текущую сцену.",
       ].filter(Boolean).join(" ");
     }
+    const routeSentence = routeStatus === "legal" && destinationLabel
+      ? `Route check confirmed route availability for: ${destinationLabel}.`
+      : destinationLabel
+        ? `Route check to ${destinationLabel} completed; route availability is not confirmed.`
+        : "Route check completed.";
     return [
-      destinationLabel
-        ? `Route check confirmed route availability for: ${destinationLabel}.`
-        : "Route check completed.",
+      currentLabel ? `Route check was performed from the current scene: ${currentLabel}.` : null,
+      routeSentence,
       routeStatus ? `Route status: ${routeStatus}.` : null,
       pathLabels.length ? `Path: ${pathLabels.join(" -> ")}.` : null,
-      "This result does not move the player or change the current scene.",
+      currentLabel
+        ? `This result does not move the player or change the current scene; the current scene remains: ${currentLabel}. If the player text named a different origin, that origin is not authoritative.`
+        : "This result does not move the player or change the current scene.",
     ].filter(Boolean).join(" ");
   }
 

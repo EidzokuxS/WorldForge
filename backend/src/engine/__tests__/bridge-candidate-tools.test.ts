@@ -553,6 +553,9 @@ describe("bridge candidate lookup tools", () => {
       observationOnly: true,
       result: expect.objectContaining({
         routeStatus: "legal",
+        current: expect.objectContaining({
+          locationName: "Canal Market",
+        }),
         cost: 4,
         path: expect.arrayContaining(["current_location", "East Tea Lane"]),
       }),
@@ -563,6 +566,9 @@ describe("bridge candidate lookup tools", () => {
       observationOnly: true,
       result: expect.objectContaining({
         routeStatus: "not_visible_or_legal",
+        current: expect.objectContaining({
+          locationName: "Canal Market",
+        }),
         reason: "route_not_visible_or_legal",
         path: [],
       }),

@@ -1392,20 +1392,29 @@ function summarizeObservationToolResult(
         : "No matching player-visible or player-known fact is confirmed.";
     case "check_route": {
       const routeStatus = readRecordString(acceptedResult, "routeStatus");
+      const current = acceptedResult && typeof acceptedResult === "object"
+        ? (acceptedResult as Record<string, unknown>).current
+        : null;
+      const currentLabel = current && typeof current === "object"
+        ? readRecordString(current as Record<string, unknown>, "locationName")
+          ?? readRecordString(current as Record<string, unknown>, "sceneName")
+        : null;
       const destination = acceptedResult && typeof acceptedResult === "object"
         ? readRecordString((acceptedResult as Record<string, unknown>).destination, "label")
         : null;
       if (routeStatus === "already_here") {
         return destination
-          ? `The player is already at ${destination}.`
+          ? `The player is already at ${destination}; the current scene remains ${currentLabel ?? "the grounded vantage point"}.`
           : "The player is already at the checked destination.";
       }
       if (routeStatus === "legal") {
         return destination
-          ? `A visible route to ${destination} is confirmed.`
+          ? `A visible route to ${destination} is confirmed from ${currentLabel ?? "the current scene"}; this is not movement.`
           : "A visible route to the checked destination is confirmed.";
       }
-      return "The requested route is checked against visible current-scene routes.";
+      return currentLabel
+        ? `The requested route is checked against visible routes from ${currentLabel}; no movement happens and the current scene remains ${currentLabel}.`
+        : "The requested route is checked against visible current-scene routes; no movement happens.";
     }
     default:
       return count !== null && count === 0
@@ -2368,10 +2377,12 @@ function observationAtomSummaryFromRecord(
     if (routeStatus) {
       const destinationLabel = readNestedObservationLabel(record, "destination")
         ?? readObservationString(record, ["label", "name", "title"]);
+      const current = record.current;
+      const currentLabel = current && typeof current === "object"
+        ? readObservationString(current as Record<string, unknown>, ["locationName", "sceneName", "label", "name"])
+        : null;
       const status = formatInventoryTagForPrompt(routeStatus);
-      return destinationLabel
-        ? formatRouteStatusObservation(destinationLabel, status)
-        : formatRouteStatusObservation(null, status);
+      return formatRouteStatusObservation(destinationLabel, status, currentLabel);
     }
   }
 
@@ -2389,21 +2400,22 @@ function observationAtomSummaryFromRecord(
 function formatRouteStatusObservation(
   destinationLabel: string | null,
   status: string,
+  currentLabel: string | null = null,
 ): string {
   const normalizedStatus = status.trim().toLocaleLowerCase();
   if (normalizedStatus === "legal") {
     return destinationLabel
-      ? `The route to ${destinationLabel} is reachable from here.`
-      : "A route is reachable from here.";
+      ? `The route to ${destinationLabel} is reachable from ${currentLabel ?? "the current scene"}; this is not movement.`
+      : `A route is reachable from ${currentLabel ?? "the current scene"}; this is not movement.`;
   }
   if (normalizedStatus === "already here") {
     return destinationLabel
-      ? `You are already at ${destinationLabel}.`
+      ? `You are already at ${destinationLabel}; the current scene remains ${currentLabel ?? "the grounded vantage point"}.`
       : "You are already at the checked destination.";
   }
   return destinationLabel
-    ? `The route to ${destinationLabel} is ${status}.`
-    : `The route status is ${status}.`;
+    ? `The route to ${destinationLabel} is ${status} from ${currentLabel ?? "the current scene"}; no movement happens.`
+    : `The route status is ${status} from ${currentLabel ?? "the current scene"}; no movement happens.`;
 }
 
 function hasSentencePunctuation(value: string): boolean {

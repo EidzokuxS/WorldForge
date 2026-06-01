@@ -2562,6 +2562,7 @@ describe("narrator packet settlement boundary", () => {
           observationOnly: true,
           result: {
             routeStatus: "legal",
+            current: { locationName: "Archive Hall" },
             destination: { label: "Archive Stair" },
           },
         },
@@ -2576,9 +2577,9 @@ describe("narrator packet settlement boundary", () => {
     const atomSummaries = packet.perceivableObservations?.[0]?.atoms.map((atom) => atom.summary) ?? [];
     const formatted = formatNarratorPacketForPrompt(packet);
 
-    expect(atomSummaries).toContain("The route to Archive Stair is reachable from here.");
+    expect(atomSummaries).toContain("The route to Archive Stair is reachable from Archive Hall; this is not movement.");
     expect(atomSummaries.join("\n")).not.toContain("legal");
-    expect(formatted).toContain("The route to Archive Stair is reachable from here.");
+    expect(formatted).toContain("The route to Archive Stair is reachable from Archive Hall; this is not movement.");
     expect(formatted).not.toContain("Route to Archive Stair is legal");
   });
 
@@ -2711,7 +2712,7 @@ describe("narrator packet settlement boundary", () => {
     expect(repaired.perceivableObservations?.[0]?.atoms.map((atom) => atom.summary)).toEqual([
       "Mira is visible here.",
       "No obvious visible barriers are apparent from here.",
-      "The route to Archive Stair is reachable from here.",
+      "The route to Archive Stair is reachable from the current scene; this is not movement.",
     ]);
     expect(repaired.evidenceLedger).toEqual(
       expect.arrayContaining([
@@ -2725,10 +2726,10 @@ describe("narrator packet settlement boundary", () => {
         expect.objectContaining({
           id: `observation_result:${successfulActionId}:a3`,
           category: "observation_result",
-          summary: "The route to Archive Stair is reachable from here.",
+          summary: "The route to Archive Stair is reachable from the current scene; this is not movement.",
           precisionFacts: [expect.objectContaining({
             kind: "summary",
-            value: "The route to Archive Stair is reachable from here.",
+            value: "The route to Archive Stair is reachable from the current scene; this is not movement.",
           })],
         }),
       ]),
@@ -2736,7 +2737,7 @@ describe("narrator packet settlement boundary", () => {
     expect(repaired.sourceLinkedSummaries).toEqual([]);
     expect(repaired.contextBudgetTrace).toBeUndefined();
     expect(formatted).toContain("Mira is visible here.");
-    expect(formatted).toContain("The route to Archive Stair is reachable from here.");
+    expect(formatted).toContain("The route to Archive Stair is reachable from the current scene; this is not movement.");
     expect(formatted).not.toContain("Route to Archive Stair is legal");
     expect(formatted).not.toContain("barrier refs");
     expect(actorRef).toBeDefined();

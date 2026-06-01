@@ -1044,6 +1044,9 @@ describe("gameplay turn cycle v1 contracts", () => {
           observationOnly: true,
           result: {
             routeStatus: "legal",
+            current: {
+              locationName: "Shibuya Ward",
+            },
             destination: {
               type: "location",
               label: "Shibuya Backstreet Collection Point",
@@ -1078,11 +1081,78 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.system).toContain("narrate the completed arrival");
     expect(built.system).toContain("route availability only");
+    expect(built.prompt).toContain("Проверка маршрута выполнена из текущей сцены: Shibuya Ward.");
     expect(built.prompt).toContain("Проверка маршрута подтвердила доступность направления: Shibuya Backstreet Collection Point.");
-    expect(built.prompt).toContain("Этот результат не перемещает игрока и не меняет текущую сцену.");
+    expect(built.prompt).toContain("Этот результат не перемещает игрока и не меняет текущую сцену");
     expect(built.prompt).toContain("Перемещение завершено: текущая сцена теперь Shibuya Backstreet Collection Point.");
     expect(built.prompt).not.toContain("Мир принял результат действия.");
     expect(built.prompt).not.toContain("The world accepted the action result.");
+  });
+
+  it("anchors failed route checks to the tool current scene instead of stale player-origin text", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 4,
+      resultWorldVersion: 4,
+      tick: 8,
+      playerAction: "Я иду из Shibuya Ward к Shibuya Backstreet Collection Point.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player checks a route from stale wording.",
+        sceneQuestion: "Which current-scene route is legal?",
+        actionInterpretation: {
+          intent: "check route to collection point",
+          targetRefs: ["Shibuya Backstreet Collection Point"],
+        },
+        rationale: "Route checks must use current tool evidence.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "check_route",
+        input: {
+          actorRef: "Player",
+          destinationRef: "Shibuya Backstreet Collection Point",
+          mode: "walk",
+        },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            routeStatus: "not_visible_or_legal",
+            current: {
+              locationName: "East Exit Underground Passage",
+            },
+            destination: null,
+            path: [],
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+
+    expect(built.prompt).toContain("Проверка маршрута выполнена из текущей сцены: East Exit Underground Passage.");
+    expect(built.prompt).toContain("Статус маршрута: not_visible_or_legal.");
+    expect(built.prompt).toContain("текущая сцена остаётся: East Exit Underground Passage");
+    expect(built.prompt).toContain("Если текст игрока называл другую исходную локацию, она не является авторитетной.");
   });
 
   it("uses accepted log_event input text as actor-visible settled evidence", () => {
