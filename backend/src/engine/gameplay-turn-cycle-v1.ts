@@ -1251,6 +1251,7 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
         notes: [
           "Use only for real custody/owner/location/equip-state changes.",
           "Do not use when the player merely keeps, pockets, hides, carries, or stows an item already in their inventory/current possession.",
+          "Do not use for ordinary small/unmodeled currency unless the money exists as a visible/current/inventory item ref in the SceneFrame.",
         ],
       };
     case "record_world_fact":
@@ -1527,6 +1528,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
     "Do not create transfer_item or any item-state step when the player merely keeps, pockets, hides, carries, holds, readies, secures, or stows an item already in playerInventory/current possession; that is narration detail unless ownership, location, or equip state actually changes.",
+    "Do not create transfer_item for ordinary small/unmodeled currency, coins, fees, tips, bribes, or prices unless that money exists as a visible/current/inventory item in the SceneFrame. For a paid answer, sold hint, named price, refusal, or bargain with no modeled currency item, use one record_dialogue_outcome step.",
     "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
     "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",

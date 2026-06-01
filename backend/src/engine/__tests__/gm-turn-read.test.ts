@@ -671,6 +671,40 @@ describe("GM Read contract", () => {
     );
   });
 
+  it("allows concrete dialogue outcomes without structural owners for unmodeled paid route hints", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      situationSummary: "The player pays a visible contact for a quiet route hint.",
+      sceneQuestion: "What route hint does the contact sell?",
+      actionInterpretation: {
+        intent: "pay the visible contact for a quiet route hint",
+        targetRefs: ["Road Warden"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "trade",
+        durability: "durable",
+      }),
+      turnIntent:
+        "Record the visible contact accepting unmodeled small currency and giving the route hint as a durable dialogue outcome.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "trade",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+        requiresStructuralEffect: false,
+      },
+      rationale:
+        "The payment is ordinary unmodeled pocket money; no item, location, relationship, or permission state changes structurally.",
+      narrationGuardrails: ["Do not claim a structural item transfer receipt."],
+    });
+
+    expect(validateGmReadForFrame(read, createFrame())).toEqual([]);
+  });
+
   it("rejects dialogue outcomes that absorb explicit travel to a distinct responder location", () => {
     const read = gmReadSchema.parse({
       ...baseRead,

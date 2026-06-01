@@ -235,12 +235,22 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("unless ownership, location, or equip state actually changes");
   });
 
+  it("tells Stage 3 not to turn unmodeled small currency into transfer_item", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("ordinary small/unmodeled currency");
+    expect(prompt).toContain("unless that money exists as a visible/current/inventory item");
+    expect(prompt).toContain("For a paid answer, sold hint, named price, refusal, or bargain");
+    expect(prompt).toContain("use one record_dialogue_outcome step");
+  });
+
   it("exposes transfer_item target contract without item targets", () => {
     const hint = toolContractHint("transfer_item");
 
     expect(JSON.stringify(hint)).toContain("character|npc|player|actor|location; never item");
     expect(JSON.stringify(hint)).toContain("never a container item label");
     expect(JSON.stringify(hint)).toContain("Do not use when the player merely keeps, pockets, hides, carries, or stows");
+    expect(JSON.stringify(hint)).toContain("ordinary small/unmodeled currency");
   });
 
   it("narrows Stage 4 tool selection for terminal and helper needs", () => {
