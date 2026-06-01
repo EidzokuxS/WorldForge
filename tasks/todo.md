@@ -210,6 +210,13 @@ Session: `gm-v1-consequenc-slice`.
   - DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
   - Packet `09b0044f-eec2-4c50-8c2e-2ac4b1e2a5df` persisted accepted refs `["inspect-items:find_object_candidates","assess-routes:list_navigation_options"]`; narrator attempt `c446f935-f8b9-40f8-ad7f-f84ce36716e6` succeeded.
   - Minor narration quality smell observed: one English word leaked into Russian prose (`reveals`). Not a settled-truth contract failure, but worth tracking before final polish.
+- Lane B second-turn live acceptance:
+  - Verified current SceneFrame after first turn: tick `1`, location/scene `Lowwater Bazaar`, 8 connected movement candidates, including `Silt Warrens`.
+  - Real `/api/chat/action` against `ba788102-b970-43f2-8221-6f0f136e23f8`: `Я выбираю Silt Warrens как путь с наименьшим количеством открытых линий обзора и иду туда, держа sealed lacquer message tube в satchel.`
+  - Result: SSE reached `narrative` and `done`; backend log showed accepted `move_actor` with destination `Silt Warrens`, travelCost `1`, path `["Lowwater Bazaar","Silt Warrens"]`.
+  - DB showed `chat=4`, `settled_turn_packets=2`, `turn_sagas=2`, `narrator_attempts=2`, `pendingSagas=0`; player location and scene both updated to `Silt Warrens`.
+  - Packet `59f98d4f-bb71-4328-95dc-9b36b126df78` persisted resultWorldVersion `1` and accepted refs including `step-1:move_actor`.
+  - Minor narration quality smell observed: one English word leaked into Russian prose (`openness`). This is language polish, not a settled-truth contract failure.
 - Lane C first-turn live acceptance:
   - Real `/api/chat/action` against zero-turn clone `b13e8cfd-468e-44ef-a464-62e13fd70a7a`: `Я показываю master clerk requisition chit и спрашиваю, какие записи в municipal logs подтверждают выдачу supplies; затем сверяю это с ledger folio.`
   - Stage 3 checklist produced one backend step with `toolNeed=["record_dialogue_outcome"]`; Stage 4 accepted durable `record_dialogue_outcome`.
