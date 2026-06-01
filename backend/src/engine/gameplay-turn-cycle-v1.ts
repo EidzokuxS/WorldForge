@@ -917,6 +917,8 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Write only prose for the player. Do not output JSON, markdown, bullet lists, tool names, ids, schemas, logs, or diagnostics.",
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
+    "The playerAction is the player's first-person action. Narrate that action with the player as the subject, preferably as second-person you/ты.",
+    "Never make a non-player gmRead targetRef or evidenceRef the grammatical subject of the player's action unless acceptedEvidence includes an accepted actor/local consequence for that character.",
     "When acceptedEvidence says movement completed or names the current scene after movement, narrate the completed arrival; do not describe the choice as still pending.",
     "A route-check acceptedEvidence entry is route availability only; never narrate travel, arrival, or location change from check_route unless a separate move_actor/move_to acceptedEvidence entry says movement completed.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
@@ -933,6 +935,11 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
           ? "Russian prose; preserve accepted proper nouns exactly; English only for exact accepted labels/names/canon terms; translate all other common words."
           : "English prose.",
         allowedSources: ["acceptedEvidence", "gmRead", "oracleResult"],
+        subject: {
+          playerActionSubject: "player",
+          narratorVoice: language === "ru" ? "second-person ты/вы or neutral player wording" : "second-person you or neutral player wording",
+          nonPlayerRefs: "gmRead targetRefs/evidenceRefs are never the subject of the player's action unless acceptedEvidence has an accepted actor/local consequence for that character",
+        },
         forbidden: [
           "new consequences",
           "failed/skipped step effects",

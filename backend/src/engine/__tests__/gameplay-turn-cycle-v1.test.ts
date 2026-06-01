@@ -1000,6 +1000,66 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).not.toContain("Ты осматриваешься вокруг.");
   });
 
+  it("keeps non-player GM Read refs from becoming the subject of the player action", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 1,
+      resultWorldVersion: 1,
+      tick: 2,
+      playerAction: "В текущем месте я останавливаюсь и проверяю доступные выходы, видимых людей и явные признаки опасности.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player checks exits, visible people, and danger signs.",
+        sceneQuestion: "What does the player see?",
+        actionInterpretation: {
+          intent: "check the current place",
+          targetRefs: ["Chizuru Oba"],
+        },
+        rationale: "Observation read.",
+        evidenceRefs: ["Player", "Chizuru Oba", "East Exit Underground Passage"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "find_actor_candidates",
+        input: { query: "visible people", scope: "current_scene", maxResults: 4 },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            toolName: "find_actor_candidates",
+            queryMatched: false,
+            candidates: [],
+            count: 0,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("The playerAction is the player's first-person action");
+    expect(built.system).toContain("Never make a non-player gmRead targetRef or evidenceRef");
+    expect(built.prompt).toContain("\"playerActionSubject\": \"player\"");
+    expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs are never the subject");
+    expect(built.prompt).toContain("Совпавшие видимые люди или акторы этим lookup не подтверждены");
+  });
+
   it("summarizes equipped visible items as carried, not unattended scene objects", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
