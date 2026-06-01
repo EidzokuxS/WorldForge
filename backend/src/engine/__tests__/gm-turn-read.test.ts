@@ -829,6 +829,90 @@ describe("GM Read contract", () => {
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects dialogue route claims for concrete route-feasibility checks", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      actionInterpretation: {
+        intent: "check whether the official route to Gatehouse Duty Desk is open",
+        targetRefs: ["Road Warden"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "route",
+        durability: "durable",
+      }),
+      turnIntent: "Record the route answer so the player can rely on it later.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "route",
+        speakerBinding: {
+          kind: "visible_actor",
+          speakerRef: "Road Warden",
+        },
+      },
+    });
+
+    expect(validateGmReadForFrame(
+      read,
+      createFrame(),
+      "Я проверяю, открыт ли официальный маршрут от Municipal Stores Front Counter к Gatehouse Duty Desk и требуется ли сопровождение.",
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement",
+        message: expect.stringContaining("mixed-travel-dialogue-requires-movement-first"),
+      }),
+    ]));
+  });
+
+  it("hardens Russian concrete route-feasibility checks through route authority before dialogue claims", async () => {
+    const invalidRead = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      actionInterpretation: {
+        intent: "check whether the official route to Gatehouse Duty Desk is open",
+        targetRefs: ["Road Warden"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "route",
+        durability: "durable",
+      }),
+      turnIntent: "Record the route answer so the player can rely on it later.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "route",
+        speakerBinding: {
+          kind: "visible_actor",
+          speakerRef: "Road Warden",
+        },
+      },
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(invalidRead));
+
+    await expect(runGmRead({
+      provider,
+      playerAction:
+        "Я проверяю, открыт ли официальный маршрут от Municipal Stores Front Counter к Gatehouse Duty Desk и требуется ли сопровождение.",
+      frame: createFrame(),
+    })).resolves.toMatchObject({
+      path: "tool_plan",
+      turnGrounding: expect.objectContaining({
+        groundingKind: "state_mutation",
+        topicKind: "route",
+      }),
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps runtimeRequirement topicKind aligned with runtime tool schemas", () => {
     expect(gmReadSchema.safeParse({
       ...baseRead,

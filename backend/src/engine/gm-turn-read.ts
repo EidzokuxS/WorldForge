@@ -603,6 +603,26 @@ function hasExplicitTravelThenInteraction(playerAction: string | undefined): boo
     || /\b(?:ask|speak|address|talk|inquire|request|buy|purchase|present|show)\b[^.?!;]*(?:at|there)\b/.test(text);
 }
 
+function hasExplicitRouteFeasibilityCheck(playerAction: string | undefined): boolean {
+  const text = playerAction?.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  const routeWord =
+    /\b(?:route|path|way|road|passage|corridor|access)\b/.test(text)
+    || /(?:маршрут|путь|дорог|проход|коридор|доступ)/u.test(text);
+  if (!routeWord) return false;
+
+  const feasibilityWord =
+    /\b(?:open|available|reachable|legal|official|safe|clear|can\s+(?:i|we)\s+(?:go|get|reach|pass)|is\s+there)\b/.test(text)
+    || /(?:открыт|доступ|можно|официальн|безопасн|разреш[её]н|проходим|есть ли|проверя[юе]|требуется ли)/u.test(text);
+  if (!feasibilityWord) return false;
+
+  return (
+    /\b(?:to|toward|towards|into|through)\b[^.?!;]{1,120}\b(?:desk|gate|office|counter|hall|gallery|corridor|room|chamber|yard|station|stairs|cellar)\b/.test(text)
+    || /(?:\b(?:from|between)\b[^.?!;]{1,120}\b(?:to|and)\b)/.test(text)
+    || /(?:^|[\s,.;:])(?:к|до|в|на|через|от)\s+[a-zа-яё0-9][^.!?;]{1,120}/u.test(text)
+  );
+}
+
 function validateDialogueOutcomeDoesNotAbsorbPlayerTravel(
   read: GmRead,
   playerAction: string | undefined,
@@ -614,6 +634,20 @@ function validateDialogueOutcomeDoesNotAbsorbPlayerTravel(
     path: "runtimeRequirement",
     message:
       `${MIXED_TRAVEL_DIALOGUE_ISSUE_CODE}: a player action that first travels to a distinct place and then speaks/shops there must resolve movement before dialogue. Use runtimeRequirement { kind: "state_mutation", effectKind: "movement" } for the travel beat, then let the responder answer after the player is actually at that scene.`,
+  }];
+}
+
+function validateDialogueOutcomeDoesNotAbsorbRouteFeasibility(
+  read: GmRead,
+  playerAction: string | undefined,
+): GmReadValidationIssue[] {
+  const requirement = read.runtimeRequirement;
+  if (read.path !== "tool_plan" || requirement?.kind !== "dialogue_outcome") return [];
+  if (!hasExplicitRouteFeasibilityCheck(playerAction)) return [];
+  return [{
+    path: "runtimeRequirement",
+    message:
+      `${MIXED_TRAVEL_DIALOGUE_ISSUE_CODE}: a player action that checks whether a route to a concrete destination is open, legal, safe, or reachable must use route/movement authority before any dialogue route claim can become playable truth. Use runtimeRequirement { kind: "state_mutation", effectKind: "movement" } so Stage 3 can choose list_navigation_options/check_route/move_actor or a grounded blocked-route outcome.`,
   }];
 }
 
@@ -669,6 +703,7 @@ export function validateGmReadForFrame(
   issues.push(...validatePostedProofRuntimeRequirement(read));
   issues.push(...validateReusableDialogueDurability(read));
   issues.push(...validateDialogueOutcomeDoesNotAbsorbPlayerTravel(read, playerAction));
+  issues.push(...validateDialogueOutcomeDoesNotAbsorbRouteFeasibility(read, playerAction));
 
   return issues;
 }
@@ -1134,12 +1169,56 @@ function hardenMixedTravelDialogueToMovementFirst(
   };
 }
 
+function hardenRouteFeasibilityDialogueToRouteAuthority(
+  read: GmRead,
+  playerAction: string,
+): GmRead {
+  if (!hasExplicitRouteFeasibilityCheck(playerAction)) return read;
+  if (read.path !== "tool_plan") return read;
+  const requirement = read.runtimeRequirement;
+  const isDialogueRouteClaim = requirement?.kind === "dialogue_outcome";
+  const isAlreadyMovementAuthority =
+    requirement?.kind === "state_mutation" && requirement.effectKind === "movement";
+  if (!isDialogueRouteClaim && !isAlreadyMovementAuthority) return read;
+
+  return {
+    ...read,
+    situationSummary:
+      "The player is checking whether a route to a concrete destination is open, legal, safe, or reachable.",
+    sceneQuestion:
+      "Which legal route option, route check, movement, or grounded blocked-route outcome can be verified now?",
+    actionInterpretation: {
+      ...read.actionInterpretation,
+      intent:
+        "Resolve route availability through backend route authority before any NPC/source route claim becomes playable truth.",
+    },
+    turnGrounding: {
+      intentKind: "concrete_state_change",
+      requiresGrounding: true,
+      groundingKind: "state_mutation",
+      topicKind: "route",
+      durability: "scene_local",
+      reason:
+        "The player needs a playable route feasibility answer tied to current movement candidates, so route/movement tools own the truth before narration.",
+    },
+    turnIntent:
+      "Resolve legal route options, check the named route, move only if a connected route is accepted, or ground that no current route is visible/legal.",
+    runtimeRequirement: {
+      kind: "state_mutation",
+      effectKind: "movement",
+    },
+  };
+}
+
 function hardenGmReadForBackendContracts(
   read: GmRead,
   playerAction: string,
 ): GmRead {
-  return hardenMixedTravelDialogueToMovementFirst(
-    hardenReusableDialogueRuntimeRequirement(read),
+  return hardenRouteFeasibilityDialogueToRouteAuthority(
+    hardenMixedTravelDialogueToMovementFirst(
+      hardenReusableDialogueRuntimeRequirement(read),
+      playerAction,
+    ),
     playerAction,
   );
 }
@@ -1654,7 +1733,9 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
   let read = hardenGmReadForBackendContracts(result.object, args.playerAction);
   if (read !== result.object) {
     log.event("judge.gm-read.runtime-requirement-hardened", {
-      reason: hasExplicitTravelThenInteraction(args.playerAction)
+      reason: hasExplicitRouteFeasibilityCheck(args.playerAction)
+        ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
+        : hasExplicitTravelThenInteraction(args.playerAction)
         ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
         : REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
       path: read.path,
@@ -1726,7 +1807,9 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
       read = hardenGmReadForBackendContracts(result.object, args.playerAction);
       if (read !== result.object) {
         log.event("judge.gm-read.runtime-requirement-hardened", {
-          reason: hasExplicitTravelThenInteraction(args.playerAction)
+          reason: hasExplicitRouteFeasibilityCheck(args.playerAction)
+            ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
+            : hasExplicitTravelThenInteraction(args.playerAction)
             ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
             : REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
           path: read.path,
