@@ -175,6 +175,9 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
   "You select exactly one backend tool request for one checklist step.",
   "Return JSON only. Use one allowed tool and only visible/current refs from the scene.",
   "The only legal toolName values are listed in allowedToolNames. Never use any other tool.",
+  "Match every model-authored prose input field to responseLanguage/toolInputLanguageContract. Preserve exact refs, names, item labels, place labels, and canon terms as written.",
+  "For input refs such as sourceRefs, subjectRefs, evidenceRefs, speakerRef, addresseeRefs, actorRef, entityName, and destinationRef, use only model-safe visible labels/current aliases from scene or acceptedContext.",
+  "Never copy backend-only refs like knowledge:*, actor:*, npc:*, item:*, location:*, event:*, tool-result:*, or UUIDs into tool input refs; replace them with a visible label such as Player/master clerk/damaged field ledger/current_location or omit them.",
   "If moving an actor, destinationRef and evidenceRefs must copy the same exact connected movement candidate ref.",
   "Never send empty strings for optional fields; omit the field entirely unless you have a non-empty value.",
   "For record_dialogue_outcome, futureUseKind must be one of route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other; proof is topicKind only, so documentary/proof later use maps to futureUseKind=evidence, never futureUseKind=proof.",
@@ -877,10 +880,26 @@ function narratorLanguageContractV1(language: "ru" | "en"): string {
       "Write in Russian.",
       "All ordinary prose words, connectors, articles, transitions, and explanatory phrases must be Russian.",
       "Keep acceptedEvidence proper nouns, character names, item names, place names, and canon/franchise terms exactly as written.",
+      "An English word is allowed only when it is an exact accepted label/name/canon term from acceptedEvidence; otherwise translate it into Russian.",
+      "Do not create mixed-language phrases by attaching English common adjectives/nouns to Russian grammar, such as requisite поля.",
       "Do not leave English connective words such as and/or/nor/reveals/openness in Russian prose unless they are part of an accepted proper noun.",
     ].join(" ");
   }
   return "Write in English.";
+}
+
+export function toolInputLanguageContractV1(language: "ru" | "en"): string {
+  if (language === "ru") {
+    return [
+      "For model-authored prose fields in tool input, write ordinary prose in Russian.",
+      "This includes quote, summary, futureRelevance, reason, claims[].summary, stateEffects[].summary, and other explanatory fields.",
+      "Preserve exact visible refs, character names, item names, place names, document labels, and canon terms as written.",
+      "Do not put English ordinary phrases into dialogue quotes unless the phrase is an exact accepted source label or proper noun.",
+      "Do not use English schema/internal words as Russian prose, such as durable, official, stamped, proof, procedure, or applied_now; translate them unless they are exact accepted labels.",
+      "Do not mix Latin and Cyrillic inside one ordinary Russian word, such as procedурные.",
+    ].join(" ");
+  }
+  return "For model-authored prose fields in tool input, write ordinary prose in English.";
 }
 
 export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacketV1): {
@@ -904,7 +923,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
         output: "player-facing prose only",
         language,
         languageContract: language === "ru"
-          ? "Russian prose; preserve accepted proper nouns exactly; do not use English connective/common words."
+          ? "Russian prose; preserve accepted proper nouns exactly; English only for exact accepted labels/names/canon terms; translate all other common words."
           : "English prose.",
         allowedSources: ["acceptedEvidence", "gmRead", "oracleResult"],
         forbidden: [
@@ -1212,6 +1231,30 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           targetHint: "optional visible target",
           stance: "intends|claims|suspects|asks|refuses|offers|unknown",
           summary: "brief summary",
+        },
+      };
+    case "record_world_fact":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          sourceKind: "direct_observation|public_record|report_message|rumor|claim|comparison|memory|other",
+          truthStatus: "observed|verified|reported|rumored|claimed|believed|disputed|unknown",
+          factKind: "public_record|procedure|route_status|permission_boundary|warning|lead|status|contradiction|gap|other",
+          topicKind: "social|procedure|permission|proof|route|safety|trade|status|other",
+          durability: "durable|scene_local",
+          futureUseKind: "required when durable; route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other",
+          futureRelevance: "required when durable",
+          summary: "brief fact summary",
+          claims: [{
+            claimKind: "public_record|requirement|permission_boundary|prohibition|office|route_status|warning|lead|status|contradiction|gap|other",
+            polarity: "allows|denies|requires|redirects|unknown|states",
+            subjectRef: "optional exact visible/current ref only; never knowledge:* or backend id",
+            subjectText: "free text when not an exact visible ref",
+            summary: "claim summary",
+          }],
+          subjectRefs: ["optional exact visible/current refs only; never knowledge:* or backend ids"],
+          sourceRefs: ["exact visible/current refs only; never knowledge:* or backend ids; prefer Player/master clerk/damaged field ledger/current_location"],
         },
       };
     case "create_scene_extra":
@@ -1745,6 +1788,7 @@ async function proposeToolRequestV1(input: {
 }): Promise<GmToolRequestV1> {
   const model = createModel(input.provider, { role: "judge" });
   const allowedToolNames = selectAllowedToolNamesForStepV1(input.step, input.envelope.frame);
+  const responseLanguage = responseLanguageForAction(input.envelope.frame.playerAction);
   const { object } = await withRole("judge", () =>
     safeGenerateObject({
       model,
@@ -1753,6 +1797,8 @@ async function proposeToolRequestV1(input: {
       prompt: JSON.stringify({
         requiredVersion: TOOL_REQUEST_VERSION_V1,
         allowedToolNames,
+        responseLanguage,
+        toolInputLanguageContract: toolInputLanguageContractV1(responseLanguage),
         playerAction: input.envelope.frame.playerAction,
         gmRead: input.read,
         checklistStep: input.step,

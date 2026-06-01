@@ -18,6 +18,7 @@ import {
   nextExecutableChecklistStepV1,
   selectAllowedToolNamesForStepV1,
   toolContractHint,
+  toolInputLanguageContractV1,
   toolRequestSchemaForAllowedToolsV1,
   validateAndNormalizeToolRequestV1,
   type SettledTurnPacketV1,
@@ -502,7 +503,10 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.system).toContain("Write in Russian.");
     expect(built.system).toContain("ordinary prose words, connectors, articles");
+    expect(built.system).toContain("exact accepted label/name/canon term");
+    expect(built.system).toContain("requisite поля");
     expect(built.prompt).toContain("Russian prose");
+    expect(built.prompt).toContain("English only for exact accepted labels/names/canon terms");
     expect(built.prompt).toContain("Gate plaza is visible.");
     expect(built.prompt).not.toContain("SECRET_ROUTE_TOKEN");
     expect(built.prompt).not.toContain("Planned ambush did not happen.");
@@ -1059,6 +1063,25 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("never futureUseKind=proof");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never send empty strings for optional fields");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("acceptedContext exposes a prior stateReceipts");
+  });
+
+  it("requires Stage 4 model-authored tool input prose to follow the turn language", () => {
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("responseLanguage/toolInputLanguageContract");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("model-authored prose input field");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Preserve exact refs, names, item labels");
+    expect(toolInputLanguageContractV1("ru")).toContain("durable, official, stamped");
+    expect(toolInputLanguageContractV1("ru")).toContain("procedурные");
+  });
+
+  it("forbids backend-only refs in Stage 4 tool input refs", () => {
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("use only model-safe visible labels/current aliases");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never copy backend-only refs like knowledge:*");
+    expect(toolContractHint("record_world_fact")).toMatchObject({
+      input: {
+        sourceRefs: [expect.stringContaining("never knowledge:*")],
+        subjectRefs: [expect.stringContaining("never knowledge:*")],
+      },
+    });
   });
 
   it("exposes backend-issued state receipts from accepted structural steps to later Stage 4 dialogue requests", () => {
