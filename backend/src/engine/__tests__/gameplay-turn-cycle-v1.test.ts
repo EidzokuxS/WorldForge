@@ -249,6 +249,8 @@ describe("gameplay turn cycle v1 contracts", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
     expect(prompt).toContain("Use toolNeed=find_object_candidates only when the needed result is which visible/current/inventory object labels match");
+    expect(prompt).toContain("mixed current-scene affordance");
+    expect(prompt).toContain("Never satisfy a visible-person search with only find_object_candidates");
     expect(prompt).toContain("Use toolNeed=start_search");
     expect(prompt).toContain("registration numbers");
     expect(prompt).toContain("must not assert the searched detail exists or is absent");
@@ -844,6 +846,126 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.prompt).toContain("Конкретная находка");
     expect(built.prompt).toContain("это не доказывает их отсутствие");
+  });
+
+  it("keeps empty candidate lookup evidence scoped to its own category", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я ищу торговца, носильщика или указатель.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player looks for a person or sign.",
+        sceneQuestion: "What is visible?",
+        actionInterpretation: {
+          intent: "find help or a sign",
+          targetRefs: ["merchant", "porter", "sign"],
+        },
+        rationale: "Mixed category lookup must stay scoped.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "find_object_candidates",
+        input: { query: "merchant porter sign" },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            toolName: "find_object_candidates",
+            queryMatched: false,
+            candidates: [],
+            count: 0,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("Совпавшие видимые предметы этим lookup не подтверждены");
+    expect(built.prompt).toContain("Это не проверяет видимых людей");
+    expect(built.prompt).toContain("не доказывает их отсутствие");
+  });
+
+  it("summarizes equipped visible items as carried, not unattended scene objects", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я осматриваюсь на базаре.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player looks around.",
+        sceneQuestion: "What is visible?",
+        actionInterpretation: {
+          intent: "look around",
+          targetRefs: [],
+        },
+        rationale: "Observation only.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "list_visible_affordances",
+        input: { maxResults: 8 },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            toolName: "list_visible_affordances",
+            current: { locationName: "Lowwater Bazaar" },
+            visibleActors: [],
+            legalTargets: [
+              { type: "item", label: "Courier satchel", visibleTags: ["equipped"] },
+              { type: "location", label: "Anchor Chain Pylon" },
+            ],
+            legalMovement: [{ label: "Anchor Chain Pylon" }],
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("При тебе: Courier satchel.");
+    expect(built.prompt).toContain("В поле внимания есть: Anchor Chain Pylon.");
+    expect(built.prompt).not.toContain("В поле внимания есть: Courier satchel");
   });
 
   it("uses accepted log_event input text as actor-visible settled evidence", () => {

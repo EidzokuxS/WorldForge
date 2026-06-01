@@ -426,6 +426,24 @@ const OBSERVATION_CATEGORY_KEYWORDS = {
     "clerk",
     "guard",
     "personnel",
+    "worker",
+    "workers",
+    "dockworker",
+    "dockworkers",
+    "trader",
+    "traders",
+    "merchant",
+    "merchants",
+    "vendor",
+    "vendors",
+    "seller",
+    "sellers",
+    "buyer",
+    "buyers",
+    "porter",
+    "porters",
+    "representative",
+    "representatives",
   ],
   personnel: [
     "personnel",
@@ -436,6 +454,26 @@ const OBSERVATION_CATEGORY_KEYWORDS = {
     "clerk",
     "attendant",
     "crew",
+    "worker",
+    "workers",
+    "dockworker",
+    "dockworkers",
+    "trader",
+    "traders",
+    "merchant",
+    "merchants",
+    "vendor",
+    "vendors",
+    "seller",
+    "sellers",
+    "buyer",
+    "buyers",
+    "porter",
+    "porters",
+    "representative",
+    "representatives",
+    "courier",
+    "couriers",
     "sorcerer",
     "jujutsu",
   ],
@@ -600,13 +638,17 @@ function listVisibleAffordances(
   const visiblePersonnel = snapshot.visibleActors.filter(
     (actor) => (actor.actorId ?? actor.id) !== snapshot.current.playerActorId,
   );
+  const playerFacingTargets = snapshot.legalTargets.filter((target) =>
+    target.type !== "actor"
+    || (target.actorId ?? target.id) !== snapshot.current.playerActorId
+  );
   const witnessActors = visiblePersonnel.filter((actor) =>
     actorMatchesCategory(actor, OBSERVATION_CATEGORY_KEYWORDS.witness)
   );
   const personnelActors = visiblePersonnel.filter((actor) =>
     actorMatchesCategory(actor, OBSERVATION_CATEGORY_KEYWORDS.personnel)
   );
-  const visiblePhysicalTargets = snapshot.legalTargets.filter((target) => target.type !== "actor");
+  const visiblePhysicalTargets = playerFacingTargets.filter((target) => target.type !== "actor");
   const cameraTargets = categoryTargets(
     visiblePhysicalTargets,
     OBSERVATION_CATEGORY_KEYWORDS.camera,
@@ -650,8 +692,8 @@ function listVisibleAffordances(
 
   return observation(toolName, {
     current: compactCurrent(snapshot),
-    visibleActors: snapshot.visibleActors.map((actor) => compactActor(actor, 1, aliases)),
-    legalTargets: snapshot.legalTargets.map((candidate) => compactTarget(candidate, 1, aliases)),
+    visibleActors: visiblePersonnel.map((actor) => compactActor(actor, 1, aliases)),
+    legalTargets: playerFacingTargets.map((candidate) => compactTarget(candidate, 1, aliases)),
     legalMovement: snapshot.legalMovement
       .filter((candidate) => candidate.connected)
       .map((candidate) => compactMovement(candidate, 1, aliases)),

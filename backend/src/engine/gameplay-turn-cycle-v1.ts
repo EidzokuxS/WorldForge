@@ -1018,6 +1018,35 @@ function readLabelList(value: unknown, limit: number): string[] {
     .filter((label): label is string => typeof label === "string" && label.trim().length > 0));
 }
 
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(value
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim()));
+}
+
+function readVisibleTargetLabels(input: {
+  value: unknown;
+  limit: number;
+  carried: boolean;
+}): string[] {
+  if (!Array.isArray(input.value)) return [];
+  const labels: string[] = [];
+  for (const entry of input.value.slice(0, input.limit)) {
+    const record = readRecord(entry);
+    const label = typeof record?.label === "string" && record.label.trim().length > 0
+      ? record.label.trim()
+      : null;
+    const type = typeof record?.type === "string" ? record.type : null;
+    const tags = readStringList(record?.visibleTags).map((tag) => tag.toLowerCase());
+    const isCarried = type === "item" && tags.some((tag) =>
+      tag === "equipped" || tag === "carried" || tag === "starting-loadout"
+    );
+    if (label && isCarried === input.carried) labels.push(label);
+  }
+  return uniqueStrings(labels);
+}
+
 function summarizeToolSettlementForNarration(
   settlement: GmToolStepSettlementV1,
   russian: boolean,
@@ -1073,6 +1102,24 @@ function summarizeToolSettlementForNarration(
       }
       return `Matching visible options: ${labels.join(", ")}.`;
     }
+    switch (settlement.toolName) {
+      case "find_object_candidates":
+        return russian
+          ? "Совпавшие видимые предметы этим lookup не подтверждены. Это не проверяет видимых людей, маршруты, учреждения или точки интереса и не доказывает их отсутствие."
+          : "No matching visible objects are confirmed by this lookup. This does not check visible people, routes, offices, or points of interest and does not prove their absence.";
+      case "find_actor_candidates":
+        return russian
+          ? "Совпавшие видимые люди или акторы этим lookup не подтверждены. Это не проверяет предметы, маршруты, учреждения или точки интереса и не доказывает их отсутствие."
+          : "No matching visible people or actors are confirmed by this lookup. This does not check objects, routes, offices, or points of interest and does not prove their absence.";
+      case "find_location_candidates":
+        return russian
+          ? "Совпавшие видимые или достижимые локации этим lookup не подтверждены. Это не проверяет людей, предметы или другие категории и не доказывает их отсутствие."
+          : "No matching visible or reachable locations are confirmed by this lookup. This does not check people, objects, or other categories and does not prove their absence.";
+      case "find_poi_candidates":
+        return russian
+          ? "Совпавшие видимые точки интереса этим lookup не подтверждены. Это не проверяет все возможные предметы, людей или маршруты и не доказывает их отсутствие."
+          : "No matching visible points of interest are confirmed by this lookup. This does not check every possible object, person, or route and does not prove their absence.";
+    }
   }
 
   if (settlement.toolName === "start_search") {
@@ -1100,12 +1147,22 @@ function summarizeToolSettlementForNarration(
         : null;
     const actors = readLabelList(payload.visibleActors, 5);
     const movement = readLabelList(payload.legalMovement, 5);
-    const targets = readLabelList(payload.legalTargets, 5)
+    const carriedTargets = readVisibleTargetLabels({
+      value: payload.legalTargets,
+      limit: 8,
+      carried: true,
+    });
+    const targets = readVisibleTargetLabels({
+      value: payload.legalTargets,
+      limit: 8,
+      carried: false,
+    })
       .filter((label) => !actors.includes(label));
     if (russian) {
       return [
         location ? `Ты осматриваешься в месте: ${location}.` : "Ты осматриваешься вокруг.",
         actors.length ? `Рядом заметны: ${actors.join(", ")}.` : null,
+        carriedTargets.length ? `При тебе: ${carriedTargets.join(", ")}.` : null,
         targets.length ? `В поле внимания есть: ${targets.join(", ")}.` : null,
         movement.length ? `Доступные направления: ${movement.join(", ")}.` : null,
       ].filter(Boolean).join(" ");
@@ -1114,6 +1171,7 @@ function summarizeToolSettlementForNarration(
     return [
       location ? `You look around at ${location}.` : "You look around.",
       actors.length ? `Visible nearby: ${actors.join(", ")}.` : null,
+      carriedTargets.length ? `You are carrying: ${carriedTargets.join(", ")}.` : null,
       targets.length ? `You can focus on: ${targets.join(", ")}.` : null,
       movement.length ? `Open routes: ${movement.join(", ")}.` : null,
     ].filter(Boolean).join(" ");
@@ -1580,6 +1638,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "Never use toolNeed=create_scene_extra for actor labels already present in gmRead.actionInterpretation.targetRefs, gmRead.evidenceRefs, or scene.visibleActors. If the player addresses multiple visible actors, record one dialogue outcome from an existing primary speaker and cite the other visible actors as evidence/source refs.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
     "Use toolNeed=find_object_candidates only when the needed result is which visible/current/inventory object labels match the player's words.",
+    "If the player asks for a mixed current-scene affordance such as a visible person/trader/porter/guard plus signs/objects/points of interest, use list_visible_affordances or separate matching find_actor_candidates/find_object_candidates/find_poi_candidates steps. Never satisfy a visible-person search with only find_object_candidates.",
     "Use toolNeed=start_search when the player checks, reads, searches, or inspects visible/current/inventory objects in order to find a specific unconfirmed detail such as markings, text, contents, serial numbers, registration numbers, addresses, hidden compartments, or proof that current lookup tools cannot return.",
     "A start_search step records that the search target is unconfirmed; it must not assert the searched detail exists or is absent.",
     "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",

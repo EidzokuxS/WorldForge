@@ -299,6 +299,23 @@ describe("bridge candidate lookup tools", () => {
     });
   });
 
+  it("does not expose the player as a visible social affordance", () => {
+    const result = executeBridgeCandidateTool(
+      "list_visible_affordances",
+      { maxResults: 8 },
+      createContext(),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.result).toMatchObject({
+      visibleActors: [expect.objectContaining({ label: "Road Warden" })],
+      legalTargets: expect.arrayContaining([
+        expect.objectContaining({ label: "Road Warden" }),
+      ]),
+    });
+    expect(JSON.stringify(result.result)).not.toContain('"label":"Player"');
+  });
+
   it("keeps inspect_known_fact visible and known scopes separate", () => {
     const context = createContext();
 
