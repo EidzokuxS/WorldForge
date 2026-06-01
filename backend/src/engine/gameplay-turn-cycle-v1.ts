@@ -918,6 +918,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
     "When acceptedEvidence says movement completed or names the current scene after movement, narrate the completed arrival; do not describe the choice as still pending.",
+    "A route-check acceptedEvidence entry is route availability only; never narrate travel, arrival, or location change from check_route unless a separate move_actor/move_to acceptedEvidence entry says movement completed.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
     narratorLanguageContractV1(language),
@@ -1152,18 +1153,20 @@ function summarizeToolSettlementForNarration(
     if (russian) {
       return [
         destinationLabel
-          ? `Проверка маршрута подтвердила направление: ${destinationLabel}.`
+          ? `Проверка маршрута подтвердила доступность направления: ${destinationLabel}.`
           : "Проверка маршрута завершена.",
         routeStatus ? `Статус маршрута: ${routeStatus}.` : null,
         pathLabels.length ? `Маршрут: ${pathLabels.join(" -> ")}.` : null,
+        "Этот результат не перемещает игрока и не меняет текущую сцену.",
       ].filter(Boolean).join(" ");
     }
     return [
       destinationLabel
-        ? `Route check confirmed destination: ${destinationLabel}.`
+        ? `Route check confirmed route availability for: ${destinationLabel}.`
         : "Route check completed.",
       routeStatus ? `Route status: ${routeStatus}.` : null,
       pathLabels.length ? `Path: ${pathLabels.join(" -> ")}.` : null,
+      "This result does not move the player or change the current scene.",
     ].filter(Boolean).join(" ");
   }
 

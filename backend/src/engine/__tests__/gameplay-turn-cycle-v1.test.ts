@@ -1077,7 +1077,9 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.system).toContain("narrate the completed arrival");
-    expect(built.prompt).toContain("Проверка маршрута подтвердила направление: Shibuya Backstreet Collection Point.");
+    expect(built.system).toContain("route availability only");
+    expect(built.prompt).toContain("Проверка маршрута подтвердила доступность направления: Shibuya Backstreet Collection Point.");
+    expect(built.prompt).toContain("Этот результат не перемещает игрока и не меняет текущую сцену.");
     expect(built.prompt).toContain("Перемещение завершено: текущая сцена теперь Shibuya Backstreet Collection Point.");
     expect(built.prompt).not.toContain("Мир принял результат действия.");
     expect(built.prompt).not.toContain("The world accepted the action result.");
