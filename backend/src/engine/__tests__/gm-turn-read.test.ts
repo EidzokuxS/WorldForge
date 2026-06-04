@@ -3486,8 +3486,8 @@ describe("GM Read contract", () => {
     );
   });
 
-  it("rejects public indicated route clarification that tries to carry future pressure", async () => {
-    const invalidRead = {
+  it("hardens public indicated route clarification into movement authority", async () => {
+    const clarificationRead = {
       ...baseRead,
       situationSummary: "The player tries to follow a public indicated route.",
       sceneQuestion: "Which holding point becomes safest as the public route shifts?",
@@ -3510,7 +3510,7 @@ describe("GM Read contract", () => {
       narrationGuardrails: ["Keep the public route pressure visible for later choices."],
     } satisfies GmRead;
 
-    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(invalidRead));
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(clarificationRead));
 
     await expect(
       runGmRead({
@@ -3518,9 +3518,16 @@ describe("GM Read contract", () => {
         playerAction: "I follow only a public, indicated route toward the safest named office or holding point.",
         frame: createFrame(),
       }),
-    ).rejects.toThrow(/turn-grounding-runtime-contract-mismatch/);
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      turnGrounding: {
+        groundingKind: "state_mutation",
+        topicKind: "route",
+      },
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+    });
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("accepts public indicated route movement as a grounded tool plan", async () => {
@@ -3612,6 +3619,23 @@ describe("GM Read contract", () => {
         message: expect.stringContaining("explicit-travel-requires-movement-authority"),
       }),
     ]);
+
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(rollRead));
+
+    await expect(
+      runGmRead({
+        provider,
+        playerAction: "I return from the parlor to Old Shrine Road.",
+        frame: createFrame(),
+      }),
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      turnGrounding: {
+        groundingKind: "state_mutation",
+      },
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+    });
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("does not secretly promote invalid no-mutation reads in backend", async () => {

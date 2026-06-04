@@ -1259,16 +1259,75 @@ function hardenRouteFeasibilityDialogueToRouteAuthority(
   };
 }
 
+function hardenExplicitTravelToMovementAuthority(
+  read: GmRead,
+  playerAction: string,
+  frame: SceneFrame,
+): GmRead {
+  if (!hasExplicitCompletedTravelIntent(playerAction, frame)) return read;
+  const requirement = read.runtimeRequirement;
+  if (
+    read.path === "tool_plan"
+    && requirement?.kind === "state_mutation"
+    && requirement.effectKind === "movement"
+  ) {
+    return read;
+  }
+
+  return {
+    version: read.version,
+    situationSummary:
+      "The player is explicitly traveling, exiting, entering, or returning to a destination.",
+    sceneQuestion:
+      "Which legal movement or grounded blocked-route outcome can be settled now?",
+    focalActorRefs: read.focalActorRefs,
+    backgroundActorRefs: read.backgroundActorRefs,
+    actionInterpretation: {
+      ...read.actionInterpretation,
+      intent:
+        "Resolve explicit player travel through backend movement authority before narration can claim arrival.",
+    },
+    turnGrounding: {
+      intentKind: "concrete_state_change",
+      requiresGrounding: true,
+      groundingKind: "state_mutation",
+      topicKind: "route",
+      durability: "scene_local",
+      reason:
+        "Oracle can resolve uncertainty, but only movement tools can change current location or prove blocked travel.",
+    },
+    path: "tool_plan",
+    turnIntent:
+      "Use movement authority to check/list/move to the destination or ground that the route is currently blocked/unavailable.",
+    runtimeRequirement: {
+      kind: "state_mutation",
+      effectKind: "movement",
+    },
+    rationale:
+      "Explicit travel changes the player's current location if it succeeds, so it needs a movement receipt.",
+    evidenceRefs: read.evidenceRefs,
+    narrationGuardrails: [
+      "Do not complete movement without a valid move_actor/move_to receipt or grounded blocked-route result.",
+      ...read.narrationGuardrails,
+    ].slice(0, GM_READ_GUARDRAIL_MAX),
+  };
+}
+
 function hardenGmReadForBackendContracts(
   read: GmRead,
   playerAction: string,
+  frame: SceneFrame,
 ): GmRead {
-  return hardenRouteFeasibilityDialogueToRouteAuthority(
-    hardenMixedTravelDialogueToMovementFirst(
-      hardenReusableDialogueRuntimeRequirement(read),
+  return hardenExplicitTravelToMovementAuthority(
+    hardenRouteFeasibilityDialogueToRouteAuthority(
+      hardenMixedTravelDialogueToMovementFirst(
+        hardenReusableDialogueRuntimeRequirement(read),
+        playerAction,
+      ),
       playerAction,
     ),
     playerAction,
+    frame,
   );
 }
 
@@ -1780,10 +1839,12 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     });
 
   let result = await withRole("judge", () => generateRead(prompt));
-  let read = hardenGmReadForBackendContracts(result.object, args.playerAction);
+  let read = hardenGmReadForBackendContracts(result.object, args.playerAction, args.frame);
   if (read !== result.object) {
     log.event("judge.gm-read.runtime-requirement-hardened", {
-      reason: hasExplicitRouteFeasibilityCheck(args.playerAction)
+      reason: hasExplicitCompletedTravelIntent(args.playerAction, args.frame)
+        ? EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE
+        : hasExplicitRouteFeasibilityCheck(args.playerAction)
         ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
         : hasExplicitTravelThenInteraction(args.playerAction)
         ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
@@ -1854,10 +1915,12 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
 
     if (repairResult?.object) {
       result = repairResult;
-      read = hardenGmReadForBackendContracts(result.object, args.playerAction);
+      read = hardenGmReadForBackendContracts(result.object, args.playerAction, args.frame);
       if (read !== result.object) {
         log.event("judge.gm-read.runtime-requirement-hardened", {
-          reason: hasExplicitRouteFeasibilityCheck(args.playerAction)
+          reason: hasExplicitCompletedTravelIntent(args.playerAction, args.frame)
+            ? EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE
+            : hasExplicitRouteFeasibilityCheck(args.playerAction)
             ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
             : hasExplicitTravelThenInteraction(args.playerAction)
             ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
