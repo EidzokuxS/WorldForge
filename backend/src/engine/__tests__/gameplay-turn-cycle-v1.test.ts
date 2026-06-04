@@ -270,6 +270,14 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("never fold that observation into toolNeed=movement or move_actor");
   });
 
+  it("tells Stage 3 to keep scene-local positioning out of movement tools", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("repositions within the current scene");
+    expect(prompt).toContain("use log_event with durability=scene_local");
+    expect(prompt).toContain("Never use toolNeed=movement or move_actor for scene-local positioning");
+  });
+
   it("tells Stage 3 not to turn already-held item stowing into transfer_item", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
@@ -353,6 +361,10 @@ describe("gameplay turn cycle v1 contracts", () => {
       { toolNeed: "route_check" },
       { allowedTools: ["check_route", "move_actor"] },
     )).toEqual(["check_route"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "local_positioning" },
+      { allowedTools: ["move_actor", "log_event", "start_search"] },
+    )).toEqual(["log_event"]);
     expect(selectAllowedToolNamesForStepV1(
       { toolNeed: "device_signal_observation" },
       { allowedTools: ["inspect_known_fact", "start_search", "record_world_fact"] },
@@ -604,6 +616,42 @@ describe("gameplay turn cycle v1 contracts", () => {
       },
     );
     expect(validation.failure).toMatch(/does not satisfy checklist toolNeed=start_search/u);
+  });
+
+  it("rejects move_actor when scene-local positioning selects an unrequested exit route", () => {
+    const validation = validateAndNormalizeToolRequestV1(
+      {
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "move_actor",
+        input: {
+          destinationRef: "Shibuya District",
+          mode: "walk",
+          intentSummary: "Stand by the third poster column in the underpass.",
+          evidenceRefs: ["Shibuya District"],
+        },
+        evidenceRefs: ["Shibuya District"],
+      },
+      {
+        playerAction: "Я выбираю третью колонну справа в Shibuya Pedestrian Underpass, подхожу к ней и встаю рядом.",
+        currentLocationName: "Shibuya Pedestrian Underpass",
+        currentSceneScopeName: "Shibuya Pedestrian Underpass",
+        allowedTools: ["move_actor", "log_event"],
+      } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "The player takes a local position near the third column.",
+        evidenceRefs: ["Shibuya Pedestrian Underpass"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "The player is waiting near the third column.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "movement",
+      },
+    );
+
+    expect(validation.failure).toContain("scene-local positioning");
+    expect(validation.failure).toContain("Use log_event with durability=scene_local");
   });
 
   it("aborts before packet persistence when required mutating tool step has no receipt", () => {
@@ -1002,6 +1050,61 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).toContain("Не пиши, что экран пуст");
     expect(built.prompt).toContain("сообщение/звонок/уведомление/инструкция есть или отсутствует");
     expect(built.prompt).toContain("конкретный статус не установлен");
+  });
+
+  it("forbids narrator from turning a ready phone mention into screen status", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я встаю у колонны и держу Burner phone наготове.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player waits by a column with phone ready.",
+        sceneQuestion: "What local position is established?",
+        actionInterpretation: {
+          intent: "wait by the column",
+          targetRefs: ["Burner phone"],
+        },
+        rationale: "Local positioning is scene-local.",
+        evidenceRefs: ["Player", "Burner phone"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "log_event",
+        input: {
+          text: "Игрок встаёт у третьей колонны и держит Burner phone наготове.",
+          importance: 3,
+          participants: ["Hayashi Ren"],
+          durability: "scene_local",
+        },
+        result: {
+          success: true,
+          status: "success",
+          result: { persisted: false },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("phone/device is held, ready, carried, or at hand is not screen/status evidence");
+    expect(built.system).toContain("screen brightness/darkness");
   });
 
   it("keeps empty candidate lookup evidence scoped to its own category", () => {

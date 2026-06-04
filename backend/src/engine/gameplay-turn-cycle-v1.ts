@@ -184,13 +184,14 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
   "For record_dialogue_outcome claims[].claimKind must be one of requirement|permission|prohibition|office|route_status|warning|lead|document_status|other; if the claim is a procedure step, document, authority, policy, office, access path, or category not represented exactly, use other rather than inventing a new enum.",
   "For record_dialogue_outcome, every outcome requires quote or claims; summary alone is never enough.",
   "For record_dialogue_outcome with a visible speaker/speakerRef, never use outcomeKind=unavailable or outcomeKind=no_current_answer. If the visible speaker cannot answer, use refused, redirected, silent, gestured, warned, or answered with truthStatus unconfirmed/speaker_asserted and include quote or claims.",
-  "For record_dialogue_outcome, unavailable/no_current_answer are only for no visible/current speaker or source: omit speakerRef, set authorityKind=no_visible_authority, include requestedRoleText, and include quote or claims.",
-  "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
-  "For record_dialogue_outcome stateEffects, omit the field unless acceptedContext exposes a prior stateReceipts[].stateReceipt alias. If you use applied_now, every stateEffects entry must include effectId, status:\"applied_now\", stateReceipt copied exactly from acceptedContext, and summary.",
-  "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
-  "If gmRead.runtimeRequirement.speakerBinding.kind is visible_actor, record_dialogue_outcome speakerRef must copy that visible speakerRef; do not create or use a composed responder name for multiple already-visible actors.",
-  "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
-  "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
+    "For record_dialogue_outcome, unavailable/no_current_answer are only for no visible/current speaker or source: omit speakerRef, set authorityKind=no_visible_authority, include requestedRoleText, and include quote or claims.",
+    "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
+    "For record_dialogue_outcome stateEffects, omit the field unless acceptedContext exposes a prior stateReceipts[].stateReceipt alias. If you use applied_now, every stateEffects entry must include effectId, status:\"applied_now\", stateReceipt copied exactly from acceptedContext, and summary.",
+    "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
+    "If gmRead.runtimeRequirement.speakerBinding.kind is visible_actor, record_dialogue_outcome speakerRef must copy that visible speakerRef; do not create or use a composed responder name for multiple already-visible actors.",
+    "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
+    "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
+    "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
 ].join(" ");
 
 export function toolRequestSchemaForAllowedToolsV1(allowedToolNames: readonly RuntimeToolName[]) {
@@ -936,6 +937,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "A route-check acceptedEvidence entry is route availability only; never narrate travel, arrival, or location change from check_route unless a separate move_actor/move_to acceptedEvidence entry says movement completed.",
     "Movement acceptedEvidence is not device/status evidence. Never state that a carried item/device/phone signal, message, call, instruction, alert, or status appeared or did not appear from move_actor/move_to alone; that requires separate accepted observation, dialogue, world-fact, or Oracle evidence.",
     "For start_search acceptedEvidence, found=false means no concrete discovery/receipt was created; it is not evidence that the searched detail is absent. Never narrate an empty screen, no signal, stable signal bars, no message, no call, no notification, or no instruction from start_search unless acceptedEvidence explicitly states that exact observed status as confirmed truth.",
+    "Accepted evidence that a phone/device is held, ready, carried, or at hand is not screen/status evidence. Do not narrate screen brightness/darkness, signal bars, battery state, messages, calls, notifications, or instructions unless acceptedEvidence explicitly confirms that exact device status.",
     "An Oracle result is not a movement, inventory, condition, or location state receipt; never narrate arrival, departure, current-scene change, gained/lost items, or changed condition from oracleResult alone.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
@@ -1447,6 +1449,10 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           durability: "scene_local|durable",
           futureRelevance: "required when durable",
         },
+        notes: [
+          "Use durability=scene_local for player stance, waiting, taking cover, or repositioning near a current-scene landmark when current scene does not change.",
+          "Do not use log_event to claim a hidden contact, item, message, route, or discovery exists unless another accepted receipt established it.",
+        ],
       };
     case "record_player_intent":
       return {
@@ -1767,6 +1773,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "toolNeed must be either a known state-effect kind or an exact runtime tool name.",
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
     "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step with toolNeed=start_search; never fold that observation into toolNeed=movement or move_actor.",
+    "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
     "Do not create transfer_item or any item-state step when the player merely keeps, pockets, hides, carries, holds, readies, secures, or stows an item already in playerInventory/current possession; that is narration detail unless ownership, location, or equip state actually changes.",
@@ -1921,6 +1928,16 @@ export function selectAllowedToolNamesForStepV1(
     const routeTools = frame.allowedTools.filter((toolName) => toolName === "check_route");
     return routeTools.length > 0 ? routeTools : [...frame.allowedTools];
   }
+  if (
+    toolNeed === "local_positioning"
+    || toolNeed === "scene_local_position"
+    || toolNeed === "scene_positioning"
+    || toolNeed === "wait_position"
+    || toolNeed === "waiting"
+  ) {
+    const localEventTools = frame.allowedTools.filter((toolName) => toolName === "log_event");
+    return localEventTools.length > 0 ? localEventTools : [...frame.allowedTools];
+  }
   const isKnownStateEffect = RUNTIME_TOOL_STATE_EFFECT_KINDS.some((effectKind) => effectKind === toolNeed);
   if (!isKnownStateEffect) {
     return [...frame.allowedTools];
@@ -2048,7 +2065,64 @@ export function validateAndNormalizeToolRequestV1(
         .join("; "),
     };
   }
+  const movementFailure = validateMovementRequestMatchesPlayerActionV1(
+    request.toolName,
+    parsed.data as Record<string, unknown>,
+    frame,
+    step,
+  );
+  if (movementFailure) {
+    return {
+      input: parsed.data as Record<string, unknown>,
+      failure: movementFailure,
+    };
+  }
   return { input: parsed.data as Record<string, unknown>, failure: null };
+}
+
+function normalizeMovementMatchTextV1(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLocaleLowerCase()
+    .replace(/["'`«»“”.,;:!?()[\]{}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function textLooksSceneLocalPositioningV1(value: string): boolean {
+  return /(?:\b(?:stand|wait|cover|hide|beside|near|column|pillar|wall|bench|sign|poster)\b|вста[еёю]|становл|останавл|жд[уаеё]|пряч|укры|подхож|рядом|возле|колонн|скам|стен|указател|плакат|рекламн|ориентир|позици)/iu
+    .test(value);
+}
+
+function validateMovementRequestMatchesPlayerActionV1(
+  toolName: RuntimeToolName,
+  input: Record<string, unknown>,
+  frame: SceneFrame,
+  step: GmChecklistStepV1,
+): string | null {
+  if (toolName !== "move_actor" && toolName !== "move_to") return null;
+  const destinationRef = typeof input.destinationRef === "string"
+    ? input.destinationRef
+    : typeof input.targetLocationName === "string"
+      ? input.targetLocationName
+      : null;
+  const destination = normalizeMovementMatchTextV1(destinationRef);
+  if (!destination) return null;
+
+  const actionText = normalizeMovementMatchTextV1(frame.playerAction);
+  if (!textLooksSceneLocalPositioningV1(actionText)) return null;
+
+  const requestedText = normalizeMovementMatchTextV1([
+    frame.playerAction,
+    step.purpose,
+    step.expectedVisibleEffect,
+  ].join(" "));
+  if (requestedText.includes(destination)) return null;
+
+  return [
+    `${toolName} destinationRef=${destinationRef} is a connected exit, but the player action describes scene-local positioning inside ${frame.currentSceneScopeName ?? frame.currentLocationName ?? "the current scene"}.`,
+    "Movement tools may only change current scene for an explicitly requested connected destination.",
+    "Use log_event with durability=scene_local, start_search, list_visible_affordances, or create_minor_poi for local positioning near a current-scene landmark.",
+  ].join(" ");
 }
 
 function applyToolRequestContextDefaultsV1(
