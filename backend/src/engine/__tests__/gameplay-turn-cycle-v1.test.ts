@@ -261,6 +261,15 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("Do not fold player-applied physical marks or annotations into record_dialogue_outcome");
   });
 
+  it("tells Stage 3 to split movement from post-move device observations", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("Movement tools own only departure, route, travel cost, and arrival/current-scene change");
+    expect(prompt).toContain("carried item/device/phone receives a signal, message, call, instruction");
+    expect(prompt).toContain("create a separate required observation step after the movement step");
+    expect(prompt).toContain("never fold that observation into toolNeed=movement or move_actor");
+  });
+
   it("tells Stage 3 not to turn already-held item stowing into transfer_item", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
@@ -1065,6 +1074,8 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.system).toContain("The playerAction is the player's first-person action");
     expect(built.system).toContain("Never make a non-player gmRead targetRef or evidenceRef");
     expect(built.system).toContain("Never narrate a non-player actor as present, visible, nearby");
+    expect(built.system).toContain("Movement acceptedEvidence is not device/status evidence");
+    expect(built.system).toContain("signal, message, call, instruction, alert, or status appeared or did not appear");
     expect(built.prompt).toContain("\"playerActionSubject\": \"player\"");
     expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs are never the subject");
     expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs/narrationGuardrails never establish NPC presence or visibility");
