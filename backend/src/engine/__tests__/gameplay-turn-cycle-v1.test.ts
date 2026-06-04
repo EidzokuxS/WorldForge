@@ -942,6 +942,68 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).toContain("это не доказывает их отсутствие");
   });
 
+  it("forbids narrator from turning phone start_search found=false into device status truth", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я иду в переход и смотрю, появится ли сообщение на Burner phone.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player moves and watches a phone.",
+        sceneQuestion: "Does the phone have confirmed status?",
+        actionInterpretation: {
+          intent: "watch the phone for a message",
+          targetRefs: ["Burner phone"],
+        },
+        rationale: "Phone status needs observation evidence.",
+        evidenceRefs: ["Player", "Burner phone"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "start_search",
+        input: {
+          query: "сигнал, сообщение или инструкция на Burner phone",
+          method: "look",
+          intentSummary: "Проверить экран Burner phone после прибытия.",
+        },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            kind: "search_started",
+            query: "сигнал, сообщение или инструкция на Burner phone",
+            status: "active",
+            targetTruth: "unconfirmed",
+            found: false,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("found=false means no concrete discovery/receipt was created");
+    expect(built.prompt).toContain("Не пиши, что экран пуст");
+    expect(built.prompt).toContain("сообщение/звонок/уведомление/инструкция есть или отсутствует");
+    expect(built.prompt).toContain("конкретный статус не установлен");
+  });
+
   it("keeps empty candidate lookup evidence scoped to its own category", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",

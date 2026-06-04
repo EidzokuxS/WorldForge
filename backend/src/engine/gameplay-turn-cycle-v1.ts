@@ -935,6 +935,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "When acceptedEvidence says movement completed or names the current scene after movement, narrate the completed arrival; do not describe the choice as still pending.",
     "A route-check acceptedEvidence entry is route availability only; never narrate travel, arrival, or location change from check_route unless a separate move_actor/move_to acceptedEvidence entry says movement completed.",
     "Movement acceptedEvidence is not device/status evidence. Never state that a carried item/device/phone signal, message, call, instruction, alert, or status appeared or did not appear from move_actor/move_to alone; that requires separate accepted observation, dialogue, world-fact, or Oracle evidence.",
+    "For start_search acceptedEvidence, found=false means no concrete discovery/receipt was created; it is not evidence that the searched detail is absent. Never narrate an empty screen, no signal, stable signal bars, no message, no call, no notification, or no instruction from start_search unless acceptedEvidence explicitly states that exact observed status as confirmed truth.",
     "An Oracle result is not a movement, inventory, condition, or location state receipt; never narrate arrival, departure, current-scene change, gained/lost items, or changed condition from oracleResult alone.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
@@ -1151,15 +1152,27 @@ function summarizeToolSettlementForNarration(
     const query = typeof payload.query === "string" && payload.query.trim().length > 0
       ? payload.query.trim()
       : null;
+    const deviceStatusQuery = [query, settlement.input?.query, settlement.input?.intentSummary]
+      .filter((value): value is string => typeof value === "string")
+      .some((value) =>
+        /\b(?:phone|device|signal|message|call|instruction|alert|notification|screen)\b/iu.test(value)
+        || /\b(?:телефон|устройств|сигнал|сообщени|звон|инструкц|уведомлен|экран)\b/iu.test(value)
+      );
     if (russian) {
       return [
         query ? `Поиск начат: ${query}.` : "Поиск начат.",
-        "Конкретная находка, доказательство, номер, адрес или отметка этим шагом не подтверждены; это не доказывает их отсутствие.",
+        "Поле found=false в этом результате означает только, что система не создала подтверждённую находку или отдельный receipt; это не является наблюдением отсутствия.",
+        deviceStatusQuery
+          ? "Не пиши, что экран пуст, сигнал есть или отсутствует, полосы сигнала устойчивы, сообщение/звонок/уведомление/инструкция есть или отсутствует; можно писать только, что игрок начал или продолжает проверку, а конкретный статус не установлен."
+          : "Конкретная находка, доказательство, номер, адрес или отметка этим шагом не подтверждены; это не доказывает их отсутствие.",
       ].join(" ");
     }
     return [
       query ? `Search started: ${query}.` : "Search started.",
-      "No concrete discovery, proof, number, address, or mark is confirmed by this step; that does not prove absence.",
+      "The found=false field means only that the system did not create a confirmed discovery or separate receipt; it is not an observed absence.",
+      deviceStatusQuery
+        ? "Do not write that the screen is empty, signal is present or absent, signal bars are stable, or a message/call/notification/instruction is present or absent; write only that the player started or continues checking and the concrete status is not established."
+        : "No concrete discovery, proof, number, address, or mark is confirmed by this step; that does not prove absence.",
     ].join(" ");
   }
 
