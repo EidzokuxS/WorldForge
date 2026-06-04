@@ -1,24 +1,96 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import path from "node:path";
 import {
   assertSafeId,
   getCampaignDir,
   getCampaignConfigPath,
   getChatHistoryPath,
-  CAMPAIGNS_DIR,
+  getCampaignsDir,
 } from "../paths.js";
 import { AppError } from "../../lib/errors.js";
 
 // ---------------------------------------------------------------------------
-// CAMPAIGNS_DIR
+// getCampaignsDir
 // ---------------------------------------------------------------------------
-describe("CAMPAIGNS_DIR", () => {
-  it("is an absolute path", () => {
-    expect(path.isAbsolute(CAMPAIGNS_DIR)).toBe(true);
+describe("getCampaignsDir", () => {
+  const originalEnv = process.env.GSD_CAMPAIGNS_ROOT;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.GSD_CAMPAIGNS_ROOT;
+    } else {
+      process.env.GSD_CAMPAIGNS_ROOT = originalEnv;
+    }
   });
 
-  it("ends with 'campaigns'", () => {
-    expect(path.basename(CAMPAIGNS_DIR)).toBe("campaigns");
+  it("returns an absolute path", () => {
+    delete process.env.GSD_CAMPAIGNS_ROOT;
+    expect(path.isAbsolute(getCampaignsDir())).toBe(true);
+  });
+
+  it("ends with 'campaigns' when env unset", () => {
+    delete process.env.GSD_CAMPAIGNS_ROOT;
+    expect(path.basename(getCampaignsDir())).toBe("campaigns");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCampaignsDir env override (Phase 58 BLOCKER-1 fix)
+// ---------------------------------------------------------------------------
+describe("getCampaignsDir env override", () => {
+  const originalEnv = process.env.GSD_CAMPAIGNS_ROOT;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.GSD_CAMPAIGNS_ROOT;
+    } else {
+      process.env.GSD_CAMPAIGNS_ROOT = originalEnv;
+    }
+  });
+
+  it("returns module-relative default when env is unset", () => {
+    delete process.env.GSD_CAMPAIGNS_ROOT;
+    const dir = getCampaignsDir();
+    expect(path.basename(dir)).toBe("campaigns");
+    expect(path.isAbsolute(dir)).toBe(true);
+  });
+
+  it("returns env override when GSD_CAMPAIGNS_ROOT is set", () => {
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-a";
+    expect(getCampaignsDir()).toBe("/tmp/test-a");
+  });
+
+  it("toggling env between calls returns different values (call-time read)", () => {
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-a";
+    const first = getCampaignsDir();
+
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-b";
+    const second = getCampaignsDir();
+
+    expect(first).toBe("/tmp/test-a");
+    expect(second).toBe("/tmp/test-b");
+    expect(first).not.toBe(second);
+  });
+
+  it("getCampaignDir reflects the env override too", () => {
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-a";
+    expect(getCampaignDir("abc")).toBe(path.join("/tmp/test-a", "abc"));
+  });
+
+  it("getCampaignConfigPath reflects the env override too", () => {
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-a";
+    const p = getCampaignConfigPath("abc");
+    expect(p).toBe(path.join("/tmp/test-a", "abc", "config.json"));
+  });
+
+  it("reverts to default when env is unset between calls", () => {
+    process.env.GSD_CAMPAIGNS_ROOT = "/tmp/test-a";
+    expect(getCampaignsDir()).toBe("/tmp/test-a");
+
+    delete process.env.GSD_CAMPAIGNS_ROOT;
+    const defaultDir = getCampaignsDir();
+    expect(defaultDir).not.toBe("/tmp/test-a");
+    expect(path.basename(defaultDir)).toBe("campaigns");
   });
 });
 
@@ -144,10 +216,10 @@ describe("assertSafeId", () => {
 // getCampaignDir
 // ---------------------------------------------------------------------------
 describe("getCampaignDir", () => {
-  it("returns the CAMPAIGNS_DIR joined with the campaign ID", () => {
+  it("returns the campaigns root joined with the campaign ID", () => {
     const id = "test-campaign-01";
     const result = getCampaignDir(id);
-    expect(result).toBe(path.join(CAMPAIGNS_DIR, id));
+    expect(result).toBe(path.join(getCampaignsDir(), id));
   });
 
   it("returns an absolute path", () => {

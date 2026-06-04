@@ -17,12 +17,15 @@ import {
 import type {
   GenerateWorldResult,
   GenerationProgress,
-  IpContext,
   WorldbookLibraryItem,
 } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
-import type { PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
-import type { CampaignNewFlowSession } from "@/components/campaign-new/flow-session";
+import type { IpResearchContext, PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
+import {
+  clearCampaignNewFlowSession,
+  type CampaignNewFlowSession,
+} from "@/components/campaign-new/flow-session";
 import {
   type CampaignMeta,
   type DnaState,
@@ -82,6 +85,12 @@ type UseNewCampaignWizardOptions = {
   initialSession?: CampaignNewFlowSession | null;
 };
 
+type SuggestedAuthorityContext = {
+  _ipContext?: IpResearchContext | null;
+  _premiseDivergence?: PremiseDivergence | null;
+  _researchArtifact?: WorldgenResearchArtifactV2 | null;
+};
+
 export function useNewCampaignWizard(
   settings: Settings | null,
   onCreated: () => void,
@@ -100,8 +109,11 @@ export function useNewCampaignWizard(
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(
     initialSession?.generationProgress ?? null,
   );
-  const [ipContext, setIpContext] = useState<IpContext | null>(null);
+  const [ipContext, setIpResearchContext] = useState<IpResearchContext | null>(null);
   const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
+  const [researchArtifact, setResearchArtifact] = useState<WorldgenResearchArtifactV2 | null>(
+    initialSession?.researchArtifact ?? null,
+  );
 
   const [worldbookLibrary, setWorldbookLibrary] = useState<WorldbookLibraryItem[]>([]);
   const [selectedWorldbooks, setSelectedWorldbooks] = useState<WorldbookLibraryItem[]>(
@@ -111,6 +123,7 @@ export function useNewCampaignWizard(
   const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
   const [worldbookError, setWorldbookError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationRetryCampaignId, setGenerationRetryCampaignId] = useState<string | null>(null);
 
   const isBusy = phase.kind !== "idle";
   const creatingCampaign = phase.kind === "creating" || phase.kind === "generating";
@@ -125,15 +138,70 @@ export function useNewCampaignWizard(
 
   function resetFlow() {
     setStep(1);
+    setCampaignName("");
+    setCampaignPremise("");
+    setCampaignFranchise("");
+    setResearchEnabled(true);
     setDnaState(null);
-    setIpContext(null);
+    setIpResearchContext(null);
     setPremiseDivergence(null);
+    setResearchArtifact(null);
     setPhase({ kind: "idle" });
-    setWorldbookLibrary([]);
+    setGenerationProgress(null);
+    setGenerationError(null);
+    setGenerationRetryCampaignId(null);
+    // Reusable worldbooks are global library data, not part of the campaign draft.
+    // A fresh-start reset should clear selections while keeping the loaded shelf visible.
     setSelectedWorldbooks([]);
-    setWorldbookLibraryLoading(false);
     setWorldbookStatus("idle");
     setWorldbookError(null);
+  }
+
+  function invalidatePreparedDna() {
+    setDnaState(null);
+    setIpResearchContext(null);
+    setPremiseDivergence(null);
+    setResearchArtifact(null);
+    setGenerationProgress(null);
+    setGenerationError(null);
+    setGenerationRetryCampaignId(null);
+    if (step === 2) {
+      setStep(1);
+    }
+  }
+
+  function updateCampaignName(value: string) {
+    if (value !== campaignName) {
+      invalidatePreparedDna();
+    }
+    setCampaignName(value);
+  }
+
+  function updateCampaignPremise(value: string) {
+    if (value !== campaignPremise) {
+      invalidatePreparedDna();
+    }
+    setCampaignPremise(value);
+  }
+
+  function updateCampaignFranchise(value: string) {
+    if (value !== campaignFranchise) {
+      invalidatePreparedDna();
+    }
+    setCampaignFranchise(value);
+  }
+
+  function updateResearchEnabled(value: boolean) {
+    if (value !== researchEnabled) {
+      invalidatePreparedDna();
+    }
+    setResearchEnabled(value);
+  }
+
+  function applySuggestedAuthorityContext(suggested: SuggestedAuthorityContext) {
+    setIpResearchContext(suggested._ipContext ?? null);
+    setPremiseDivergence(suggested._premiseDivergence ?? null);
+    setResearchArtifact(suggested._researchArtifact ?? null);
   }
 
   async function loadReusableWorldbooks() {
@@ -232,7 +300,7 @@ export function useNewCampaignWizard(
     try {
       const generation = await generateWorld(campaignId, (progress) => {
         setGenerationProgress(progress);
-      });
+      }, ipContext, premiseDivergence, researchArtifact);
       toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
         description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
       });
@@ -250,7 +318,7 @@ export function useNewCampaignWizard(
         try {
           const restarted = await generateWorld(campaignId, (progress) => {
             setGenerationProgress(progress);
-          });
+          }, ipContext, premiseDivergence, researchArtifact);
           toast.success(`World generated: ${restarted.startingLocation ?? "Unknown"}`, {
             description: `${restarted.locationCount ?? 0} locations, ${restarted.npcCount ?? 0} NPCs, ${restarted.factionCount ?? 0} factions`,
           });
@@ -307,6 +375,7 @@ export function useNewCampaignWizard(
   }
 
   function toggleWorldbookSelection(item: WorldbookLibraryItem) {
+    invalidatePreparedDna();
     setSelectedWorldbooks((current) => {
       if (current.some((existing) => existing.id === item.id)) {
         return current.filter((existing) => existing.id !== item.id);
@@ -329,8 +398,10 @@ export function useNewCampaignWizard(
         name: string;
         premise: string;
         seeds?: Partial<WorldSeeds>;
-        ipContext?: IpContext | null;
+        ipContext?: IpResearchContext | null;
         premiseDivergence?: PremiseDivergence | null;
+        worldgenSourceHint?: string;
+        worldgenResearchEnabled?: boolean;
         worldbookSelection?: WorldbookLibraryItem[];
       } = {
         name,
@@ -345,12 +416,22 @@ export function useNewCampaignWizard(
       if (premiseDivergence) {
         payload.premiseDivergence = premiseDivergence;
       }
+      const sourceHint = campaignFranchise.trim();
+      if (sourceHint) {
+        payload.worldgenSourceHint = sourceHint;
+      }
+      payload.worldgenResearchEnabled = researchEnabled;
       if (selectedWorldbooks.length > 0) {
         payload.worldbookSelection = selectedWorldbooks;
       }
 
-      const created = await apiPost<CampaignMeta>("/api/campaigns", payload);
-      toast.success("Campaign created", { description: created.name });
+      const created = generationRetryCampaignId
+        ? await loadCampaign(generationRetryCampaignId)
+        : await apiPost<CampaignMeta>("/api/campaigns", payload);
+      if (!generationRetryCampaignId) {
+        toast.success("Campaign created", { description: created.name });
+        setGenerationRetryCampaignId(created.id);
+      }
 
       // Load campaign so it becomes active BEFORE generation (generate needs active campaign)
       await loadCampaign(created.id);
@@ -366,11 +447,8 @@ export function useNewCampaignWizard(
         return;
       }
 
-      setCampaignName("");
-      setCampaignPremise("");
-      setCampaignFranchise("");
-      setResearchEnabled(true);
       resetFlow();
+      clearCampaignNewFlowSession();
       onCreated();
       router.push(`/campaign/${created.id}/review`);
     } catch (error) {
@@ -382,22 +460,22 @@ export function useNewCampaignWizard(
     }
   }
 
-  async function handleNextToDna() {
+  async function handleNextToDna(): Promise<boolean> {
     if (!conceptReady) {
       toast.error(hasWorldbook ? "Campaign name is required." : "Campaign name and premise are required.");
-      return;
+      return false;
     }
     if (dnaState) {
       setStep(2);
-      return;
+      return true;
     }
     if (!settings) {
       toast.error("Settings are still loading.");
-      return;
+      return false;
     }
     if (!isGeneratorConfigured(settings)) {
       toast.error("Configure Generator API key in Settings first.");
-      return;
+      return false;
     }
 
     setStep(2);
@@ -409,21 +487,18 @@ export function useNewCampaignWizard(
           research: researchEnabled,
           selectedWorldbooks: selectedWorldbooks.length > 0 ? selectedWorldbooks : undefined,
         });
-      if (suggested._ipContext) {
-        setIpContext(suggested._ipContext);
-      }
-      if (suggested._premiseDivergence) {
-        setPremiseDivergence(suggested._premiseDivergence);
-      }
+      applySuggestedAuthorityContext(suggested);
       setDnaState(createDnaStateFromSeeds(suggested));
     } catch (error) {
       toast.error("Failed to generate suggestions", {
         description: getErrorMessage(error, "Try again or write seeds manually."),
       });
+      applySuggestedAuthorityContext({});
       setDnaState(createEmptyDnaState());
     } finally {
       setPhase({ kind: "idle" });
     }
+    return true;
   }
 
   async function handleResuggestAll() {
@@ -449,12 +524,7 @@ export function useNewCampaignWizard(
           research: researchEnabled,
           selectedWorldbooks: selectedWorldbooks.length > 0 ? selectedWorldbooks : undefined,
         });
-      if (suggested._ipContext) {
-        setIpContext(suggested._ipContext);
-      }
-      if (suggested._premiseDivergence) {
-        setPremiseDivergence(suggested._premiseDivergence);
-      }
+      applySuggestedAuthorityContext(suggested);
       setDnaState((current) => {
         if (!current) return current;
         const next = { ...current };
@@ -487,6 +557,7 @@ export function useNewCampaignWizard(
         category,
         ipContext,
         premiseDivergence,
+        researchArtifact,
       );
       setDnaState((current) => {
         if (!current) return current;
@@ -510,6 +581,7 @@ export function useNewCampaignWizard(
   }
 
   function handleSeedToggle(category: SeedCategory, enabled: boolean) {
+    setGenerationRetryCampaignId(null);
     setDnaState((current) => {
       if (!current) return current;
       return { ...current, [category]: { ...current[category], enabled } };
@@ -517,6 +589,7 @@ export function useNewCampaignWizard(
   }
 
   function handleSeedTextChange(category: SeedCategory, value: string) {
+    setGenerationRetryCampaignId(null);
     setDnaState((current) => {
       if (!current) return current;
       return {
@@ -562,14 +635,15 @@ export function useNewCampaignWizard(
 
     // Form fields
     campaignName,
-    setCampaignName,
+    setCampaignName: updateCampaignName,
     campaignPremise,
-    setCampaignPremise,
+    setCampaignPremise: updateCampaignPremise,
     campaignFranchise,
-    setCampaignFranchise,
+    setCampaignFranchise: updateCampaignFranchise,
     researchEnabled,
-    setResearchEnabled,
+    setResearchEnabled: updateResearchEnabled,
     dnaState,
+    researchArtifact,
 
     // Derived state
     isBusy,
@@ -600,5 +674,6 @@ export function useNewCampaignWizard(
     handlePrepareManualDna,
     handleWorldbookUpload,
     toggleWorldbookSelection,
+    resetFlow,
   };
 }

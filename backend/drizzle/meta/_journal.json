@@ -36,6 +36,111 @@
       "when": 1775026435715,
       "tag": "0004_illegal_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1775922132266,
+      "tag": "0005_ordinary_misty_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1775924166574,
+      "tag": "0006_gigantic_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1775971237950,
+      "tag": "0007_spooky_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775989473666,
+      "tag": "0008_dusty_tana_nile",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778184084836,
+      "tag": "0009_living_world_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778213000000,
+      "tag": "0010_actor_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1778220110916,
+      "tag": "0011_small_hitman",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778220110917,
+      "tag": "0012_turn_runtime_resilience",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778220110918,
+      "tag": "0013_proposal_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1778411392795,
+      "tag": "0014_actor_wake_signals",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1778632000000,
+      "tag": "0015_settled_turn_durable_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1778632100000,
+      "tag": "0016_authority_trace_tool_result_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1778632200000,
+      "tag": "0017_turn_saga_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1779583200000,
+      "tag": "0018_quick_action_offers",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1779587400000,
+      "tag": "0019_turn_clock_ledger",
+      "breakpoints": true
     }
   ]
 }

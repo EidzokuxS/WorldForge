@@ -5,7 +5,6 @@ import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { importWorldbookLibrary, listWorldbookLibrary } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 
 interface LibraryItem {
   id: string;
@@ -73,8 +72,15 @@ export function LibraryWorkspace() {
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0">
-      <div className="flex justify-end mb-[clamp(6px,0.5vw,12px)]">
+    <div className="wf-v4-page wf-v4-page-theater">
+      <div className="mb-10 flex flex-wrap items-end justify-between gap-5 border-b border-white/[0.08] pb-8">
+        <div>
+          <p className="wf-kicker wf-kicker-ember">Worldbook</p>
+          <h1 className="wf-display mt-3 text-[clamp(44px,3.7vw,78px)]">Reusable context.</h1>
+          <p className="wf-prose mt-4 max-w-[72ch] text-[17px] leading-7 text-[var(--fg-2)]">
+            Import SillyTavern-style worldbook JSON and reuse it during campaign creation.
+          </p>
+        </div>
         <label className="inline-flex">
           <input
             type="file"
@@ -88,56 +94,42 @@ export function LibraryWorkspace() {
               event.target.value = "";
             }}
           />
-          <span className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/10 bg-white/5 px-[clamp(10px,0.8vw,16px)] py-[clamp(5px,0.4vw,8px)] text-[clamp(13px,0.9vw,16px)] font-medium text-foreground shadow-sm transition-colors hover:bg-white/[0.08]">
+          <span className="wf-v4-btn wf-v4-btn-primary cursor-pointer">
             {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Import Worldbook
+            Import JSON
           </span>
         </label>
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <div className="wf-v4-card flex items-center gap-2 p-8 text-sm text-[var(--fg-2)]">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading worldbooks...
         </div>
       ) : items.length === 0 ? (
-        <div className="py-8 text-sm text-muted-foreground">
+        <div className="wf-v4-card p-8 text-sm text-[var(--fg-2)]">
           No worldbooks yet. Import a JSON file to get started.
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_80px_100px_120px] pb-[clamp(6px,0.5vw,10px)] border-b border-border/60 text-[clamp(10px,0.7vw,13px)] font-semibold uppercase tracking-[0.06em] text-zinc-500">
-            <span>Name</span>
-            <span>Entries</span>
-            <span>Updated</span>
-            <span />
-          </div>
-
-          {/* Table rows */}
+        <div className="wf-worldbook-shelf">
           {items.map((item) => (
-            <div
+            <article
               key={item.id}
-              className="group grid grid-cols-[1fr_80px_100px_120px] items-center py-[clamp(10px,0.9vw,18px)] border-b border-border/60 transition-colors hover:bg-white/[0.04]"
+              className="wf-v4-card wf-worldbook-card"
             >
-              <span className="text-[clamp(14px,1vw,18px)] font-medium text-foreground">
-                {item.displayName}
-              </span>
-              <span className="text-[clamp(12px,0.85vw,15px)] text-zinc-500">
-                {item.entryCount}
-              </span>
-              <span className="text-[clamp(12px,0.85vw,15px)] text-zinc-500">
+              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--fg-3)]">
                 {formatDate(item.updatedAt)}
-              </span>
-              <div className="flex justify-end gap-1">
-                <Button variant="ghost" size="sm" className="text-muted-foreground">
-                  Export
-                </Button>
-                <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-400 hover:bg-red-500/[0.06]">
-                  Delete
-                </Button>
               </div>
-            </div>
+              <h2 className="mt-4 font-serif text-[clamp(24px,1.7vw,34px)] font-semibold leading-tight text-[var(--fg)]">
+                {item.displayName}
+              </h2>
+              {item.originalFileName ? (
+                <p className="wf-prose mt-3 line-clamp-2 text-sm text-[var(--fg-2)]">{item.originalFileName}</p>
+              ) : null}
+              <div className="mt-7 inline-flex border border-white/[0.08] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--fg-2)]">
+                {item.entryCount} entries
+              </div>
+            </article>
           ))}
         </div>
       )}

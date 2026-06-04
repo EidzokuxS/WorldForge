@@ -4,9 +4,21 @@ import userEvent from "@testing-library/user-event";
 import { QuickActions, type QuickAction } from "../quick-actions";
 
 const sampleActions: QuickAction[] = [
-  { label: "Look around", action: "look around" },
-  { label: "Check inventory", action: "check inventory" },
-  { label: "Rest", action: "rest" },
+  {
+    label: "Look around",
+    action: "look around",
+    handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  },
+  {
+    label: "Check inventory",
+    action: "check inventory",
+    handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  },
+  {
+    label: "Rest",
+    action: "rest",
+    handle: "qac_cccccccccccccccccccccccccccccccc",
+  },
 ];
 
 describe("QuickActions", () => {
@@ -28,7 +40,9 @@ describe("QuickActions", () => {
     const onAction = vi.fn();
     render(<QuickActions actions={sampleActions} onAction={onAction} />);
     await userEvent.click(screen.getByText("Look around"));
-    expect(onAction).toHaveBeenCalledWith("look around");
+    expect(onAction).toHaveBeenCalledWith("look around", {
+      quickActionHandle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
   });
 
   it("disables all buttons when disabled is true", () => {

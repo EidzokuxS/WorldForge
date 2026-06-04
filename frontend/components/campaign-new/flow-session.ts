@@ -2,6 +2,7 @@
 
 import type { GenerationProgress, WorldbookLibraryItem } from "@/lib/api";
 import type { DnaState } from "@/components/title/utils";
+import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
 
 export type CampaignNewFlowPhaseSnapshot =
   | { kind: "idle" }
@@ -18,12 +19,14 @@ export type CampaignNewFlowSession = {
   researchEnabled: boolean;
   selectedWorldbooks: WorldbookLibraryItem[];
   dnaState: DnaState | null;
+  researchArtifact: WorldgenResearchArtifactV2 | null;
   step: 1 | 2;
   phase: CampaignNewFlowPhaseSnapshot;
   generationProgress: GenerationProgress | null;
 };
 
 const STORAGE_KEY = "worldforge.campaign-new-flow";
+export const CAMPAIGN_NEW_FLOW_CLEARED_EVENT = "worldforge:campaign-new-flow-cleared";
 
 function canUseSessionStorage(): boolean {
   return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
@@ -53,6 +56,10 @@ export function readCampaignNewFlowSession(): CampaignNewFlowSession | null {
       researchEnabled: parsed.researchEnabled !== false,
       selectedWorldbooks: Array.isArray(parsed.selectedWorldbooks) ? parsed.selectedWorldbooks : [],
       dnaState: parsed.dnaState ?? null,
+      researchArtifact:
+        parsed.researchArtifact && typeof parsed.researchArtifact === "object"
+          ? (parsed.researchArtifact as WorldgenResearchArtifactV2)
+          : null,
       step: parsed.step === 2 ? 2 : 1,
       phase: parsed.phase ?? { kind: "idle" },
       generationProgress: parsed.generationProgress ?? null,
@@ -75,7 +82,11 @@ export function clearCampaignNewFlowSession(): void {
     return;
   }
 
+  const hadSession = window.sessionStorage.getItem(STORAGE_KEY) !== null;
   window.sessionStorage.removeItem(STORAGE_KEY);
+  if (hadSession) {
+    window.dispatchEvent(new Event(CAMPAIGN_NEW_FLOW_CLEARED_EVENT));
+  }
 }
 
 export function isCampaignNewFlowSessionEmpty(session: CampaignNewFlowSession): boolean {
@@ -85,6 +96,7 @@ export function isCampaignNewFlowSessionEmpty(session: CampaignNewFlowSession): 
     && session.campaignFranchise.trim().length === 0
     && session.selectedWorldbooks.length === 0
     && session.dnaState === null
+    && session.researchArtifact === null
     && session.step === 1
     && session.phase.kind === "idle"
     && session.generationProgress === null

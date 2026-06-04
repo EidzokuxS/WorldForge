@@ -77,6 +77,7 @@ describe("parseV2CardFile — JSON", () => {
         personality: "Bold and daring",
         scenario: "Fighting evil",
         tags: ["warrior", "hero"],
+        mes_example: "{{char}}: Stand behind me.\n{{char}}: We move at dawn.",
       },
     };
     const result = await parseV2CardFile(jsonFile(JSON.stringify(card)));
@@ -87,6 +88,7 @@ describe("parseV2CardFile — JSON", () => {
       personality: "Bold and daring",
       scenario: "Fighting evil",
       tags: ["warrior", "hero"],
+      mesExample: "{{char}}: Stand behind me.\n{{char}}: We move at dawn.",
     });
   });
 
@@ -132,6 +134,7 @@ describe("parseV2CardFile — JSON", () => {
       personality: "",
       scenario: "",
       tags: [],
+      mesExample: "",
     });
   });
 

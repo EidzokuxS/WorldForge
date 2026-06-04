@@ -100,9 +100,9 @@ export function LorePanel({ campaignId }: LorePanelProps) {
 
     if (!campaignId) {
         return (
-            <aside className="flex w-full flex-col border-l border-border bg-card lg:w-[250px]">
-                <div className="border-b border-border px-4 py-3">
-                    <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-muted-foreground">
+            <aside className="flex w-full flex-col overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04] shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl xl:h-full">
+                <div className="border-b border-white/8 bg-white/[0.03] px-5 py-4">
+                    <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-zinc-500">
                         World Lore
                     </h2>
                 </div>
@@ -114,14 +114,14 @@ export function LorePanel({ campaignId }: LorePanelProps) {
     }
 
     return (
-        <aside className="flex w-full flex-col border-l border-border bg-card lg:w-[250px]">
-            <div className="border-b border-border px-4 py-3">
-                <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-muted-foreground">
+        <aside className="flex w-full flex-col overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04] shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl xl:h-full">
+            <div className="border-b border-white/8 bg-white/[0.03] px-5 py-4">
+                <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-zinc-500">
                     World Lore
                 </h2>
             </div>
 
-            <div className="border-b border-border px-3 py-2">
+            <div className="border-b border-white/8 px-3 py-2">
                 <div className="relative">
                     <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input

@@ -1,15 +1,21 @@
 import type {
   CharacterDraft,
+  CharacterIdentityBaseFacts,
+  CharacterIdentityBehavioralCore,
+  CharacterIdentityLiveDynamics,
+  CharacterPersonality,
   CharacterImportMode,
   CharacterRecord,
   CharacterSkill,
   CharacterTier,
   CharacterWealthTier,
   PlayerCharacter,
+  PowerStats,
 } from "@worldforge/shared";
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS } from "@worldforge/shared";
 import type { ScaffoldNpc } from "../worldgen/types.js";
 import { deriveRuntimeCharacterTags } from "./runtime-tags.js";
+import type { AuthoritativeInventoryView } from "../inventory/authority.js";
 
 const CONDITION_TAGS = new Set([
   "bleeding",
@@ -66,6 +72,7 @@ type LegacyNpcRow = {
   tags: string;
   tier: "temporary" | "persistent" | "key";
   currentLocationId: string | null;
+  currentSceneLocationId?: string | null;
   goals: string;
   beliefs: string;
   unprocessedImportance: number;
@@ -99,14 +106,189 @@ interface ParsedLegacyTags {
   legacyTags: string[];
 }
 
+/**
+ * Strip legacy grounding fields from old records.
+ * Does NOT synthesize PowerStats -- old records get undefined powerStats.
+ * This is fail-closed: the UI shows "No power assessment" instead of fake data.
+ */
+function stripLegacyGroundingFields<T extends CharacterDraft | CharacterRecord>(
+  record: T,
+): Omit<T, "grounding"> & { powerStats?: PowerStats } {
+  const { grounding: _grounding, ...rest } = record as T & { grounding?: unknown };
+  return {
+    ...rest,
+    powerStats: (record as T & { powerStats?: PowerStats }).powerStats,
+  };
+}
+
+type DraftLegacyInput = {
+  identity: Omit<CharacterDraft["identity"], "baseFacts" | "behavioralCore" | "liveDynamics"> & {
+    baseFacts?: CharacterIdentityBaseFacts;
+    behavioralCore?: CharacterIdentityBehavioralCore;
+    liveDynamics?: CharacterIdentityLiveDynamics;
+    id?: string;
+    campaignId?: string;
+  };
+  profile: CharacterDraft["profile"];
+  socialContext: CharacterDraft["socialContext"];
+  motivations: CharacterDraft["motivations"];
+  capabilities: CharacterDraft["capabilities"];
+  state: CharacterDraft["state"];
+  loadout: CharacterDraft["loadout"];
+  startConditions: CharacterDraft["startConditions"];
+  provenance: CharacterDraft["provenance"];
+  powerStats?: PowerStats;
+};
+
+type DraftLegacyInputWithId = DraftLegacyInput & {
+  identity: DraftLegacyInput["identity"] & { id: string; campaignId: string };
+};
+
+function normalizeCharacterDraftRecord(record: CharacterRecord): CharacterRecord;
+function normalizeCharacterDraftRecord(record: CharacterDraft): CharacterDraft;
+function normalizeCharacterDraftRecord(record: DraftLegacyInputWithId): CharacterRecord;
+function normalizeCharacterDraftRecord(record: DraftLegacyInput): CharacterDraft;
+function normalizeCharacterDraftRecord(
+  record: DraftLegacyInput,
+): CharacterDraft | CharacterRecord {
+  const baseFacts = normalizeBaseFacts(record as CharacterDraft);
+  const behavioralCore = normalizeBehavioralCore(record as CharacterDraft);
+  const liveDynamics = normalizeLiveDynamics(record as CharacterDraft);
+  const personality = normalizePersonality(record as CharacterDraft);
+  const stripped = stripLegacyGroundingFields(record as CharacterDraft);
+
+  return {
+    ...stripped,
+    identity: {
+      ...record.identity,
+      baseFacts,
+      behavioralCore,
+      liveDynamics,
+      personality,
+    },
+    profile: {
+      ...record.profile,
+      backgroundSummary: record.profile.backgroundSummary || baseFacts.biography,
+      personaSummary: record.profile.personaSummary || behavioralCore.selfImage,
+    },
+    motivations: {
+      ...record.motivations,
+      shortTermGoals:
+        record.motivations.shortTermGoals.length > 0
+          ? record.motivations.shortTermGoals
+          : [...liveDynamics.activeGoals],
+      longTermGoals:
+        record.motivations.longTermGoals.length > 0
+          ? record.motivations.longTermGoals
+          : [],
+      beliefs:
+        record.motivations.beliefs.length > 0
+          ? record.motivations.beliefs
+          : [...liveDynamics.beliefDrift],
+      drives:
+        record.motivations.drives.length > 0
+          ? record.motivations.drives
+          : [...(behavioralCore.motives ?? [])],
+      frictions:
+        record.motivations.frictions.length > 0
+          ? record.motivations.frictions
+          : [...liveDynamics.currentStrains],
+    },
+  } as unknown as CharacterDraft;
+}
+
+function normalizeBaseFacts(
+  record: CharacterDraft | CharacterRecord,
+): CharacterIdentityBaseFacts {
+  return {
+    biography: record.identity.baseFacts?.biography ?? record.profile.backgroundSummary ?? "",
+    socialRole: dedupeStrings([
+      ...(record.identity.baseFacts?.socialRole ?? []),
+      record.identity.role,
+      record.socialContext.factionName ?? "",
+    ]),
+    hardConstraints: dedupeStrings(record.identity.baseFacts?.hardConstraints ?? []),
+  };
+}
+
+function normalizeBehavioralCore(
+  record: CharacterDraft | CharacterRecord,
+): CharacterIdentityBehavioralCore {
+  const liveDynamics = record.identity.liveDynamics;
+  const behavioralCore = record.identity.behavioralCore;
+
+  return {
+    motives: dedupeStrings(behavioralCore?.motives ?? record.motivations.drives),
+    pressureResponses: dedupeStrings(
+      behavioralCore?.pressureResponses ?? record.motivations.frictions,
+    ),
+    taboos: dedupeStrings(behavioralCore?.taboos ?? []),
+    attachments: dedupeStrings(
+      liveDynamics?.attachments
+      ?? behavioralCore?.attachments
+      ?? record.socialContext.relationshipRefs.map((ref) => ref.entityName),
+    ),
+    selfImage:
+      behavioralCore?.selfImage
+      ?? record.profile.personaSummary
+      ?? record.profile.backgroundSummary
+      ?? "",
+  };
+}
+
+function normalizeLiveDynamics(
+  record: CharacterDraft | CharacterRecord,
+): CharacterIdentityLiveDynamics {
+  return {
+    attachments: dedupeStrings(
+      record.identity.liveDynamics?.attachments
+      ?? record.identity.behavioralCore?.attachments
+      ?? [],
+    ),
+    activeGoals: dedupeStrings(
+      record.identity.liveDynamics?.activeGoals
+      ?? [...record.motivations.shortTermGoals, ...record.motivations.longTermGoals],
+    ),
+    beliefDrift: dedupeStrings(
+      record.identity.liveDynamics?.beliefDrift ?? record.motivations.beliefs,
+    ),
+    currentStrains: dedupeStrings(
+      record.identity.liveDynamics?.currentStrains ?? record.motivations.frictions,
+    ),
+    earnedChanges: dedupeStrings(record.identity.liveDynamics?.earnedChanges ?? []),
+  };
+}
+
+export function blankPersonality(): CharacterPersonality {
+  return {
+    summary: "",
+    voice: "",
+    decisionStyle: "",
+    worldview: "",
+    internalContradictions: [],
+    personalMythology: "",
+    sampleLines: [],
+  };
+}
+
+export function normalizePersonality(
+  record: CharacterDraft | CharacterRecord,
+): CharacterPersonality {
+  return {
+    ...blankPersonality(),
+    ...record.identity.personality,
+  };
+}
+
 export function createCharacterRecordFromDraft(
   draft: CharacterDraft,
   identity: Pick<CharacterRecord["identity"], "id" | "campaignId">,
 ): CharacterRecord {
+  const normalizedDraft = normalizeCharacterDraftRecord(draft);
   return {
-    ...draft,
+    ...normalizedDraft,
     identity: {
-      ...draft.identity,
+      ...normalizedDraft.identity,
       ...identity,
     },
   };
@@ -114,10 +296,10 @@ export function createCharacterRecordFromDraft(
 
 export function toCharacterDraft(record: CharacterRecord): CharacterDraft {
   const { id: _id, campaignId: _campaignId, ...identity } = record.identity;
-  return {
+  return normalizeCharacterDraftRecord({
     ...record,
     identity,
-  };
+  });
 }
 
 export function fromLegacyPlayerRow(
@@ -126,7 +308,7 @@ export function fromLegacyPlayerRow(
 ): CharacterRecord {
   const parsedTags = classifyLegacyTags(safeParseStringArray(row.tags));
 
-  return {
+  return normalizeCharacterDraftRecord({
     identity: {
       id: row.id,
       campaignId: row.campaignId,
@@ -189,7 +371,7 @@ export function fromLegacyPlayerRow(
       worldgenOrigin: null,
       legacyTags: parsedTags.legacyTags,
     },
-  };
+  });
 }
 
 export function fromLegacyPlayerCharacter(
@@ -227,6 +409,13 @@ export interface RichParsedCharacter {
   appearance: string;
   backgroundSummary: string;
   personaSummary: string;
+  personalitySummary: string;
+  personalityVoice: string;
+  personalityDecisionStyle: string;
+  personalityWorldview: string;
+  personalityContradictions: string[];
+  personalityMythology: string;
+  personalitySampleLines: string[];
   tags: string[];
   drives: string[];
   frictions: string[];
@@ -248,12 +437,21 @@ export function fromRichParsedCharacter(
 ): CharacterDraft {
   const parsedTags = classifyLegacyTags(rich.tags);
 
-  return {
+  return normalizeCharacterDraftRecord({
     identity: {
       role: "player",
       tier: "key",
       displayName: rich.name,
       canonicalStatus: opts.canonicalStatus ?? "original",
+      personality: {
+        summary: rich.personalitySummary,
+        voice: rich.personalityVoice,
+        decisionStyle: rich.personalityDecisionStyle,
+        worldview: rich.personalityWorldview,
+        internalContradictions: rich.personalityContradictions,
+        personalMythology: rich.personalityMythology,
+        sampleLines: rich.personalitySampleLines,
+      },
     },
     profile: {
       species: rich.race,
@@ -309,7 +507,7 @@ export function fromRichParsedCharacter(
       worldgenOrigin: null,
       legacyTags: parsedTags.legacyTags,
     },
-  };
+  });
 }
 
 export function hydrateStoredPlayerRecord(
@@ -323,7 +521,7 @@ export function hydrateStoredPlayerRecord(
 
   const equippedItems = safeParseStringArray(row.equippedItems);
 
-  return {
+  return normalizeCharacterDraftRecord({
     ...stored,
     identity: {
       ...stored.identity,
@@ -371,11 +569,11 @@ export function hydrateStoredPlayerRecord(
       ...stored.provenance,
       sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
       legacyTags: dedupeStrings([
-        ...stored.provenance.legacyTags,
+        ...(stored.provenance.legacyTags ?? []),
         ...safeParseStringArray(row.derivedTags ?? "[]"),
       ]),
     },
-  };
+  });
 }
 
 export function fromLegacyNpcRow(
@@ -385,7 +583,7 @@ export function fromLegacyNpcRow(
   const parsedTags = classifyLegacyTags(safeParseStringArray(row.tags));
   const goals = safeParseGoals(row.goals);
 
-  return {
+  return normalizeCharacterDraftRecord({
     identity: {
       id: row.id,
       campaignId: row.campaignId,
@@ -448,7 +646,7 @@ export function fromLegacyNpcRow(
       worldgenOrigin: null,
       legacyTags: parsedTags.legacyTags,
     },
-  };
+  });
 }
 
 export function fromLegacyScaffoldNpc(
@@ -483,6 +681,104 @@ export function fromLegacyScaffoldNpc(
   );
 }
 
+export function reconcileDraftBackedScaffoldNpc(
+  npc: ScaffoldNpc & { draft: CharacterDraft },
+): CharacterDraft {
+  const editableTier = npc.tier ?? mapRecordTierToScaffoldTier(npc.draft.identity.tier);
+  const reconciledTier: CharacterDraft["identity"]["tier"] =
+    editableTier === "key" ? "key" : "supporting";
+  const editableDraft = fromLegacyScaffoldNpc(
+    {
+      ...npc,
+      tier: editableTier,
+    },
+    {
+      currentLocationName: npc.locationName,
+      factionName: npc.factionName,
+      sourceKind: npc.draft.provenance.sourceKind,
+      originMode: npc.draft.socialContext.originMode ?? "unknown",
+    },
+  );
+
+  const EMPTY_CORE: CharacterIdentityBehavioralCore = {
+    motives: [],
+    pressureResponses: [],
+    taboos: [],
+    attachments: [],
+    selfImage: "",
+  };
+  const EMPTY_DYNAMICS: CharacterIdentityLiveDynamics = {
+    attachments: [],
+    activeGoals: [],
+    beliefDrift: [],
+    currentStrains: [],
+    earnedChanges: [],
+  };
+  const editableCore = editableDraft.identity.behavioralCore ?? EMPTY_CORE;
+  const editableDynamics = editableDraft.identity.liveDynamics ?? EMPTY_DYNAMICS;
+  const draftCore = npc.draft.identity.behavioralCore ?? EMPTY_CORE;
+  const draftDynamics = npc.draft.identity.liveDynamics ?? EMPTY_DYNAMICS;
+
+  return normalizeCharacterDraftRecord({
+    ...editableDraft,
+    identity: {
+      ...editableDraft.identity,
+      tier: reconciledTier,
+      canonicalStatus: npc.draft.identity.canonicalStatus,
+      baseFacts: npc.draft.identity.baseFacts,
+      personality:
+        npc.draft.identity.personality ?? editableDraft.identity.personality,
+      behavioralCore: {
+        ...draftCore,
+        motives: editableCore.motives,
+        pressureResponses: editableCore.pressureResponses,
+        selfImage: editableCore.selfImage,
+      },
+      liveDynamics: {
+        ...draftDynamics,
+        activeGoals: editableDynamics.activeGoals,
+        currentStrains: editableDynamics.currentStrains,
+      },
+    },
+    profile: {
+      ...npc.draft.profile,
+      personaSummary: editableDraft.profile.personaSummary,
+    },
+    socialContext: {
+      ...npc.draft.socialContext,
+      factionName: editableDraft.socialContext.factionName,
+      currentLocationName: editableDraft.socialContext.currentLocationName,
+      socialStatus: editableDraft.socialContext.socialStatus,
+    },
+    motivations: {
+      ...npc.draft.motivations,
+      shortTermGoals: editableDraft.motivations.shortTermGoals,
+      longTermGoals: editableDraft.motivations.longTermGoals,
+      drives: editableDraft.motivations.drives,
+      frictions: editableDraft.motivations.frictions,
+    },
+    capabilities: {
+      ...npc.draft.capabilities,
+      traits: editableDraft.capabilities.traits,
+      skills: editableDraft.capabilities.skills,
+      flaws: editableDraft.capabilities.flaws,
+      wealthTier: editableDraft.capabilities.wealthTier,
+    },
+    state: {
+      ...npc.draft.state,
+      conditions: editableDraft.state.conditions,
+      statusFlags: editableDraft.state.statusFlags,
+    },
+    provenance: {
+      ...npc.draft.provenance,
+      legacyTags: editableDraft.provenance.legacyTags,
+    },
+    loadout: npc.draft.loadout,
+    startConditions: npc.draft.startConditions,
+    powerStats: npc.draft.powerStats,
+  });
+}
+
 export function hydrateStoredNpcRecord(
   row: StoredNpcRow,
   opts: LegacyNpcOptions = {},
@@ -495,14 +791,16 @@ export function hydrateStoredNpcRecord(
   const goals = safeParseGoals(row.goals);
   const beliefs = safeParseStringArray(row.beliefs);
 
-  return {
+  return normalizeCharacterDraftRecord({
     ...stored,
     identity: {
       ...stored.identity,
       id: row.id,
       campaignId: row.campaignId,
       role: "npc",
-      tier: row.tier,
+      tier: row.tier === "persistent" && stored.identity.tier === "supporting"
+        ? "supporting"
+        : row.tier,
       displayName: stored.identity.displayName || row.name,
       canonicalStatus: opts.canonicalStatus ?? stored.identity.canonicalStatus,
     },
@@ -542,24 +840,36 @@ export function hydrateStoredNpcRecord(
       ...stored.provenance,
       sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
       legacyTags: dedupeStrings([
-        ...stored.provenance.legacyTags,
+        ...(stored.provenance.legacyTags ?? []),
         ...safeParseStringArray(row.derivedTags ?? "[]"),
       ]),
     },
-  };
+  });
 }
 
-export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacter {
+export function toLegacyPlayerCharacter(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerCharacter {
+  return toLegacyPlayerCharacterWithInventory(record, inventoryView);
+}
+
+export function toLegacyPlayerCharacterWithInventory(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerCharacter {
+  const normalized = normalizeCharacterDraftRecord(record);
   return {
-    name: record.identity.displayName,
-    race: record.profile.species,
-    gender: record.profile.gender,
-    age: record.profile.ageText,
-    appearance: record.profile.appearance,
-    tags: deriveRuntimeCharacterTags(record),
-    hp: record.state.hp,
-    equippedItems: record.loadout.equippedItemRefs,
-    locationName: record.socialContext.currentLocationName ?? "",
+    name: normalized.identity.displayName,
+    race: normalized.profile.species,
+    gender: normalized.profile.gender,
+    age: normalized.profile.ageText,
+    appearance: normalized.profile.appearance,
+    tags: deriveRuntimeCharacterTags(normalized),
+    hp: normalized.state.hp,
+    equippedItems:
+      inventoryView?.compatibility.equippedItemRefs ?? normalized.loadout.equippedItemRefs,
+    locationName: normalized.socialContext.currentLocationName ?? "",
   };
 }
 
@@ -577,9 +887,20 @@ export interface PlayerRecordProjection {
   derivedTags: string;
 }
 
-export function projectPlayerRecord(record: CharacterRecord): PlayerRecordProjection {
-  const legacy = toLegacyPlayerCharacter(record);
-  const derivedTags = deriveRuntimeCharacterTags(record);
+export function projectPlayerRecord(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerRecordProjection {
+  return projectPlayerRecordWithInventory(record, inventoryView);
+}
+
+export function projectPlayerRecordWithInventory(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerRecordProjection {
+  const normalized = normalizeCharacterDraftRecord(record);
+  const legacy = toLegacyPlayerCharacterWithInventory(normalized, inventoryView);
+  const derivedTags = deriveRuntimeCharacterTags(normalized);
 
   return {
     name: legacy.name,
@@ -590,25 +911,26 @@ export function projectPlayerRecord(record: CharacterRecord): PlayerRecordProjec
     hp: legacy.hp,
     tags: JSON.stringify(legacy.tags),
     equippedItems: JSON.stringify(legacy.equippedItems),
-    currentLocationId: record.socialContext.currentLocationId,
-    characterRecord: JSON.stringify(record),
+    currentLocationId: normalized.socialContext.currentLocationId,
+    characterRecord: JSON.stringify(normalized),
     derivedTags: JSON.stringify(derivedTags),
   };
 }
 
 export function toLegacyNpcDraft(record: CharacterRecord): ScaffoldNpc {
-  const tier = mapRecordTierToScaffoldTier(record.identity.tier);
+  const normalized = normalizeCharacterDraftRecord(record);
+  const tier = mapRecordTierToScaffoldTier(normalized.identity.tier);
 
   return {
-    name: record.identity.displayName,
-    persona: record.profile.personaSummary,
-    tags: deriveRuntimeCharacterTags(record),
+    name: normalized.identity.displayName,
+    persona: normalized.profile.personaSummary,
+    tags: deriveRuntimeCharacterTags(normalized),
     goals: {
-      shortTerm: [...record.motivations.shortTermGoals],
-      longTerm: [...record.motivations.longTermGoals],
+      shortTerm: [...normalized.motivations.shortTermGoals],
+      longTerm: [...normalized.motivations.longTermGoals],
     },
-    locationName: record.socialContext.currentLocationName ?? "",
-    factionName: record.socialContext.factionName,
+    locationName: normalized.socialContext.currentLocationName ?? "",
+    factionName: normalized.socialContext.factionName,
     tier,
   };
 }
@@ -626,25 +948,26 @@ export interface NpcRecordProjection {
 }
 
 export function projectNpcRecord(record: CharacterRecord): NpcRecordProjection {
-  const legacy = toLegacyNpcDraft(record);
-  const derivedTags = deriveRuntimeCharacterTags(record);
+  const normalized = normalizeCharacterDraftRecord(record);
+  const legacy = toLegacyNpcDraft(normalized);
+  const derivedTags = deriveRuntimeCharacterTags(normalized);
 
   return {
     name: legacy.name,
     persona: legacy.persona,
     tags: JSON.stringify(legacy.tags),
-    tier: record.identity.tier === "key"
+    tier: normalized.identity.tier === "key"
       ? "key"
-      : record.identity.tier === "temporary"
+      : normalized.identity.tier === "temporary"
         ? "temporary"
         : "persistent",
-    currentLocationId: record.socialContext.currentLocationId,
+    currentLocationId: normalized.socialContext.currentLocationId,
     goals: JSON.stringify({
       short_term: legacy.goals.shortTerm,
       long_term: legacy.goals.longTerm,
     }),
-    beliefs: JSON.stringify(record.motivations.beliefs),
-    characterRecord: JSON.stringify(record),
+    beliefs: JSON.stringify(normalized.motivations.beliefs),
+    characterRecord: JSON.stringify(normalized),
     derivedTags: JSON.stringify(derivedTags),
   };
 }

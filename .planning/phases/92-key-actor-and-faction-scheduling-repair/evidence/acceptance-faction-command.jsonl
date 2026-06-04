@@ -1,0 +1,1 @@
+{"scenario":"faction-command-path","commandNodeId":"9ed9d3cf-41f4-4abb-aa83-6cf13487173f","reportRoute":"report_message","proposalStatus":"proposed","commitStatus":"committed","reportStatus":"consumed","resourceRows":[{"key":"patrols","quantity":1}],"resourceLedgerDeltas":[-1],"surfaceSignalIds":["e8d6d0a7-8ce9-411e-9416-0575c6835bf2"],"surfaceSignalVisible":true}

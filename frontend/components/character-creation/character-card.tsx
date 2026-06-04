@@ -12,12 +12,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StringListEditor } from "@/components/world-review/string-list-editor";
-import { TagEditor } from "@/components/world-review/tag-editor";
+import { PersonalitySection } from "@/components/world-review/personality-section";
 import { cn } from "@/lib/utils";
 import type {
   LoadoutPreviewResult,
   PersonaTemplateSummary,
 } from "@/lib/api-types";
+import { PowerStatsSection } from "./power-stats-section";
 
 interface CharacterCardProps {
   draft: CharacterDraft;
@@ -31,6 +32,14 @@ interface CharacterCardProps {
   onResolveStartingLocation: () => void;
   onPreviewLoadout?: () => void;
   onApplyPersonaTemplate?: (templateId: string) => void;
+  /**
+   * True when this draft was hydrated from a pre-Phase-60 database record
+   * (i.e. no `powerStats` were ever generated for it). Renders a muted
+   * "Not assessed (legacy record)" label instead of the full PowerStats
+   * block. Defaults to false — newly-ingested drafts always carry
+   * `powerStats` or the pipeline threw upstream.
+   */
+  isLegacyRecord?: boolean;
 }
 
 const HP_OPTIONS = [1, 2, 3, 4, 5];
@@ -58,17 +67,20 @@ function CompactTextarea({
   onChange,
   placeholder,
   maxLength,
+  minH,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   maxLength?: number;
+  minH?: string;
 }) {
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      style={minH ? { minHeight: minH } : undefined}
       className={cn(
         "min-h-[72px] w-full resize-y rounded-md border px-3 py-2 outline-none",
         "bg-zinc-800 border-zinc-700 text-[clamp(14px,1vw,16px)] text-zinc-200 placeholder:text-zinc-600",
@@ -77,6 +89,41 @@ function CompactTextarea({
       maxLength={maxLength}
     />
   );
+}
+
+function formatCanonicalStatus(
+  status: CharacterDraft["identity"]["canonicalStatus"],
+): string {
+  switch (status) {
+    case "known_ip_canonical":
+      return "Known IP Canonical";
+    case "known_ip_diverged":
+      return "Known IP Diverged";
+    case "imported":
+      return "Imported";
+    default:
+      return "Original";
+  }
+}
+
+function getIdentityFidelitySummary(draft: CharacterDraft) {
+  const selfImage = draft.identity.behavioralCore?.selfImage?.trim() ?? "";
+  const activeGoals = (draft.identity.liveDynamics?.activeGoals ?? [])
+    .map((goal) => goal.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const hasFidelitySignals = Boolean(
+    draft.identity.canonicalStatus !== "original"
+    || selfImage
+    || activeGoals.length > 0,
+  );
+
+  return {
+    hasFidelitySignals,
+    canonicalStatusLabel: formatCanonicalStatus(draft.identity.canonicalStatus),
+    selfImage,
+    activeGoals,
+  };
 }
 
 function CharacterCardInner({
@@ -91,20 +138,22 @@ function CharacterCardInner({
   onResolveStartingLocation,
   onPreviewLoadout,
   onApplyPersonaTemplate,
+  isLegacyRecord = false,
 }: CharacterCardProps) {
-  // Local draft state — edits happen here, debounced to parent
-  const [local, setLocal] = useState<CharacterDraft>(draft);
+  // Local draft state - edits happen here, debounced to parent.
+  const [localState, setLocalState] = useState(() => ({
+    sourceDraft: draft,
+    value: draft,
+  }));
+  const local = localState.sourceDraft === draft ? localState.value : draft;
   const onChangeRef = useRef(onChange);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
-  // Sync from parent when a new character arrives (parse/generate/import)
-  useEffect(() => { setLocal(draft); }, [draft]);
-
   // Debounced propagation to parent
   function commitLocal(next: CharacterDraft) {
-    setLocal(next);
+    setLocalState({ sourceDraft: draft, value: next });
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { onChangeRef.current(next); }, 300);
   }
@@ -128,6 +177,7 @@ function CharacterCardInner({
   }
 
   const loadoutToRender = previewLoadout?.loadout ?? local.loadout;
+  const identityFidelity = getIdentityFidelitySummary(local);
 
   return (
     <div className="flex flex-col gap-[clamp(20px,1.8vw,36px)] border border-border/30 rounded-lg bg-zinc-900 p-[clamp(20px,1.8vw,36px)]">
@@ -208,27 +258,56 @@ function CharacterCardInner({
         </div>
       </div>
 
-      {/* ── CAPABILITIES ── */}
-      <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)]">
-        <SectionLabel>Capabilities</SectionLabel>
-        <div className="grid gap-[clamp(16px,1.2vw,24px)] md:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Traits</FieldLabel>
-            <TagEditor
-              tags={local.capabilities.traits}
-              onChange={(traits) => patch("capabilities", { ...local.capabilities, traits })}
-            />
+      {identityFidelity.hasFidelitySignals && (
+        <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)] rounded-lg border border-zinc-700/50 bg-zinc-800/30 p-[clamp(12px,1vw,18px)]">
+          <SectionLabel>Identity Fidelity</SectionLabel>
+          <div className="grid gap-[clamp(10px,0.8vw,16px)] md:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Canon Status</FieldLabel>
+              <p className="text-[13px] text-zinc-300">
+                {identityFidelity.canonicalStatusLabel}
+              </p>
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Flaws</FieldLabel>
-            <TagEditor
-              tags={local.capabilities.flaws}
-              onChange={(flaws) => patch("capabilities", { ...local.capabilities, flaws })}
-            />
-          </div>
+          {identityFidelity.selfImage && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Core Self-Image</FieldLabel>
+              <p className="text-[13px] leading-6 text-zinc-300">
+                {identityFidelity.selfImage}
+              </p>
+            </div>
+          )}
+          {identityFidelity.activeGoals.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Live Identity Pressure</FieldLabel>
+              <p className="text-[13px] text-zinc-300">
+                {identityFidelity.activeGoals.join(" · ")}
+              </p>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
+      <PersonalitySection personality={local.identity.personality} />
+
+      {/* ── POWER STATS ── (read-only per Phase 61; see power-stats-section.tsx) */}
+      {local.powerStats ? (
+        <section
+          aria-labelledby="power-stats-heading"
+          className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-[clamp(14px,1.2vw,20px)]"
+        >
+          <PowerStatsSection powerStats={local.powerStats} />
+        </section>
+      ) : isLegacyRecord ? (
+        <section
+          aria-label="Power stats not assessed"
+          className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">
+            Power stats — not assessed (legacy record)
+          </span>
+        </section>
+      ) : null}
 
       {/* ── STATUS ── */}
       <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)]">

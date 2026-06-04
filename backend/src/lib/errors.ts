@@ -1,5 +1,12 @@
 export { getErrorMessage } from "@worldforge/shared";
 
+export function getPlayerSafeErrorMessage(
+  _error: unknown,
+  fallback = "Turn processing failed. The raw error was logged server-side.",
+): string {
+  return fallback;
+}
+
 export class AppError extends Error {
   constructor(
     message: string,

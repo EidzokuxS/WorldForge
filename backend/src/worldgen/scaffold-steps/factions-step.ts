@@ -3,10 +3,11 @@ import { z } from "zod";
 import { createModel } from "../../ai/index.js";
 import {
   buildCanonicalList,
-  buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
+  buildScaffoldPromptContract,
   buildStopSlopRules,
+  buildWorldgenResearchContextBlock,
   formatNameList,
   reportSubProgress,
 } from "./prompt-utils.js";
@@ -32,6 +33,28 @@ const factionDetailSingleSchema = z.object({
   territoryNames: z.array(z.string()).describe("Controlled locations from the known locations list"),
 });
 
+const FACTION_SCAFFOLD_PROMPT_CONTRACT = buildScaffoldPromptContract({
+  marker: "STRUCTURED_OUTPUT_CONTRACT: scaffold-faction.v1",
+  title: "Faction scaffold contract",
+  requiredFields:
+    'Plan returns "factions"; each item has "name" and "purpose". Detail returns "tags", "goals", "assets", and "territoryNames"; planned name remains authoritative.',
+  nestedShapes:
+    '"factions": [{ "name": "Station Authority", "purpose": "Controls access to signal data." }]; detail shape { "tags": ["Bureaucratic"], "goals": ["Suppress anomalous signal evidence"], "assets": ["Archive clearance"], "territoryNames": ["Signal Base"] }.',
+  caps:
+    "Generate 3-6 planned factions; tags 2-4; goals 1-3; assets 1-3; territoryNames only from known locations.",
+  nullableRules:
+    "goals, assets, tags, and territoryNames are arrays; return [] only for territoryNames when the faction has no valid location. Do not use null for faction arrays.",
+  validMinimal:
+    '{ "factions": [{ "name": "Station Authority", "purpose": "Controls access to signal data and emergency supplies." }] }',
+  validExample:
+    '{ "tags": ["Bureaucratic", "Secretive"], "goals": ["Suppress anomalous signal evidence"], "assets": ["Archive clearance"], "territoryNames": ["Signal Base"] }',
+  invalidExamples: [
+    '{ "factions": "Station Authority, Free Traders" }',
+    '{ "goals": "Expand influence", "assets": "power" }',
+    '{ "factions": [{ "name": "Excluded Mechanics Council", "sourceRole": "backend inferred canon" }] }',
+  ],
+});
+
 // ---------------------------------------------------------------------------
 // generateFactionsStep -- plan + per-entity detail calls with accumulator
 // ---------------------------------------------------------------------------
@@ -46,18 +69,31 @@ export async function generateFactionsStep(
   progressStep?: number,
   progressTotalSteps?: number,
 ): Promise<ScaffoldFaction[]> {
-  const ipBlock = buildIpContextBlock(ipContext);
+  const researchArtifact = req.researchArtifact ?? null;
+  const ipBlock = buildWorldgenResearchContextBlock({
+    researchArtifact,
+    ipContext,
+    target: "factions",
+  });
   const premiseDivergence = req.premiseDivergence ?? null;
   const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-  const knownIpContract = buildKnownIpGenerationContract(
-    ipContext,
-    premiseDivergence,
-    "factions",
-  );
-  const canonFactions = buildCanonicalList(ipContext, "factions");
+  const knownIpContract = researchArtifact
+    ? ""
+    : buildKnownIpGenerationContract(
+        ipContext,
+        premiseDivergence,
+        "factions",
+      );
+  const canonFactions = researchArtifact ? "" : buildCanonicalList(ipContext, "factions");
 
   // --- Call 1: PLAN ---
-  const planInstruction = ipContext
+  const planInstruction = researchArtifact
+    ? `Generate 3-6 factions using the research artifact source usage rules.
+Use sources whose useFor includes factions, institutions, politics, or world structure.
+Do NOT import political factions, villages, nations, clans, military offices, or cast organizations from any source whose avoidFor includes factions, locations, npcs, or timeline.
+If a source is only marked for power_system/mechanics, treat it as ability context only, not as political structure.
+Favor named institutions from the artifact's generated context when the artifact rules allow them for factions.`
+    : ipContext
     ? `You are writing a faction reference for the ${ipContext.franchise} universe. Output 3-6 CANONICAL factions.
 ${canonFactions}
 HARD RULE: Your faction names MUST come from the canonical list above. Do NOT invent new factions. The premise changes WHO leads or joins a faction, not WHETHER the faction exists.
@@ -76,6 +112,8 @@ Copy-paste canonical faction names exactly. Never create "premise-themed" factio
     model: createModel(req.role.provider),
     schema: factionPlanSchema,
     prompt: `${planInstruction}
+
+${FACTION_SCAFFOLD_PROMPT_CONTRACT}
 
 WORLD PREMISE:
 ${refinedPremise}
@@ -120,6 +158,8 @@ ${buildStopSlopRules()}`,
       schema: factionDetailSingleSchema,
       prompt: `You are writing a faction reference sheet for a text RPG engine. The engine reads these fields mechanically -- be precise.
 
+${FACTION_SCAFFOLD_PROMPT_CONTRACT}
+
 WORLD PREMISE:
 ${refinedPremise}
 
@@ -135,7 +175,7 @@ FIELD INSTRUCTIONS:
 - tags: Mechanical trait tags. Format: [Adjective]. Examples: [Militaristic], [Secretive], [Wealthy], [Religious], [Expansionist], [Decentralized]. 2-4 tags per faction.
 - goals: 1-3 SPECIFIC objectives with concrete targets. Bad: "Expand influence." Good: "Annex the northern mining towns before winter." Each goal names a place, person, resource, or deadline. Consider goals of ALREADY DETAILED factions above to ensure rival dynamics.
 - assets: 1-3 concrete resources. Not "great power" -- name the specific army, spy network, trade fleet, artifact, or territory they control.
-- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic. Avoid claiming territory already controlled by factions in ALREADY DETAILED above unless the faction explicitly contests it.${ipContext ? `\n- For known-IP factions: start from the canonical faction, then update only the goals, assets, territory, or alliances that PREMISE DIVERGENCE changes. Preserve untouched canon exactly.` : ""}
+- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic. Avoid claiming territory already controlled by factions in ALREADY DETAILED above unless the faction explicitly contests it.${!researchArtifact && ipContext ? `\n- For known-IP factions: start from the canonical faction, then update only the goals, assets, territory, or alliances that PREMISE DIVERGENCE changes. Preserve untouched canon exactly.` : ""}
 
 ${buildStopSlopRules()}`,
       temperature: req.role.temperature,

@@ -1,0 +1,127 @@
+{
+  "phase": 90,
+  "plan": "90-04",
+  "mode": "dry-run",
+  "exactInput": "иду дальше по логичному маршруту и ищу чайную лавку",
+  "steps": [
+    {
+      "order": 1,
+      "toolName": "gm-read-reviewer",
+      "phase": "gm-read",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "route-market-tea-row"
+      ],
+      "summary": "Parser-like clarification repaired before visible output."
+    },
+    {
+      "order": 2,
+      "toolName": "list_navigation_options",
+      "phase": "lookup",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "route-market-tea-row"
+      ],
+      "summary": "Visible route options include Tea Row."
+    },
+    {
+      "order": 3,
+      "toolName": "find_location_candidates",
+      "phase": "lookup",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "route-market-tea-row"
+      ],
+      "summary": "Route lookup resolves Tea Row."
+    },
+    {
+      "order": 4,
+      "toolName": "inspect_known_fact",
+      "phase": "lookup",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "knowledge:public-tea-route"
+      ],
+      "summary": "Visible/player-known public tea fact found."
+    },
+    {
+      "order": 5,
+      "toolName": "inspect_known_fact",
+      "phase": "lookup",
+      "success": false,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [],
+      "summary": "Private hidden-fact probe denied without mutation or leaked terms."
+    },
+    {
+      "order": 6,
+      "toolName": "find_poi_candidates",
+      "phase": "lookup",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "potential:loc-canal-market"
+      ],
+      "summary": "POI lookup allows constrained potential tea stall support."
+    },
+    {
+      "order": 7,
+      "toolName": "check_route",
+      "phase": "lookup",
+      "success": true,
+      "mutation": "none",
+      "observationOnly": true,
+      "evidenceRefs": [
+        "route-market-tea-row"
+      ],
+      "summary": "Route check accepts Tea Row."
+    },
+    {
+      "order": 8,
+      "toolName": "move_actor",
+      "phase": "state",
+      "success": true,
+      "mutation": "validated",
+      "observationOnly": false,
+      "evidenceRefs": [
+        "route-market-tea-row"
+      ],
+      "summary": "Movement validated through legal route evidence."
+    },
+    {
+      "order": 9,
+      "toolName": "create_minor_poi",
+      "phase": "state",
+      "success": true,
+      "mutation": "validated",
+      "observationOnly": false,
+      "evidenceRefs": [
+        "knowledge:public-tea-route"
+      ],
+      "summary": "Constrained public tea stall validation accepted."
+    },
+    {
+      "order": 10,
+      "toolName": "start_search",
+      "phase": "state",
+      "success": true,
+      "mutation": "validated",
+      "observationOnly": false,
+      "evidenceRefs": [
+        "action-poi"
+      ],
+      "summary": "Search intent recorded without discovery truth."
+    }
+  ],
+  "requiredSequencePresent": true
+}

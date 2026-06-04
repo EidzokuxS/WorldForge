@@ -1,29 +1,20 @@
 /**
  * Reflection Agent tool definitions for AI SDK.
  *
- * Factory creates campaign-scoped tools that let the Reflection Agent
- * update an NPC's beliefs, goals, and relationships based on accumulated
- * episodic events.
+ * Factory creates campaign-scoped proposal tools for the Reflection Agent.
+ * These tools do not directly mutate gameplay state; accepted reflection
+ * changes must route through a typed backend proposal executor.
  */
 
 import { z } from "zod";
 import { tool } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, players } from "../db/schema.js";
-import { executeToolCall } from "./tool-executor.js";
-import { createLogger } from "../lib/index.js";
 import {
   hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
-  projectNpcRecord,
-  projectPlayerRecord,
 } from "../character/record-adapters.js";
-
-const log = createLogger("reflection-tools");
-
-const MAX_BELIEFS = 10;
-const MAX_GOALS_PER_CATEGORY = 5;
 
 // -- Tier constants -----------------------------------------------------------
 
@@ -32,6 +23,20 @@ export const SKILL_TIERS = ["Novice", "Skilled", "Master"] as const;
 export const RELATIONSHIP_TAGS = ["Trusted Ally", "Friendly", "Neutral", "Suspicious", "Hostile", "Sworn Enemy"] as const;
 
 type EntityType = "player" | "npc";
+
+function reflectionProposalOnly(
+  toolName: string,
+  proposal: Record<string, unknown>,
+) {
+  return {
+    accepted: false,
+    proposalOnly: true,
+    toolName,
+    reason:
+      "Reflection tools cannot directly mutate gameplay state; route through a typed backend proposal executor with explicit state owners, receipts, rollback, projection, and recovery.",
+    proposal,
+  };
+}
 
 function resolveEntityForUpgrade(
   campaignId: string,
@@ -78,26 +83,7 @@ function resolveEntityForUpgrade(
   };
 }
 
-function persistResolvedEntity(
-  entity:
-    | { id: string; type: "player"; record: ReturnType<typeof hydrateStoredPlayerRecord> }
-    | { id: string; type: "npc"; record: ReturnType<typeof hydrateStoredNpcRecord> },
-) {
-  const db = getDb();
-
-  if (entity.type === "player") {
-    db.update(players)
-      .set(projectPlayerRecord(entity.record))
-      .where(eq(players.id, entity.id))
-      .run();
-    return;
-  }
-
-  db.update(npcs)
-    .set(projectNpcRecord(entity.record))
-    .where(eq(npcs.id, entity.id))
-    .run();
-}
+const REQUIRED_EVIDENCE = 1;
 
 // -- Tool factory -------------------------------------------------------------
 
@@ -105,6 +91,16 @@ function persistResolvedEntity(
  * Create Reflection Agent tools bound to a specific NPC and campaign.
  */
 export function createReflectionTools(campaignId: string, npcId: string) {
+  const personalityPatchSchema = z.object({
+    summary: z.string().optional(),
+    voice: z.string().optional(),
+    decisionStyle: z.string().optional(),
+    worldview: z.string().optional(),
+    internalContradictions: z.array(z.string()).optional(),
+    personalMythology: z.string().optional(),
+    sampleLines: z.array(z.string()).optional(),
+  }).strict();
+
   return {
     set_belief: tool({
       description:
@@ -113,43 +109,12 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         belief: z.string().describe("The belief statement"),
         evidence: z.array(z.string()).describe("Event references supporting this belief"),
       }),
-      execute: async ({ belief }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const beliefs = [...npcRecord.motivations.beliefs];
-
-        // Append new belief (avoid duplicates)
-        if (!beliefs.includes(belief)) {
-          beliefs.push(belief);
-        }
-
-        // Keep max N beliefs (drop oldest if exceeded)
-        while (beliefs.length > MAX_BELIEFS) {
-          beliefs.shift();
-        }
-
-        db.update(npcs)
-          .set(projectNpcRecord({
-            ...npcRecord,
-            motivations: {
-              ...npcRecord.motivations,
-              beliefs,
-            },
-          }))
-          .where(eq(npcs.id, npcId))
-          .run();
-
-        log.info(`NPC ${npcId}: set belief "${belief}"`);
-        return { updated: true, beliefs };
+      execute: async ({ belief, evidence }) => {
+        return reflectionProposalOnly("set_belief", {
+          npcId,
+          belief,
+          evidence,
+        });
       },
     }),
 
@@ -161,47 +126,11 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         priority: z.enum(["short_term", "long_term"]).describe("Goal category"),
       }),
       execute: async ({ goal, priority }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const goals = {
-          short_term: [...npcRecord.motivations.shortTermGoals],
-          long_term: [...npcRecord.motivations.longTermGoals],
-        };
-        const goalList = goals[priority];
-
-        // Append if not duplicate
-        if (!goalList.includes(goal)) {
-          goalList.push(goal);
-        }
-
-        // Cap at max per category
-        while (goalList.length > MAX_GOALS_PER_CATEGORY) {
-          goalList.shift();
-        }
-
-        db.update(npcs)
-          .set(projectNpcRecord({
-            ...npcRecord,
-            motivations: {
-              ...npcRecord.motivations,
-              shortTermGoals: goals.short_term,
-              longTermGoals: goals.long_term,
-            },
-          }))
-          .where(eq(npcs.id, npcId))
-          .run();
-
-        log.info(`NPC ${npcId}: set ${priority} goal "${goal}"`);
-        return { updated: true, goals };
+        return reflectionProposalOnly("set_goal", {
+          npcId,
+          goal,
+          priority,
+        });
       },
     }),
 
@@ -212,45 +141,10 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         goal: z.string().describe("The goal text to remove"),
       }),
       execute: async ({ goal }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const goals = {
-          short_term: [...npcRecord.motivations.shortTermGoals],
-          long_term: [...npcRecord.motivations.longTermGoals],
-        };
-        const lowerGoal = goal.toLowerCase();
-
-        // Remove from both arrays (case-insensitive)
-        goals.short_term = goals.short_term.filter(
-          (g) => g.toLowerCase() !== lowerGoal,
-        );
-        goals.long_term = goals.long_term.filter(
-          (g) => g.toLowerCase() !== lowerGoal,
-        );
-
-        db.update(npcs)
-          .set(projectNpcRecord({
-            ...npcRecord,
-            motivations: {
-              ...npcRecord.motivations,
-              shortTermGoals: goals.short_term,
-              longTermGoals: goals.long_term,
-            },
-          }))
-          .where(eq(npcs.id, npcId))
-          .run();
-
-        log.info(`NPC ${npcId}: dropped goal "${goal}"`);
-        return { updated: true, goals };
+        return reflectionProposalOnly("drop_goal", {
+          npcId,
+          goal,
+        });
       },
     }),
 
@@ -263,32 +157,51 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         reason: z.string().describe("Why this relationship exists or changed"),
       }),
       execute: async ({ target, tag, reason }) => {
-        const db = getDb();
+        return reflectionProposalOnly("set_relationship", {
+          npcId,
+          target,
+          tag,
+          reason,
+        });
+      },
+    }),
 
-        // Load NPC name for entityA
-        const npc = db
-          .select({ name: npcs.name })
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
+    promote_identity_change: tool({
+      description:
+        "Promote an earned deeper identity change after multiple strong evidence points. This is the only tool allowed to alter personality, self-image, attachments, or baseFacts.",
+      inputSchema: z.object({
+        personality: personalityPatchSchema.optional().describe("Partial personality fields to promote into durable identity."),
+        liveDynamicsAttachments: z.array(z.string()).optional().describe("Replace live dynamics attachments with the promoted attachment list."),
+        selfImage: z.string().optional().describe("Optional promoted self-image value."),
+        hardConstraints: z.array(z.string()).optional().describe("Optional replacement hard-constraint list."),
+        evidence: z.array(z.string()).describe("Multiple concrete evidence points supporting the promotion"),
+        whyNow: z.string().describe("Why the accumulated evidence justifies a deeper identity shift now"),
+      }).strict(),
+      execute: async ({
+        personality,
+        liveDynamicsAttachments,
+        selfImage,
+        hardConstraints,
+        evidence,
+        whyNow,
+      }) => {
+        const strongEvidence = evidence.map((entry) => entry.trim()).filter(Boolean);
 
-        if (!npc) return { error: "NPC not found" };
+        if (strongEvidence.length < REQUIRED_EVIDENCE || whyNow.trim().length < 24) {
+          return {
+            error: `Deeper identity changes require multiple strong evidence points. Need ${REQUIRED_EVIDENCE}, got ${strongEvidence.length}.`,
+          };
+        }
 
-        // Reuse existing set_relationship tool executor logic
-        const result = await executeToolCall(
-          campaignId,
-          "set_relationship",
-          {
-            entityA: npc.name,
-            entityB: target,
-            tag,
-            reason,
-          },
-          0,
-        );
-
-        log.info(`NPC ${npcId}: set relationship with "${target}" -> [${tag}]`);
-        return result;
+        return reflectionProposalOnly("promote_identity_change", {
+          npcId,
+          personality: personality ?? null,
+          liveDynamicsAttachments: liveDynamicsAttachments ?? null,
+          selfImage: selfImage?.trim() || null,
+          hardConstraints: hardConstraints ?? null,
+          evidence: strongEvidence,
+          whyNow: whyNow.trim(),
+        });
       },
     }),
 
@@ -313,16 +226,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           if (newIndex > 1) {
             return { error: `No current wealth tier. Can only set Destitute or Poor as starting tier, not ${newTier}.` };
           }
-          entity.record = {
-            ...entity.record,
-            capabilities: {
-              ...entity.record.capabilities,
-              wealthTier: newTier,
-            },
-          };
-          persistResolvedEntity(entity);
-          log.info(`${entityName}: set initial wealth tier "${newTier}"`);
-          return { updated: true, tags: entity.record.capabilities.wealthTier ? [entity.record.capabilities.wealthTier] : [] };
+          return reflectionProposalOnly("upgrade_wealth", {
+            npcId,
+            entityName,
+            entityType,
+            currentWealthTag: null,
+            newTier,
+          });
         }
 
         const currentIndex = WEALTH_TIERS.indexOf(currentWealthTag as typeof WEALTH_TIERS[number]);
@@ -335,17 +245,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           return { error: `Wealth must progress one step at a time. Current: ${currentWealthTag}, requested: ${newTier}, expected next: ${WEALTH_TIERS[currentIndex + 1] ?? "max reached"}.` };
         }
 
-        // Replace old tier with new tier
-        entity.record = {
-          ...entity.record,
-          capabilities: {
-            ...entity.record.capabilities,
-            wealthTier: newTier,
-          },
-        };
-        persistResolvedEntity(entity);
-        log.info(`${entityName}: wealth ${currentWealthTag} -> ${newTier}`);
-        return { updated: true, tags: [newTier] };
+        return reflectionProposalOnly("upgrade_wealth", {
+          npcId,
+          entityName,
+          entityType,
+          currentWealthTag,
+          newTier,
+        });
       },
     }),
 
@@ -373,19 +279,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           if (newIndex !== 0) {
             return { error: `No existing ${skillName} skill. Can only set Novice as starting tier, not ${newTier}.` };
           }
-          entity.record = {
-            ...entity.record,
-            capabilities: {
-              ...entity.record.capabilities,
-              skills: [
-                ...entity.record.capabilities.skills,
-                { name: skillName, tier: newTier },
-              ],
-            },
-          };
-          persistResolvedEntity(entity);
-          log.info(`${entityName}: set initial skill "${newTier} ${skillName}"`);
-          return { updated: true, tags: [`${newTier} ${skillName}`] };
+          return reflectionProposalOnly("upgrade_skill", {
+            npcId,
+            entityName,
+            entityType,
+            skillName,
+            currentTier: null,
+            newTier,
+          });
         }
 
         const currentTier = existingSkill.tier;
@@ -403,21 +304,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           return { error: `Skill must progress one step at a time. Current: ${currentTier} ${skillName}, expected next: ${SKILL_TIERS[currentIndex + 1] ?? "max reached"} ${skillName}.` };
         }
 
-        // Replace old skill tag with new one
-        entity.record = {
-          ...entity.record,
-          capabilities: {
-            ...entity.record.capabilities,
-            skills: entity.record.capabilities.skills.map((entry) =>
-              entry.name.toLowerCase() === skillName.toLowerCase()
-                ? { ...entry, tier: newTier }
-                : entry,
-            ),
-          },
-        };
-        persistResolvedEntity(entity);
-        log.info(`${entityName}: skill ${currentTier} ${skillName} -> ${newTier} ${skillName}`);
-        return { updated: true, tags: [`${newTier} ${skillName}`] };
+        return reflectionProposalOnly("upgrade_skill", {
+          npcId,
+          entityName,
+          entityType,
+          skillName,
+          currentTier,
+          newTier,
+        });
       },
     }),
   };

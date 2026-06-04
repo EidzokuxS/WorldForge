@@ -61,7 +61,7 @@ export function createDefaultSettings(): Settings {
       providerId: defaultProviderId,
       model: "",
       temperature: 0.8,
-      maxTokens: 1024,
+      maxTokens: 4096,
     },
     generator: {
       providerId: defaultProviderId,
@@ -75,12 +75,6 @@ export function createDefaultSettings(): Settings {
       temperature: 0,
       maxTokens: 512,
     },
-    fallback: {
-      providerId: defaultProviderId,
-      model: "gpt-4o-mini",
-      timeoutMs: 30000,
-      retryCount: 1,
-    },
     images: {
       providerId: NONE_PROVIDER_ID,
       model: "",
@@ -93,6 +87,21 @@ export function createDefaultSettings(): Settings {
       searchProvider: "brave",
       braveApiKey: "",
       zaiApiKey: "",
+    },
+    ui: {
+      showRawReasoning: false,
+    },
+    observability: {
+      enabled: true,
+      dumpFullPrompts: false,
+      roles: {
+        judge: true,
+        storyteller: true,
+        oracle: true,
+        npcAgent: true,
+        reflection: true,
+        embedder: true,
+      },
     },
   };
 }

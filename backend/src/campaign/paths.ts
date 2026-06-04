@@ -3,7 +3,19 @@ import { fileURLToPath } from "node:url";
 import { AppError } from "../lib/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const CAMPAIGNS_DIR = path.resolve(__dirname, "../../../campaigns");
+const DEFAULT_CAMPAIGNS_ROOT = path.resolve(__dirname, "../../../campaigns");
+
+/**
+ * Returns the campaigns root directory. Reads GSD_CAMPAIGNS_ROOT at CALL TIME
+ * (not module load time) so route-level integration tests can sandbox
+ * `app.request("/api/chat/action", ...)` per-test by setting the env in beforeEach.
+ *
+ * Phase 58 BLOCKER-1 fix — the previous module-level export constant was
+ * captured at module load, invisible to env overrides set in test setup.
+ */
+export function getCampaignsDir(): string {
+  return process.env.GSD_CAMPAIGNS_ROOT || DEFAULT_CAMPAIGNS_ROOT;
+}
 
 export function assertSafeId(id: string): void {
   if (!/^[\w-]{1,128}$/.test(id)) {
@@ -13,7 +25,7 @@ export function assertSafeId(id: string): void {
 
 export function getCampaignDir(campaignId: string): string {
   assertSafeId(campaignId);
-  return path.join(CAMPAIGNS_DIR, campaignId);
+  return path.join(getCampaignsDir(), campaignId);
 }
 
 export function getCampaignConfigPath(campaignId: string): string {

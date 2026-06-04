@@ -35,7 +35,6 @@ function makeSettings(overrides: {
     storyteller: { providerId: "", model: "", temperature: 0, maxTokens: 4096 },
     generator: { providerId: "", model: "", temperature: 0, maxTokens: 4096 },
     embedder: { providerId: "", model: "", temperature: 0, maxTokens: 4096 },
-    fallback: { providerId: "", model: "", timeoutMs: 30000, retryCount: 1 },
     images: {
       enabled: overrides.enabled ?? true,
       providerId: overrides.providerId ?? "test-provider",
@@ -46,6 +45,7 @@ function makeSettings(overrides: {
       searchProvider: "duckduckgo",
       maxSearchSteps: 3,
     },
+    ui: { showRawReasoning: false },
   } as Settings;
 }
 

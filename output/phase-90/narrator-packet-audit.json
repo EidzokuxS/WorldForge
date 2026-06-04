@@ -1,0 +1,106 @@
+{
+  "phase": 90,
+  "plan": "90-04",
+  "mode": "dry-run",
+  "exactInput": "иду дальше по логичному маршруту и ищу чайную лавку",
+  "finalAssistantText": "You follow Tea Row from Canal Market. Lantern Tea Stall becomes reachable from the public route, and the search for the tea stall is started without confirming a discovery yet.",
+  "mentioned": [
+    "movement",
+    "tea stall",
+    "route",
+    "search"
+  ],
+  "unsupported": [],
+  "packetSourceRefs": [
+    {
+      "id": "player-action",
+      "kind": "player_action_request"
+    },
+    {
+      "id": "event-player-action",
+      "kind": "anchor_event"
+    },
+    {
+      "id": "event-player-action",
+      "kind": "committed_event"
+    },
+    {
+      "id": "action-result:action-move",
+      "kind": "perceivable_effect"
+    },
+    {
+      "id": "action-result:action-poi",
+      "kind": "perceivable_effect"
+    },
+    {
+      "id": "action-result:action-search",
+      "kind": "perceivable_effect"
+    },
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "kind": "visible_actor"
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "kind": "visible_actor"
+    },
+    {
+      "id": "awareness:1",
+      "kind": "hint_signal"
+    },
+    {
+      "id": "guardrail:1",
+      "kind": "guardrail"
+    }
+  ],
+  "visibleEffectSummaries": [
+    "Tourist Courier moves to Tea Row.",
+    "Lantern Tea Stall becomes reachable from Canal Market.",
+    "Tourist Courier starts searching for чайная лавка; no discovery is confirmed."
+  ],
+  "hiddenLeakTermsFound": [],
+  "passed": true,
+  "packetAudit": {
+    "sourceCount": 10,
+    "visibleTextCount": 11,
+    "hiddenExcludedCount": 5,
+    "forbiddenTermCount": 4,
+    "canonicalTurnPacketOmitted": true
+  },
+  "contextBudgetTrace": {
+    "label": "PlayerFacingPacket",
+    "estimatedInputTokens": 147,
+    "visibleItemCount": 11,
+    "hiddenExcludedCount": 5,
+    "candidateItemCount": 5,
+    "sectionCounts": {
+      "actors": 2,
+      "hints": 1,
+      "events": 1,
+      "responses": 0,
+      "effects": 3,
+      "guardrails": 1
+    },
+    "sourceCoverage": {
+      "sourceBackedCount": 10,
+      "sourceFreeCount": 0,
+      "routeCounts": {}
+    },
+    "retrievalCounts": {
+      "structured": 0,
+      "lexical": 0,
+      "vector": 0,
+      "returned": 11
+    },
+    "forbiddenPrivateTermHitCount": 0,
+    "fullHistoryDumpAttempted": false,
+    "sourceFreeMemoryCount": 0,
+    "summaryAsTruthCount": 0,
+    "didClipModelOutput": false,
+    "violations": [],
+    "notes": [
+      "PlayerFacingPacket is derived from NarratorPacket and intentionally omits raw canonicalTurnPacket.",
+      "Context pressure is diagnostic only; it must not clip model output."
+    ]
+  }
+}

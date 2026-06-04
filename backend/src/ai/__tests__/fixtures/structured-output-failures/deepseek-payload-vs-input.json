@@ -1,0 +1,18 @@
+{
+  "fixtureId": "deepseek-payload-vs-input",
+  "targetSchemaFamily": "semanticScenePlan.v1",
+  "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-PRD.md:8; .planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:557",
+  "malformedObject": {
+    "sceneRead": "The player asks a clear question during a guarded encounter.",
+    "narratorIntent": "Record the player-facing beat without inventing hidden state.",
+    "plannedActions": [
+      {
+        "actorRef": "player",
+        "toolName": "log_event",
+        "payload": {
+          "text": "The player asks Gojo what caused the ward to fail."
+        }
+      }
+    ]
+  }
+}

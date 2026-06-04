@@ -1,0 +1,71 @@
+{
+  "phase": 91,
+  "plan": "91-01",
+  "generatedAt": "2026-05-10",
+  "branches": [
+    {
+      "case": "ready-to-commit",
+      "baseWorldVersion": 3,
+      "currentWorldVersion": 3,
+      "readSetChanged": [],
+      "disposition": "ready_to_commit",
+      "reason": "proposal_ready_to_commit"
+    },
+    {
+      "case": "deferred-not-due",
+      "currentWorldTimeMinutes": 9,
+      "dueAtWorldTimeMinutes": 10,
+      "disposition": "deferred_not_due",
+      "reason": "proposal_due_time_not_reached"
+    },
+    {
+      "case": "expired-stale-version",
+      "currentWorldTimeMinutes": 31,
+      "expiresAtWorldTimeMinutes": 30,
+      "disposition": "expired_stale_version",
+      "reason": "proposal_expired_before_commit"
+    },
+    {
+      "case": "invalid-precondition",
+      "preconditions": ["invalid: required report was consumed"],
+      "disposition": "rejected_invalid",
+      "reason": "invalid: required report was consumed"
+    },
+    {
+      "case": "write-scope-conflict",
+      "writeScopes": ["npc:npc-1:state"],
+      "blockedWriteScopes": ["npc:npc-1"],
+      "disposition": "rejected_invalid",
+      "reason": "conflicting_write_scope"
+    },
+    {
+      "case": "stale-unaffected-read-set",
+      "baseWorldVersion": 3,
+      "currentWorldVersion": 4,
+      "readSet": ["npc:npc-1:state", "location:market:presence"],
+      "changedReadSetRefs": ["faction:faction-1:state"],
+      "disposition": "needs_rebase",
+      "reason": "stale_base_world_version_unaffected_read_set"
+    },
+    {
+      "case": "stale-material-read-set",
+      "baseWorldVersion": 3,
+      "currentWorldVersion": 4,
+      "readSet": ["npc:npc-1:state", "location:market:presence"],
+      "changedReadSetRefs": ["npc:npc-1:state"],
+      "disposition": "needs_actor_retry",
+      "reason": "material_read_set_changed"
+    },
+    {
+      "case": "superseded-by-new-event",
+      "supersededByProposalId": "proposal-newer",
+      "disposition": "superseded_by_new_event",
+      "reason": "proposal_superseded_by_new_event"
+    }
+  ],
+  "compatibility": {
+    "legacyStatusValuesPreserved": ["pending", "committed", "rejected", "canceled", "superseded"],
+    "legacyStaleCommitResult": "stale_base_world_version",
+    "phase91StoredDispositionForLegacyStaleResult": "needs_rebase"
+  }
+}

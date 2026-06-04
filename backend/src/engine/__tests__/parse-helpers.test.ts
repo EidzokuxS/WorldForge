@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { parseTags, parseNpcGoals, parseBeliefs } from "../parse-helpers.js";
+import { describe, expect, it } from "vitest";
+
+import {
+  collectToolCalls,
+  parseBeliefs,
+  parseNpcGoals,
+  parseTags,
+} from "../parse-helpers.js";
 
 describe("parseTags", () => {
   it("parses a valid JSON string array", () => {
@@ -123,5 +129,134 @@ describe("parseBeliefs", () => {
 
   it("returns empty array for empty string", () => {
     expect(parseBeliefs("")).toEqual([]);
+  });
+});
+
+describe("collectToolCalls", () => {
+  it("deduplicates cumulative AI SDK steps by toolCallId and matches results by id", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "log_event", toolCallId: "call-1", input: { text: "record" } },
+        ],
+        toolResults: [
+          { toolCallId: "call-1", output: { success: true, result: { eventId: "event-1" } } },
+        ],
+      },
+      {
+        toolCalls: [
+          { toolName: "log_event", toolCallId: "call-1", input: { text: "record" } },
+          { toolName: "add_tag", toolCallId: "call-2", input: { tag: "caught-lying" } },
+        ],
+        toolResults: [
+          { toolCallId: "call-2", output: { success: true, result: { tags: ["caught-lying"] } } },
+        ],
+      },
+      {
+        toolCalls: [
+          { toolName: "log_event", toolCallId: "call-1", input: { text: "record" } },
+          { toolName: "add_tag", toolCallId: "call-2", input: { tag: "caught-lying" } },
+          { toolName: "offer_quick_actions", toolCallId: "call-3", input: { actions: [] } },
+        ],
+        toolResults: [
+          { toolCallId: "call-3", output: { success: true, result: { actions: [] } } },
+        ],
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        tool: "log_event",
+        args: { text: "record" },
+        result: { success: true, result: { eventId: "event-1" } },
+        toolCallId: "call-1",
+      },
+      {
+        tool: "add_tag",
+        args: { tag: "caught-lying" },
+        result: { success: true, result: { tags: ["caught-lying"] } },
+        toolCallId: "call-2",
+      },
+      {
+        tool: "offer_quick_actions",
+        args: { actions: [] },
+        result: { success: true, result: { actions: [] } },
+        toolCallId: "call-3",
+      },
+    ]);
+  });
+
+  it("preserves repeated calls without toolCallId because they cannot be proven duplicates", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "log_event", input: { text: "first" } },
+          { toolName: "log_event", input: { text: "first" } },
+        ],
+        toolResults: [
+          { output: { success: true, result: { eventId: "event-1" } } },
+          { output: { success: false, error: "tool_failed" } },
+        ],
+      },
+    ]);
+
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.result)).toEqual([
+      { success: true, result: { eventId: "event-1" } },
+      { success: false, error: "tool_failed" },
+    ]);
+  });
+
+  it("matches tool results emitted in a later tool-result-only step by id", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "find_object_candidates", toolCallId: "call-1", input: { query: "ledger" } },
+          { toolName: "inspect_known_fact", toolCallId: "call-2", input: { query: "bond wording" } },
+        ],
+      },
+      {
+        toolResults: [
+          {
+            toolCallId: "call-1",
+            output: { success: true, kind: "observation", result: { candidates: [] } },
+          },
+          {
+            toolCallId: "call-2",
+            output: { success: true, kind: "observation", result: { facts: [] } },
+          },
+        ],
+      },
+    ]);
+
+    expect(calls.map((call) => call.result)).toEqual([
+      { success: true, kind: "observation", result: { candidates: [] } },
+      { success: true, kind: "observation", result: { facts: [] } },
+    ]);
+  });
+
+  it("unwraps AI SDK json output wrappers before returning tool results", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "find_object_candidates", toolCallId: "call-1", input: { query: "ledger" } },
+        ],
+        toolResults: [
+          {
+            toolCallId: "call-1",
+            output: {
+              type: "json",
+              value: { success: true, kind: "observation", result: { candidates: [] } },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(calls[0]?.result).toEqual({
+      success: true,
+      kind: "observation",
+      result: { candidates: [] },
+    });
   });
 });

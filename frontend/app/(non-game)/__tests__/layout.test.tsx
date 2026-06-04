@@ -34,8 +34,8 @@ describe("NonGameLayout", () => {
       </NonGameLayout>,
     );
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Launchpad");
-    expect(screen.getByRole("link", { name: "New Campaign" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "WorldForge" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /New campaign/i })).toBeInTheDocument();
 
     const main = screen.getByRole("main");
     expect(within(main).getByText("Launchpad child")).toBeInTheDocument();

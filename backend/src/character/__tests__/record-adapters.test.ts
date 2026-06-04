@@ -4,11 +4,14 @@ import {
   deriveRuntimeCharacterTags,
 } from "../runtime-tags.js";
 import {
+  projectPlayerRecord,
+  projectNpcRecord,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../record-adapters.js";
+import { buildAuthoritativeInventoryView } from "../../inventory/authority.js";
 
 describe("record adapters", () => {
   it("hydrates legacy player and npc rows into one shared CharacterRecord shape", () => {
@@ -202,6 +205,270 @@ describe("record adapters", () => {
       { name: "Tactician", tier: "Skilled" },
     ]);
     expect(record.motivations.longTermGoals).toEqual(["Rebuild the militia"]);
+  });
+
+  it("derives legacy equippedItems compatibility output from authoritative inventory instead of record.loadout", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-1",
+        campaignId: "camp-1",
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        hp: 4,
+        tags: JSON.stringify(["Poor", "Observant"]),
+        equippedItems: JSON.stringify(["Legacy Bow"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Signal Station" },
+    );
+
+    const authoritativeInventory = buildAuthoritativeInventoryView([
+      {
+        id: "item-1",
+        campaignId: "camp-1",
+        name: "Iron Sword",
+        tags: "[]",
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "main-hand",
+        isSignature: false,
+      },
+      {
+        id: "item-2",
+        campaignId: "camp-1",
+        name: "Family Compass",
+        tags: "[]",
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: true,
+      },
+    ]);
+
+    const legacyPlayer = (toLegacyPlayerCharacter as unknown as (
+      record: CharacterRecord,
+      inventory: ReturnType<typeof buildAuthoritativeInventoryView>,
+    ) => ReturnType<typeof toLegacyPlayerCharacter>)(record, authoritativeInventory);
+    const projection = (projectPlayerRecord as unknown as (
+      record: CharacterRecord,
+      inventory: ReturnType<typeof buildAuthoritativeInventoryView>,
+    ) => ReturnType<typeof projectPlayerRecord>)(record, authoritativeInventory);
+
+    expect(legacyPlayer.equippedItems).toEqual(["Iron Sword"]);
+    expect(JSON.parse(projection.equippedItems)).toEqual(["Iron Sword"]);
+    expect(legacyPlayer.equippedItems).not.toEqual(["Legacy Bow"]);
+  });
+
+  it("derives legacy npc persona, goals, and beliefs from the richer identity model when shallow fields are stale", () => {
+    const record: CharacterRecord = {
+      identity: {
+        id: "npc-4",
+        campaignId: "camp-1",
+        role: "npc",
+        tier: "key",
+        displayName: "Captain Mire",
+        canonicalStatus: "known_ip_canonical",
+        baseFacts: {
+          biography: "A veteran signal-station commander.",
+          socialRole: ["npc", "warden"],
+          hardConstraints: ["Will not abandon the station"],
+        },
+        behavioralCore: {
+          motives: ["Protect the valley"],
+          pressureResponses: ["Turns colder under pressure"],
+          taboos: [],
+          attachments: ["The station crew"],
+          selfImage: "Guardian of the northern line",
+        },
+        liveDynamics: {
+          attachments: [],
+          activeGoals: ["Hold the barricade"],
+          beliefDrift: ["The valley can still be saved"],
+          currentStrains: ["Running out of supplies"],
+          earnedChanges: [],
+        },
+      },
+      profile: {
+        species: "Human",
+        gender: "Female",
+        ageText: "42",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "",
+      },
+      socialContext: {
+        factionId: "faction-wardens",
+        factionName: "Wardens",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-barricade",
+        currentLocationName: "North Barricade",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["Connected"],
+        skills: [],
+        flaws: [],
+        specialties: [],
+        wealthTier: "Comfortable",
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "import",
+        importMode: "outsider",
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "known-ip",
+        legacyTags: ["legacy"],
+      },
+    };
+
+    const legacyNpc = toLegacyNpcDraft(record);
+    const projection = projectNpcRecord(record);
+
+    expect(legacyNpc.persona).toBe("Guardian of the northern line");
+    expect(legacyNpc.goals).toEqual({
+      shortTerm: ["Hold the barricade"],
+      longTerm: [],
+    });
+    expect(JSON.parse(projection.goals)).toEqual({
+      short_term: ["Hold the barricade"],
+      long_term: [],
+    });
+    expect(JSON.parse(projection.beliefs)).toEqual(["The valley can still be saved"]);
+  });
+});
+
+describe("fail-closed migration: grounding -> powerStats", () => {
+  it("old record with grounding but no powerStats normalizes to powerStats undefined (not fake Human 5)", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-old",
+        campaignId: "camp-1",
+        name: "Old Hero",
+        race: "Human",
+        gender: "Male",
+        age: "30",
+        appearance: "Scarred face.",
+        hp: 5,
+        tags: JSON.stringify(["Brave"]),
+        equippedItems: JSON.stringify(["Sword"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Town" },
+    );
+
+    // Simulate old stored record with grounding but no powerStats
+    const oldStored = {
+      ...record,
+      grounding: {
+        summary: "Some grounding data",
+        facts: ["fact1"],
+        abilities: ["ability1"],
+        constraints: [],
+        signatureMoves: [],
+        strongPoints: [],
+        vulnerabilities: [],
+        uncertaintyNotes: [],
+        sources: [],
+      },
+    };
+
+    const projection = projectPlayerRecord(oldStored as CharacterRecord);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    // powerStats should be undefined (fail-closed), not synthesized
+    expect(serialized.powerStats).toBeUndefined();
+    // grounding should be stripped
+    expect(serialized.grounding).toBeUndefined();
+  });
+
+  it("new record with powerStats only passes through unchanged", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-new",
+        campaignId: "camp-1",
+        name: "New Hero",
+        race: "Human",
+        gender: "Female",
+        age: "25",
+        appearance: "Sharp eyes.",
+        hp: 5,
+        tags: JSON.stringify(["Clever"]),
+        equippedItems: JSON.stringify(["Staff"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Tower" },
+    );
+
+    const withPowerStats = {
+      ...record,
+      powerStats: {
+        attackPotency: { tier: "City" as const, rank: 5 },
+        speed: { tier: "Hypersonic" as const, rank: 3 },
+        durability: { tier: "Building" as const, rank: 7 },
+        intelligence: { tier: "Genius" as const, rank: 6 },
+        hax: [],
+        vulnerabilities: [],
+      },
+    };
+
+    const projection = projectPlayerRecord(withPowerStats as CharacterRecord);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    expect(serialized.powerStats).toEqual(withPowerStats.powerStats);
+    expect(serialized.grounding).toBeUndefined();
+  });
+
+  it("record with neither grounding nor powerStats has powerStats undefined", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-plain",
+        campaignId: "camp-1",
+        name: "Plain Hero",
+        race: "Human",
+        gender: "Male",
+        age: "20",
+        appearance: "Average build.",
+        hp: 5,
+        tags: JSON.stringify(["Average"]),
+        equippedItems: JSON.stringify([]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Village" },
+    );
+
+    const projection = projectPlayerRecord(record);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    expect(serialized.powerStats).toBeUndefined();
+    expect(serialized.grounding).toBeUndefined();
   });
 });
 

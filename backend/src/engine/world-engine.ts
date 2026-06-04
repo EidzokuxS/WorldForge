@@ -7,10 +7,11 @@
  * and create world-level narrative events.
  */
 
-import { generateText, stepCountIs } from "ai";
+import { stepCountIs } from "ai";
 import { eq, sql, desc } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { factions, locations, chronicle } from "../db/schema.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createFactionTools } from "./faction-tools.js";
 import { createLogger } from "../lib/index.js";
@@ -70,7 +71,6 @@ async function tickSingleFaction(
     )
     .all();
 
-  // Load recent chronicle entries
   const recentChronicle = db
     .select({ tick: chronicle.tick, text: chronicle.text })
     .from(chronicle)
@@ -79,7 +79,6 @@ async function tickSingleFaction(
     .limit(10)
     .all();
 
-  // Build system prompt
   const territoryText = ownedLocations.length > 0
     ? ownedLocations.map((l) => `  - ${l.name} [${parseTags(l.tags).join(", ")}]`).join("\n")
     : "  (no controlled territory)";
@@ -111,18 +110,19 @@ async function tickSingleFaction(
     `Recent World Events:`,
     chronicleText,
     ``,
-    `Choose ONE macro-level action for this faction. You may:`,
-    `- faction_action: Execute a concrete action (expand territory, trade, declare war, build, recruit)`,
-    `- update_faction_goal: Update the faction's goals based on current situation`,
-    `- add_chronicle_entry: Record a significant world event`,
-    `- declare_world_event: Introduce an unexpected world event (plague, disaster, anomaly, discovery)`,
+    `Choose ONE macro-level action proposal for this faction. You may:`,
+    `- faction_action: Propose a concrete action (expand territory, trade, declare war, build, recruit)`,
+    `- update_faction_goal: Propose a faction goal update based on current situation`,
+    `- add_chronicle_entry: Propose a significant chronicle entry`,
+    `- declare_world_event: Propose an unexpected world event (plague, disaster, anomaly, discovery)`,
     ``,
-    `You may also introduce an unexpected world event (plague, disaster, anomaly, discovery) if narratively appropriate for the current world state. Use declare_world_event for this. Do NOT force events every tick -- only when the situation calls for it.`,
+    `These tools are proposal-only. They do not commit tags, chronicle rows, location events, or faction goals. Durable world changes must be committed later through the authority pipeline.`,
     ``,
-    `Use tools to execute your decision. Your faction_action MUST include a SPECIFIC, OBSERVABLE change — territory gained/lost, resource acquired/depleted, alliance formed/broken, attack launched, fortification built. Vague actions like "continued to plan" or "monitored the situation" are NOT acceptable. Name specific locations, NPCs, or resources affected.`,
+    `You may also propose an unexpected world event (plague, disaster, anomaly, discovery) if narratively appropriate for the current world state. Use declare_world_event for this. Do NOT force events every tick -- only when the situation calls for it.`,
+    ``,
+    `Use exactly one proposal tool. Your faction_action proposal MUST include a SPECIFIC, OBSERVABLE intended change — territory gained/lost, resource acquired/depleted, alliance formed/broken, attack launched, fortification built. Vague actions like "continued to plan" or "monitored the situation" are NOT acceptable. Name specific locations, NPCs, or resources affected.`,
   ].join("\n");
 
-  // Call Judge LLM with faction tools
   const model = createModel(judgeProvider);
   const tools = createFactionTools(campaignId, tick);
 
@@ -135,7 +135,6 @@ async function tickSingleFaction(
     prompt: `What does "${faction.name}" do this period?`,
   });
 
-  // Collect tool call results
   const toolCalls: Array<{ tool: string; args: unknown; result: unknown }> = [];
   for (const step of result.steps ?? []) {
     const calls = step.toolCalls ?? [];
@@ -182,7 +181,6 @@ export async function tickFactions(
 
   const db = getDb();
 
-  // Query all factions for this campaign
   const allFactions = db
     .select({
       id: factions.id,

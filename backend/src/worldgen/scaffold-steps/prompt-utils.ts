@@ -1,5 +1,7 @@
-import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type { IpResearchContext, PremiseDivergence, WorldgenResearchArtifactV2 } from "@worldforge/shared";
 import { createLogger } from "../../lib/index.js";
+import { buildWorldgenSourceRuleAuthorityContract } from "../prompt-contracts.js";
+import { formatWorldgenResearchArtifactBlock } from "../research-artifact.js";
 import type { WorldSeeds } from "../seed-roller.js";
 import type { GenerationProgress } from "../types.js";
 
@@ -38,18 +40,18 @@ function buildFlatIpContextBlock(ipContext: IpResearchContext): string {
   const nameBlock = buildCanonicalNamesBlock(ipContext.canonicalNames);
 
   return `
-FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
+LEGACY IP REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
 ${nameBlock ? `${nameBlock}\n` : ""}
-Key facts — treat as ground truth:
+Key facts - selected source context:
 ${facts}
 Tone:
 ${tone}
 
 GENERATION RULES:
-1. Build the canonical world from this FRANCHISE REFERENCE, with targeted modifications from the premise.
-2. Draw locations, factions, and characters from the franchise canon. Use the franchise's own names exactly as written.
-3. Keep all canonical details intact unless the premise explicitly changes them.
-4. For absent details, rely on your knowledge of the franchise.
+1. Use this legacy IP reference as selected source context, with targeted modifications from the premise.
+2. Draw locations, factions, and characters from the selected source material. Use the source's own names exactly as written.
+3. Keep documented source details intact unless the premise explicitly changes them.
+4. For absent details, rely on your knowledge of the selected source.
 5. This is a private RPG tool — use real canonical names freely.
 `;
 }
@@ -68,7 +70,7 @@ function buildSourceGroupedIpContextBlock(ipContext: IpResearchContext): string 
   for (const group of primaryGroups) {
     const facts = group.keyFacts.map((f) => `  - ${f}`).join("\n");
     sourceBlocks.push(
-      `PRIMARY SOURCE — ${group.sourceName} (${group.keyFacts.length} entries):\nThis is THE WORLD. Draw all locations, factions, and NPCs from here.\n${facts}`,
+      `PRIMARY SOURCE — ${group.sourceName} (${group.keyFacts.length} entries):\nUse this selected source for the main locations, factions, and NPCs in this legacy context.\n${facts}`,
     );
   }
   for (const group of suppGroups) {
@@ -79,7 +81,7 @@ function buildSourceGroupedIpContextBlock(ipContext: IpResearchContext): string 
   }
 
   return `
-FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
+LEGACY IP REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
 ${nameBlock ? `${nameBlock}\n` : ""}
 ${sourceBlocks.join("\n\n")}
 
@@ -88,7 +90,7 @@ ${tone}
 
 GENERATION RULES:
 1. The PREMISE defines what this world is. Follow it as the primary creative guide.
-2. Draw the vast majority of locations, factions, and NPCs from the PRIMARY SOURCE. This source IS the world.
+2. Draw the vast majority of locations, factions, and NPCs from the PRIMARY SOURCE selected in this legacy context.
 3. Supplementary sources contribute at most 1-2 crossover elements. The world belongs to the PRIMARY SOURCE.
 4. Use canonical names exactly as written in the source material.
 5. Keep all canonical details intact unless the premise explicitly changes them.
@@ -120,6 +122,64 @@ export function buildIpContextBlock(ipContext: IpResearchContext | null): string
   }
 
   return buildFlatIpContextBlock(ipContext);
+}
+
+export function buildWorldgenResearchContextBlock(input: {
+  researchArtifact?: WorldgenResearchArtifactV2 | null;
+  ipContext?: IpResearchContext | null;
+  target: string;
+}): string {
+  if (input.researchArtifact) {
+    const target = input.target.trim() || "world generation";
+    return `RESEARCH CONTEXT FOR ${target.toUpperCase()}:
+Use the artifact source usage rules below. Do not collapse mixed sources into a single backend-selected franchise, and do not use a source for categories listed in avoidFor.
+${formatWorldgenResearchArtifactBlock(input.researchArtifact)}`;
+  }
+
+  return buildIpContextBlock(input.ipContext ?? null);
+}
+
+export function buildScaffoldCorePromptContract(): string {
+  return [
+    "STRUCTURED_OUTPUT_CONTRACT: scaffold-core.v1",
+    "Core scaffold outputs are schema-bound objects. Return JSON-compatible object fields only; no markdown, no prose wrapper, no alternate key names.",
+    "Required fields: every scaffold item must include the step's named identity field plus its required descriptive or purpose fields.",
+    "Nested list/object shapes: arrays stay arrays of strings or objects as requested; relationship and goal containers stay objects with named fields instead of one combined paragraph.",
+    "Caps: names <= 120 chars; purpose/summary lines <= 260 chars; descriptions <= 900 chars; tags/goals/assets/links usually <= 6 items unless a step says lower.",
+    "Nullable/optional rules: omit optional fields when source data is absent; do not emit null for arrays; use [] only when an empty list is a valid explicit output.",
+    "VALID MINIMAL: { \"items\": [{ \"name\": \"Signal Base\", \"purpose\": \"Coordinates anomalous signal monitoring.\" }] }",
+    "VALID EXAMPLE: { \"items\": [{ \"name\": \"Tokyo Jujutsu High\", \"purpose\": \"Trains sorcerers and dispatches missions.\", \"tags\": [\"School\", \"Occult\"], \"links\": [{ \"name\": \"Jujutsu Headquarters\", \"kind\": \"faction\" }] }] }",
+    "INVALID: { \"items\": \"Tokyo Jujutsu High, Jujutsu Headquarters\" }",
+    "INVALID: { \"canonicalNames\": \"Satoru Gojo, Tokyo Jujutsu High\" }",
+    "INVALID: { \"sourceRole\": \"backend inferred Naruto as world_basis\" }",
+    buildWorldgenSourceRuleAuthorityContract(),
+  ].join("\n");
+}
+
+export function buildScaffoldPromptContract(input: {
+  marker: string;
+  title: string;
+  requiredFields: string;
+  nestedShapes: string;
+  caps: string;
+  nullableRules: string;
+  validMinimal: string;
+  validExample: string;
+  invalidExamples: string[];
+}): string {
+  return [
+    buildScaffoldCorePromptContract(),
+    input.marker,
+    `${input.title}: return the exact schema-bound object requested by this call.`,
+    `Required fields: ${input.requiredFields}`,
+    `Nested list/object shapes: ${input.nestedShapes}`,
+    `Caps: ${input.caps}`,
+    `Nullable/optional rules: ${input.nullableRules}`,
+    `VALID MINIMAL: ${input.validMinimal}`,
+    `VALID EXAMPLE: ${input.validExample}`,
+    ...input.invalidExamples.map((example) => `INVALID: ${example}`),
+    "Source authority: source roles, canon membership, and premise interpretation come only from source rules, research artifacts, or the caller's explicit premise. Backend repair may validate, trim, and preserve planned names; backend must not invent source roles, and backend must not invent canonical truth.",
+  ].join("\n");
 }
 
 export function buildPremiseDivergenceBlock(
@@ -184,13 +244,13 @@ export function buildKnownIpGenerationContract(
   const hasDivergence = Boolean(premiseDivergence);
   return `
 KNOWN-IP GENERATION CONTRACT FOR ${generationTarget.toUpperCase()}:
-  - Start from the FRANCHISE REFERENCE as the canonical baseline for ${ipContext.franchise}.
+  - Start from the LEGACY IP REFERENCE as the explicit selected source baseline for ${ipContext.franchise}.
   - ${hasDivergence
       ? "Apply only the specific changes listed in PREMISE DIVERGENCE."
-      : "No premise divergence artifact is present, so stay fully canonical."}
-  - Preserve every canonical entity, relationship, institution, and history unless CHANGED CANON FACTS or CURRENT WORLD-STATE DIRECTIVES explicitly alter it.
-  - Describe the present world state for ${generationTarget}, not a blind canon recap and not a character-exclusion list.
-  - If the divergence changes one role, allegiance, or relationship, keep unrelated canon details intact.
+      : "No premise divergence artifact is present, so follow the selected source context closely."}
+  - Preserve every established entity, relationship, institution, and history unless CHANGED CANON FACTS or CURRENT WORLD-STATE DIRECTIVES explicitly alter it.
+  - Describe the present world state for ${generationTarget}, not a blind source recap and not a character-exclusion list.
+  - If the divergence changes one role, allegiance, or relationship, keep unrelated source details intact.
 `.trim();
 }
 

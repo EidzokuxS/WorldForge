@@ -7,6 +7,15 @@ import type {
   ResolvedStartConditions,
 } from "@worldforge/shared";
 import { START_CONDITIONS_CONTRACT } from "../character/prompt-contract.js";
+import { buildStartingLocationPromptContract } from "./prompt-contracts.js";
+
+type StartingLocationCandidate = {
+  id: string;
+  name: string;
+  isStarting?: boolean | null;
+  kind?: string | null;
+  parentLocationId?: string | null;
+};
 
 const resolvedStartSchema = z.object({
   locationName: z.string().describe("One of the known locations"),
@@ -20,7 +29,7 @@ const resolvedStartSchema = z.object({
 
 export async function resolveStartingLocation(opts: {
   premise: string;
-  locations: Array<{ id: string; name: string; isStarting?: boolean }>;
+  locations: StartingLocationCandidate[];
   userPrompt?: string;
   role: ResolvedRole;
 }): Promise<ResolvedStartConditions> {
@@ -50,12 +59,21 @@ export async function resolveStartingLocation(opts: {
     };
   }
 
-  const locationList = opts.locations.map((location) => location.name).join(", ");
+  const locationList = opts.locations
+    .map((location) => {
+      const kind = location.kind ?? "macro";
+      const parentLocationId = location.parentLocationId ?? "null";
+      return `- ${location.name} (id=${location.id}; kind=${kind}; parentLocationId=${parentLocationId})`;
+    })
+    .join("\n");
+  const outputContract = buildStartingLocationPromptContract();
 
   const { object } = await generateObject({
     model: createModel(opts.role.provider),
     schema: resolvedStartSchema,
-    prompt: `WORLD PREMISE: ${opts.premise}
+    prompt: `${outputContract}
+
+WORLD PREMISE: ${opts.premise}
 
 KNOWN LOCATIONS: ${locationList}
 

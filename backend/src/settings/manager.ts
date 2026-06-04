@@ -1,18 +1,37 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Provider, RoleConfig, FallbackConfig, ResearchConfig, Settings } from "@worldforge/shared";
+import type {
+  ObservabilityConfig,
+  Provider,
+  RoleConfig,
+  ResearchConfig,
+  Settings,
+  UiConfig,
+} from "@worldforge/shared";
 import {
   BUILTIN_PROVIDER_PRESETS,
   NONE_PROVIDER_ID,
   createDefaultSettings,
-  firstProviderId,
 } from "@worldforge/shared";
 import { isRecord } from "../lib/index.js";
+// DIRECT import — bypasses the lib/index.js barrel to prevent a cycle
+// (barrel imports logger.ts, logger.ts imports logger-setup.ts, and manager.ts
+// would otherwise complete the loop via barrel → logger-setup → barrel).
+import { configureObservability } from "../lib/logger-setup.js";
+import { observabilityConfigSchema } from "../routes/schemas.js";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_PATH = path.resolve(__dirname, "../../../settings.json");
+const SETTINGS_BACKUP_PATH = path.resolve(__dirname, "../../../settings.json.bak");
+
+class SettingsFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SettingsFileError";
+  }
+}
 
 const BUILTIN_PROVIDER_IDS = new Set(BUILTIN_PROVIDER_PRESETS.map((p) => p.id));
 
@@ -91,55 +110,25 @@ function mergeBuiltinProviders(providers: Provider[]): Provider[] {
   return [...builtins, ...customProviders];
 }
 
-function resolveProviderId(
-  providers: Provider[],
-  providerId: string | undefined,
-  fallback: string
+function normalizeRoleProviderId(
+  providerId: unknown,
+  defaults: RoleConfig
 ): string {
-  if (providerId && providers.some((provider) => provider.id === providerId)) {
-    return providerId;
-  }
-
-  return fallback;
+  const normalized = asString(providerId).trim();
+  return normalized || defaults.providerId;
 }
 
 function normalizeRoleConfig(
   value: unknown,
-  providers: Provider[],
   defaults: RoleConfig
 ): RoleConfig {
-  const fallbackProviderId = firstProviderId(providers);
   const source = isRecord(value) ? value : {};
 
   return {
-    providerId: resolveProviderId(
-      providers,
-      asString(source.providerId),
-      fallbackProviderId
-    ),
+    providerId: normalizeRoleProviderId(source.providerId, defaults),
     model: asString(source.model, defaults.model ?? ""),
     temperature: clampNumber(source.temperature, 0, 2, defaults.temperature),
     maxTokens: clampInt(source.maxTokens, 1, 32000, defaults.maxTokens),
-  };
-}
-
-function normalizeFallbackConfig(
-  value: unknown,
-  providers: Provider[],
-  defaults: FallbackConfig
-): FallbackConfig {
-  const fallbackProviderId = firstProviderId(providers);
-  const source = isRecord(value) ? value : {};
-
-  return {
-    providerId: resolveProviderId(
-      providers,
-      asString(source.providerId),
-      fallbackProviderId
-    ),
-    model: asString(source.model, defaults.model),
-    timeoutMs: clampInt(source.timeoutMs, 1000, 120000, defaults.timeoutMs),
-    retryCount: clampInt(source.retryCount, 0, 10, defaults.retryCount),
   };
 }
 
@@ -163,10 +152,50 @@ function normalizeResearchConfig(
   };
 }
 
+function normalizeUiConfig(
+  value: unknown,
+  defaults: UiConfig
+): UiConfig {
+  const source = isRecord(value) ? value : {};
+
+  return {
+    showRawReasoning:
+      typeof source.showRawReasoning === "boolean"
+        ? source.showRawReasoning
+        : defaults.showRawReasoning,
+  };
+}
+
+/**
+ * Phase 58 — observability normalizer.
+ *
+ * MISSING is OK (pre-upgrade settings file) — fill with defaults.
+ * PRESENT but malformed is an ERROR — throw with Zod issue list per CLAUDE.md
+ * "NO SILENT DEGRADATION". Callers can either fix the offending field or
+ * remove the observability block to accept defaults.
+ */
+function normalizeObservabilityConfig(
+  value: unknown,
+  defaults: ObservabilityConfig,
+): ObservabilityConfig {
+  if (value === undefined || value === null) return defaults;
+
+  const parsed = observabilityConfigSchema.safeParse(value);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("; ");
+    throw new Error(
+      `[settings] observability block in settings.json is malformed: ${issues}. ` +
+        `Fix or remove the observability section to accept defaults.`,
+    );
+  }
+  return parsed.data;
+}
+
 export function rebindProviderReferences(settings: Settings): Settings {
   const providers = mergeBuiltinProviders(settings.providers);
   const defaults = createDefaultSettings();
-  const fallbackProviderId = firstProviderId(providers);
 
   const imageProviderId =
     settings.images.providerId === NONE_PROVIDER_ID ||
@@ -177,51 +206,20 @@ export function rebindProviderReferences(settings: Settings): Settings {
   return {
     ...settings,
     providers,
-    judge: {
-      ...settings.judge,
-      providerId: resolveProviderId(
-        providers,
-        settings.judge.providerId,
-        fallbackProviderId
-      ),
-    },
-    storyteller: {
-      ...settings.storyteller,
-      providerId: resolveProviderId(
-        providers,
-        settings.storyteller.providerId,
-        fallbackProviderId
-      ),
-    },
-    generator: {
-      ...settings.generator,
-      providerId: resolveProviderId(
-        providers,
-        settings.generator.providerId,
-        fallbackProviderId
-      ),
-    },
-    embedder: {
-      ...settings.embedder,
-      providerId: resolveProviderId(
-        providers,
-        settings.embedder.providerId,
-        fallbackProviderId
-      ),
-    },
-    fallback: {
-      ...settings.fallback,
-      providerId: resolveProviderId(
-        providers,
-        settings.fallback.providerId,
-        fallbackProviderId
-      ),
-    },
+    judge: { ...settings.judge },
+    storyteller: { ...settings.storyteller },
+    generator: { ...settings.generator },
+    embedder: { ...settings.embedder },
     images: {
       ...settings.images,
       providerId: imageProviderId,
       stylePrompt: settings.images.stylePrompt || defaults.images.stylePrompt,
     },
+    ui: normalizeUiConfig(settings.ui, defaults.ui),
+    observability: normalizeObservabilityConfig(
+      settings.observability,
+      defaults.observability,
+    ),
   };
 }
 
@@ -243,15 +241,13 @@ export function normalizeSettings(value: unknown): Settings {
 
   return {
     providers,
-    judge: normalizeRoleConfig(value.judge, providers, defaults.judge),
+    judge: normalizeRoleConfig(value.judge, defaults.judge),
     storyteller: normalizeRoleConfig(
       value.storyteller,
-      providers,
       defaults.storyteller
     ),
-    generator: normalizeRoleConfig(value.generator, providers, defaults.generator),
-    embedder: normalizeRoleConfig(value.embedder, providers, defaults.embedder),
-    fallback: normalizeFallbackConfig(value.fallback, providers, defaults.fallback),
+    generator: normalizeRoleConfig(value.generator, defaults.generator),
+    embedder: normalizeRoleConfig(value.embedder, defaults.embedder),
     images: {
       providerId:
         imagesProviderId === NONE_PROVIDER_ID ||
@@ -263,38 +259,94 @@ export function normalizeSettings(value: unknown): Settings {
       enabled: Boolean(imagesSource.enabled),
     },
     research: normalizeResearchConfig(value.research, defaults.research),
+    ui: normalizeUiConfig(value.ui, defaults.ui),
+    observability: normalizeObservabilityConfig(
+      value.observability,
+      defaults.observability,
+    ),
   };
 }
 
-function writeSettingsFile(settings: Settings): void {
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf-8");
+function applyObservabilityRuntime(settings: Settings): void {
+  configureObservability({
+    enabled: settings.observability.enabled,
+    dumpFullPrompts: settings.observability.dumpFullPrompts,
+    roles: settings.observability.roles,
+  });
+}
+
+function readSettingsText(): string | null {
+  if (!fs.existsSync(SETTINGS_PATH)) {
+    return null;
+  }
+
+  try {
+    return fs.readFileSync(SETTINGS_PATH, "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown read failure.";
+    throw new SettingsFileError(`Failed to read settings file at ${SETTINGS_PATH}: ${detail}`);
+  }
+}
+
+function backupSettingsText(rawText: string): void {
+  if (!rawText.trim()) {
+    return;
+  }
+
+  fs.writeFileSync(SETTINGS_BACKUP_PATH, rawText, "utf-8");
+}
+
+function writeSettingsFile(
+  settings: Settings,
+  options: { backupCurrent?: boolean } = {}
+): void {
+  const serialized = JSON.stringify(settings, null, 2);
+
+  if (options.backupCurrent) {
+    const current = readSettingsText();
+    if (current !== null && current !== serialized) {
+      backupSettingsText(current);
+    }
+  }
+
+  fs.writeFileSync(SETTINGS_PATH, serialized, "utf-8");
 }
 
 export function loadSettings(): Settings {
   if (!fs.existsSync(SETTINGS_PATH)) {
     const defaults = createDefaultSettings();
     writeSettingsFile(defaults);
+    applyObservabilityRuntime(defaults);
     return defaults;
   }
 
-  try {
-    const rawText = fs.readFileSync(SETTINGS_PATH, "utf-8");
-    const raw = JSON.parse(rawText) as unknown;
-    const normalized = normalizeSettings(raw);
-    const normalizedText = JSON.stringify(normalized, null, 2);
-    if (normalizedText !== rawText) {
-      writeSettingsFile(normalized);
-    }
-    return normalized;
-  } catch {
-    const defaults = createDefaultSettings();
-    writeSettingsFile(defaults);
-    return defaults;
+  const rawText = readSettingsText();
+  if (rawText == null) {
+    throw new SettingsFileError(`Failed to read settings file at ${SETTINGS_PATH}.`);
   }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(rawText) as unknown;
+  } catch {
+    backupSettingsText(rawText);
+    throw new SettingsFileError(
+      `Settings file at ${SETTINGS_PATH} contains invalid JSON. The original content was preserved at ${SETTINGS_BACKUP_PATH}.`
+    );
+  }
+
+  const normalized = normalizeSettings(raw);
+  const normalizedText = JSON.stringify(normalized, null, 2);
+  if (normalizedText !== rawText) {
+    writeSettingsFile(normalized, { backupCurrent: true });
+  }
+  applyObservabilityRuntime(normalized);
+  return normalized;
 }
 
 export function saveSettings(value: unknown): Settings {
   const normalized = rebindProviderReferences(normalizeSettings(value));
-  writeSettingsFile(normalized);
+  writeSettingsFile(normalized, { backupCurrent: true });
+  applyObservabilityRuntime(normalized);
   return normalized;
 }

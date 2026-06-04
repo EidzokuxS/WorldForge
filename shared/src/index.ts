@@ -1,24 +1,39 @@
 export type {
   Provider,
   RoleConfig,
-  FallbackConfig,
   ImageConfig,
   ResearchConfig,
+  UiConfig,
   SearchProvider,
   PremiseDivergenceMode,
   PremiseDivergenceProtagonistKind,
   PremiseDivergenceInterpretation,
   PremiseDivergenceProtagonistRole,
   PremiseDivergence,
+  ObservabilityRoleKey,
+  ObservabilityRoleToggles,
+  ObservabilityConfig,
   Settings,
   ChatRole,
   ChatMessage,
   WorldSeeds,
   SeedCategory,
   IpResearchContext,
+  WorldgenResearchUse,
+  WorldgenSourceRole,
+  WorldgenResearchSourceUsageRule,
+  WorldgenResearchSearchJob,
+  WorldgenResearchSearchResult,
+  WorldgenResearchCitation,
+  WorldgenResearchArtifactV2,
   WorldbookLibraryItemSummary,
   CampaignWorldbookSelection,
   CampaignMeta,
+  LocationKind,
+  LocationPersistence,
+  LocationConnectedPathSummary,
+  LocationRecentHappeningSummary,
+  LocationGraphNodeSummary,
   CharacterImportMode,
   CharacterRole,
   CharacterTier,
@@ -26,6 +41,12 @@ export type {
   CharacterSourceKind,
   CharacterWealthTier,
   CharacterSkillTier,
+  CharacterIdentityBaseFacts,
+  CharacterIdentityBehavioralCore,
+  CharacterIdentityLiveDynamics,
+  CharacterPersonality,
+  CharacterIdentitySourceKind,
+  CharacterIdentitySourceCitation,
   CharacterIdentityDraft,
   CharacterIdentity,
   CharacterProfile,
@@ -49,12 +70,35 @@ export type {
   CanonicalLoadoutItemSpec,
   CanonicalLoadoutPreview,
   PlayerCharacter,
+  ApDurabilityTier,
+  SpeedTier,
+  IntelligenceTier,
+  TierRank,
+  HaxAbility,
+  CharacterVulnerability,
+  PowerStats,
 } from "./types.js";
 
 export {
+  LOCATION_KINDS,
+  LOCATION_PERSISTENCE_MODES,
   CHARACTER_WEALTH_TIERS,
   CHARACTER_SKILL_TIERS,
+  AP_DURABILITY_TIERS,
+  SPEED_TIERS,
+  INTELLIGENCE_TIERS,
 } from "./types.js";
+
+export {
+  compareTiers,
+  tierDistance,
+  canHaxBypass,
+  formatTierRank,
+  normalizeTierName,
+  normalizeApDurTier,
+  normalizeSpeedTier,
+  normalizeIntelligenceTier,
+} from "./power-tiers.js";
 
 export {
   NONE_PROVIDER_ID,
@@ -64,6 +108,10 @@ export {
   isLocalProvider,
 } from "./settings.js";
 
-export { isChatMessage } from "./chat.js";
+export {
+  formatLookupLogEntry,
+  isChatMessage,
+  parseLookupLogEntry,
+} from "./chat.js";
 
 export { getErrorMessage } from "./errors.js";

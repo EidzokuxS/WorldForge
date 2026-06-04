@@ -1,0 +1,15 @@
+🧿 oracle 0.11.1 — From shruggy agents to shippable PRs.
+[preview] Oracle (0.11.1) browser mode (gpt-5.5-pro) with ~56 070 tokens (prompt only; 9 attachments excluded).
+[preview] Browser control: launch visible Chrome; may focus/control the browser UI.
+[preview] Browser guidance: A visible automation Chrome window may take focus while Oracle controls ChatGPT.
+[preview] Browser guidance: Use --browser-hide-window, --browser-attach-running, or --remote-chrome to reduce desktop disruption.
+[preview] Attachments to upload:
+  • output/phase95-actual-play/verification-summary.md (2.6 KB)
+  • output/phase95-actual-play/transcript.md (54.2 KB)
+  • backend/src/campaign/restore-bundle.ts (3.0 KB)
+  • backend/src/engine/narrator-packet.ts (64.7 KB)
+  • backend/src/engine/player-facing-packet.ts (21.9 KB)
+  • backend/src/engine/visible-narration-output-guard.ts (15.3 KB)
+  • backend/src/engine/__tests__/state-snapshot.test.ts (6.2 KB)
+  • backend/src/engine/__tests__/player-facing-packet.test.ts (20.1 KB)
+  • backend/src/engine/__tests__/visible-narration-output-guard.test.ts (30.0 KB)

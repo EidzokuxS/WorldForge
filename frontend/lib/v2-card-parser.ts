@@ -5,6 +5,7 @@ export interface V2ImportPayload {
   personality: string;
   scenario: string;
   tags: string[];
+  mesExample: string;
 }
 
 /**
@@ -34,12 +35,16 @@ function parseV2Json(text: string): V2ImportPayload {
   if (!data || typeof data !== "object" || !("name" in data)) {
     throw new Error("Not a valid SillyTavern V2 card (missing name).");
   }
+  const nestedData = data.data;
+  const nestedRecord =
+    nestedData && typeof nestedData === "object" ? (nestedData as Record<string, unknown>) : null;
   return {
     name: String(data.name),
     description: String(data.description ?? ""),
     personality: String(data.personality ?? ""),
     scenario: String(data.scenario ?? ""),
     tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
+    mesExample: String(nestedRecord?.mes_example ?? data.mes_example ?? ""),
   };
 }
 

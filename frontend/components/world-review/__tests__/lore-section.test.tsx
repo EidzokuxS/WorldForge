@@ -36,15 +36,15 @@ vi.mock("@/lib/api-types", () => ({
     "item",
     "event",
   ],
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/badge", () => ({
   Badge: ({ children, ...props }: MockProps) => <span {...props}>{children}</span>,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, ...props }: MockProps) => <button {...props}>{children}</button>,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({ open, children }: MockProps) => (open ? <div>{children}</div> : null),
@@ -53,27 +53,29 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogFooter: ({ children }: MockProps) => <div>{children}</div>,
   DialogHeader: ({ children }: MockProps) => <div>{children}</div>,
   DialogTitle: ({ children }: MockProps) => <h2>{children}</h2>,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/input", () => ({
   Input: (props: MockProps) => <input {...props} />,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/label", () => ({
   Label: ({ children, ...props }: MockProps) => <label {...props}>{children}</label>,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/select", () => ({
   Select: ({ children }: MockProps) => <div>{children}</div>,
   SelectContent: ({ children }: MockProps) => <div>{children}</div>,
   SelectItem: ({ children }: MockProps) => <div>{children}</div>,
   SelectTrigger: ({ children, ...props }: MockProps) => <button type="button" {...props}>{children}</button>,
-  SelectValue: ({ placeholder }: MockProps) => <span>{placeholder ?? null}</span>,
-}), { virtual: true });
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <span>{typeof placeholder === "string" ? placeholder : null}</span>
+  ),
+}));
 
 vi.mock("@/components/ui/textarea", () => ({
   Textarea: ({ children, ...props }: MockProps) => <textarea {...props}>{children}</textarea>,
-}), { virtual: true });
+}));
 
 vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialog: ({ open, children }: MockProps) => (open ? <div>{children}</div> : null),
@@ -84,7 +86,7 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialogFooter: ({ children }: MockProps) => <div>{children}</div>,
   AlertDialogHeader: ({ children }: MockProps) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: MockProps) => <h2>{children}</h2>,
-}), { virtual: true });
+}));
 
 vi.mock("../worldbook-import-dialog", () => ({
   WorldBookImportDialog: () => null,

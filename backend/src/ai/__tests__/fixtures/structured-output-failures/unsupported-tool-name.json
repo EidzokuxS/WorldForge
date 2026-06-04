@@ -1,0 +1,18 @@
+{
+  "fixtureId": "unsupported-tool-name",
+  "targetSchemaFamily": "semanticScenePlan.v1",
+  "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-STRUCTURED-PROMPT-AUDIT.md:69",
+  "malformedObject": {
+    "sceneRead": "The model tries to inspect unseen state with a tool that is not in the runtime registry.",
+    "narratorIntent": "Reject unsupported mechanical authority.",
+    "plannedActions": [
+      {
+        "actorRef": "narrator",
+        "toolName": "search_environment",
+        "input": {
+          "query": "find hidden curse source"
+        }
+      }
+    ]
+  }
+}

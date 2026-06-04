@@ -91,10 +91,6 @@ async function searchViaMcp(
       log.info(`MCP[${config.provider}]: ${results.length} results for "${query}"`);
       return results.slice(0, count);
     },
-    async () => {
-      log.warn(`MCP[${config.provider}] failed, no results`);
-      return [];
-    },
     apiKey,
   );
 }

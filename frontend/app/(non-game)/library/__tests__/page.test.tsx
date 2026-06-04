@@ -33,6 +33,6 @@ describe("LibraryPage", () => {
       expect(screen.getByText("Alpha Codex")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Import Worldbook")).toBeInTheDocument();
+    expect(screen.getByText("Import JSON")).toBeInTheDocument();
   });
 });

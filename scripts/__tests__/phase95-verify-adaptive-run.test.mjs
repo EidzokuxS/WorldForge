@@ -1,0 +1,396 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { validateAdaptiveRun } from "../phase95-verify-adaptive-run.mjs";
+
+function makeRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "wf-phase95-verify-"));
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function turn(index, overrides = {}) {
+  return {
+    index,
+    status: "done",
+    mode: `mode-${index}`,
+    action: `I take grounded action ${index}.`,
+    visibleText:
+      `Visible grounded outcome ${index} has enough concrete public detail to prove the turn produced a playable scene beat without leaking internals.`,
+    done: { tick: index, type: "done" },
+    eventTypes: ["progress", "narrative", "done"],
+    before: { worldVersion: index - 1 },
+    after: { worldVersion: index },
+    quickActions: [
+      {
+        label: `Ask follow-up ${index}`,
+        action: `Ask a grounded follow-up for turn ${index}.`,
+        offerId: `offer-${index}`,
+        actionId: `action-${index}`,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function writeTurnArtifacts(root, turns) {
+  for (const current of turns) {
+    writeJson(path.join(root, `turn-${String(current.index).padStart(2, "0")}.json`), {
+      turn: current,
+      world: { campaign: { id: "campaign-fresh" } },
+      history: { messages: [] },
+    });
+  }
+}
+
+function writeProgress(root, count) {
+  const lines = [];
+  for (let index = 1; index <= count; index += 1) {
+    lines.push(JSON.stringify({ type: "turn", index, status: "done" }));
+  }
+  lines.push(JSON.stringify({ type: "complete", doneCount: count }));
+  fs.writeFileSync(path.join(root, "clean-adaptive-progress.jsonl"), `${lines.join("\n")}\n`, "utf8");
+}
+
+function runEvidenceTurn(current, overrides = {}) {
+  return {
+    index: current.index,
+    turnId: `turn-${current.index}`,
+    mode: current.mode,
+    before: current.before,
+    after: current.after,
+    done: current.done,
+    acceptedReceiptRefs: [`receipt-${current.index}`],
+    terminalEventCount: 1,
+    retryCount: 0,
+    recoveryOutcome: "none",
+    dueWorldReasons: ["none"],
+    actorBacklogCount: 0,
+    vectorCounts: {
+      episodicEvents: current.index,
+      loreCards: 0,
+    },
+    ...overrides,
+  };
+}
+
+function writeRunEvidence(root, turns, overrides = {}) {
+  const evidence = {
+    version: "phase95-run-evidence.v1",
+    campaignId: overrides.campaignId ?? "campaign-fresh",
+    head: "test-head",
+    dirtyState: "clean",
+    turns: turns.map((current) => runEvidenceTurn(current)),
+    ...overrides,
+  };
+  writeJson(path.join(root, "run-evidence.json"), evidence);
+}
+
+function writeFreshRun(root, turns) {
+  writeJson(path.join(root, "state.json"), {
+    setupMode: "worldgen",
+    campaignId: "campaign-fresh",
+    worldGeneratedAt: "2026-05-24T00:00:00.000Z",
+    playerSavedAt: "2026-05-24T00:00:01.000Z",
+    openingAt: "2026-05-24T00:00:02.000Z",
+    turns,
+  });
+  fs.writeFileSync(path.join(root, "transcript.md"), "# transcript\n", "utf8");
+  writeJson(path.join(root, "world-after-generation.json"), {
+    locations: [{ id: "loc-a" }],
+    factions: [{ id: "faction-a" }],
+    npcs: [{ id: "npc-a" }],
+    items: [{ id: "item-a" }],
+  });
+  writeJson(path.join(root, "world-after-opening.json"), { ok: true });
+  writeTurnArtifacts(root, turns);
+  writeProgress(root, turns.length);
+}
+
+function writeCloneRun(root, turns, cloneWorld = { campaign: { id: "clone-campaign" } }) {
+  const cloneCampaignPath = path.join(root, "clone-campaign-dir");
+  fs.mkdirSync(cloneCampaignPath, { recursive: true });
+  writeJson(path.join(cloneCampaignPath, "clone-manifest.json"), {
+    sourceCampaignId: "source-campaign",
+    targetCampaignId: "clone-campaign",
+  });
+  writeJson(path.join(root, "state.json"), {
+    setupMode: "clone",
+    campaignId: "clone-campaign",
+    sourceCampaignId: "source-campaign",
+    turns,
+  });
+  fs.writeFileSync(path.join(root, "transcript.md"), "# transcript\n", "utf8");
+  writeJson(path.join(root, "clone-provenance.json"), {
+    sourceCampaignId: "source-campaign",
+    cloneCampaignId: "clone-campaign",
+    cloneCampaignPath,
+  });
+  writeJson(path.join(root, "baseline-pool.json"), { routeClones: [] });
+  writeJson(path.join(root, "world-after-clone-load.json"), cloneWorld);
+  writeTurnArtifacts(root, turns);
+  writeProgress(root, turns.length);
+}
+
+describe("phase95 adaptive run verifier", () => {
+  it("accepts a minimal fresh pilot with grounded turns and progress evidence", () => {
+    const root = makeRoot();
+    const turns = [turn(1), turn(2)];
+    writeFreshRun(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 2 });
+
+    expect(result.ok).toBe(true);
+    expect(result.hardFailureCount).toBe(0);
+    expect(result.setupMode).toBe("worldgen");
+  });
+
+  it("rejects player-visible raw refs and quick actions without authority handles", () => {
+    const root = makeRoot();
+    const turns = [
+      turn(1, {
+        visibleText:
+          "The clerk says npc-hidden-7 should never be displayed but this sentence is deliberately long enough to pass the length floor.",
+        quickActions: [{ label: "Use loc-secret", action: "Use raw id loc-secret" }],
+      }),
+    ];
+    writeFreshRun(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        "visible-internal-leak",
+        "quick-action-missing-capability",
+        "quick-action-visible-leak",
+      ]),
+    );
+  });
+
+  it("rejects clone runs whose public world projection still contains the source campaign id", () => {
+    const root = makeRoot();
+    writeCloneRun(root, [turn(1)], {
+      campaign: { id: "clone-campaign" },
+      leakedSourceCampaignId: "source-campaign",
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain("clone-world-source-id-residue");
+  });
+
+  it("rejects clone runs without a campaign-local clone manifest", () => {
+    const root = makeRoot();
+    writeCloneRun(root, [turn(1)]);
+    fs.rmSync(path.join(root, "clone-campaign-dir", "clone-manifest.json"));
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain("missing-campaign-clone-manifest");
+  });
+
+  it("rejects raw ids inside public world and history projections", () => {
+    const root = makeRoot();
+    const turns = [turn(1)];
+    writeFreshRun(root, turns);
+    writeJson(path.join(root, "turn-01.json"), {
+      turn: turns[0],
+      world: {
+        scene: {
+          handle: "pdto_location_visible",
+          unsafeRawLocation: "loc-secret-room",
+        },
+      },
+      history: {
+        messages: [
+          {
+            role: "assistant",
+            content: "Public text should not replay NarratorPacket internals.",
+          },
+        ],
+      },
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining([
+        "turn-world-public-projection-leak",
+        "turn-history-public-projection-leak",
+      ]),
+    );
+  });
+
+  it("allows hyphenated in-world role prose while still rejecting machine-shaped refs", () => {
+    const root = makeRoot();
+    const turns = [
+      turn(1, {
+        visibleText:
+          "Route-Scout Fen Dorrow works with Route-finders near a Faction-Neutral Front, giving enough public detail for the scene without exposing internal ids.",
+      }),
+    ];
+    writeCloneRun(root, turns, {
+      campaign: { id: "clone-campaign" },
+      locations: [
+        {
+          description:
+            "Route-finders use route-glyphs at the gate, but this unsafe projection also exposes route-a1.",
+        },
+      ],
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "visible-internal-leak" }),
+    ]));
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "clone-world-public-projection-leak",
+        message: expect.stringContaining("route-id"),
+      }),
+    ]));
+  });
+
+  it("requires mode diversity for 60-turn acceptance evidence", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1, { mode: "repeat-mode" }));
+    writeFreshRun(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain("low-action-mode-diversity");
+  });
+
+  it("requires run evidence for 60-turn acceptance", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing-run-evidence" }),
+    ]));
+  });
+
+  it("accepts 60-turn evidence when per-turn trust fields are present", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+    writeRunEvidence(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(true);
+    expect(result.hasRunEvidence).toBe(true);
+  });
+
+  it("rejects incomplete long-loop evidence fields", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+    writeRunEvidence(root, turns, {
+      turns: turns.map((current) => runEvidenceTurn(current)),
+    });
+    const evidencePath = path.join(root, "run-evidence.json");
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+    evidence.turns[4].acceptedReceiptRefs = [];
+    evidence.turns[4].terminalEventCount = 0;
+    evidence.turns[4].retryCount = -1;
+    evidence.turns[4].recoveryOutcome = "";
+    evidence.turns[4].dueWorldReasons = [];
+    evidence.turns[4].actorBacklogCount = -1;
+    evidence.turns[4].vectorCounts = { episodicEvents: -1 };
+    writeJson(evidencePath, evidence);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "run-evidence-missing-receipts" }),
+      expect.objectContaining({ code: "run-evidence-terminal-count" }),
+      expect.objectContaining({ code: "run-evidence-retry-count" }),
+      expect.objectContaining({ code: "run-evidence-recovery-outcome" }),
+      expect.objectContaining({ code: "run-evidence-due-world-reasons" }),
+      expect.objectContaining({ code: "run-evidence-actor-backlog" }),
+      expect.objectContaining({ code: "run-evidence-vector-counts" }),
+    ]));
+  });
+
+  it("requires clone evidence to name lineage and manifest digest", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeCloneRun(root, turns);
+    writeRunEvidence(root, turns, {
+      campaignId: "clone-campaign",
+      cloneLineage: {
+        sourceCampaignId: "source-campaign",
+        cloneCampaignId: "clone-campaign",
+      },
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "run-evidence-clone-lineage-incomplete" }),
+    ]));
+  });
+
+  it("rejects world clock regressions and stale done boundaries", () => {
+    const root = makeRoot();
+    writeFreshRun(root, [
+      turn(1, {
+        before: { tick: 1, worldVersion: 3, worldTimeMinutes: 30 },
+        after: { tick: 2, worldVersion: 2, worldTimeMinutes: 20 },
+        done: { tick: 2, worldVersion: 3, worldTimeMinutes: 30 },
+      }),
+    ]);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "turn-worldVersion-regression" }),
+      expect.objectContaining({ code: "turn-worldTimeMinutes-regression" }),
+      expect.objectContaining({ code: "done-worldVersion-mismatch" }),
+      expect.objectContaining({ code: "done-worldTimeMinutes-mismatch" }),
+    ]));
+  });
+
+  it("rejects between-turn clock drift as a hard acceptance failure", () => {
+    const root = makeRoot();
+    writeFreshRun(root, [
+      turn(1, {
+        after: { tick: 2, worldVersion: 4, worldTimeMinutes: 15 },
+        done: { tick: 2, worldVersion: 4, worldTimeMinutes: 15 },
+      }),
+      turn(2, {
+        before: { tick: 2, worldVersion: 5, worldTimeMinutes: 10 },
+        after: { tick: 3, worldVersion: 5, worldTimeMinutes: 20 },
+        done: { tick: 3, worldVersion: 5, worldTimeMinutes: 20 },
+      }),
+    ]);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 2 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "between-turn-worldVersion-drift" }),
+      expect.objectContaining({ code: "between-turn-worldTimeMinutes-drift" }),
+    ]));
+  });
+});

@@ -1,15 +1,29 @@
 import type { Metadata } from "next";
-import { Inter, Playfair_Display } from "next/font/google";
+import { Fraunces, Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const inter = Inter({
   variable: "--font-inter",
+  weight: ["400", "500", "600", "700"],
   subsets: ["latin", "cyrillic"],
 });
 
-const playfair = Playfair_Display({
-  variable: "--font-playfair",
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
+  weight: ["400", "500", "600", "700"],
+  subsets: ["latin", "cyrillic"],
+});
+
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  weight: ["500", "600", "700"],
+  subsets: ["latin"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  weight: ["400", "500", "600"],
   subsets: ["latin", "cyrillic"],
 });
 
@@ -25,7 +39,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body className={`${inter.variable} ${playfair.variable} font-sans antialiased`}>
+      <body
+        className={`${inter.variable} ${interTight.variable} ${fraunces.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+      >
         {children}
         <Toaster />
       </body>

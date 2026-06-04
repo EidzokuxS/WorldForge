@@ -2,20 +2,35 @@ import { Hono } from "hono";
 import crypto from "node:crypto";
 import type { CharacterDraft } from "@worldforge/shared";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
+import { readCampaignConfig, loadIpContext, loadPremiseDivergence } from "../campaign/index.js";
 import { loadSettings } from "../settings/index.js";
 import { resolveStartingLocation } from "../worldgen/index.js";
-import { parseCharacterDescription, generateCharacter, generateCharacterFromArchetype, mapV2CardToCharacter, parseNpcDescription, mapV2CardToNpc, generateNpcFromArchetype, researchArchetype } from "../character/index.js";
+import {
+  ingestCharacterDraft,
+  IngestionPipelineError,
+  type IngestionInput,
+  type IngestionContext,
+} from "../character/ingestion/index.js";
 import {
   createCharacterRecordFromDraft,
   projectPlayerRecord,
+  toCharacterDraft,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { buildCompatibilityTags } from "./compatibility-tags.js";
+import { applyStartConditionEffects } from "../engine/start-condition-runtime.js";
 import { getDb } from "../db/index.js";
 import { items, locations, players } from "../db/schema.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { and, eq } from "drizzle-orm";
-import { parseBody, requireLoadedCampaign, resolveGenerator, setupCharacterEndpoint } from "./helpers.js";
+import {
+  parseBody,
+  requireLoadedCampaign,
+  resolveGenerator,
+  setupCharacterEndpoint,
+  type CharacterEndpointContext,
+} from "./helpers.js";
 import { createLogger } from "../lib/index.js";
 import {
   generateImage,
@@ -24,6 +39,7 @@ import {
   ensureImageDir,
   cacheImage,
 } from "../images/index.js";
+import { toAuthoritativeItemSeed } from "../inventory/index.js";
 
 const log = createLogger("character-route");
 import {
@@ -36,12 +52,33 @@ import {
   saveCharacterSchema,
 } from "./schemas.js";
 import { deriveCanonicalLoadout } from "../character/loadout-deriver.js";
+import type { Context } from "hono";
 
 const app = new Hono();
 
+type CampaignLocationCandidate = {
+  id: string;
+  name: string;
+  isStarting?: boolean | null;
+  kind?: string | null;
+  parentLocationId?: string | null;
+};
+
+type PlayerStartPlacement =
+  | {
+      ok: true;
+      broadLocationId: string;
+      sceneLocationId: string;
+      matchedLocation: CampaignLocationCandidate;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 function resolveDraftLocation(
   draft: CharacterDraft,
-  allLocations: Array<{ id: string; name: string; isStarting?: boolean }>,
+  allLocations: CampaignLocationCandidate[],
 ) {
   const preferredId =
     draft.startConditions.startLocationId ?? draft.socialContext.currentLocationId;
@@ -63,28 +100,124 @@ function resolveDraftLocation(
   return allLocations.find((location) => location.isStarting) ?? allLocations[0] ?? null;
 }
 
-function createDraftResponse(
-  campaignId: string,
-  draft: Awaited<ReturnType<typeof parseCharacterDescription>>,
-) {
+function resolvePlayerStartPlacement(
+  matchedLocation: CampaignLocationCandidate,
+  allLocations: CampaignLocationCandidate[],
+): PlayerStartPlacement {
+  if (matchedLocation.kind !== "persistent_sublocation") {
+    return {
+      ok: true,
+      broadLocationId: matchedLocation.id,
+      sceneLocationId: matchedLocation.id,
+      matchedLocation,
+    };
+  }
+
+  const parentLocationId = matchedLocation.parentLocationId ?? null;
+  const parentLocation = parentLocationId
+    ? allLocations.find((location) => location.id === parentLocationId)
+    : null;
+  if (!parentLocation || parentLocation.kind === "persistent_sublocation") {
+    return {
+      ok: false,
+      error: `Starting location "${matchedLocation.name}" has an unresolved parent location.`,
+    };
+  }
+
+  return {
+    ok: true,
+    broadLocationId: parentLocation.id,
+    sceneLocationId: matchedLocation.id,
+    matchedLocation,
+  };
+}
+
+function createDraftResponse(campaignId: string, draft: CharacterDraft) {
   const record = createCharacterRecordFromDraft(draft, {
     id: `draft:${draft.identity.displayName || "character"}`,
     campaignId,
   });
+  const compatibilityTags = buildCompatibilityTags(record);
 
   if (draft.identity.role === "npc") {
     return {
       role: "key" as const,
+      characterRecord: record,
       draft,
-      npc: toLegacyNpcDraft(record),
+      npc: {
+        ...toLegacyNpcDraft(record),
+        tags: compatibilityTags,
+      },
     };
   }
 
   return {
     role: "player" as const,
+    characterRecord: record,
     draft,
-    character: toLegacyPlayerCharacter(record),
+    character: {
+      ...toLegacyPlayerCharacter(record),
+      tags: compatibilityTags,
+    },
   };
+}
+
+function createSavedCharacterResponse(
+  playerId: string,
+  characterRecord: ReturnType<typeof createCharacterRecordFromDraft>,
+) {
+  const compatibilityTags = buildCompatibilityTags(characterRecord);
+  return {
+    ok: true,
+    playerId,
+    characterRecord,
+    draft: toCharacterDraft(characterRecord),
+    character: {
+      ...toLegacyPlayerCharacter(characterRecord),
+      tags: compatibilityTags,
+    },
+  };
+}
+
+/**
+ * Build the IngestionContext from a setupCharacterEndpoint result.
+ * Wires ipContext + premiseDivergence from disk so the pipeline can
+ * classify canonical status and feed VS Battles research correctly.
+ */
+function buildIngestionContext(
+  ctx: CharacterEndpointContext,
+  campaignId: string,
+): IngestionContext {
+  const ipContext = loadIpContext(campaignId) ?? null;
+  const premiseDivergence = loadPremiseDivergence(campaignId) ?? null;
+  return {
+    gen: ctx.gen,
+    campaign: {
+      premise: ctx.campaign.premise,
+      ipContext,
+      premiseDivergence,
+    },
+    settings: ctx.settings,
+    locationNames: ctx.names.locationNames,
+    factionNames: ctx.names.factionNames,
+  };
+}
+
+/**
+ * Convert IngestionPipelineError to 502 with { error, stage, attempts }.
+ * Other errors fall through to getErrorStatus/getErrorMessage.
+ */
+function pipelineErrorResponse(c: Context, error: unknown, fallback: string) {
+  if (error instanceof IngestionPipelineError) {
+    return c.json(
+      { error: error.message, stage: error.stage, attempts: error.attempts },
+      502,
+    );
+  }
+  return c.json(
+    { error: getErrorMessage(error, fallback) },
+    getErrorStatus(error),
+  );
 }
 
 app.post("/parse-character", async (c) => {
@@ -92,26 +225,24 @@ app.post("/parse-character", async (c) => {
     const result = await parseBody(c, parseCharacterSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, concept, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
+    const { campaignId, concept, role, locationNames: bodyLoc, factionNames: bodyFac, overrideText } =
+      result.data;
     const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
-    if (role === "key") {
-      const draft = await parseNpcDescription({
-        description: concept, premise: ctx.campaign.premise,
-        locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-        role: ctx.gen,
-      });
-      return c.json(createDraftResponse(campaignId, draft));
-    }
-
-    const draft = await parseCharacterDescription({
-      description: concept, premise: ctx.campaign.premise,
-      locationNames: ctx.names.locationNames, role: ctx.gen,
-    });
+    const input: IngestionInput = {
+      mode: "parse",
+      campaignId,
+      role,
+      freeText: concept,
+      overrideText,
+      locationNames: ctx.names.locationNames,
+      factionNames: ctx.names.factionNames,
+    };
+    const draft = await ingestCharacterDraft(input, buildIngestionContext(ctx, campaignId));
     return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
-    return c.json({ error: getErrorMessage(error, "Failed to parse character.") }, getErrorStatus(error));
+    return pipelineErrorResponse(c, error, "Failed to parse character.");
   }
 });
 
@@ -120,28 +251,23 @@ app.post("/generate-character", async (c) => {
     const result = await parseBody(c, generateCharacterSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
+    const { campaignId, role, locationNames: bodyLoc, factionNames: bodyFac, overrideText } =
+      result.data;
     const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
-    if (role === "key") {
-      const draft = await generateNpcFromArchetype({
-        archetype: "a compelling and unique character",
-        premise: ctx.campaign.premise,
-        locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-        role: ctx.gen,
-      });
-      return c.json(createDraftResponse(campaignId, draft));
-    }
-
-    const draft = await generateCharacter({
-      premise: ctx.campaign.premise,
-      locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-      role: ctx.gen,
-    });
+    const input: IngestionInput = {
+      mode: "generate",
+      campaignId,
+      role,
+      overrideText,
+      locationNames: ctx.names.locationNames,
+      factionNames: ctx.names.factionNames,
+    };
+    const draft = await ingestCharacterDraft(input, buildIngestionContext(ctx, campaignId));
     return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
-    return c.json({ error: getErrorMessage(error, "Failed to generate character.") }, getErrorStatus(error));
+    return pipelineErrorResponse(c, error, "Failed to generate character.");
   }
 });
 
@@ -150,31 +276,24 @@ app.post("/research-character", async (c) => {
     const result = await parseBody(c, researchCharacterSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, archetype, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
+    const { campaignId, archetype, role, locationNames: bodyLoc, factionNames: bodyFac, overrideText } =
+      result.data;
     const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
-    const researchContext = await researchArchetype({
-      archetype, role: ctx.gen, research: ctx.settings.research,
-    });
-
-    if (role === "key") {
-      const draft = await generateNpcFromArchetype({
-        archetype, premise: ctx.campaign.premise,
-        locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-        role: ctx.gen, researchContext,
-      });
-      return c.json(createDraftResponse(campaignId, draft));
-    }
-
-    const draft = await generateCharacterFromArchetype({
-      archetype, premise: ctx.campaign.premise,
-      locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-      role: ctx.gen, researchContext,
-    });
+    const input: IngestionInput = {
+      mode: "research",
+      campaignId,
+      role,
+      archetype,
+      overrideText,
+      locationNames: ctx.names.locationNames,
+      factionNames: ctx.names.factionNames,
+    };
+    const draft = await ingestCharacterDraft(input, buildIngestionContext(ctx, campaignId));
     return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
-    return c.json({ error: getErrorMessage(error, "Failed to research character.") }, getErrorStatus(error));
+    return pipelineErrorResponse(c, error, "Failed to research character.");
   }
 });
 
@@ -183,28 +302,36 @@ app.post("/import-v2-card", async (c) => {
     const result = await parseBody(c, importV2CardSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, name, description, personality, scenario, tags, importMode, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
+    const {
+      campaignId,
+      name,
+      description,
+      personality,
+      scenario,
+      tags,
+      mesExample,
+      importMode,
+      role,
+      locationNames: bodyLoc,
+      factionNames: bodyFac,
+      overrideText,
+    } = result.data;
     const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
-    if (role === "key") {
-      const draft = await mapV2CardToNpc({
-        name, description, personality, scenario, v2Tags: tags, importMode,
-        premise: ctx.campaign.premise,
-        locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
-        role: ctx.gen,
-      });
-      return c.json(createDraftResponse(campaignId, draft));
-    }
-
-    const draft = await mapV2CardToCharacter({
-      name, description, personality, scenario, v2Tags: tags, importMode,
-      premise: ctx.campaign.premise, locationNames: ctx.names.locationNames,
-      role: ctx.gen,
-    });
+    const input: IngestionInput = {
+      mode: "import",
+      campaignId,
+      role,
+      v2Card: { name, description, personality, scenario, tags, mesExample, importMode },
+      overrideText,
+      locationNames: ctx.names.locationNames,
+      factionNames: ctx.names.factionNames,
+    };
+    const draft = await ingestCharacterDraft(input, buildIngestionContext(ctx, campaignId));
     return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
-    return c.json({ error: getErrorMessage(error, "Failed to import V2 card.") }, getErrorStatus(error));
+    return pipelineErrorResponse(c, error, "Failed to import V2 card.");
   }
 });
 
@@ -220,7 +347,13 @@ app.post("/save-character", async (c) => {
     const db = getDb();
 
     const allLocations = db
-      .select({ id: locations.id, name: locations.name, isStarting: locations.isStarting })
+      .select({
+        id: locations.id,
+        name: locations.name,
+        isStarting: locations.isStarting,
+        kind: locations.kind,
+        parentLocationId: locations.parentLocationId,
+      })
       .from(locations)
       .where(eq(locations.campaignId, campaignId))
       .all();
@@ -232,6 +365,10 @@ app.post("/save-character", async (c) => {
         },
         400,
       );
+    }
+    const placement = resolvePlayerStartPlacement(matchedLocation, allLocations);
+    if (!placement.ok) {
+      return c.json({ error: placement.error }, 400);
     }
 
     const existingPlayer = db
@@ -250,17 +387,17 @@ app.post("/save-character", async (c) => {
 
     const playerId = crypto.randomUUID();
     const canonicalLoadout = deriveCanonicalLoadout(draft);
-    const characterRecord = createCharacterRecordFromDraft(
+    const draftRecord = createCharacterRecordFromDraft(
       {
         ...draft,
         socialContext: {
           ...draft.socialContext,
-          currentLocationId: matchedLocation.id,
-          currentLocationName: matchedLocation.name,
+          currentLocationId: placement.sceneLocationId,
+          currentLocationName: placement.matchedLocation.name,
         },
         startConditions: {
           ...draft.startConditions,
-          startLocationId: matchedLocation.id,
+          startLocationId: placement.sceneLocationId,
         },
         loadout: canonicalLoadout.loadout,
       },
@@ -269,6 +406,11 @@ app.post("/save-character", async (c) => {
         campaignId,
       },
     );
+    const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+    const { record: characterRecord } = applyStartConditionEffects(draftRecord, {
+      currentTick,
+      currentLocationId: placement.sceneLocationId,
+    });
     const projection = projectPlayerRecord(characterRecord);
 
     db.insert(players)
@@ -276,20 +418,17 @@ app.post("/save-character", async (c) => {
         id: playerId,
         campaignId,
         ...projection,
+        currentLocationId: placement.broadLocationId,
+        currentSceneLocationId: placement.sceneLocationId,
       })
       .run();
 
     if (canonicalLoadout.items.length > 0) {
       db.insert(items)
         .values(
-          canonicalLoadout.items.map((item) => ({
-            id: crypto.randomUUID(),
-            campaignId,
-            name: item.name,
-            tags: JSON.stringify(item.tags),
-            ownerId: playerId,
-            locationId: null,
-          })),
+          canonicalLoadout.items.map((item) =>
+            toAuthoritativeItemSeed(campaignId, playerId, item),
+          ),
         )
         .run();
     }
@@ -311,14 +450,14 @@ app.post("/save-character", async (c) => {
           });
           ensureImageDir(campaignId, "portraits");
           const imageData = await generateImage({ prompt, provider: imgProvider.provider, model: imgProvider.model });
-          cacheImage(campaignId, "portraits", `${playerId}.png`, imageData);
+          cacheImage(campaignId, "portraits", "player.png", imageData);
         } catch (err) {
           log.warn("Portrait generation failed (non-blocking)", err);
         }
       })();
     }
 
-    return c.json({ ok: true, playerId });
+    return c.json(createSavedCharacterResponse(playerId, characterRecord));
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to save character.") },
@@ -357,7 +496,13 @@ app.post("/resolve-starting-location", async (c) => {
     if (campaign instanceof Response) return campaign;
 
     const db = getDb();
-    const allLocations = db.select({ id: locations.id, name: locations.name, isStarting: locations.isStarting })
+    const allLocations = db.select({
+      id: locations.id,
+      name: locations.name,
+      isStarting: locations.isStarting,
+      kind: locations.kind,
+      parentLocationId: locations.parentLocationId,
+    })
       .from(locations).where(eq(locations.campaignId, campaignId)).all();
 
     if (allLocations.length === 0) {

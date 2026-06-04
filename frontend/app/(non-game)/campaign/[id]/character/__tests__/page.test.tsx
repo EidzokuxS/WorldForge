@@ -12,6 +12,7 @@ vi.mock("@/lib/api", () => ({
   parseCharacter: vi.fn(),
   generateCharacter: vi.fn(),
   importV2Card: vi.fn(),
+  listPersonaTemplates: vi.fn(),
   resolveStartingLocation: vi.fn(),
   previewCanonicalLoadout: vi.fn(),
   applyPersonaTemplate: vi.fn(),
@@ -44,11 +45,12 @@ vi.mock("@/components/character-creation/character-card", () => ({
   CharacterCard: () => <div data-testid="character-card" />,
 }));
 
-import { getWorldData, loadCampaign } from "@/lib/api";
+import { getWorldData, listPersonaTemplates, loadCampaign } from "@/lib/api";
 import CharacterCreationPage from "@/app/(non-game)/campaign/[id]/character/page";
 
 const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetWorldData = vi.mocked(getWorldData);
+const mockedListPersonaTemplates = vi.mocked(listPersonaTemplates);
 
 async function renderPage(campaignId: string) {
   await act(async () => {
@@ -62,10 +64,11 @@ async function renderPage(campaignId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedListPersonaTemplates.mockResolvedValue({ personaTemplates: [] } as never);
 });
 
 describe("CharacterCreationPage", () => {
-  it("renders character form, no-draft message, and action buttons", async () => {
+  it("renders the empty-state character launcher with a back link", async () => {
     mockedLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -80,8 +83,7 @@ describe("CharacterCreationPage", () => {
       expect(screen.getByTestId("character-form")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Use the entry methods above to parse, generate, or import a character.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save & Begin Adventure" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save & Begin Adventure" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Review" })).toBeInTheDocument();
   });
 

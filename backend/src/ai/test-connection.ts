@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText } from "./raindrop-workshop.js";
 import { createModel } from "./provider-registry.js";
 import type { ProviderConfig } from "./provider-registry.js";
 
@@ -18,7 +18,6 @@ export async function testProviderConnection(
     await generateText({
       model,
       prompt: "Respond with exactly one word: hello",
-      maxOutputTokens: 10,
     });
 
     return {

@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "notes": "Sanitized Phase 73/74 structured-output failure corpus. Payloads preserve wrong shapes only; raw prompts, raw provider responses, credentials, and campaign data are omitted.",
+  "fixtures": [
+    {
+      "fixtureId": "kimi-citations-string",
+      "file": "kimi-citations-string.json",
+      "providerModel": "Kimi/Moonshot generated-context class",
+      "targetSchemaFamily": "generatedContext.v1",
+      "failureClass": "citations returned as a single joined string where citation object array is required",
+      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:556; backend/src/ai/__tests__/generate-object-safe.test.ts:546",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "credentials",
+        "campaign identifiers"
+      ]
+    },
+    {
+      "fixtureId": "mimo-canonical-names-string",
+      "file": "mimo-canonical-names-string.json",
+      "providerModel": "Mimo-like generated-context class",
+      "targetSchemaFamily": "generatedContext.v1",
+      "failureClass": "canonicalNames returned as a flat string where grouped object arrays are required",
+      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:556; backend/src/ai/__tests__/generate-object-safe.test.ts:547",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "credentials",
+        "campaign identifiers"
+      ]
+    },
+    {
+      "fixtureId": "deepseek-scene-plan-missing-action",
+      "file": "deepseek-scene-plan-missing-action.json",
+      "providerModel": "OpenCode DeepSeek scene-plan class",
+      "targetSchemaFamily": "semanticScenePlan.v1",
+      "failureClass": "offer_quick_actions input has labels but omits nested actions[].action",
+      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:106; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "campaign identifiers",
+        "private scene text"
+      ]
+    },
+    {
+      "fixtureId": "deepseek-payload-vs-input",
+      "file": "deepseek-payload-vs-input.json",
+      "providerModel": "OpenCode DeepSeek scene-plan class",
+      "targetSchemaFamily": "semanticScenePlan.v1",
+      "failureClass": "planned action uses payload instead of the primary input field",
+      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-PRD.md:8; .planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:557",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "campaign identifiers",
+        "private scene text"
+      ]
+    },
+    {
+      "fixtureId": "glm-overlong-rationale",
+      "file": "glm-overlong-rationale.json",
+      "providerModel": "GLM/Z.AI oracle-style class",
+      "targetSchemaFamily": "oracle.v1",
+      "failureClass": "reasoning/rationale exceeds prompt and schema caps",
+      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:31; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-03-PLAN.md:105",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "campaign identifiers",
+        "private scene text"
+      ]
+    },
+    {
+      "fixtureId": "unsupported-tool-name",
+      "file": "unsupported-tool-name.json",
+      "providerModel": "multi-provider tool-call class",
+      "targetSchemaFamily": "semanticScenePlan.v1",
+      "failureClass": "model invents unsupported toolName outside runtime tool schema registry",
+      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-STRUCTURED-PROMPT-AUDIT.md:69",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "campaign identifiers",
+        "private scene text"
+      ]
+    },
+    {
+      "fixtureId": "lazy-power-stats",
+      "file": "lazy-power-stats.json",
+      "providerModel": "named-IP power-stat class",
+      "targetSchemaFamily": "powerStats.v1",
+      "failureClass": "lazy or underspecified power stats use vague labels instead of evidence-bound axes",
+      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:297; backend/src/character/prompt-contract.ts:88",
+      "sanitizedFields": [
+        "provider response envelope",
+        "prompt body",
+        "search result snippets",
+        "campaign identifiers"
+      ]
+    }
+  ]
+}

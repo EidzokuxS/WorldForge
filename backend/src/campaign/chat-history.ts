@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { ChatMessage } from "@worldforge/shared";
-import { isChatMessage } from "@worldforge/shared";
+import { formatLookupLogEntry, isChatMessage } from "@worldforge/shared";
 import { readCampaignConfig } from "./manager.js";
 import { getChatHistoryPath } from "./paths.js";
 
@@ -33,6 +33,20 @@ export function appendChatMessages(
   const existing = getChatHistory(campaignId);
   existing.push(...messages);
   fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), "utf-8");
+}
+
+export function buildLookupHistoryMessages(
+  userCommand: string,
+  lookupKind: string,
+  answer: string,
+): ChatMessage[] {
+  return [
+    { role: "user", content: userCommand },
+    {
+      role: "assistant",
+      content: formatLookupLogEntry(lookupKind, answer),
+    },
+  ];
 }
 
 /**

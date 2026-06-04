@@ -28,6 +28,8 @@ interface LocationsSectionProps {
   regenerating: boolean;
 }
 
+const LOCATION_PARENT_NONE = "__none__";
+
 export function LocationsSection({
   locations,
   onChange,
@@ -58,6 +60,8 @@ export function LocationsSection({
       tags: [],
       isStarting: false,
       connectedTo: [],
+      kind: "macro",
+      parentLocationName: null,
     };
     onChange([...locations, newLoc]);
   }, [locations, onChange]);
@@ -143,6 +147,95 @@ export function LocationsSection({
                   />
                 </div>
               </div>
+
+              {(() => {
+                const kind = loc.kind ?? "macro";
+                const locationLabel = loc.name.trim() || `location ${index + 1}`;
+                const parentOptions = locations
+                  .filter((candidate, candidateIndex) =>
+                    candidateIndex !== index &&
+                    (candidate.kind ?? "macro") === "macro" &&
+                    candidate.name.trim().length > 0
+                  )
+                  .map((candidate) => candidate.name);
+                const validParent =
+                  loc.parentLocationName != null &&
+                  parentOptions.includes(loc.parentLocationName);
+
+                return (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Kind</Label>
+                      <Select
+                        value={kind}
+                        onValueChange={(value: string) => {
+                          const nextKind: ScaffoldLocation["kind"] =
+                            value === "persistent_sublocation"
+                              ? "persistent_sublocation"
+                              : "macro";
+                          updateLocation(index, {
+                            kind: nextKind,
+                            parentLocationName:
+                              nextKind === "persistent_sublocation"
+                                ? validParent
+                                  ? loc.parentLocationName
+                                  : parentOptions[0] ?? null
+                                : null,
+                          });
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label={`Kind for ${locationLabel}`}
+                          className="mt-1 h-8 w-full text-xs"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="macro">Macro</SelectItem>
+                          {parentOptions.length > 0 ? (
+                            <SelectItem value="persistent_sublocation">
+                              Persistent sublocation
+                            </SelectItem>
+                          ) : null}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Parent</Label>
+                      <Select
+                        value={validParent ? loc.parentLocationName! : LOCATION_PARENT_NONE}
+                        onValueChange={(value: string) =>
+                          updateLocation(index, {
+                            kind:
+                              value === LOCATION_PARENT_NONE
+                                ? "macro"
+                                : "persistent_sublocation",
+                            parentLocationName:
+                              value === LOCATION_PARENT_NONE ? null : value,
+                          })
+                        }
+                        disabled={parentOptions.length === 0 && kind === "persistent_sublocation"}
+                      >
+                        <SelectTrigger
+                          aria-label={`Parent for ${locationLabel}`}
+                          className="mt-1 h-8 w-full text-xs"
+                        >
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={LOCATION_PARENT_NONE}>None</SelectItem>
+                          {parentOptions.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="flex items-center gap-2">
                 <Switch

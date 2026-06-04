@@ -16,7 +16,10 @@ vi.mock("../../lib/index.js", () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
+    event: vi.fn(),
   })),
+  withRole: <T,>(_role: string, fn: () => T) => fn(),
 }));
 
 import {

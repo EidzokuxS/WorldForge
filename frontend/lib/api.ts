@@ -35,8 +35,20 @@ import type {
   ResolveStartConditionsResult,
   WorldBookImportResult,
   WorldbookLibraryItem,
+  WorldCurrentScene,
+  WorldLocationConnectedPath,
+  WorldLocationRecentHappening,
+  WorldPlayerInventoryItem,
+  WorldSceneAwarenessBand,
 } from "./api-types";
-import type { CharacterDraft, CharacterRecord } from "@worldforge/shared";
+import type {
+  CharacterDraft,
+  CharacterRecord,
+  ChatMessage,
+  LocationKind,
+  LocationPersistence,
+  WorldgenResearchArtifactV2,
+} from "@worldforge/shared";
 import {
   characterDraftToParsedCharacter,
   characterDraftToScaffoldNpc,
@@ -44,6 +56,8 @@ import {
   parsedCharacterToDraft,
   scaffoldNpcToDraft,
 } from "./character-drafts";
+import type { OracleResultData } from "./oracle-result";
+import { normalizeOracleResult } from "./oracle-result";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
 export type {
@@ -78,58 +92,118 @@ export type {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
 const LAST_ACTIVE_CAMPAIGN_KEY = "worldforge:lastActiveCampaignId";
 
+export type ChatHistoryResponse = {
+  messages: ChatMessage[];
+  premise: string;
+  hasLiveTurnSnapshot: boolean;
+  pendingNarration?: {
+    pendingNarration: true;
+    resumable: boolean;
+    recoveryState: "resume_ready" | "finalizing_turn" | "recovering";
+    resumeToken?: string;
+  } | null;
+};
+
+export type LookupKind =
+  | "world_canon_fact"
+  | "character_canon_fact"
+  | "power_profile"
+  | "event_clarification";
+
+export interface ChatLookupRequest {
+  lookupKind: LookupKind;
+  subject: string;
+  compareAgainst?: string;
+  question?: string;
+}
+
+export interface LookupResultEvent {
+  lookupKind: LookupKind;
+  subject: string;
+  answer: string;
+  citations: Array<{ kind?: string; label: string; excerpt: string }>;
+  uncertaintyNotes: string[];
+  sceneImpact: string;
+}
+
 // ───── Raw types (internal) ─────
 
 interface RawWorldData {
+  currentTick?: number;
+  worldVersion?: number;
+  worldTimeMinutes?: number;
+  currentScene?: unknown;
   locations: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    placeHandle?: string;
+    campaignId?: string;
     name: string;
     description: string;
-    tags: string;
-    connectedTo: string;
+    tags: unknown;
+    connectedTo?: unknown;
+    connectedToPlaceHandles?: unknown;
+    connectedPaths?: unknown;
+    recentHappenings?: unknown;
     isStarting: boolean;
+    kind?: LocationKind | null;
+    locationKind?: LocationKind | null;
+    parentLocationId?: string | null;
+    parentPlaceHandle?: string | null;
+    anchorLocationId?: string | null;
+    anchorPlaceHandle?: string | null;
+    persistence?: LocationPersistence | null;
+    expiresAtTick?: number | null;
+    archivedAtTick?: number | null;
   }>;
   npcs: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    actorHandle?: string;
+    campaignId?: string;
     name: string;
-    persona: string;
+    persona?: string;
     tags: string;
     tier: string;
     currentLocationId: string | null;
-    goals: string;
-    beliefs: string;
-    characterRecord?: CharacterRecord | null;
-    draft?: CharacterDraft | null;
-    npc?: ScaffoldNpc | null;
+    currentPlaceHandle?: string | null;
+    sceneScopeId?: string | null;
+    sceneHandle?: string | null;
+    goals?: string;
+    beliefs?: string;
   }>;
   factions: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    factionHandle?: string;
+    campaignId?: string;
     name: string;
     tags: string;
     goals: string;
     assets: string;
   }>;
   relationships: Array<{
-    id: string;
-    campaignId: string;
-    entityA: string;
-    entityB: string;
+    id?: string;
+    relationshipHandle?: string;
+    campaignId?: string;
+    entityA?: string | null;
+    entityAHandle?: string | null;
+    entityB?: string | null;
+    entityBHandle?: string | null;
     tags: string;
     reason: string | null;
   }>;
   items: Array<{
-    id: string;
+    id?: string;
+    itemHandle?: string;
     name: string;
     tags: string;
     ownerId: string | null;
+    ownerActorHandle?: string | null;
     locationId: string | null;
+    placeHandle?: string | null;
   }>;
   player: {
-    id: string;
-    campaignId: string;
+    id?: string;
+    actorHandle?: string;
+    campaignId?: string;
     name: string;
     race: string;
     gender: string;
@@ -138,7 +212,12 @@ interface RawWorldData {
     hp: number;
     tags: string;
     equippedItems: string;
+    inventory?: unknown;
+    equipment?: unknown;
     currentLocationId: string | null;
+    currentPlaceHandle?: string | null;
+    sceneScopeId?: string | null;
+    sceneHandle?: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
     character?: ParsedCharacter | null;
@@ -157,7 +236,15 @@ interface RawWorldData {
 
 // ───── Helpers ─────
 
-function parseJsonArray(value: string): string[] {
+function parseJsonArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed)
@@ -170,9 +257,9 @@ function parseJsonArray(value: string): string[] {
 
 const EMPTY_NPC_GOALS = { short_term: [] as string[], long_term: [] as string[] };
 
-function parseNpcGoals(value: string): { short_term: string[]; long_term: string[] } {
+function parseNpcGoals(value: unknown): { short_term: string[]; long_term: string[] } {
   try {
-    const parsed = JSON.parse(value) as unknown;
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
       return {
@@ -186,62 +273,487 @@ function parseNpcGoals(value: string): { short_term: string[]; long_term: string
   }
 }
 
-function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draft?: CharacterDraft; character?: ParsedCharacter } | { role: "key"; draft?: CharacterDraft; npc?: ScaffoldNpc })) : CharacterResult {
+function parseNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseLocationKind(value: unknown): LocationKind | null {
+  return value === "macro"
+    || value === "persistent_sublocation"
+    || value === "ephemeral_scene"
+    ? value
+    : null;
+}
+
+function parseLocationPersistence(value: unknown): LocationPersistence | null {
+  return value === "persistent" || value === "ephemeral" ? value : null;
+}
+
+type PublicDtoHandleKind =
+  | "actor"
+  | "checkpoint"
+  | "event"
+  | "faction"
+  | "item"
+  | "place"
+  | "relationship"
+  | "route"
+  | "template"
+  | "entity";
+
+const PUBLIC_DTO_HANDLE_PATTERN =
+  /^pdto_(actor|checkpoint|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/u;
+
+function publicDtoHandle(value: unknown, kinds: readonly PublicDtoHandleKind[]): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  const match = PUBLIC_DTO_HANDLE_PATTERN.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+
+  return kinds.includes(match[1] as PublicDtoHandleKind) ? trimmed : null;
+}
+
+function publicDtoHandles(value: unknown, kinds: readonly PublicDtoHandleKind[]): string[] {
+  return parseJsonArray(value).flatMap((item) => {
+    const handle = publicDtoHandle(item, kinds);
+    return handle ? [handle] : [];
+  });
+}
+
+function parseWorldLocationConnectedPaths(value: unknown): WorldLocationConnectedPath[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const path = item as Record<string, unknown>;
+      const edgeId = publicDtoHandle(path.routeHandle, ["route"])
+        ?? publicDtoHandle(path.edgeId, ["route"]);
+      const toLocationId = publicDtoHandle(path.toPlaceHandle, ["place"])
+        ?? publicDtoHandle(path.toLocationId, ["place"])
+        ?? publicDtoHandle(path.locationId, ["place"]);
+      const travelCost = typeof path.travelCost === "number" && Number.isFinite(path.travelCost)
+        ? path.travelCost
+        : null;
+
+      if (!edgeId || !toLocationId || travelCost == null) {
+        return [];
+      }
+
+      return [{
+        edgeId,
+        routeHandle: edgeId,
+        toLocationId,
+        toPlaceHandle: toLocationId,
+        toLocationName: typeof path.toLocationName === "string"
+          ? path.toLocationName
+          : typeof path.locationName === "string"
+            ? path.locationName
+            : null,
+        travelCost,
+        discovered: typeof path.discovered === "boolean" ? path.discovered : true,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseWorldLocationRecentHappenings(value: unknown): WorldLocationRecentHappening[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const event = item as Record<string, unknown>;
+      const id = publicDtoHandle(event.eventHandle, ["event"])
+        ?? publicDtoHandle(event.id, ["event"]);
+      const locationId = publicDtoHandle(event.placeHandle, ["place"])
+        ?? publicDtoHandle(event.locationId, ["place"]);
+      const eventType = typeof event.eventType === "string" ? event.eventType : null;
+      const summary = typeof event.summary === "string" ? event.summary : null;
+      const tick = typeof event.tick === "number" && Number.isFinite(event.tick) ? event.tick : null;
+      const importance = typeof event.importance === "number" && Number.isFinite(event.importance)
+        ? event.importance
+        : null;
+      const createdAt = typeof event.createdAt === "number" && Number.isFinite(event.createdAt)
+        ? event.createdAt
+        : null;
+
+      if (!id || !locationId || !eventType || !summary || tick == null || importance == null || createdAt == null) {
+        return [];
+      }
+
+      return [{
+        id,
+        eventHandle: id,
+        locationId,
+        placeHandle: locationId,
+        sourceLocationId: publicDtoHandle(event.sourcePlaceHandle, ["place"])
+          ?? publicDtoHandle(event.sourceLocationId, ["place"]),
+        sourcePlaceHandle: publicDtoHandle(event.sourcePlaceHandle, ["place"])
+          ?? publicDtoHandle(event.sourceLocationId, ["place"]),
+        anchorLocationId: publicDtoHandle(event.anchorPlaceHandle, ["place"])
+          ?? publicDtoHandle(event.anchorLocationId, ["place"]),
+        anchorPlaceHandle: publicDtoHandle(event.anchorPlaceHandle, ["place"])
+          ?? publicDtoHandle(event.anchorLocationId, ["place"]),
+        eventType,
+        summary,
+        tick,
+        importance,
+        archivedAtTick: parseNullableNumber(event.archivedAtTick),
+        createdAt,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseWorldPlayerInventoryItems(value: unknown): WorldPlayerInventoryItem[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const row = item as Record<string, unknown>;
+      const id = publicDtoHandle(row.itemHandle, ["item"])
+        ?? publicDtoHandle(row.id, ["item"]);
+      const name = typeof row.name === "string" ? row.name : null;
+      const equipState = row.equipState === "equipped" ? "equipped" : row.equipState === "carried" ? "carried" : null;
+
+      if (!id || !name || !equipState) {
+        return [];
+      }
+
+      return [{
+        id,
+        itemHandle: id,
+        name,
+        tags: parseJsonArray(row.tags),
+        equipState,
+        equippedSlot: typeof row.equippedSlot === "string" ? row.equippedSlot : null,
+        isSignature: row.isSignature === true || row.isSignature === 1,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseWorldSceneAwarenessBand(value: unknown): WorldSceneAwarenessBand {
+  return value === "clear" || value === "hint" ? value : "none";
+}
+
+function parseWorldSceneAwarenessMap(value: unknown): Record<string, WorldSceneAwarenessBand> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([actorHandle, band]) => {
+      const handle = publicDtoHandle(actorHandle, ["actor"]);
+      return handle ? [[handle, parseWorldSceneAwarenessBand(band)]] : [];
+    }),
+  );
+}
+
+function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const scene = value as Record<string, unknown>;
+  const awareness = typeof scene.awareness === "object" && scene.awareness !== null
+    ? scene.awareness as Record<string, unknown>
+    : {};
+  const rawByNpcId = typeof awareness.byActorHandle === "object" && awareness.byActorHandle !== null
+    ? awareness.byActorHandle
+    : typeof awareness.byNpcId === "object" && awareness.byNpcId !== null
+      ? awareness.byNpcId
+    : {};
+  const sceneHandle = publicDtoHandle(scene.sceneHandle, ["place"])
+    ?? publicDtoHandle(scene.id, ["place"]);
+  const broadPlaceHandle = publicDtoHandle(scene.broadPlaceHandle, ["place"])
+    ?? publicDtoHandle(scene.broadLocationId, ["place"]);
+  const actorHandles = publicDtoHandles(scene.actorHandles, ["actor"]);
+  const sceneNpcIds = actorHandles.length > 0
+    ? actorHandles
+    : publicDtoHandles(scene.sceneNpcIds, ["actor"]);
+  const clearActorHandles = publicDtoHandles(scene.clearActorHandles, ["actor"]);
+  const clearNpcIds = clearActorHandles.length > 0
+    ? clearActorHandles
+    : publicDtoHandles(scene.clearNpcIds, ["actor"]);
+
+  if (!sceneHandle) {
+    return null;
+  }
+
+  return {
+    id: sceneHandle,
+    sceneHandle,
+    name: typeof scene.name === "string" ? scene.name : null,
+    broadLocationId: broadPlaceHandle,
+    broadPlaceHandle,
+    broadLocationName: typeof scene.broadLocationName === "string" ? scene.broadLocationName : null,
+    sceneNpcIds,
+    actorHandles: sceneNpcIds,
+    clearNpcIds,
+    clearActorHandles: clearNpcIds,
+    awareness: {
+      byNpcId: parseWorldSceneAwarenessMap(rawByNpcId),
+      byActorHandle: parseWorldSceneAwarenessMap(rawByNpcId),
+      hintSignals: parseJsonArray(awareness.hintSignals),
+    },
+  };
+}
+
+function normalizeCharacterResult(
+  raw: CharacterResult | ({
+    role: "player";
+    draft?: CharacterDraft;
+    character?: ParsedCharacter;
+    characterRecord?: CharacterRecord | null;
+  } | {
+    role: "key";
+    draft?: CharacterDraft;
+    npc?: ScaffoldNpc;
+    characterRecord?: CharacterRecord | null;
+  }),
+): CharacterResult {
   if (raw.role === "player") {
-    const draft = raw.draft ?? raw.character?.draft ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
+    const draft = raw.draft
+      ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
+      ?? raw.character?.draft
+      ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
     return {
       role: "player",
+      characterRecord: raw.characterRecord ?? null,
       draft,
       character: raw.character ?? characterDraftToParsedCharacter(draft),
     };
   }
 
-  const draft = raw.draft ?? raw.npc?.draft ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
+  const draft = raw.draft
+    ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
+    ?? raw.npc?.draft
+    ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
   return {
     role: "key",
+    characterRecord: raw.characterRecord ?? null,
     draft,
-    npc: raw.npc ?? characterDraftToScaffoldNpc(draft),
+    npc: raw.npc
+      ? {
+          ...raw.npc,
+          characterRecord: raw.characterRecord ?? raw.npc.characterRecord ?? null,
+        }
+      : {
+          ...characterDraftToScaffoldNpc(draft),
+          characterRecord: raw.characterRecord ?? null,
+        },
   };
 }
 
-function parseWorldData(raw: RawWorldData): WorldData {
+type WorldDataProjection = "gameplay" | "review";
+
+function parseWorldData(raw: RawWorldData, projection: WorldDataProjection = "gameplay"): WorldData {
+  const exposeNpcSemantics = projection === "review";
+  const publicEntityHandle = (...values: unknown[]) => {
+    for (const value of values) {
+      const handle = publicDtoHandle(value, ["actor", "place", "faction", "item", "entity"]);
+      if (handle) {
+        return handle;
+      }
+    }
+    return null;
+  };
+  const player = raw.player;
+  const playerActorHandle = player
+    ? publicDtoHandle(player.actorHandle, ["actor"]) ?? publicDtoHandle(player.id, ["actor"])
+    : null;
+  const playerCurrentPlaceHandle = player
+    ? publicDtoHandle(player.currentPlaceHandle, ["place"]) ?? publicDtoHandle(player.currentLocationId, ["place"])
+    : null;
+  const playerSceneHandle = player
+    ? publicDtoHandle(player.sceneHandle, ["place"])
+      ?? publicDtoHandle(player.sceneScopeId, ["place"])
+      ?? playerCurrentPlaceHandle
+    : null;
+
   return {
-    locations: raw.locations.map((loc) => ({
-      ...loc,
-      tags: parseJsonArray(loc.tags),
-      connectedTo: parseJsonArray(loc.connectedTo),
-    })),
-    npcs: raw.npcs.map((npc) => ({
-      ...npc,
-      tags: parseJsonArray(npc.tags),
-      goals: parseNpcGoals(npc.goals),
-      beliefs: parseJsonArray(npc.beliefs),
-      characterRecord: npc.characterRecord ?? null,
-      draft: npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null),
-      npc: npc.npc ?? (npc.draft ? characterDraftToScaffoldNpc(npc.draft) : npc.characterRecord ? characterDraftToScaffoldNpc(characterRecordToDraft(npc.characterRecord)) : null),
-    })),
-    factions: raw.factions.map((fac) => ({
-      ...fac,
-      tags: parseJsonArray(fac.tags),
-      goals: parseJsonArray(fac.goals),
-      assets: parseJsonArray(fac.assets),
-    })),
-    items: raw.items.map((item) => ({
-      ...item,
-      tags: parseJsonArray(item.tags),
-    })),
-    relationships: raw.relationships.map((rel) => ({
-      ...rel,
-      tags: parseJsonArray(rel.tags),
-    })),
-    player: raw.player
+    currentTick: typeof raw.currentTick === "number" ? raw.currentTick : 0,
+    worldVersion: typeof raw.worldVersion === "number" ? raw.worldVersion : 0,
+    worldTimeMinutes: typeof raw.worldTimeMinutes === "number" ? raw.worldTimeMinutes : 0,
+    currentScene: parseWorldCurrentScene(raw.currentScene),
+    locations: raw.locations.flatMap((loc) => {
+      const connectedPaths = parseWorldLocationConnectedPaths(loc.connectedPaths);
+      const placeHandle = publicDtoHandle(loc.placeHandle, ["place"])
+        ?? publicDtoHandle(loc.id, ["place"]);
+      if (!placeHandle) {
+        return [];
+      }
+      const connectedToPlaceHandles = publicDtoHandles(loc.connectedToPlaceHandles, ["place"]);
+      const connectedTo = connectedPaths.length > 0
+        ? connectedPaths.map((path) => path.toLocationId)
+        : connectedToPlaceHandles.length > 0
+          ? connectedToPlaceHandles
+          : publicDtoHandles(loc.connectedTo, ["place"]);
+      const parentPlaceHandle = publicDtoHandle(loc.parentPlaceHandle, ["place"])
+        ?? publicDtoHandle(loc.parentLocationId, ["place"]);
+      const anchorPlaceHandle = publicDtoHandle(loc.anchorPlaceHandle, ["place"])
+        ?? publicDtoHandle(loc.anchorLocationId, ["place"]);
+
+      return [{
+        id: placeHandle,
+        placeHandle,
+        name: loc.name,
+        description: loc.description,
+        tags: parseJsonArray(loc.tags),
+        connectedTo,
+        connectedToPlaceHandles: connectedTo,
+        connectedPaths,
+        recentHappenings: parseWorldLocationRecentHappenings(loc.recentHappenings),
+        isStarting: loc.isStarting,
+        locationKind: parseLocationKind(loc.locationKind ?? loc.kind),
+        parentLocationId: parentPlaceHandle,
+        parentPlaceHandle,
+        anchorLocationId: anchorPlaceHandle,
+        anchorPlaceHandle,
+        persistence: parseLocationPersistence(loc.persistence),
+        expiresAtTick: parseNullableNumber(loc.expiresAtTick),
+        archivedAtTick: parseNullableNumber(loc.archivedAtTick),
+      }];
+    }),
+    npcs: raw.npcs.flatMap((npc) => {
+      const actorHandle = publicDtoHandle(npc.actorHandle, ["actor"])
+        ?? publicDtoHandle(npc.id, ["actor"]);
+      if (!actorHandle) {
+        return [];
+      }
+      const currentPlaceHandle = publicDtoHandle(npc.currentPlaceHandle, ["place"])
+        ?? publicDtoHandle(npc.currentLocationId, ["place"]);
+      const sceneHandle = publicDtoHandle(npc.sceneHandle, ["place"])
+        ?? publicDtoHandle(npc.sceneScopeId, ["place"])
+        ?? currentPlaceHandle;
+      return [{
+        id: actorHandle,
+        actorHandle,
+        name: npc.name,
+        persona: exposeNpcSemantics && typeof npc.persona === "string" ? npc.persona : "",
+        tags: parseJsonArray(npc.tags),
+        tier: npc.tier,
+        currentLocationId: currentPlaceHandle,
+        currentPlaceHandle,
+        goals: exposeNpcSemantics
+          ? parseNpcGoals(npc.goals ?? "{\"short_term\":[],\"long_term\":[]}")
+          : { short_term: [], long_term: [] },
+        beliefs: exposeNpcSemantics ? parseJsonArray(npc.beliefs ?? "[]") : [],
+        sceneScopeId: sceneHandle,
+        sceneHandle,
+        characterRecord: null,
+        draft: null,
+        npc: null,
+      }];
+    }),
+    factions: raw.factions.flatMap((fac) => {
+      const factionHandle = publicDtoHandle(fac.factionHandle, ["faction"])
+        ?? publicDtoHandle(fac.id, ["faction"]);
+      if (!factionHandle) {
+        return [];
+      }
+      return [{
+        id: factionHandle,
+        factionHandle,
+        name: fac.name,
+        tags: parseJsonArray(fac.tags),
+        goals: parseJsonArray(fac.goals),
+        assets: parseJsonArray(fac.assets),
+      }];
+    }),
+    items: raw.items.flatMap((item) => {
+      const itemHandle = publicDtoHandle(item.itemHandle, ["item"])
+        ?? publicDtoHandle(item.id, ["item"]);
+      if (!itemHandle) {
+        return [];
+      }
+      const ownerActorHandle = publicDtoHandle(item.ownerActorHandle, ["actor"])
+        ?? publicDtoHandle(item.ownerId, ["actor"]);
+      const placeHandle = publicDtoHandle(item.placeHandle, ["place"])
+        ?? publicDtoHandle(item.locationId, ["place"]);
+      return [{
+        id: itemHandle,
+        itemHandle,
+        name: item.name,
+        tags: parseJsonArray(item.tags),
+        ownerId: ownerActorHandle,
+        ownerActorHandle,
+        locationId: placeHandle,
+        placeHandle,
+      }];
+    }),
+    relationships: raw.relationships.flatMap((rel) => {
+      const relationshipHandle = publicDtoHandle(rel.relationshipHandle, ["relationship"])
+        ?? publicDtoHandle(rel.id, ["relationship"]);
+      if (!relationshipHandle) {
+        return [];
+      }
+      const entityAHandle = publicEntityHandle(rel.entityAHandle, rel.entityA);
+      const entityBHandle = publicEntityHandle(rel.entityBHandle, rel.entityB);
+      return [{
+        id: relationshipHandle,
+        relationshipHandle,
+        entityA: entityAHandle,
+        entityAHandle,
+        entityB: entityBHandle,
+        entityBHandle,
+        tags: parseJsonArray(rel.tags),
+        reason: rel.reason,
+      }];
+    }),
+    player: player && playerActorHandle
       ? {
-          ...raw.player,
-          tags: parseJsonArray(raw.player.tags),
-          equippedItems: parseJsonArray(raw.player.equippedItems),
-          characterRecord: raw.player.characterRecord ?? null,
-          draft: raw.player.draft ?? (raw.player.characterRecord ? characterRecordToDraft(raw.player.characterRecord) : raw.player.character?.draft ?? null),
-          character: raw.player.character ?? (raw.player.draft ? characterDraftToParsedCharacter(raw.player.draft) : raw.player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(raw.player.characterRecord)) : null),
+          id: playerActorHandle,
+          actorHandle: playerActorHandle,
+          name: player.name,
+          race: player.race,
+          gender: player.gender,
+          age: player.age,
+          appearance: player.appearance,
+          hp: player.hp,
+          tags: parseJsonArray(player.tags),
+          equippedItems: parseJsonArray(player.equippedItems),
+          inventory: parseWorldPlayerInventoryItems(player.inventory),
+          equipment: parseWorldPlayerInventoryItems(player.equipment),
+          currentLocationId: playerCurrentPlaceHandle,
+          currentPlaceHandle: playerCurrentPlaceHandle,
+          sceneScopeId: playerSceneHandle,
+          sceneHandle: playerSceneHandle,
+          characterRecord: player.characterRecord ?? null,
+          draft: player.draft ?? (player.characterRecord ? characterRecordToDraft(player.characterRecord) : player.character?.draft ?? null),
+          character: player.character ?? (player.draft ? characterDraftToParsedCharacter(player.draft) : player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(player.characterRecord)) : null),
         }
       : null,
     personaTemplates: raw.personaTemplates ?? [],
@@ -260,6 +772,50 @@ export async function readErrorMessage(response: Response): Promise<string> {
     // Fall back to status text.
   }
   return response.statusText || "Request failed";
+}
+
+/**
+ * Phase 61 — typed error carrying the ingestion pipeline's structured 502 payload.
+ * Backend emits `{ error, stage, attempts }` via `pipelineErrorResponse` in
+ * `backend/src/routes/character.ts` whenever `IngestionPipelineError` is thrown.
+ * Preserving stage+attempts on the frontend lets `PipelineErrorBanner` render a
+ * targeted "Retry {stage}" UI instead of a generic toast.
+ */
+export class IngestionError extends Error {
+  constructor(
+    message: string,
+    public stage?: "extract" | "classify" | "research" | "synthesize" | "power_assess",
+    public attempts?: number,
+  ) {
+    super(message);
+    this.name = "IngestionError";
+  }
+}
+
+/**
+ * Read an error response and return either a typed IngestionError (when the
+ * backend included a `stage` field) or a plain Error with the extracted message.
+ * Falls back to statusText when the body is not JSON.
+ */
+export async function readIngestionError(response: Response): Promise<Error> {
+  try {
+    const payload = (await response.json()) as {
+      error?: string;
+      stage?: string;
+      attempts?: number;
+    };
+    if (payload.stage) {
+      return new IngestionError(
+        payload.error ?? "Request failed",
+        payload.stage as IngestionError["stage"],
+        payload.attempts,
+      );
+    }
+    if (payload.error) return new Error(payload.error);
+  } catch {
+    // Fall through to statusText fallback.
+  }
+  return new Error(response.statusText || "Request failed");
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -289,10 +845,10 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    throw await readIngestionError(res);
   }
   return (await res.json()) as T;
 }
@@ -399,8 +955,16 @@ export function suggestSeeds(
     selectedWorldbooks?: CampaignWorldbookSelection[];
     worldbookEntries?: ClassifiedWorldBookEntry[];
   }
-): Promise<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }> {
-  return apiPost<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }>("/api/worldgen/suggest-seeds", {
+): Promise<WorldSeeds & {
+  _ipContext?: IpResearchContext | null;
+  _premiseDivergence?: PremiseDivergence | null;
+  _researchArtifact?: WorldgenResearchArtifactV2 | null;
+}> {
+  return apiPost<WorldSeeds & {
+    _ipContext?: IpResearchContext | null;
+    _premiseDivergence?: PremiseDivergence | null;
+    _researchArtifact?: WorldgenResearchArtifactV2 | null;
+  }>("/api/worldgen/suggest-seeds", {
     premise,
     name: opts?.name,
     franchise: opts?.franchise,
@@ -410,34 +974,280 @@ export function suggestSeeds(
   });
 }
 
-/** @deprecated Use IpResearchContext from @/lib/types */
-export type IpContext = IpResearchContext;
 export type PremiseDivergenceContext = PremiseDivergence;
 export type WorldbookSelection = CampaignWorldbookSelection;
 
 export function suggestSeed(
   premise: string,
   category: SeedCategory,
-  ipContext?: IpContext | null,
+  ipContext?: IpResearchContext | null,
   premiseDivergence?: PremiseDivergence | null,
+  researchArtifact?: WorldgenResearchArtifactV2 | null,
 ): Promise<RollSeedResult> {
-  return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", {
+  const body: Record<string, unknown> = {
     premise,
     category,
     ipContext: ipContext ?? null,
     premiseDivergence: premiseDivergence ?? null,
-  });
+  };
+  if (researchArtifact) {
+    body.researchArtifact = researchArtifact;
+  }
+  return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", body);
 }
 
 // ───── Turn SSE Parser ─────
 
+export type TurnProgressStageId =
+  | "resolving-action"
+  | "checking-immediate-consequences"
+  | "resolving-nearby-reactions"
+  | "advancing-world-time"
+  | "writing-scene"
+  | "repairing-narration-grounding";
+
+export interface TurnStageStatus {
+  stage?: string;
+  stageId?: TurnProgressStageId | string;
+  phase?: string;
+  opening?: boolean;
+  tick?: number;
+  criticality?: string;
+  criticalPath?: boolean;
+  executed?: number;
+  deferred?: number;
+  worldThreads?: number;
+  resumed?: boolean;
+}
+
 export interface TurnSSEHandlers {
+  onSceneSettling?: (status: TurnStageStatus) => void;
+  onLookupResult?: (result: LookupResultEvent) => void;
   onNarrative: (text: string) => void;
-  onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
+  onReasoning?: (payload: { text: string }) => void;
+  onOracleResult: (result: OracleResultData) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
-  onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
-  onDone: () => void;
+  onQuickActions: (actions: QuickActionChoice[]) => void;
+  onFinalizing?: (status?: TurnStageStatus) => void;
+  onDone: (boundary?: TurnDoneBoundary) => void;
   onError: (error: string) => void;
+}
+
+export interface QuickActionChoice {
+  label: string;
+  action: string;
+  handle: string;
+}
+
+export interface TurnDoneBoundary {
+  tick?: number;
+  worldVersion?: number;
+  worldTimeMinutes?: number;
+  resumed?: boolean;
+}
+
+const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
+const TURN_STREAM_INCOMPLETE_ERROR = "Turn stream ended before completion.";
+const LOOKUP_RESULT_INVALID_ERROR = "Lookup result failed public projection.";
+const QUICK_ACTION_HANDLE_PATTERN = /^qac_[a-f0-9]{32}$/u;
+const LOOKUP_KINDS = new Set<LookupKind>([
+  "world_canon_fact",
+  "character_canon_fact",
+  "power_profile",
+  "event_clarification",
+]);
+const MAX_LOOKUP_SUBJECT_LENGTH = 160;
+const MAX_LOOKUP_ANSWER_LENGTH = 4_000;
+const MAX_LOOKUP_CITATIONS = 5;
+const MAX_LOOKUP_CITATION_LABEL_LENGTH = 120;
+const MAX_LOOKUP_CITATION_EXCERPT_LENGTH = 800;
+const MAX_LOOKUP_NOTES = 5;
+const MAX_LOOKUP_NOTE_LENGTH = 320;
+const MAX_LOOKUP_SCENE_IMPACT_LENGTH = 320;
+const LOOKUP_CITATION_KIND_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
+
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readNumberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readBooleanField(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeTurnStageStatus(value: unknown): TurnStageStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  const status: TurnStageStatus = {};
+  const stage = readStringField(record, "stage");
+  const stageId = readStringField(record, "stageId");
+  const phase = readStringField(record, "phase");
+  const criticality = readStringField(record, "criticality");
+  const opening = readBooleanField(record, "opening");
+  const criticalPath = readBooleanField(record, "criticalPath");
+  const tick = readNumberField(record, "tick");
+  const executed = readNumberField(record, "executed");
+  const deferred = readNumberField(record, "deferred");
+  const worldThreads = readNumberField(record, "worldThreads");
+  const resumed = readBooleanField(record, "resumed");
+
+  if (stage) status.stage = stage;
+  if (stageId) status.stageId = stageId;
+  if (phase) status.phase = phase;
+  if (opening !== undefined) status.opening = opening;
+  if (tick !== undefined) status.tick = tick;
+  if (criticality) status.criticality = criticality;
+  if (criticalPath !== undefined) status.criticalPath = criticalPath;
+  if (executed !== undefined) status.executed = executed;
+  if (deferred !== undefined) status.deferred = deferred;
+  if (worldThreads !== undefined) status.worldThreads = worldThreads;
+  if (resumed !== undefined) status.resumed = resumed;
+  return status;
+}
+
+function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const boundary: TurnDoneBoundary = {};
+  const tick = readNumberField(record, "tick");
+  const worldVersion = readNumberField(record, "worldVersion");
+  const worldTimeMinutes = readNumberField(record, "worldTimeMinutes");
+
+  if (tick !== undefined) boundary.tick = tick;
+  if (worldVersion !== undefined) boundary.worldVersion = worldVersion;
+  if (worldTimeMinutes !== undefined) boundary.worldTimeMinutes = worldTimeMinutes;
+  const resumed = readBooleanField(record, "resumed");
+  if (resumed !== undefined) boundary.resumed = resumed;
+
+  return Object.keys(boundary).length > 0 ? boundary : undefined;
+}
+
+function normalizeLookupText(
+  value: unknown,
+  maxLength: number,
+  options: { preserveWhitespace?: boolean } = {},
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = options.preserveWhitespace
+    ? value
+    : value.replace(/\s+/g, " ").trim();
+  const text = normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`
+    : normalized;
+  return text.trim().length > 0 ? text : undefined;
+}
+
+function normalizeLookupKind(value: unknown): LookupKind | undefined {
+  return typeof value === "string" && LOOKUP_KINDS.has(value as LookupKind)
+    ? value as LookupKind
+    : undefined;
+}
+
+function normalizeLookupCitation(value: unknown): LookupResultEvent["citations"][number] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const label = normalizeLookupText(record.label, MAX_LOOKUP_CITATION_LABEL_LENGTH)
+    ?? "Stored source";
+  const excerpt = normalizeLookupText(
+    record.excerpt,
+    MAX_LOOKUP_CITATION_EXCERPT_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!excerpt) return null;
+  const kind = normalizeLookupText(record.kind, 40);
+  return {
+    ...(kind && LOOKUP_CITATION_KIND_PATTERN.test(kind) ? { kind } : {}),
+    label,
+    excerpt,
+  };
+}
+
+function normalizeLookupResult(value: unknown): LookupResultEvent | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const lookupKind = normalizeLookupKind(record.lookupKind);
+  const subject = normalizeLookupText(record.subject, MAX_LOOKUP_SUBJECT_LENGTH);
+  const answer = normalizeLookupText(
+    record.answer,
+    MAX_LOOKUP_ANSWER_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!lookupKind || !subject || !answer) return null;
+
+  const citations = Array.isArray(record.citations)
+    ? record.citations
+        .flatMap((entry): LookupResultEvent["citations"] => {
+          const citation = normalizeLookupCitation(entry);
+          return citation ? [citation] : [];
+        })
+        .slice(0, MAX_LOOKUP_CITATIONS)
+    : [];
+  const uncertaintyNotes = Array.isArray(record.uncertaintyNotes)
+    ? record.uncertaintyNotes
+        .flatMap((entry): string[] => {
+          const note = normalizeLookupText(entry, MAX_LOOKUP_NOTE_LENGTH);
+          return note ? [note] : [];
+        })
+        .slice(0, MAX_LOOKUP_NOTES)
+    : [];
+
+  return {
+    lookupKind,
+    subject,
+    answer,
+    citations,
+    uncertaintyNotes,
+    sceneImpact:
+      normalizeLookupText(record.sceneImpact, MAX_LOOKUP_SCENE_IMPACT_LENGTH)
+      ?? "Lookup only.",
+  };
+}
+
+function normalizeQuickActions(value: unknown): QuickActionChoice[] {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const source: unknown[] = Array.isArray(record.actions)
+    ? record.actions
+    : (
+      record.result
+      && typeof record.result === "object"
+      && !Array.isArray(record.result)
+      && Array.isArray((record.result as Record<string, unknown>).actions)
+    )
+      ? (record.result as Record<string, unknown>).actions as unknown[]
+      : [];
+
+  return source.flatMap((entry): QuickActionChoice[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const action = entry as Record<string, unknown>;
+    if (typeof action.label !== "string" || typeof action.action !== "string") return [];
+    const label = action.label.trim();
+    const actionText = action.action.trim();
+    const handle = typeof action.handle === "string" ? action.handle.trim() : "";
+    if (!label || !actionText || !QUICK_ACTION_HANDLE_PATTERN.test(handle)) return [];
+    return [{
+      label,
+      action: actionText,
+      handle,
+    }];
+  });
+}
+
+function hasDurableTurnDoneBoundary(boundary: TurnDoneBoundary | undefined): boolean {
+  return boundary?.tick !== undefined
+    && boundary.worldVersion !== undefined
+    && boundary.worldTimeMinutes !== undefined;
 }
 
 export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
@@ -446,6 +1256,85 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
   let buffer = "";
   let currentEvent = "";
   let currentData = "";
+  let hasVisibleNarrative = false;
+  let hasDoneEvent = false;
+  let hasErrorEvent = false;
+  let hasLookupResult = false;
+  let requiresVisibleNarrative = false;
+
+  const dispatchCurrentEvent = () => {
+    if (!currentEvent || !currentData) {
+      currentEvent = "";
+      currentData = "";
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(currentData);
+      switch (currentEvent) {
+        case "scene-settling": handlers.onSceneSettling?.(normalizeTurnStageStatus(parsed)); break;
+        case "lookup_result":
+          {
+            const lookup = normalizeLookupResult(parsed);
+            if (!lookup) {
+              hasErrorEvent = true;
+              handlers.onError(LOOKUP_RESULT_INVALID_ERROR);
+              break;
+            }
+            hasLookupResult = true;
+            handlers.onLookupResult?.(lookup);
+          }
+          break;
+        case "narrative":
+          if (typeof parsed.text === "string" && parsed.text.trim().length > 0) {
+            hasVisibleNarrative = true;
+          }
+          handlers.onNarrative(parsed.text);
+          break;
+        case "reasoning": handlers.onReasoning?.(parsed); break;
+        case "oracle_result":
+          {
+            const oracleResult = normalizeOracleResult(parsed);
+            if (oracleResult) {
+              handlers.onOracleResult(oracleResult);
+            }
+          }
+          break;
+        case "state_update": handlers.onStateUpdate(parsed); break;
+        case "quick_actions": handlers.onQuickActions(normalizeQuickActions(parsed)); break;
+        case "finalizing_turn":
+          requiresVisibleNarrative = true;
+          handlers.onFinalizing?.(normalizeTurnStageStatus(parsed));
+          break;
+        case "done":
+          hasDoneEvent = true;
+          if (requiresVisibleNarrative && !hasVisibleNarrative) {
+            hasErrorEvent = true;
+            handlers.onError(TURN_STREAM_EMPTY_NARRATION_ERROR);
+            break;
+          }
+          {
+            const boundary = normalizeTurnDoneBoundary(parsed);
+            if (!hasLookupResult && hasVisibleNarrative && !hasDurableTurnDoneBoundary(boundary)) {
+              hasErrorEvent = true;
+              handlers.onError("Turn finished without durable boundary metadata. Please refresh before continuing.");
+              break;
+            }
+            handlers.onDone(boundary);
+          }
+          break;
+        case "error":
+          hasErrorEvent = true;
+          handlers.onError(parsed.error ?? "Unknown error");
+          break;
+      }
+    } catch {
+      // Skip malformed events.
+    }
+
+    currentEvent = "";
+    currentData = "";
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -460,23 +1349,25 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
       } else if (line.startsWith("data:")) {
         currentData += line.slice(5).trim();
       } else if (line === "") {
-        if (currentEvent && currentData) {
-          try {
-            const parsed = JSON.parse(currentData);
-            switch (currentEvent) {
-              case "narrative": handlers.onNarrative(parsed.text); break;
-              case "oracle_result": handlers.onOracleResult(parsed); break;
-              case "state_update": handlers.onStateUpdate(parsed); break;
-              case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
-              case "done": handlers.onDone(); break;
-              case "error": handlers.onError(parsed.error ?? "Unknown error"); break;
-            }
-          } catch { /* skip malformed events */ }
-        }
-        currentEvent = "";
-        currentData = "";
+        dispatchCurrentEvent();
       }
     }
+  }
+
+  if (buffer.length > 0) {
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData += line.slice(5).trim();
+      }
+    }
+  }
+
+  dispatchCurrentEvent();
+
+  if (!hasDoneEvent && !hasErrorEvent) {
+    handlers.onError(TURN_STREAM_INCOMPLETE_ERROR);
   }
 }
 
@@ -563,8 +1454,9 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
 export async function generateWorld(
   campaignId: string,
   onProgress?: (progress: GenerationProgress) => void,
-  ipContext?: IpContext | null,
+  ipContext?: IpResearchContext | null,
   premiseDivergence?: PremiseDivergence | null,
+  researchArtifact?: WorldgenResearchArtifactV2 | null,
 ): Promise<GenerateWorldResult> {
   const body: Record<string, unknown> = { campaignId };
   if (ipContext) {
@@ -572,6 +1464,9 @@ export async function generateWorld(
   }
   if (premiseDivergence) {
     body.premiseDivergence = premiseDivergence;
+  }
+  if (researchArtifact) {
+    body.researchArtifact = researchArtifact;
   }
   const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
     method: "POST",
@@ -603,9 +1498,13 @@ export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
   return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
 
-export async function getWorldData(campaignId: string): Promise<WorldData> {
-  const raw = await apiGet<RawWorldData>(`/api/campaigns/${campaignId}/world`);
-  return parseWorldData(raw);
+export async function getWorldData(
+  campaignId: string,
+  options: { projection?: WorldDataProjection } = {},
+): Promise<WorldData> {
+  const query = options.projection === "review" ? "?projection=review" : "";
+  const raw = await apiGet<RawWorldData>(`/api/campaigns/${campaignId}/world${query}`);
+  return parseWorldData(raw, options.projection ?? "gameplay");
 }
 
 // ───── Lore Cards ─────
@@ -701,9 +1600,11 @@ export function parseCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/parse-character", {
     campaignId, concept, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -712,9 +1613,11 @@ export function generateCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/generate-character", {
     campaignId, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -724,9 +1627,11 @@ export function researchCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/research-character", {
     campaignId, archetype, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -738,9 +1643,11 @@ export function importV2Card(
     importMode?: CharacterImportMode;
     locationNames?: string[];
     factionNames?: string[];
+    overrideText?: string;
   },
 ): Promise<CharacterResult> {
   const role = options?.role ?? "player";
+  const overrideText = options?.overrideText;
   return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
     campaignId,
     ...card,
@@ -748,6 +1655,7 @@ export function importV2Card(
     importMode: options?.importMode ?? "native",
     locationNames: options?.locationNames,
     factionNames: options?.factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -827,19 +1735,69 @@ export function getImageUrl(
 
 // ───── Chat Controls (Retry / Undo / Edit) ─────
 
-export function chatRetry(): Promise<Response> {
-  return apiStreamPost("/api/chat/retry", {});
+export function chatHistory(campaignId: string): Promise<ChatHistoryResponse> {
+  return apiGet<ChatHistoryResponse>(
+    `/api/chat/history?campaignId=${encodeURIComponent(campaignId)}`,
+  );
 }
 
-export function chatUndo(): Promise<{ success: boolean; messagesRemoved: number }> {
-  return apiPost<{ success: boolean; messagesRemoved: number }>("/api/chat/undo", {});
+export function chatAction(
+  campaignId: string,
+  playerAction: string,
+  intent: string,
+  method: string,
+  options: { quickActionHandle?: string } = {},
+): Promise<Response> {
+  const body: Record<string, unknown> = {
+    campaignId,
+    playerAction,
+    intent,
+    method,
+  };
+  if (options.quickActionHandle) {
+    body.quickActionHandle = options.quickActionHandle;
+  }
+  return apiStreamPost("/api/chat/action", body);
+}
+
+export function chatLookup(
+  campaignId: string,
+  request: ChatLookupRequest,
+): Promise<Response> {
+  return apiStreamPost("/api/chat/lookup", {
+    campaignId,
+    ...request,
+  });
+}
+
+export function chatOpening(campaignId: string): Promise<Response> {
+  return apiStreamPost("/api/chat/opening", { campaignId });
+}
+
+export function chatRetry(campaignId: string): Promise<Response> {
+  return apiStreamPost("/api/chat/retry", { campaignId });
+}
+
+export function chatResume(campaignId: string, resumeToken: string): Promise<Response> {
+  return apiStreamPost("/api/chat/resume", { campaignId, resumeToken });
+}
+
+export function chatUndo(campaignId: string): Promise<{ ok: boolean; messagesRemoved: number }> {
+  return apiPost<{ ok: boolean; messagesRemoved: number }>("/api/chat/undo", {
+    campaignId,
+  });
 }
 
 export function chatEdit(
+  campaignId: string,
   messageIndex: number,
   newContent: string,
-): Promise<{ success: boolean }> {
-  return apiPost<{ success: boolean }>("/api/chat/edit", { messageIndex, newContent });
+): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>("/api/chat/edit", {
+    campaignId,
+    messageIndex,
+    newContent,
+  });
 }
 
 // ───── Checkpoints ─────
@@ -861,18 +1819,18 @@ export function createCheckpointApi(
 
 export function loadCheckpointApi(
   campaignId: string,
-  checkpointId: string,
+  checkpointHandle: string,
 ): Promise<CheckpointMeta> {
   return apiPost<CheckpointMeta>(
-    `/api/campaigns/${campaignId}/checkpoints/${checkpointId}/load`,
+    `/api/campaigns/${campaignId}/checkpoints/${checkpointHandle}/load`,
   );
 }
 
 export function deleteCheckpointApi(
   campaignId: string,
-  checkpointId: string,
+  checkpointHandle: string,
 ): Promise<void> {
-  return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointId}`);
+  return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointHandle}`);
 }
 
 // ───── WorldBook Import ─────

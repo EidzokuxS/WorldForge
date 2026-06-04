@@ -1,7 +1,16 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type { z } from "zod";
+import type {
+  CharacterDraft,
+  CharacterTier,
+  IpResearchContext,
+  PremiseDivergence,
+  WorldgenResearchArtifactV2,
+  WorldSeeds,
+} from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
+import type { SearchConfig } from "../lib/web-search.js";
 import {
   readCampaignConfig,
   markGenerationComplete,
@@ -9,7 +18,12 @@ import {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchArtifact,
+  loadWorldgenResearchArtifact,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
 } from "../campaign/index.js";
+import { reconcileDraftBackedScaffoldNpc } from "../character/record-adapters.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
@@ -28,8 +42,9 @@ import {
   suggestSingleSeed,
   suggestWorldSeeds,
 } from "../worldgen/index.js";
+import type { WorldScaffold } from "../worldgen/types.js";
+import { buildWorldgenResearchFrame } from "../worldgen/research-frame.js";
 import { parseBody, requireActiveCampaign, requireLoadedCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
-import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("worldgen-route");
@@ -56,8 +71,79 @@ import {
   importWorldbookToLibrary,
 } from "../worldbook-library/index.js";
 import { worldbookLibraryImportSchema } from "./schemas.js";
+import {
+  evaluateResearchArtifactSufficiency,
+  evaluateResearchSufficiency,
+  researchWorldgenArtifact,
+} from "../worldgen/ip-researcher.js";
 
 const app = new Hono();
+
+type SaveEditsScaffold = z.infer<typeof saveEditsSchema>["scaffold"];
+
+function normalizeCharacterTier(tier: string): CharacterTier {
+  switch (tier) {
+    case "temporary":
+    case "persistent":
+    case "key":
+    case "supporting":
+      return tier;
+    default:
+      return "supporting";
+  }
+}
+
+function normalizeSavedScaffold(scaffold: SaveEditsScaffold): WorldScaffold {
+  return {
+    refinedPremise: scaffold.refinedPremise,
+    locations: scaffold.locations.map((location) => ({
+      ...location,
+      tags: [...location.tags],
+      connectedTo: [...location.connectedTo],
+    })),
+    factions: scaffold.factions.map((faction) => ({
+      ...faction,
+      tags: [...faction.tags],
+      goals: [...faction.goals],
+      assets: [...faction.assets],
+      territoryNames: [...faction.territoryNames],
+    })),
+    npcs: scaffold.npcs.map((npc): WorldScaffold["npcs"][number] => {
+      const reconciledDraft = npc.draft
+        ? reconcileDraftBackedScaffoldNpc({
+            ...npc,
+            draft: npc.draft as CharacterDraft,
+          })
+        : undefined;
+
+      return {
+        name: npc.name,
+        persona: npc.persona,
+        tags: [...npc.tags],
+        goals: {
+          shortTerm: [...npc.goals.shortTerm],
+          longTerm: [...npc.goals.longTerm],
+        },
+        locationName: npc.locationName,
+        sceneLocationName: npc.sceneLocationName,
+        factionName: npc.factionName ?? null,
+        tier: npc.tier,
+        draft: reconciledDraft
+          ? ({
+              ...reconciledDraft,
+              identity: {
+                ...reconciledDraft.identity,
+                tier: normalizeCharacterTier(reconciledDraft.identity.tier),
+              },
+            } satisfies CharacterDraft)
+          : undefined,
+      };
+    }),
+    loreCards: scaffold.loreCards.map((card) => ({
+      ...card,
+    })),
+  };
+}
 
 app.get("/debug/progress", (c) => {
   return c.json(listWorldgenOperations());
@@ -79,6 +165,45 @@ async function resolvePremiseDivergence(
     savePremiseDivergence(campaignId, premiseDivergence);
   }
   return premiseDivergence;
+}
+
+function buildResearchSearchConfig(role: ResolvedRole): SearchConfig {
+  const settings = loadSettings();
+  return {
+    provider: settings.research.searchProvider ?? "brave",
+    braveApiKey: settings.research.braveApiKey,
+    zaiApiKey: settings.research.zaiApiKey,
+    llmProvider: role.provider,
+  };
+}
+
+function shouldSaveResearchArtifact(
+  previous: WorldgenResearchArtifactV2 | null,
+  next: WorldgenResearchArtifactV2 | null | undefined,
+): next is WorldgenResearchArtifactV2 {
+  if (!next) return false;
+  return JSON.stringify(previous) !== JSON.stringify(next);
+}
+
+function resolveWorldgenResearchFrame(
+  campaignId: string,
+  ipContext: IpResearchContext | null,
+  premise: string,
+  premiseDivergence: PremiseDivergence | null,
+  seeds?: Partial<WorldSeeds>,
+) {
+  if (!ipContext) {
+    return null;
+  }
+
+  const frame = buildWorldgenResearchFrame({
+    franchise: ipContext.franchise,
+    premise,
+    premiseDivergence,
+    seeds,
+  });
+  saveWorldgenResearchFrame(campaignId, frame);
+  return frame;
 }
 
 app.post("/roll-seeds", async (c) => {
@@ -129,9 +254,12 @@ app.post("/suggest-seeds", async (c) => {
     });
     debugOperation.startHeartbeat(10000);
 
-    // Build knowledge context: reusable worldbook selection, legacy worldbook
-    // entries, or franchise research.
+    // Build knowledge context: reusable worldbook selection and legacy
+    // worldbook entries still produce compatibility ipContext. Automatic
+    // known-IP research now returns a v2 artifact instead of a legacy
+    // franchise-shaped context.
     let ipContext = null;
+    let researchArtifact: WorldgenResearchArtifactV2 | null = null;
     if (result.data.selectedWorldbooks?.length) {
       debugOperation.setLabel("Composing selected worldbooks...");
       const composed = await composeSelectedWorldbooks(result.data.selectedWorldbooks, result.data.premise);
@@ -144,26 +272,36 @@ app.post("/suggest-seeds", async (c) => {
     } else if (result.data.worldbookEntries?.length) {
       debugOperation.setLabel("Converting WorldBook into generation context...");
       ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
-    } else {
+    } else if (result.data.research !== false) {
       const franchiseName = result.data.franchise?.trim();
-      if (franchiseName && result.data.research !== false) {
-        debugOperation.setLabel(`Researching franchise lore for ${franchiseName}...`);
-        const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
-        ipContext = await researchKnownIP(
-          { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
-          gen.resolved,
-        );
+      if (franchiseName) {
+        debugOperation.setLabel(`Researching source artifact for ${franchiseName}...`);
+      } else {
+        debugOperation.setLabel("Interpreting source artifact from premise...");
       }
+      researchArtifact = await researchWorldgenArtifact(
+        { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
+        gen.resolved,
+        settings.research.maxSearchSteps,
+      );
     }
 
-    // If no premise provided but worldbook exists, generate premise from worldbook
-    const premise = result.data.premise?.trim() ||
-      (ipContext ? `A world based on the ${ipContext.franchise} setting` : "An original fantasy world");
+    const explicitPremise = result.data.premise?.trim() ?? "";
+    const premise = explicitPremise ||
+      researchArtifact?.rawPremise.trim() ||
+      (ipContext ? `A world based on the ${ipContext.franchise} setting` : "");
+    if (!premise) {
+      return c.json(
+        { error: "Premise is required when no world knowledge context is available." },
+        400,
+      );
+    }
     debugOperation.setLabel("Generating World DNA suggestions...");
     const { seeds, premiseDivergence } = await suggestWorldSeeds({
       premise,
       role: gen.resolved,
       ipContext,
+      researchArtifact,
     });
 
     debugOperation.finish("completed");
@@ -171,6 +309,7 @@ app.post("/suggest-seeds", async (c) => {
     return c.json({
       ...seeds,
       _ipContext: ipContext,
+      _researchArtifact: researchArtifact,
       _premiseDivergence: premiseDivergence,
     });
   } catch (error) {
@@ -193,12 +332,16 @@ app.post("/suggest-seed", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
+    const researchArtifact = result.data.researchArtifact ?? null;
     const value = await suggestSingleSeed({
       premise,
       category,
       role: gen.resolved,
-      ipContext: result.data.ipContext ?? undefined,
-      premiseDivergence: result.data.premiseDivergence ?? undefined,
+      ipContext: researchArtifact ? undefined : result.data.ipContext ?? undefined,
+      premiseDivergence: researchArtifact
+        ? undefined
+        : result.data.premiseDivergence ?? undefined,
+      researchArtifact: researchArtifact ?? undefined,
     });
     return c.json({ category, value });
   } catch (error) {
@@ -236,14 +379,6 @@ app.post("/generate", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    // Resolve Fallback role for lore extraction retry
-    const fallbackProviderConfig = resolveFallbackProvider(settings.fallback, settings.providers);
-    const fallbackRole = fallbackProviderConfig ? {
-      provider: fallbackProviderConfig,
-      temperature: gen.resolved.temperature,
-      maxTokens: gen.resolved.maxTokens,
-    } : undefined;
-
     return streamSSE(c, async (stream) => {
       const keepaliveTimer = setInterval(() => {
         void stream.writeSSE({
@@ -255,20 +390,33 @@ app.post("/generate", async (c) => {
       }, 10000);
 
       try {
-        // Load cached worldgen context: request body (fresh from wizard) or config cache
-        const bodyIpContext = result.data.ipContext;
-        const bodyPremiseDivergence = result.data.premiseDivergence ?? null;
+        // Load cached worldgen context: request body (fresh from wizard) or config cache.
+        const config = readCampaignConfig(campaignId);
+        let researchArtifact = result.data.researchArtifact ?? null;
+        if (researchArtifact) {
+          saveWorldgenResearchArtifact(campaignId, researchArtifact);
+        }
+        if (!researchArtifact) {
+          researchArtifact = loadWorldgenResearchArtifact(campaignId);
+        }
+
+        const bodyIpContext = researchArtifact ? null : result.data.ipContext;
+        const bodyPremiseDivergence = researchArtifact
+          ? null
+          : result.data.premiseDivergence ?? null;
         if (bodyIpContext) {
           saveIpContext(campaignId, bodyIpContext);
         }
         if (bodyPremiseDivergence) {
           savePremiseDivergence(campaignId, bodyPremiseDivergence);
         }
-        let ipContext = bodyIpContext ?? loadIpContext(campaignId);
-        let premiseDivergence = bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
+        let ipContext = researchArtifact ? null : bodyIpContext ?? loadIpContext(campaignId);
+        let premiseDivergence = researchArtifact
+          ? null
+          : bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
+        let researchFrame = researchArtifact ? null : loadWorldgenResearchFrame(campaignId);
 
-        if (!ipContext) {
-          const config = readCampaignConfig(campaignId);
+        if (!ipContext && !researchArtifact) {
           if (config.worldbookSelection?.length) {
             debugOperation?.setLabel("Composing saved worldbook selection...");
             const composed = await composeSelectedWorldbooks(config.worldbookSelection, campaign.premise);
@@ -285,41 +433,68 @@ app.post("/generate", async (c) => {
           }
         }
 
-        // If no ipContext exists, run research now (user may have skipped DNA step)
-        if (!ipContext) {
-          debugOperation?.setLabel("Researching franchise lore...");
-          const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
-          ipContext = await researchKnownIP(
-            { premise: campaign.premise, name: campaign.name, research: settings.research },
+        // If no cached context exists, run v2 artifact research now. This is
+        // the accepted Phase 71 behavior when the browser does not pass the
+        // suggest-seeds artifact into generate.
+        if (!ipContext && !researchArtifact && config.worldgenResearchEnabled !== false) {
+          debugOperation?.setLabel("Researching source artifact...");
+          researchArtifact = await researchWorldgenArtifact(
+            {
+              premise: campaign.premise,
+              name: campaign.name,
+              knownIP: config.worldgenSourceHint,
+              research: settings.research,
+            },
             gen.resolved,
+            settings.research.maxSearchSteps,
           );
-          if (ipContext) {
-            saveIpContext(campaignId, ipContext);
-            log.info(`Ran research on-demand: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts)`);
+          if (researchArtifact) {
+            ipContext = null;
+            premiseDivergence = null;
+            researchFrame = null;
+            saveWorldgenResearchArtifact(campaignId, researchArtifact);
+            log.info(
+              `Ran v2 research on-demand (${researchArtifact.researchBrief.searchJobs.length} search jobs)`,
+            );
           }
         }
 
         if (ipContext) {
           log.info(`Using IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${bodyIpContext ? "request" : "cache"})`);
         }
-        premiseDivergence = await resolvePremiseDivergence(
-          campaignId,
-          ipContext,
-          campaign.premise,
-          gen.resolved,
-          premiseDivergence,
-        );
+        if (!researchArtifact) {
+          premiseDivergence = await resolvePremiseDivergence(
+            campaignId,
+            ipContext,
+            campaign.premise,
+            gen.resolved,
+            premiseDivergence,
+          );
+          researchFrame = resolveWorldgenResearchFrame(
+            campaignId,
+            ipContext,
+            campaign.premise,
+            premiseDivergence,
+            campaign.seeds,
+          );
+        }
 
-        const { scaffold, enrichedIpContext } = await generateWorldScaffold(
+        const researchArtifactBeforeGeneration = researchArtifact;
+        const {
+          scaffold,
+          enrichedIpContext,
+          researchArtifact: scaffoldResearchArtifact,
+        } = await generateWorldScaffold(
           {
             campaignId,
             name: campaign.name,
             premise: campaign.premise,
             seeds: campaign.seeds,
             role: gen.resolved,
-            fallbackRole,
             ipContext,
             premiseDivergence,
+            researchFrame,
+            researchArtifact,
             research: settings.research,
           },
           async (progress) => {
@@ -330,6 +505,14 @@ app.post("/generate", async (c) => {
             });
           }
         );
+
+        if (shouldSaveResearchArtifact(researchArtifactBeforeGeneration, scaffoldResearchArtifact)) {
+          saveWorldgenResearchArtifact(campaignId, scaffoldResearchArtifact);
+          researchArtifact = scaffoldResearchArtifact;
+          log.info(
+            `Saved enriched v2 research artifact (${researchArtifact.generatedContext.keyFacts.length} facts, ${researchArtifact.searchResults.length} results)`,
+          );
+        }
 
         // Save enriched ipContext back to cache if facts were added
         if (enrichedIpContext && ipContext && enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
@@ -416,15 +599,59 @@ app.post("/regenerate-section", async (c) => {
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
-    // Load cached IP research for section regeneration
-    const ipContext = loadIpContext(campaignId);
-    const premiseDivergence = await resolvePremiseDivergence(
-      campaignId,
-      ipContext,
-      campaign.premise,
-      gen.resolved,
-      loadPremiseDivergence(campaignId),
-    );
+    let researchArtifact = loadWorldgenResearchArtifact(campaignId);
+    // Load legacy IP research only when no v2 artifact owns the route lane.
+    let ipContext: IpResearchContext | null = null;
+    let premiseDivergence: PremiseDivergence | null = null;
+    let researchFrame: ReturnType<typeof resolveWorldgenResearchFrame> = null;
+    if (!researchArtifact) {
+      ipContext = loadIpContext(campaignId);
+      premiseDivergence = await resolvePremiseDivergence(
+        campaignId,
+        ipContext,
+        campaign.premise,
+        gen.resolved,
+        loadPremiseDivergence(campaignId),
+      );
+      researchFrame = resolveWorldgenResearchFrame(
+        campaignId,
+        ipContext,
+        campaign.premise,
+        premiseDivergence,
+        campaign.seeds,
+      );
+    }
+
+    const { section } = result.data;
+    const searchConfig = buildResearchSearchConfig(gen.resolved);
+
+    if (researchArtifact && section !== "premise") {
+      const enrichedArtifact = await evaluateResearchArtifactSufficiency(
+        researchArtifact,
+        section,
+        result.data.refinedPremise,
+        gen.resolved,
+        searchConfig,
+      );
+      if (shouldSaveResearchArtifact(researchArtifact, enrichedArtifact)) {
+        saveWorldgenResearchArtifact(campaignId, enrichedArtifact);
+      }
+      researchArtifact = enrichedArtifact;
+    } else if (ipContext && section !== "premise") {
+      const refinementPremise = result.data.refinedPremise;
+      const enrichedIpContext = await evaluateResearchSufficiency(
+        ipContext,
+        section,
+        refinementPremise,
+        gen.resolved,
+        searchConfig,
+        researchFrame,
+      );
+      if (enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
+        saveIpContext(campaignId, enrichedIpContext);
+      }
+      ipContext = enrichedIpContext;
+    }
 
     const req = {
       campaignId: campaign.id,
@@ -433,9 +660,10 @@ app.post("/regenerate-section", async (c) => {
       seeds: campaign.seeds,
       role: gen.resolved,
       premiseDivergence,
+      researchFrame,
+      researchArtifact,
+      research: settings.research,
     };
-
-    const { section } = result.data;
 
     switch (section) {
       case "premise": {
@@ -451,7 +679,8 @@ app.post("/regenerate-section", async (c) => {
         return c.json({ factions });
       }
       case "npcs": {
-        const npcs = await generateNpcsStep(req, result.data.refinedPremise, result.data.locationNames, result.data.factionNames, ipContext, result.data.additionalInstruction);
+        const npcLocations = result.data.locations ?? result.data.locationNames;
+        const npcs = await generateNpcsStep(req, result.data.refinedPremise, npcLocations, result.data.factionNames, ipContext, result.data.additionalInstruction);
         return c.json({ npcs });
       }
       default:
@@ -470,7 +699,8 @@ app.post("/save-edits", async (c) => {
     const result = await parseBody(c, saveEditsSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, scaffold } = result.data;
+    const { campaignId } = result.data;
+    const scaffold = normalizeSavedScaffold(result.data.scaffold);
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
@@ -485,7 +715,14 @@ app.post("/save-edits", async (c) => {
     const gen = resolveGenerator(settings);
     if ("resolved" in gen) {
       try {
-        const loreCards = await extractLoreCards(scaffold, gen.resolved);
+        const researchArtifact = loadWorldgenResearchArtifact(campaignId) ?? null;
+        const ipContext = researchArtifact ? null : loadIpContext(campaignId);
+        const premiseDivergence = researchArtifact ? null : loadPremiseDivergence(campaignId);
+        const loreCards = await extractLoreCards(scaffold, gen.resolved, {
+          ipContext,
+          premiseDivergence,
+          researchArtifact,
+        });
 
         await storeLoreCards(loreCards, resolveEmbedder(settings));
       } catch (loreError) {

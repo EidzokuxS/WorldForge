@@ -9,18 +9,27 @@ import crypto from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS, type CharacterRecord } from "@worldforge/shared";
 import { getDb } from "../db/index.js";
+import { withSqliteWriteLock } from "../db/sqlite-write-lock.js";
 import {
   players,
   npcs,
   locations,
+  locationEdges,
   items,
   factions,
   relationships,
   chronicle,
 } from "../db/schema.js";
-import { storeEpisodicEvent } from "../vectors/episodic-events.js";
+import {
+  retractStoredEpisodicEvent,
+  storeEpisodicEvent,
+} from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import {
+  accumulateReflectionBudget,
+  retractReflectionBudget,
+} from "./reflection-budget.js";
 import {
   createCharacterRecordFromDraft,
   fromLegacyScaffoldNpc,
@@ -29,19 +38,104 @@ import {
   projectNpcRecord,
   projectPlayerRecord,
 } from "../character/record-adapters.js";
+import {
+  listConnectedPaths,
+  loadLocationGraph,
+  resolveLocationTarget,
+  resolveTravelPath,
+} from "./location-graph.js";
+import {
+  DEFAULT_AUTHORITATIVE_ITEM_STATE,
+  type InventoryEquipState,
+  resolveCharacterTransferState,
+  resolveLocationTransferState,
+} from "../inventory/authority.js";
+import {
+  validateToolInputGrounding,
+  type SpawnNpcLocationRef,
+  type ToolExecutionContext,
+  type ToolGroundingIssue,
+} from "./tool-execution-context.js";
+import {
+  recordActorKnowledge,
+  retractActorKnowledgeRecord,
+  type ActorKnowledgeRoute,
+  type ActorKnowledgeTruthStatus,
+} from "./knowledge-model.js";
+import type { RuntimeToolName } from "./tool-schemas.js";
+import { runtimeToolInputSchemas } from "./runtime-tool-input-schemas.js";
+import {
+  buildRecordPlayerIntentResult,
+  buildStartSearchResult,
+  prepareCreateMinorPoiInput,
+  prepareCreateSceneExtraInput,
+  prepareMoveActorInput,
+  type BridgeStateValidationIssue,
+  type PreparedSceneExtraInput,
+} from "./bridge-state-tools.js";
+import {
+  WorldVersionConflictError,
+  commitAuthorityTrace,
+  readWorldClock,
+  validateBaseWorldVersion,
+} from "./living-world-authority.js";
+import {
+  attachModelVisibleToolResultJson,
+  attachToolResultAuthority,
+  buildValidationFailureToolResult,
+  inferRefsFromToolResultPayload,
+  isObservationToolResult,
+  type ToolContractFailure,
+  type ToolResult,
+} from "./tool-result.js";
+import { assertSimulationProposalExecutionStillClaimed } from "./simulation-proposal-execution.js";
+import {
+  buildCombatEnvelope,
+  buildNarrativeOutcomeBounds,
+  deriveCombatPosture,
+} from "./combat-envelope.js";
+import {
+  findConflictingWriteScope,
+  findUncoveredWriteRef,
+} from "./simulation-write-scope.js";
+import {
+  RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES,
+  RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES,
+} from "./tool-contracts.js";
+import { persistQuickActionOffer } from "./quick-action-offers.js";
+
+export type { ToolResult } from "./tool-result.js";
 
 const log = createLogger("tool-executor");
 
 // -- Types --------------------------------------------------------------------
 
-export interface ToolResult {
-  success: boolean;
-  result?: unknown;
-  error?: string;
-}
-
 type EntityType = "player" | "npc" | "location" | "item" | "faction";
 type CharacterEntityType = "player" | "npc";
+type NpcTier = "temporary" | "persistent" | "key";
+type ToolLocationRow = {
+  id: string;
+  name: string;
+  tags: string;
+  kind?: "macro" | "persistent_sublocation" | "ephemeral_scene" | null;
+  parentLocationId?: string | null;
+  anchorLocationId?: string | null;
+  persistence?: "persistent" | "ephemeral" | null;
+};
+type ResolvedSpawnNpcLocation = {
+  scene: ToolLocationRow;
+  broad: ToolLocationRow;
+};
+type ToolNpcRow = {
+  id: string;
+  name: string;
+  tier: string;
+  currentLocationId: string | null;
+  currentSceneLocationId: string | null;
+  tags?: string | null;
+  persona?: string | null;
+};
+type DurableLogEventVisibility = "player_perceivable" | "local_signal" | "report_only" | "hidden";
 
 const ENTITY_TYPE_TABLE_MAP = {
   player: players,
@@ -50,8 +144,56 @@ const ENTITY_TYPE_TABLE_MAP = {
   item: items,
   faction: factions,
 } as const;
+const NPC_TIER_ORDER: Record<NpcTier, number> = {
+  temporary: 0,
+  persistent: 1,
+  key: 2,
+};
+const AUTHORITY_REQUIRED_TOOLS = new Set<string>(RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES);
+const CANONICAL_WORLD_MUTATION_TOOLS = new Set<string>(RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES);
+const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
+  [...CANONICAL_WORLD_MUTATION_TOOLS].filter((toolName) =>
+    toolName !== "log_event" && toolName !== "record_dialogue_outcome"),
+);
+
+export function toolRequiresExecutionAuthority(toolName: string): boolean {
+  return AUTHORITY_REQUIRED_TOOLS.has(toolName);
+}
+
+export interface ExecuteToolCallOptions {
+  authorityMode?: "strict_authority" | "legacy_unscoped";
+}
 
 // -- Entity resolution --------------------------------------------------------
+
+function typedRefPrefixesForEntityType(entityType: EntityType): string[] {
+  switch (entityType) {
+    case "player":
+      return ["actor:", "player:"];
+    case "npc":
+      return ["actor:", "npc:"];
+    case "location":
+      return ["location:"];
+    case "item":
+      return ["item:"];
+    case "faction":
+      return ["faction:"];
+  }
+}
+
+function refCandidates(value: string, prefixes: readonly string[]): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  const lower = trimmed.toLowerCase();
+  const candidates = [trimmed];
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      const unprefixed = trimmed.slice(prefix.length).trim();
+      if (unprefixed) candidates.push(unprefixed);
+    }
+  }
+  return [...new Set(candidates)];
+}
 
 function resolveEntity(
   campaignId: string,
@@ -62,15 +204,145 @@ function resolveEntity(
   if (!table) return null;
 
   const db = getDb();
+  const candidates = refCandidates(entityName, typedRefPrefixesForEntityType(entityType));
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
   const row = db
     .select({ id: table.id, name: table.name, tags: table.tags })
     .from(table)
     .where(
-      sql`${table.campaignId} = ${campaignId} AND LOWER(${table.name}) = LOWER(${entityName})`
+      sql`${table.campaignId} = ${campaignId} AND (${table.id} = ${primaryRef} OR ${table.id} = ${secondaryRef} OR LOWER(${table.name}) = ${normalizedPrimary} OR LOWER(${table.name}) = ${normalizedSecondary})`
     )
     .get();
 
   return row ?? null;
+}
+
+function loadToolLocationRows(campaignId: string): ToolLocationRow[] {
+  const db = getDb();
+  return db
+    .select({
+      id: locations.id,
+      name: locations.name,
+      tags: locations.tags,
+      kind: locations.kind,
+      parentLocationId: locations.parentLocationId,
+      anchorLocationId: locations.anchorLocationId,
+      persistence: locations.persistence,
+    })
+    .from(locations)
+    .where(eq(locations.campaignId, campaignId))
+    .all();
+}
+
+function normalizeLocationRef(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeEntityName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+const SCENE_EXTRA_REUSE_STOP_WORDS = new Set([
+  "current",
+  "local",
+  "nearby",
+  "night",
+  "plaza",
+  "public",
+  "scene",
+  "extra",
+  "temporary",
+  "support",
+  "role",
+  "salt",
+  "stained",
+  "grey",
+  "gray",
+  "sash",
+  "with",
+]);
+
+function sceneExtraReuseTerms(values: Array<string | null | undefined>): Set<string> {
+  const terms = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeEntityName(value ?? "");
+    if (!normalized) continue;
+    for (const token of normalized.split(/[^a-z0-9]+/)) {
+      if (token.length < 4) continue;
+      if (SCENE_EXTRA_REUSE_STOP_WORDS.has(token)) continue;
+      terms.add(token);
+    }
+  }
+  return terms;
+}
+
+function termsOverlap(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
+  let count = 0;
+  for (const term of left) {
+    if (right.has(term)) count += 1;
+  }
+  return count;
+}
+
+function resolveToolLocationById(campaignId: string, locationId: string): ToolLocationRow | null {
+  const candidates = refCandidates(locationId, ["location:"]);
+  return loadToolLocationRows(campaignId).find((location) => candidates.includes(location.id)) ?? null;
+}
+
+function resolveToolLocationByNameOrId(
+  campaignId: string,
+  locationRef: string,
+): ToolLocationRow | null {
+  const candidates = refCandidates(locationRef, ["location:"]);
+  const normalizedRefs = candidates.map(normalizeLocationRef);
+  return (
+    loadToolLocationRows(campaignId).find(
+      (location) =>
+        candidates.includes(location.id) ||
+        normalizedRefs.includes(normalizeLocationRef(location.name)),
+    ) ?? null
+  );
+}
+
+function resolveContextLocationRef(
+  locationRef: string,
+  executionContext?: ToolExecutionContext,
+): string | null {
+  if (!executionContext) return null;
+  const normalizedRef = normalizeLocationRef(locationRef);
+  if (
+    executionContext.currentSceneScopeId &&
+    (normalizedRef === "current_scene" || executionContext.currentSceneRefs.has(normalizedRef))
+  ) {
+    return executionContext.currentSceneScopeId;
+  }
+  if (
+    executionContext.currentLocationId &&
+    (normalizedRef === "current_location" || executionContext.currentLocationRefs.has(normalizedRef))
+  ) {
+    return executionContext.currentLocationId;
+  }
+  return null;
+}
+
+function resolveBroadLocationForScene(
+  campaignId: string,
+  sceneLocation: ToolLocationRow,
+  executionContext?: ToolExecutionContext,
+): ToolLocationRow {
+  if ((sceneLocation.kind ?? "macro") === "macro") {
+    return sceneLocation;
+  }
+
+  const broadLocationId =
+    sceneLocation.parentLocationId ??
+    executionContext?.currentLocationId ??
+    sceneLocation.anchorLocationId ??
+    sceneLocation.id;
+  return resolveToolLocationById(campaignId, broadLocationId) ?? sceneLocation;
 }
 
 /**
@@ -83,13 +355,25 @@ function resolveEntityIdByName(
 ): string | null {
   const db = getDb();
   const tables = [players, npcs, locations, factions, items] as const;
+  const candidates = refCandidates(entityName, [
+    "actor:",
+    "player:",
+    "npc:",
+    "location:",
+    "faction:",
+    "item:",
+  ]);
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   for (const table of tables) {
     const row = db
       .select({ id: table.id })
       .from(table)
       .where(
-        sql`${table.campaignId} = ${campaignId} AND LOWER(${table.name}) = LOWER(${entityName})`
+        sql`${table.campaignId} = ${campaignId} AND (${table.id} = ${primaryRef} OR ${table.id} = ${secondaryRef} OR LOWER(${table.name}) = ${normalizedPrimary} OR LOWER(${table.name}) = ${normalizedSecondary})`
       )
       .get();
 
@@ -210,8 +494,8 @@ function removeCompatibilityTagFromRecord(record: CharacterRecord, tag: string):
             (entry) => entry.name.toLowerCase() !== skill.name.toLowerCase(),
           )
         : record.capabilities.skills,
-      traits: removeInsensitive(record.capabilities.traits, trimmed),
-      flaws: removeInsensitive(record.capabilities.flaws, trimmed),
+      traits: removeInsensitive(record.capabilities.traits ?? [], trimmed),
+      flaws: removeInsensitive(record.capabilities.flaws ?? [], trimmed),
     },
     state: {
       ...record.state,
@@ -236,13 +520,18 @@ function resolveCharacterRecordByName(
   entityType: CharacterEntityType,
 ) {
   const db = getDb();
+  const candidates = refCandidates(entityName, typedRefPrefixesForEntityType(entityType));
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   if (entityType === "player") {
     const row = db
       .select()
       .from(players)
       .where(
-        sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${entityName})`
+        sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`
       )
       .get();
 
@@ -259,7 +548,7 @@ function resolveCharacterRecordByName(
     .select()
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${entityName})`
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -299,13 +588,18 @@ function resolveCharacterByName(
   name: string
 ): { id: string; name: string; table: "players" | "npcs"; hp?: number } | null {
   const db = getDb();
+  const candidates = refCandidates(name, ["actor:", "player:", "npc:"]);
+  const primaryRef = candidates[0] ?? name;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   // Search players first
   const player = db
     .select({ id: players.id, name: players.name, hp: players.hp })
     .from(players)
     .where(
-      sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${name})`
+      sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -316,13 +610,104 @@ function resolveCharacterByName(
     .select({ id: npcs.id, name: npcs.name })
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${name})`
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
     )
     .get();
 
   if (npc) return { id: npc.id, name: npc.name, table: "npcs" };
 
   return null;
+}
+
+function resolveCharacterRecordByRef(
+  campaignId: string,
+  ref: string,
+) {
+  const candidates = refCandidates(ref, ["actor:", "player:", "npc:"]);
+  const primaryRef = candidates[0] ?? ref;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
+  const db = getDb();
+
+  const player = db
+    .select()
+    .from(players)
+    .where(
+      sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`,
+    )
+    .get();
+
+  if (player) {
+    return {
+      id: player.id,
+      name: player.name,
+      type: "player" as const,
+      record: hydrateStoredPlayerRecord(player),
+    };
+  }
+
+  const npc = db
+    .select()
+    .from(npcs)
+    .where(
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`,
+    )
+    .get();
+
+  if (!npc) return null;
+  return {
+    id: npc.id,
+    name: npc.name,
+    type: "npc" as const,
+    record: hydrateStoredNpcRecord(npc),
+  };
+}
+
+function resolveItemByNameOrRef(
+  campaignId: string,
+  itemRef: string,
+): {
+  id: string;
+  campaignId: string;
+  name: string;
+  tags: string;
+  ownerId: string | null;
+  locationId: string | null;
+  equipState: InventoryEquipState;
+  equippedSlot: string | null;
+  isSignature: boolean;
+} | null {
+  const candidates = refCandidates(itemRef, ["item:"]);
+  const primaryRef = candidates[0] ?? itemRef;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
+  const db = getDb();
+
+  return db
+    .select({
+      id: items.id,
+      campaignId: items.campaignId,
+      name: items.name,
+      tags: items.tags,
+      ownerId: items.ownerId,
+      locationId: items.locationId,
+      equipState: items.equipState,
+      equippedSlot: items.equippedSlot,
+      isSignature: items.isSignature,
+    })
+    .from(items)
+    .where(
+      sql`${items.campaignId} = ${campaignId} AND (${items.id} = ${primaryRef} OR ${items.id} = ${secondaryRef} OR LOWER(${items.name}) = ${normalizedPrimary} OR LOWER(${items.name}) = ${normalizedSecondary})`
+    )
+    .get() ?? null;
+}
+
+function normalizeNpcTier(value: unknown): NpcTier | null {
+  return value === "temporary" || value === "persistent" || value === "key"
+    ? value
+    : null;
 }
 
 // -- Tool handlers ------------------------------------------------------------
@@ -353,12 +738,25 @@ function handleAddTag(
     persistCharacterRecord(character);
     const tags =
       character.type === "player"
-        ? JSON.parse(projectPlayerRecord(character.record).tags) as string[]
-        : JSON.parse(projectNpcRecord(character.record).tags) as string[];
+        ? parseTags(projectPlayerRecord(character.record).tags)
+        : parseTags(projectNpcRecord(character.record).tags);
+
+    log.event("db.write", {
+      table: character.type === "player" ? "players" : "npcs",
+      op: "update",
+      rowId: character.id,
+      rowName: character.name,
+    });
 
     return {
       success: true,
-      result: { entity: character.name, tags },
+      result: {
+        entity: character.name,
+        entityId: character.id,
+        entityType: character.type,
+        appliedTag: tag,
+        tags,
+      },
     };
   }
 
@@ -380,10 +778,23 @@ function handleAddTag(
     .set({ tags: JSON.stringify(currentTags) })
     .where(eq(table.id, entity.id))
     .run();
+  log.event("db.write", {
+    table: "dynamic",
+    subTable: entityType,
+    op: "update",
+    rowId: entity.id,
+    rowName: entity.name,
+  });
 
   return {
     success: true,
-    result: { entity: entity.name, tags: currentTags },
+    result: {
+      entity: entity.name,
+      entityId: entity.id,
+      entityType,
+      appliedTag: tag,
+      tags: currentTags,
+    },
   };
 }
 
@@ -419,12 +830,25 @@ function handleRemoveTag(
     persistCharacterRecord(character);
     const tags =
       character.type === "player"
-        ? JSON.parse(projectPlayerRecord(character.record).tags) as string[]
-        : JSON.parse(projectNpcRecord(character.record).tags) as string[];
+        ? parseTags(projectPlayerRecord(character.record).tags)
+        : parseTags(projectNpcRecord(character.record).tags);
+
+    log.event("db.write", {
+      table: character.type === "player" ? "players" : "npcs",
+      op: "update",
+      rowId: character.id,
+      rowName: character.name,
+    });
 
     return {
       success: true,
-      result: { entity: character.name, tags },
+      result: {
+        entity: character.name,
+        entityId: character.id,
+        entityType: character.type,
+        removedTag: tag,
+        tags,
+      },
     };
   }
 
@@ -448,10 +872,23 @@ function handleRemoveTag(
     .set({ tags: JSON.stringify(currentTags) })
     .where(eq(table.id, entity.id))
     .run();
+  log.event("db.write", {
+    table: "dynamic",
+    subTable: entityType,
+    op: "update",
+    rowId: entity.id,
+    rowName: entity.name,
+  });
 
   return {
     success: true,
-    result: { entity: entity.name, tags: currentTags },
+    result: {
+      entity: entity.name,
+      entityId: entity.id,
+      entityType,
+      removedTag: tag,
+      tags: currentTags,
+    },
   };
 }
 
@@ -495,6 +932,12 @@ function handleSetRelationship(
       },
     })
     .run();
+  log.event("db.write", {
+    table: "relationships",
+    op: "insert",
+    rowId: id,
+    rowName: `${entityAName}<->${entityBName}`,
+  });
 
   return {
     success: true,
@@ -525,6 +968,12 @@ function handleAddChronicleEntry(
       createdAt: Date.now(),
     })
     .run();
+  log.event("db.write", {
+    table: "chronicle",
+    op: "insert",
+    rowId: id,
+    rowName: null,
+  });
 
   return {
     success: true,
@@ -535,27 +984,98 @@ function handleAddChronicleEntry(
 async function handleLogEvent(
   campaignId: string,
   args: Record<string, unknown>,
-  tick: number
+  tick: number,
+  executionContext?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const text = args.text as string;
   const importance = args.importance as number;
   const participants = args.participants as string[];
+  const durability = args.durability === "durable" ? "durable" : "scene_local";
+  const futureRelevance =
+    typeof args.futureRelevance === "string" ? args.futureRelevance.trim() : "";
+  const visibility: DurableLogEventVisibility =
+    executionContext?.scope === "actor_turn" ? "hidden" : "player_perceivable";
+  const surfaceRoute =
+    executionContext?.scope === "actor_turn" ? "actor_private_log_event" : "log_event";
+  const knowledgeRoute =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? `actor:${executionContext.subjectActorId}`
+      : null;
+  const hiddenCauseTerms =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? [executionContext.subjectActorId]
+      : [];
 
+  if (durability !== "durable") {
+    return {
+      success: true,
+      result: {
+        durability: "scene_local",
+        persisted: false,
+      },
+    };
+  }
+
+  if (!futureRelevance) {
+    return {
+      success: false,
+      error: "futureRelevance is required when log_event durability is durable",
+    };
+  }
+
+  const db = getDb();
+  const player = db
+    .select({ currentLocationId: players.currentLocationId })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const playerLocation = player?.currentLocationId
+    ? db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, player.currentLocationId))
+        .get()
+    : null;
+
+  let eventId: string | null = null;
   try {
-    const eventId = await storeEpisodicEvent(campaignId, {
+    eventId = await storeEpisodicEvent(campaignId, {
       text,
       tick,
-      location: "",
+      location: playerLocation?.name ?? "",
       participants,
       importance,
       type: "event",
+      visibility,
+      surfaceRoute,
+      knowledgeRoute,
+      hiddenCauseTerms,
     });
+    await accumulateReflectionBudget(campaignId, participants, importance);
 
     return {
       success: true,
-      result: { eventId },
+      result: {
+        eventId,
+        durability: "durable",
+        persisted: true,
+        visibility,
+        surfaceRoute,
+        knowledgeRoute,
+      },
     };
   } catch (error) {
+    if (eventId) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName: "log_event",
+        args,
+        result: {
+          success: true,
+          result: { eventId },
+        },
+      });
+    }
     log.warn("Failed to store episodic event", error);
     return {
       success: false,
@@ -564,19 +1084,765 @@ async function handleLogEvent(
   }
 }
 
+function readToolString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readToolStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+}
+
+function uniqueToolStrings(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
+  const speakerRef = readToolString(args.speakerRef);
+  const requestedRoleText = readToolString(args.requestedRoleText);
+  const outcomeKind = readToolString(args.outcomeKind) ?? "unknown";
+  const topicKind = readToolString(args.topicKind) ?? "other";
+  const authorityKind = readToolString(args.authorityKind) ?? "unknown";
+  const truthStatus = readToolString(args.truthStatus) ?? "unconfirmed";
+  const summary = readToolString(args.summary) ?? "Dialogue outcome recorded.";
+  const quote = readToolString(args.quote);
+  const futureUseKind = readToolString(args.futureUseKind);
+  const futureRelevance = readToolString(args.futureRelevance);
+  const claims = Array.isArray(args.claims)
+    ? args.claims
+        .filter((claim): claim is Record<string, unknown> =>
+          Boolean(claim) && typeof claim === "object" && !Array.isArray(claim))
+        .map((claim) => {
+          const claimKind = readToolString(claim.claimKind) ?? "other";
+          const polarity = readToolString(claim.polarity) ?? "states";
+          const claimSummary = readToolString(claim.summary) ?? "";
+          return `${claimKind}/${polarity}: ${claimSummary}`;
+        })
+        .filter(Boolean)
+    : [];
+  const stateEffects = Array.isArray(args.stateEffects)
+    ? args.stateEffects
+        .filter((effect): effect is Record<string, unknown> =>
+          Boolean(effect) && typeof effect === "object" && !Array.isArray(effect))
+        .map((effect) => {
+          const status = readToolString(effect.status) ?? "unknown";
+          const structuralTool = readToolString(effect.structuralTool);
+          const targetRef = readToolString(effect.targetRef);
+          const stateKey = readToolString(effect.stateKey);
+          const stateValue = readToolString(effect.stateValue);
+          return [
+            status,
+            structuralTool ? `tool=${structuralTool}` : null,
+            targetRef ? `target=${targetRef}` : null,
+            stateKey ? `key=${stateKey}` : null,
+            stateValue ? `value=${stateValue}` : null,
+          ].filter((part): part is string => Boolean(part)).join("/");
+        })
+        .filter(Boolean)
+    : [];
+
+  return [
+    `Dialogue outcome ${outcomeKind} on ${topicKind}.`,
+    speakerRef ? `Speaker: ${speakerRef}.` : null,
+    requestedRoleText ? `Requested role: ${requestedRoleText}.` : null,
+    `Authority: ${authorityKind}; truth: ${truthStatus}.`,
+    `Summary: ${summary}`,
+    quote ? `Quote: ${quote}` : null,
+    claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
+    stateEffects.length > 0 ? `State effects: ${stateEffects.join(" | ")}` : null,
+    futureUseKind ? `Future use: ${futureUseKind}.` : null,
+    futureRelevance ? `Future relevance: ${futureRelevance}` : null,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+}
+
+async function handleRecordDialogueOutcome(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): Promise<ToolResult> {
+  const durability = args.durability === "durable" ? "durable" : "scene_local";
+  const text = canonicalDialogueOutcomeText(args);
+  const speakerRef = readToolString(args.speakerRef);
+  const addresseeRefs = readToolStringArray(args.addresseeRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const stateEffects = Array.isArray(args.stateEffects) ? args.stateEffects : [];
+  const participants = uniqueToolStrings([
+    speakerRef,
+    ...addresseeRefs,
+    ...sourceRefs,
+  ]);
+  const baseResult = {
+    text,
+    outcomeKind: readToolString(args.outcomeKind),
+    topicKind: readToolString(args.topicKind),
+    authorityKind: readToolString(args.authorityKind),
+    truthStatus: readToolString(args.truthStatus),
+    speakerRef,
+    addresseeRefs,
+    requestedRoleText: readToolString(args.requestedRoleText),
+    futureUseKind: readToolString(args.futureUseKind),
+    futureRelevance: readToolString(args.futureRelevance),
+    quote: readToolString(args.quote),
+    summary: readToolString(args.summary),
+    claims,
+    stateEffects,
+    sourceRefs,
+    durability,
+  };
+
+  if (durability !== "durable") {
+    return {
+      success: true,
+      result: {
+        ...baseResult,
+        persisted: false,
+      },
+    };
+  }
+
+  const futureRelevance = readToolString(args.futureRelevance);
+  if (!futureRelevance) {
+    return {
+      success: false,
+      error: "futureRelevance is required when record_dialogue_outcome durability is durable",
+    };
+  }
+
+  const db = getDb();
+  const player = db
+    .select({ currentLocationId: players.currentLocationId })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const playerLocation = player?.currentLocationId
+    ? db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, player.currentLocationId))
+        .get()
+    : null;
+  const visibility: DurableLogEventVisibility =
+    executionContext?.scope === "actor_turn" ? "hidden" : "player_perceivable";
+  const surfaceRoute =
+    executionContext?.scope === "actor_turn"
+      ? "actor_private_dialogue_outcome"
+      : "dialogue_outcome";
+  const knowledgeRoute =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? `actor:${executionContext.subjectActorId}`
+      : null;
+  const hiddenCauseTerms =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? [executionContext.subjectActorId]
+      : [];
+
+  let eventId: string | null = null;
+  let knowledgeId: string | null = null;
+  try {
+    eventId = await storeEpisodicEvent(campaignId, {
+      text,
+      tick,
+      location: playerLocation?.name ?? "",
+      participants,
+      importance: 5,
+      type: "dialogue",
+      visibility,
+      surfaceRoute,
+      knowledgeRoute,
+      hiddenCauseTerms,
+    });
+    const knowledgeRecord = recordDialogueOutcomeKnowledge({
+      campaignId,
+      actorId: executionContext?.subjectActorId,
+      args,
+      eventId,
+      statement: text,
+    });
+    knowledgeId = knowledgeRecord?.id ?? null;
+    await accumulateReflectionBudget(campaignId, participants, 5);
+
+    return {
+      success: true,
+      result: {
+        ...baseResult,
+        eventId,
+        knowledgeId: knowledgeId ?? undefined,
+        factRef: knowledgeId ? `knowledge:${knowledgeId}` : undefined,
+        persisted: true,
+        visibility,
+        surfaceRoute,
+        knowledgeRoute,
+      },
+    };
+  } catch (error) {
+    if (knowledgeId) {
+      retractActorKnowledgeRecord({
+        campaignId,
+        knowledgeId,
+        reason: "failed_dialogue_outcome_commit",
+      });
+    }
+    if (eventId) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName: "record_dialogue_outcome",
+        args,
+        result: {
+          success: true,
+          result: { eventId },
+        },
+      });
+    }
+    log.warn("Failed to store dialogue outcome event", error);
+    return {
+      success: false,
+      error: `Failed to store dialogue outcome event: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function mapDialogueKnowledgeRoute(
+  authorityKind: string | null,
+  outcomeKind: string | null,
+): ActorKnowledgeRoute {
+  switch (outcomeKind) {
+    case "silent":
+    case "gestured":
+    case "no_current_answer":
+      return "memory";
+    default:
+      break;
+  }
+
+  switch (authorityKind) {
+    case "role_authority":
+    case "public_service":
+      return "report_message";
+    case "hearsay":
+      return "rumor";
+    case "no_visible_authority":
+      return "memory";
+    case "witness":
+    case "not_authorized":
+    case "unknown":
+    default:
+      return "claim";
+  }
+}
+
+function mapDialogueKnowledgeTruthStatus(
+  truthStatus: string | null,
+): ActorKnowledgeTruthStatus {
+  switch (truthStatus) {
+    case "settled_by_backend":
+      return "verified";
+    case "speaker_asserted":
+      return "claimed";
+    case "contested":
+    case "conflicting":
+      return "disputed";
+    case "unconfirmed":
+    default:
+      return "reported";
+  }
+}
+
+function dialogueKnowledgeConfidence(
+  truthStatus: string | null,
+  authorityKind: string | null,
+): number {
+  switch (truthStatus) {
+    case "settled_by_backend":
+      return 85;
+    case "speaker_asserted":
+      return authorityKind === "role_authority" || authorityKind === "public_service" ? 70 : 55;
+    case "unconfirmed":
+      return 45;
+    case "contested":
+    case "conflicting":
+      return 35;
+    default:
+      return 50;
+  }
+}
+
+function sourceKnowledgeIdsFromRefs(sourceRefs: readonly string[]): string[] {
+  return sourceRefs.flatMap((ref) => {
+    const trimmed = ref.trim();
+    const prefix = "knowledge:";
+    if (!trimmed.toLowerCase().startsWith(prefix)) return [];
+    const id = trimmed.slice(prefix.length).trim();
+    return id ? [id] : [];
+  });
+}
+
+function dialogueKnowledgeSubjectRefs(args: Record<string, unknown>): string[] {
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const values: string[] = uniqueToolStrings([
+    readToolString(args.speakerRef),
+    readToolString(args.requestedRoleText),
+    readToolString(args.topicKind),
+    readToolString(args.futureUseKind),
+    ...readToolStringArray(args.sourceRefs),
+  ]);
+
+  for (const claim of claims) {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+    values.push(...uniqueToolStrings([
+      readToolString((claim as Record<string, unknown>).claimKind),
+      readToolString((claim as Record<string, unknown>).subjectRef),
+      readToolString((claim as Record<string, unknown>).subjectText),
+    ]));
+  }
+
+  return uniqueToolStrings(values);
+}
+
+function recordDialogueOutcomeKnowledge(input: {
+  campaignId: string;
+  actorId?: string | null;
+  args: Record<string, unknown>;
+  eventId: string;
+  statement: string;
+}) {
+  if (!input.actorId) return null;
+
+  const authorityKind = readToolString(input.args.authorityKind);
+  const truthStatus = readToolString(input.args.truthStatus);
+  const sourceRefs = readToolStringArray(input.args.sourceRefs);
+  const confidence = dialogueKnowledgeConfidence(truthStatus, authorityKind);
+  return recordActorKnowledge({
+    campaignId: input.campaignId,
+    actorId: input.actorId,
+    route: mapDialogueKnowledgeRoute(
+      authorityKind,
+      readToolString(input.args.outcomeKind),
+    ),
+    truthStatus: mapDialogueKnowledgeTruthStatus(truthStatus),
+    statement: input.statement,
+    subjectRefs: dialogueKnowledgeSubjectRefs(input.args),
+    sourceEventIds: [input.eventId],
+    sourceKnowledgeIds: sourceKnowledgeIdsFromRefs(sourceRefs),
+    confidence,
+    reliability: confidence,
+    privacy: "private",
+    metadata: {
+      toolName: "record_dialogue_outcome",
+      eventId: input.eventId,
+      outcomeKind: readToolString(input.args.outcomeKind),
+      topicKind: readToolString(input.args.topicKind),
+      authorityKind,
+      truthStatus,
+      futureUseKind: readToolString(input.args.futureUseKind),
+      futureRelevance: readToolString(input.args.futureRelevance),
+      quote: readToolString(input.args.quote),
+      summary: readToolString(input.args.summary),
+      claims: Array.isArray(input.args.claims) ? input.args.claims : [],
+      stateEffects: Array.isArray(input.args.stateEffects) ? input.args.stateEffects : [],
+      sourceRefs,
+    },
+  });
+}
+
+function mapWorldFactRoute(sourceKind: string | null): ActorKnowledgeRoute {
+  switch (sourceKind) {
+    case "direct_observation":
+      return "direct_observation";
+    case "public_record":
+      return "public_record";
+    case "report_message":
+      return "report_message";
+    case "rumor":
+      return "rumor";
+    case "claim":
+      return "claim";
+    case "memory":
+      return "memory";
+    case "comparison":
+    case "other":
+    default:
+      return "belief";
+  }
+}
+
+function mapWorldFactTruthStatus(truthStatus: string | null): ActorKnowledgeTruthStatus {
+  switch (truthStatus) {
+    case "observed":
+      return "observed";
+    case "verified":
+      return "verified";
+    case "reported":
+      return "reported";
+    case "rumored":
+      return "rumored";
+    case "claimed":
+      return "claimed";
+    case "disputed":
+      return "disputed";
+    case "believed":
+    case "unknown":
+    default:
+      return "believed";
+  }
+}
+
+function worldFactConfidence(truthStatus: string | null): number {
+  switch (truthStatus) {
+    case "verified":
+    case "observed":
+      return 80;
+    case "reported":
+      return 65;
+    case "claimed":
+    case "believed":
+      return 55;
+    case "rumored":
+      return 40;
+    case "disputed":
+    case "unknown":
+      return 35;
+    default:
+      return 50;
+  }
+}
+
+function isLikelyEventSourceRef(ref: string): boolean {
+  return /event|chronicle|tool-result|tool:/i.test(ref);
+}
+
+function canonicalWorldFactText(args: Record<string, unknown>): string {
+  const sourceKind = readToolString(args.sourceKind) ?? "other";
+  const truthStatus = readToolString(args.truthStatus) ?? "believed";
+  const factKind = readToolString(args.factKind) ?? "other";
+  const topicKind = readToolString(args.topicKind) ?? "other";
+  const summary = readToolString(args.summary) ?? "World fact recorded.";
+  const futureUseKind = readToolString(args.futureUseKind);
+  const futureRelevance = readToolString(args.futureRelevance);
+  const subjectRefs = readToolStringArray(args.subjectRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims)
+    ? args.claims
+        .filter((claim): claim is Record<string, unknown> =>
+          Boolean(claim) && typeof claim === "object" && !Array.isArray(claim))
+        .map((claim) => {
+          const claimKind = readToolString(claim.claimKind) ?? "other";
+          const polarity = readToolString(claim.polarity) ?? "states";
+          const claimSummary = readToolString(claim.summary) ?? "";
+          return `${claimKind}/${polarity}: ${claimSummary}`;
+        })
+        .filter(Boolean)
+    : [];
+
+  return [
+    `World fact ${factKind} on ${topicKind}.`,
+    `Source: ${sourceKind}; truth: ${truthStatus}.`,
+    subjectRefs.length > 0 ? `Subjects: ${subjectRefs.join(", ")}.` : null,
+    sourceRefs.length > 0 ? "Source refs are preserved internally." : null,
+    `Summary: ${summary}`,
+    claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
+    futureUseKind ? `Future use: ${futureUseKind}.` : null,
+    futureRelevance ? `Future relevance: ${futureRelevance}` : null,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function handleRecordWorldFact(
+  campaignId: string,
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const actorId = executionContext?.subjectActorId;
+  if (!actorId) {
+    return {
+      success: false,
+      error: "record_world_fact requires a subject actor in the execution context",
+    };
+  }
+
+  const futureRelevance = readToolString(args.futureRelevance);
+  if (!futureRelevance) {
+    return {
+      success: false,
+      error: "futureRelevance is required when record_world_fact durability is durable",
+    };
+  }
+
+  const sourceKind = readToolString(args.sourceKind);
+  const truthStatus = readToolString(args.truthStatus);
+  const subjectRefs = readToolStringArray(args.subjectRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const statement = canonicalWorldFactText(args);
+
+  try {
+    const record = recordActorKnowledge({
+      campaignId,
+      actorId,
+      route: mapWorldFactRoute(sourceKind),
+      truthStatus: mapWorldFactTruthStatus(truthStatus),
+      statement,
+      subjectRefs,
+      sourceKnowledgeIds: sourceRefs
+        .filter((ref) => ref.startsWith("knowledge:"))
+        .map((ref) => ref.slice("knowledge:".length)),
+      sourceEventIds: sourceRefs.filter((ref) =>
+        !ref.startsWith("knowledge:") && isLikelyEventSourceRef(ref)),
+      confidence: worldFactConfidence(truthStatus),
+      reliability: worldFactConfidence(truthStatus),
+      privacy: "private",
+      metadata: {
+        toolName: "record_world_fact",
+        sourceKind,
+        truthStatus,
+        factKind: readToolString(args.factKind),
+        topicKind: readToolString(args.topicKind),
+        futureUseKind: readToolString(args.futureUseKind),
+        futureRelevance,
+        claims,
+        sourceRefs,
+      },
+    });
+
+    return {
+      success: true,
+      result: {
+        knowledgeId: record.id,
+        factRef: `knowledge:${record.id}`,
+        statement: record.statement,
+        sourceKind,
+        truthStatus,
+        factKind: readToolString(args.factKind),
+        topicKind: readToolString(args.topicKind),
+        futureUseKind: readToolString(args.futureUseKind),
+        futureRelevance,
+        summary: readToolString(args.summary),
+        claims,
+        subjectRefs,
+        sourceRefs,
+        durability: "durable",
+        persisted: true,
+      },
+    };
+  } catch (error) {
+    log.warn("Failed to record world fact", error);
+    return {
+      success: false,
+      error: `Failed to record world fact: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 // -- New tool handlers --------------------------------------------------------
+
+function resolveSpawnNpcLocation(
+  campaignId: string,
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ResolvedSpawnNpcLocation | null {
+  const locationRef = args.locationRef as SpawnNpcLocationRef | undefined;
+  const locationId = args.locationId as string | undefined;
+  const locationName = args.locationName as string | undefined;
+  let scene: ToolLocationRow | null = null;
+
+  if (locationRef) {
+    const refLocationId = locationRef === "current_scene"
+      ? executionContext?.currentSceneScopeId
+      : executionContext?.currentLocationId;
+    scene = refLocationId ? resolveToolLocationById(campaignId, refLocationId) : null;
+  } else if (locationId) {
+    scene = resolveToolLocationById(campaignId, locationId);
+  } else if (locationName) {
+    scene = resolveToolLocationByNameOrId(campaignId, locationName);
+  }
+
+  if (!scene) return null;
+
+  return {
+    scene,
+    broad: resolveBroadLocationForScene(campaignId, scene, executionContext),
+  };
+}
+
+function isNpcInResolvedLocalScope(
+  npc: Pick<ToolNpcRow, "currentLocationId" | "currentSceneLocationId">,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): boolean {
+  return npc.currentSceneLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.broad.id;
+}
+
+function isNpcInResolvedImmediateSceneScope(
+  npc: Pick<ToolNpcRow, "currentLocationId" | "currentSceneLocationId">,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): boolean {
+  return npc.currentSceneLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.scene.id;
+}
+
+function loadLocalNpcRows(
+  campaignId: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): ToolNpcRow[] {
+  return getDb()
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      tier: npcs.tier,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+      tags: npcs.tags,
+      persona: npcs.persona,
+    })
+    .from(npcs)
+    .where(eq(npcs.campaignId, campaignId))
+    .all()
+    .filter((npc: ToolNpcRow) => isNpcInResolvedLocalScope(npc, resolvedLocation));
+}
+
+function findExistingLocalNpcByName(
+  campaignId: string,
+  name: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): ToolNpcRow | null {
+  const normalizedName = normalizeEntityName(name);
+  return loadLocalNpcRows(campaignId, resolvedLocation)
+    .find((npc) => normalizeEntityName(npc.name) === normalizedName) ?? null;
+}
+
+function findExistingImmediateSceneNpcByName(
+  campaignId: string,
+  name: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  executionContext?: ToolExecutionContext,
+): ToolNpcRow | null {
+  const normalizedName = normalizeEntityName(name);
+  return loadLocalNpcRows(campaignId, resolvedLocation)
+    .filter((npc) => isNpcInResolvedImmediateSceneScope(npc, resolvedLocation))
+    .filter((npc) => isNpcVisibleForSceneExtraReuse(npc, executionContext))
+    .find((npc) => normalizeEntityName(npc.name) === normalizedName) ?? null;
+}
+
+function findExistingImmediateSceneNpcBySceneExtraIntent(
+  campaignId: string,
+  input: PreparedSceneExtraInput,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  executionContext?: ToolExecutionContext,
+): ToolNpcRow | null {
+  const requestedTerms = sceneExtraReuseTerms([
+    input.name,
+    input.roleText,
+    input.role,
+    ...input.tags,
+  ]);
+  if (requestedTerms.size === 0) return null;
+
+  let best: { npc: ToolNpcRow; score: number } | null = null;
+  for (const npc of loadLocalNpcRows(campaignId, resolvedLocation)) {
+    if (!isNpcInResolvedImmediateSceneScope(npc, resolvedLocation)) continue;
+    if (!isNpcVisibleForSceneExtraReuse(npc, executionContext)) continue;
+    if (npc.tier !== "temporary") continue;
+    const existingTerms = sceneExtraReuseTerms([
+      npc.name,
+      npc.tags,
+      npc.persona,
+    ]);
+    const score = termsOverlap(requestedTerms, existingTerms);
+    if (score === 0) continue;
+    if (!best || score > best.score) {
+      best = { npc, score };
+    }
+  }
+  return best?.npc ?? null;
+}
+
+function modelRefSetContainsVisibleLabel(refs: ReadonlySet<string> | undefined, value: string): boolean {
+  if (!refs) return false;
+  const normalized = normalizeEntityName(value);
+  return [...refs].some((ref) => normalizeEntityName(ref) === normalized);
+}
+
+function isNpcVisibleForSceneExtraReuse(
+  npc: ToolNpcRow,
+  executionContext?: ToolExecutionContext,
+): boolean {
+  if (executionContext?.scope !== "player_turn") return true;
+  return modelRefSetContainsVisibleLabel(executionContext.legalActorRefs, npc.name);
+}
+
+function buildExistingLocalNpcObservation(
+  existing: ToolNpcRow,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  extras: Record<string, unknown> = {},
+): ToolResult {
+  return {
+    success: true,
+    kind: "observation",
+    observationOnly: true,
+    result: {
+      name: existing.name,
+      locationName: resolvedLocation.scene.name,
+      broadLocationName: resolvedLocation.broad.name,
+      sceneLocationName: resolvedLocation.scene.name,
+      tier: existing.tier,
+      temporary: existing.tier === "temporary",
+      reusedExisting: true,
+      delegateTool: "existing_npc",
+      ...extras,
+    },
+  };
+}
 
 function handleSpawnNpc(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+  options: { reuseExisting?: "local" | "immediate_scene" | "none" } = {},
 ): ToolResult {
   const name = args.name as string;
   const tags = args.tags as string[];
-  const locationName = args.locationName as string;
 
-  const location = resolveEntity(campaignId, locationName, "location");
-  if (!location) {
-    return { success: false, error: `Location not found: ${locationName}` };
+  const resolvedLocation = resolveSpawnNpcLocation(campaignId, args, executionContext);
+  if (!resolvedLocation) {
+    return { success: false, error: "Location not found for grounded local spawn ref" };
+  }
+  const { scene: location, broad: broadLocation } = resolvedLocation;
+
+  if (
+    executionContext?.scope === "player_turn"
+    && typeof args.locationName === "string"
+    && location.id !== executionContext.currentLocationId
+    && location.id !== executionContext.currentSceneScopeId
+  ) {
+    return {
+      success: false,
+      error: "spawn_npc locationName must resolve to the current scene/current location in player turns",
+    };
+  }
+
+  if (executionContext?.scope === "player_turn" && options.reuseExisting !== "none") {
+    const existing = options.reuseExisting === "immediate_scene"
+      ? findExistingImmediateSceneNpcByName(campaignId, name, resolvedLocation, executionContext)
+      : findExistingLocalNpcByName(campaignId, name, resolvedLocation);
+    if (existing) {
+      return buildExistingLocalNpcObservation(existing, resolvedLocation, {
+        reason: "An exact-name local NPC already exists in the current scene; reused instead of spawning a duplicate.",
+      });
+    }
   }
 
   const id = crypto.randomUUID();
@@ -586,11 +1852,11 @@ function handleSpawnNpc(
       persona: tags.join(", "),
       tags,
       goals: { shortTerm: [], longTerm: [] },
-      locationName,
+      locationName: location.name,
       factionName: null,
       tier: "supporting",
     },
-    { currentLocationName: location.name, sourceKind: "generator" },
+    { currentLocationName: broadLocation.name, sourceKind: "generator" },
   );
   const record = createCharacterRecordFromDraft(
     {
@@ -601,8 +1867,8 @@ function handleSpawnNpc(
       },
       socialContext: {
         ...draft.socialContext,
-        currentLocationId: location.id,
-        currentLocationName: location.name,
+        currentLocationId: broadLocation.id,
+        currentLocationName: broadLocation.name,
       },
     },
     { id, campaignId },
@@ -614,15 +1880,97 @@ function handleSpawnNpc(
       id,
       campaignId,
       ...npcProjection,
+      currentSceneLocationId: location.id,
       unprocessedImportance: 0,
       inactiveTicks: 0,
       createdAt: Date.now(),
     })
     .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "insert",
+    rowId: id,
+    rowName: name,
+  });
 
   return {
     success: true,
-    result: { id, name, location: location.name },
+    result: {
+      id,
+      name,
+      locationId: location.id,
+      locationName: location.name,
+      broadLocationId: broadLocation.id,
+      broadLocationName: broadLocation.name,
+      sceneLocationId: location.id,
+      sceneLocationName: location.name,
+      tier: "temporary",
+    },
+  };
+}
+
+function handlePromoteNpc(
+  campaignId: string,
+  args: Record<string, unknown>,
+): ToolResult {
+  const npcRef = args.npcRef as string;
+  const newTier = normalizeNpcTier(args.newTier);
+  const reason = args.reason as string;
+
+  if (!newTier || newTier === "temporary") {
+    return { success: false, error: "promote_npc newTier must be persistent or key." };
+  }
+
+  const db = getDb();
+  const npcCandidates = refCandidates(npcRef, ["actor:", "npc:"]);
+  const primaryRef = npcCandidates[0] ?? npcRef;
+  const secondaryRef = npcCandidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
+  const npc = db
+    .select({ id: npcs.id, name: npcs.name, tier: npcs.tier })
+    .from(npcs)
+    .where(
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
+    )
+    .get();
+
+  if (!npc) {
+    return { success: false, error: `NPC not found: ${npcRef}` };
+  }
+
+  const oldTier = normalizeNpcTier(npc.tier);
+  if (!oldTier) {
+    return { success: false, error: `NPC ${npc.name} has invalid tier: ${npc.tier}` };
+  }
+
+  if (NPC_TIER_ORDER[newTier] <= NPC_TIER_ORDER[oldTier]) {
+    return {
+      success: false,
+      error: "Can only promote upward (temporary -> persistent -> key).",
+    };
+  }
+
+  db.update(npcs)
+    .set({ tier: newTier })
+    .where(eq(npcs.id, npc.id))
+    .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "update",
+    rowId: npc.id,
+    rowName: npc.name,
+  });
+
+  return {
+    success: true,
+    result: {
+      npcId: npc.id,
+      name: npc.name,
+      oldTier,
+      newTier,
+      reason,
+    },
   };
 }
 
@@ -651,8 +1999,17 @@ function handleSpawnItem(
         name,
         tags: JSON.stringify(tags),
         ownerId: character.id,
+        equipState: DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState,
+        equippedSlot: DEFAULT_AUTHORITATIVE_ITEM_STATE.equippedSlot,
+        isSignature: DEFAULT_AUTHORITATIVE_ITEM_STATE.isSignature,
       })
       .run();
+    log.event("db.write", {
+      table: "items",
+      op: "insert",
+      rowId: id,
+      rowName: name,
+    });
 
     return {
       success: true,
@@ -661,7 +2018,7 @@ function handleSpawnItem(
   }
 
   if (ownerType === "location") {
-    const location = resolveEntity(campaignId, ownerName, "location");
+    const location = resolveToolLocationByNameOrId(campaignId, ownerName);
     if (!location) {
       return { success: false, error: `Location not found: ${ownerName}` };
     }
@@ -673,8 +2030,17 @@ function handleSpawnItem(
         name,
         tags: JSON.stringify(tags),
         locationId: location.id,
+        equipState: DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState,
+        equippedSlot: DEFAULT_AUTHORITATIVE_ITEM_STATE.equippedSlot,
+        isSignature: DEFAULT_AUTHORITATIVE_ITEM_STATE.isSignature,
       })
       .run();
+    log.event("db.write", {
+      table: "items",
+      op: "insert",
+      rowId: id,
+      rowName: name,
+    });
 
     return {
       success: true,
@@ -687,20 +2053,28 @@ function handleSpawnItem(
 
 function handleRevealLocation(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
   const name = args.name as string;
   const description = args.description as string;
   const tags = args.tags as string[];
   const connectedToName = args.connectedToName as string;
 
-  const existingLocation = resolveEntity(campaignId, connectedToName, "location");
+  const contextLocationId = resolveContextLocationRef(connectedToName, executionContext);
+  const existingLocation = contextLocationId
+    ? resolveToolLocationById(campaignId, contextLocationId)
+    : resolveToolLocationByNameOrId(campaignId, connectedToName);
   if (!existingLocation) {
     return { success: false, error: `Connected location not found: ${connectedToName}` };
   }
 
   const id = crypto.randomUUID();
   const db = getDb();
+  const clock = readWorldClock(campaignId);
+  const effectiveTick = Math.max(tick, clock.currentTick);
+  const expiresAtTick = effectiveTick + 3;
 
   // Insert new location connected to existing one
   db.insert(locations)
@@ -709,11 +2083,50 @@ function handleRevealLocation(
       campaignId,
       name,
       description,
+      kind: "ephemeral_scene",
+      parentLocationId: existingLocation.id,
+      anchorLocationId: existingLocation.id,
+      persistence: "ephemeral",
+      expiresAtTick,
+      archivedAtTick: null,
       tags: JSON.stringify(tags),
       isStarting: false,
       connectedTo: JSON.stringify([existingLocation.id]),
     })
     .run();
+  log.event("db.write", {
+    table: "locations",
+    op: "insert",
+    rowId: id,
+    rowName: name,
+  });
+
+  db.insert(locationEdges)
+    .values([
+      {
+        id: crypto.randomUUID(),
+        campaignId,
+        fromLocationId: existingLocation.id,
+        toLocationId: id,
+        travelCost: 1,
+        discovered: true,
+      },
+      {
+        id: crypto.randomUUID(),
+        campaignId,
+        fromLocationId: id,
+        toLocationId: existingLocation.id,
+        travelCost: 1,
+        discovered: true,
+      },
+    ])
+    .run();
+  log.event("db.write", {
+    table: "locationEdges",
+    op: "insert",
+    rowId: `${existingLocation.id}<->${id}`,
+    rowName: `${existingLocation.name}<->${name}`,
+  });
 
   // Update existing location's connectedTo to include new location (bidirectional)
   const existingRow = db
@@ -739,18 +2152,41 @@ function handleRevealLocation(
     .set({ connectedTo: JSON.stringify(existingConnections) })
     .where(eq(locations.id, existingLocation.id))
     .run();
+  log.event("db.write", {
+    table: "locations",
+    op: "update",
+    rowId: existingLocation.id,
+    rowName: existingLocation.name,
+  });
 
   return {
     success: true,
-    result: { id, name, connectedTo: existingLocation.name },
+    result: {
+      id,
+      name,
+      connectedTo: existingLocation.name,
+      kind: "ephemeral_scene",
+      parentLocationId: existingLocation.id,
+      anchorLocationId: existingLocation.id,
+      persistence: "ephemeral",
+      expiresAtTick,
+      archivedAtTick: null,
+    },
   };
 }
 
 function handleMoveTo(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
+  if (executionContext?.scope === "actor_turn") {
+    return handleActorMoveTo(campaignId, args, tick, executionContext);
+  }
+
   const targetLocationName = args.targetLocationName as string;
+  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
 
   const db = getDb();
   const player = db
@@ -762,43 +2198,38 @@ function handleMoveTo(
   if (!player) return { success: false, error: "No player found" };
   if (!player.currentLocationId) return { success: false, error: "Player has no current location" };
 
-  // Resolve destination by name (case-insensitive)
-  const destination = db
-    .select()
-    .from(locations)
-    .where(
-      sql`${locations.campaignId} = ${campaignId} AND LOWER(${locations.name}) = LOWER(${targetLocationName})`
-    )
-    .get();
+  const locationGraph = loadLocationGraph({ campaignId });
+  const destination = resolveLocationTarget({
+    targetName: targetLocationRef,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
 
   if (!destination) return { success: false, error: `Location not found: ${targetLocationName}` };
 
-  // Check connectivity
   const currentLoc = db
-    .select({ connectedTo: locations.connectedTo })
+    .select({ id: locations.id, name: locations.name })
     .from(locations)
     .where(eq(locations.id, player.currentLocationId))
     .get();
 
-  let connectedIds: string[] = [];
-  if (currentLoc) {
-    try {
-      connectedIds = JSON.parse(currentLoc.connectedTo) as string[];
-    } catch {
-      connectedIds = [];
-    }
-  }
+  const travelPath = resolveTravelPath({
+    campaignId,
+    fromLocationId: player.currentLocationId,
+    toLocationId: destination.locationId,
+    edges: locationGraph.edges,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
 
-  if (!connectedIds.includes(destination.id)) {
-    // List available paths for LLM retry
-    const allLocs = db
-      .select({ id: locations.id, name: locations.name })
-      .from(locations)
-      .where(eq(locations.campaignId, campaignId))
-      .all();
-    const reachable = allLocs
-      .filter((l) => connectedIds.includes(l.id))
-      .map((l) => l.name);
+  if (!travelPath) {
+    const reachable = listConnectedPaths({
+      campaignId,
+      fromLocationId: player.currentLocationId,
+      edges: locationGraph.edges,
+      locations: locationGraph.locations,
+      currentTick: tick,
+    }).map((path) => path.locationName);
     return {
       success: false,
       error: `${targetLocationName} is not connected to current location. Available paths: ${reachable.join(", ")}`,
@@ -806,25 +2237,476 @@ function handleMoveTo(
   }
 
   // Move player
+  const destinationName = destination.locationName;
   const updatedPlayer = hydrateStoredPlayerRecord(player, {
-    currentLocationName: destination.name,
+    currentLocationName: destinationName,
   });
 
   db.update(players)
-    .set(projectPlayerRecord({
-      ...updatedPlayer,
-      socialContext: {
-        ...updatedPlayer.socialContext,
-        currentLocationId: destination.id,
-        currentLocationName: destination.name,
-      },
-    }))
+    .set({
+      ...projectPlayerRecord({
+        ...updatedPlayer,
+        socialContext: {
+          ...updatedPlayer.socialContext,
+          currentLocationId: destination.locationId,
+          currentLocationName: destinationName,
+        },
+      }),
+      currentSceneLocationId: destination.locationId,
+    })
     .where(eq(players.id, player.id))
     .run();
+  log.event("db.write", {
+    table: "players",
+    op: "update",
+    rowId: player.id,
+    rowName: player.name ?? null,
+  });
+
+  const locationNameById = new Map(
+    locationGraph.locations.map((location) => [location.id, location.name]),
+  );
+  const path = travelPath.locationIds
+    .map((locationId) => locationNameById.get(locationId))
+    .filter((locationName): locationName is string => Boolean(locationName));
 
   return {
     success: true,
-    result: { locationId: destination.id, locationName: destination.name },
+    result: {
+      playerId: player.id,
+      locationId: destination.locationId,
+      locationName: destinationName,
+      travelCost: travelPath.totalTravelCost,
+      path,
+    },
+  };
+}
+
+function handleActorMoveTo(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext: ToolExecutionContext,
+): ToolResult {
+  const targetLocationName = args.targetLocationName as string;
+  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
+  const actorId = executionContext.subjectActorId;
+  if (!actorId) {
+    return { success: false, error: "Actor turn move_to requires subjectActorId" };
+  }
+
+  const db = getDb();
+  const npc = db
+    .select()
+    .from(npcs)
+    .where(eq(npcs.id, actorId))
+    .get();
+  if (!npc || npc.campaignId !== campaignId) {
+    return { success: false, error: `NPC not found for actor move_to: ${actorId}` };
+  }
+  if (!npc.currentLocationId) {
+    return { success: false, error: "NPC has no current location" };
+  }
+
+  const locationGraph = loadLocationGraph({ campaignId });
+  const currentLoc = db
+    .select({ id: locations.id, name: locations.name })
+    .from(locations)
+    .where(eq(locations.id, npc.currentLocationId))
+    .get();
+  if (!currentLoc) {
+    return { success: false, error: "Current location not found" };
+  }
+
+  const destination = resolveLocationTarget({
+    targetName: targetLocationRef,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
+  if (!destination) {
+    return { success: false, error: `Location not found: ${targetLocationName}` };
+  }
+
+  const travelPath = resolveTravelPath({
+    campaignId,
+    fromLocationId: npc.currentLocationId,
+    toLocationId: destination.locationId,
+    edges: locationGraph.edges,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
+  if (!travelPath) {
+    const reachable = listConnectedPaths({
+      campaignId,
+      fromLocationId: npc.currentLocationId,
+      edges: locationGraph.edges,
+      locations: locationGraph.locations,
+      currentTick: tick,
+    }).map((path) => path.locationName);
+    return {
+      success: false,
+      error: `${targetLocationName} is not connected to ${currentLoc.name}. Available paths: ${reachable.join(", ")}`,
+    };
+  }
+
+  const destinationName = destination.locationName;
+  const npcRecord = hydrateStoredNpcRecord(npc, {
+    currentLocationName: destinationName,
+  });
+  db.update(npcs)
+    .set({
+      ...projectNpcRecord({
+        ...npcRecord,
+        socialContext: {
+          ...npcRecord.socialContext,
+          currentLocationId: destination.locationId,
+          currentLocationName: destinationName,
+        },
+      }),
+      currentSceneLocationId: destination.locationId,
+    })
+    .where(eq(npcs.id, actorId))
+    .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "update",
+    rowId: actorId,
+    rowName: npc.name,
+  });
+
+  const locationNameById = new Map(
+    locationGraph.locations.map((location) => [location.id, location.name]),
+  );
+  const path = travelPath.locationIds
+    .map((locationId) => locationNameById.get(locationId))
+    .filter((locationName): locationName is string => Boolean(locationName));
+
+  return {
+    success: true,
+    result: {
+      actorId,
+      actorName: npc.name,
+      locationId: destination.locationId,
+      locationName: destinationName,
+      travelCost: travelPath.totalTravelCost,
+      path,
+    },
+  };
+}
+
+function bridgeValidationFailure(issue: BridgeStateValidationIssue): ToolResult {
+  return {
+    success: false,
+    error: `Bridge state validation failed: ${issue.message}`,
+  };
+}
+
+function contractFailureFromGroundingIssue(input: {
+  toolName: string;
+  issue: ToolGroundingIssue;
+}): ToolContractFailure {
+  return {
+    code: input.issue.code,
+    path: input.issue.path,
+    toolName: input.issue.toolName?.toString() ?? input.toolName,
+    retryable: true,
+    invalidRef: input.issue.invalidRef,
+    refHints: input.issue.refHints,
+    message: input.issue.message,
+  };
+}
+
+function handleMoveActor(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareMoveActorInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const movement = handleMoveTo(
+    campaignId,
+    { targetLocationName: prepared.value.targetLocationName },
+    tick,
+    executionContext,
+  );
+  if (!movement.success) return movement;
+
+  return {
+    ...movement,
+    result: {
+      kind: "move_actor",
+      actorRef: prepared.value.actorRef,
+      actorRefs: prepared.value.actorRefs,
+      playerId: readStringField(movement.result, "playerId"),
+      actorId: readStringField(movement.result, "actorId"),
+      actorName: readStringField(movement.result, "actorName"),
+      destinationRef: prepared.value.destinationRef,
+      routeEvidenceRefs: prepared.value.routeEvidenceRefs,
+      intentSummary: prepared.value.intentSummary,
+      locationId: readStringField(movement.result, "locationId"),
+      locationName: readStringField(movement.result, "locationName"),
+      travelCost: readIntegerField(movement.result, "travelCost"),
+      path: Array.isArray((movement.result as Record<string, unknown> | undefined)?.path)
+        ? (movement.result as { path: unknown[] }).path.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      delegateTool: "move_to",
+    },
+  };
+}
+
+function handleCreateMinorPoi(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareCreateMinorPoiInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const revealed = handleRevealLocation(
+    campaignId,
+    {
+      name: prepared.value.name,
+      description: prepared.value.description,
+      tags: prepared.value.tags,
+      connectedToName: prepared.value.connectedToName,
+    },
+    tick,
+    executionContext,
+  );
+  if (!revealed.success) return revealed;
+
+  return {
+    ...revealed,
+    result: {
+      ...(revealed.result as Record<string, unknown>),
+      kind: "minor_poi",
+      poiType: prepared.value.poiType,
+      areaRef: prepared.value.areaRef,
+      visibility: prepared.value.visibility,
+      impact: "low",
+      description: prepared.value.description,
+      reason: prepared.value.reason,
+      delegateTool: "reveal_location",
+    },
+  };
+}
+
+function handleCreateSceneExtra(
+  campaignId: string,
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareCreateSceneExtraInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const resolvedLocation = resolveSpawnNpcLocation(
+    campaignId,
+    {
+      locationRef: prepared.value.locationId ? undefined : prepared.value.locationRef,
+      locationId: prepared.value.locationId,
+    },
+    executionContext,
+  );
+  if (!resolvedLocation) {
+    return { success: false, error: "Location not found for grounded local scene-extra ref" };
+  }
+  const existing = findExistingImmediateSceneNpcByName(
+    campaignId,
+    prepared.value.name,
+    resolvedLocation,
+    executionContext,
+  );
+  if (existing) {
+    return buildExistingLocalNpcObservation(existing, resolvedLocation, {
+      kind: "scene_extra",
+      role: prepared.value.role,
+      roleText: prepared.value.roleText,
+      reason: prepared.value.reason,
+    });
+  }
+  const existingByIntent = findExistingImmediateSceneNpcBySceneExtraIntent(
+    campaignId,
+    prepared.value,
+    resolvedLocation,
+    executionContext,
+  );
+  if (existingByIntent) {
+    return buildExistingLocalNpcObservation(existingByIntent, resolvedLocation, {
+      kind: "scene_extra",
+      role: prepared.value.role,
+      roleText: prepared.value.roleText,
+      reason: "A same-scene temporary scene extra already matches this requested role or office; reused instead of creating another responder.",
+    });
+  }
+
+  const spawned = handleSpawnNpc(
+    campaignId,
+    {
+      name: prepared.value.name,
+      tags: prepared.value.tags,
+      locationRef: prepared.value.locationId ? undefined : prepared.value.locationRef,
+      locationId: prepared.value.locationId,
+    },
+    executionContext,
+    { reuseExisting: "none" },
+  );
+  if (!spawned.success) return spawned;
+
+  return {
+    ...spawned,
+    result: {
+      ...(spawned.result as Record<string, unknown>),
+      kind: "scene_extra",
+      role: prepared.value.role,
+      roleText: prepared.value.roleText,
+      temporary: true,
+      reason: prepared.value.reason,
+      delegateTool: "spawn_npc",
+    },
+  };
+}
+
+function handleStartSearch(
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const built = buildStartSearchResult(args, executionContext);
+  if (!built.ok) return bridgeValidationFailure(built.issue);
+  return {
+    success: true,
+    result: built.value,
+  };
+}
+
+function handleRecordPlayerIntent(
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const built = buildRecordPlayerIntentResult(args, executionContext);
+  if (!built.ok) return bridgeValidationFailure(built.issue);
+  return {
+    success: true,
+    result: built.value,
+  };
+}
+
+function modeBaseAllowance(mode: string): string {
+  switch (mode) {
+    case "attack":
+      return "The actor may create immediate threat, pressure, or a bounded exchange, but not an automatic fight-ending injury.";
+    case "restrain":
+      return "The actor may create a grab, block, or leverage attempt, but not an automatic capture without follow-up authority.";
+    case "escape":
+      return "The actor may create an opening or distance, but not completed escape unless movement/state tools later support it.";
+    case "pursue":
+      return "The actor may close distance or keep pressure, but not completed relocation unless movement tools later support it.";
+    case "defend":
+      return "The actor may guard, absorb, redirect, or buy time, but not erase the opposition's threat.";
+    default:
+      return "The actor may contest the beat locally, but the whole conflict remains unresolved.";
+  }
+}
+
+function handleRequestContestedOutcome(
+  campaignId: string,
+  args: Record<string, unknown>,
+): ToolResult {
+  const actorName = String(args.actorName ?? "").trim();
+  const targetName = String(args.targetName ?? "").trim();
+  const mode = String(args.mode ?? "contest").trim();
+  const intent = String(args.intent ?? "").trim();
+  const stakes = String(args.stakes ?? "").trim();
+  const evidenceRefs = Array.isArray(args.evidenceRefs)
+    ? args.evidenceRefs
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map((value) => value.trim())
+      .slice(0, 8)
+    : [];
+
+  const actor = resolveCharacterRecordByRef(campaignId, actorName);
+  if (!actor) {
+    return { success: false, error: `Actor not found for contested outcome: ${actorName}` };
+  }
+
+  const target = resolveCharacterRecordByRef(campaignId, targetName);
+  if (!target) {
+    return { success: false, error: `Target not found for contested outcome: ${targetName}` };
+  }
+
+  if (actor.id === target.id) {
+    return { success: false, error: "Contested outcome requires two different actors" };
+  }
+
+  const actionText = `${mode}: ${intent}. Stakes: ${stakes}`;
+  const combatEnvelope = buildCombatEnvelope({
+    actor: {
+      label: actor.name,
+      powerStats: actor.record.powerStats,
+    },
+    target: {
+      label: target.name,
+      powerStats: target.record.powerStats,
+    },
+    hostileAction: true,
+    actionText,
+  });
+  const bounds = combatEnvelope
+    ? buildNarrativeOutcomeBounds(combatEnvelope, "contested")
+    : null;
+  const posture = combatEnvelope
+    ? deriveCombatPosture(combatEnvelope, { vsLabel: target.name })
+    : null;
+
+  const noFinalAuthority =
+    "Do not declare death, incapacitation, capture, escape, HP loss, inventory transfer, or relocation unless a later successful tool/state result commits it.";
+  const prohibitedEffects = [
+    ...(bounds?.prohibitions ?? [
+      "No power outcome is settled because at least one side has no stored power assessment.",
+    ]),
+    noFinalAuthority,
+  ];
+  const allowedEffects = [
+    modeBaseAllowance(mode),
+    ...(bounds ? [...bounds.ceilings, ...bounds.floors] : [
+      "The narrator may show effort, opposition, hesitation, and immediate pressure without deciding the contest.",
+    ]),
+  ];
+
+  return {
+    success: true,
+    status: "success",
+    kind: "observation",
+    observationOnly: true,
+    result: {
+      kind: "contested_outcome_bounds",
+      actorId: actor.id,
+      actorName: actor.name,
+      actorType: actor.type,
+      targetId: target.id,
+      targetName: target.name,
+      targetType: target.type,
+      mode,
+      intent,
+      stakes,
+      evidenceRefs,
+      combatEnvelopeBuilt: Boolean(combatEnvelope),
+      matchup: combatEnvelope?.matchup ?? "unknown",
+      posture: posture
+        ? {
+            posture: posture.posture,
+            canWin: posture.canWin,
+            mustAvoidCount: posture.mustAvoid.length,
+          }
+        : null,
+      outcomeBounds: bounds,
+      allowedEffects,
+      prohibitedEffects,
+      requiresFollowupTool:
+        "Concrete HP, movement, inventory, tag, relationship, or durable memory changes require separate successful backend tools.",
+    },
   };
 }
 
@@ -892,11 +2774,19 @@ function handleSetCondition(
     }))
     .where(eq(players.id, character.id))
     .run();
+  log.event("db.write", {
+    table: "players",
+    op: "update",
+    rowId: character.id,
+    rowName: character.name,
+  });
 
   return {
     success: true,
     result: {
       entity: character.name,
+      entityId: character.id,
+      entityType: "player",
       oldHp,
       newHp,
       isDowned: newHp === 0,
@@ -911,36 +2801,116 @@ function handleTransferItem(
   const itemName = args.itemName as string;
   const targetName = args.targetName as string;
   const targetType = args.targetType as string;
+  const equipState = args.equipState as InventoryEquipState | undefined;
+  const equippedSlot = args.equippedSlot as string | undefined;
+  const transferredItemName =
+    typeof args.transferredItemName === "string" ? args.transferredItemName.trim() : "";
+  const remainingItemName =
+    typeof args.remainingItemName === "string" ? args.remainingItemName.trim() : "";
 
   const db = getDb();
 
-  // Resolve item by name
-  const item = db
-    .select({ id: items.id, name: items.name })
-    .from(items)
-    .where(
-      sql`${items.campaignId} = ${campaignId} AND LOWER(${items.name}) = LOWER(${itemName})`
-    )
-    .get();
+  const item = resolveItemByNameOrRef(campaignId, itemName);
 
   if (!item) {
     return { success: false, error: `Item not found: ${itemName}` };
   }
+  const originalItemName = item.name;
 
-  if (targetType === "character") {
+  const isPartialTransfer = Boolean(transferredItemName || remainingItemName);
+  if (isPartialTransfer && (!transferredItemName || !remainingItemName)) {
+    return {
+      success: false,
+      error: "Partial transfer requires both transferredItemName and remainingItemName",
+    };
+  }
+
+  if (targetType === "character" || targetType === "npc" || targetType === "player" || targetType === "actor") {
     const character = resolveCharacterByName(campaignId, targetName);
     if (!character) {
       return { success: false, error: `Character not found: ${targetName}` };
     }
 
+    const nextState = resolveCharacterTransferState({
+      equipState,
+      equippedSlot,
+    });
+
+    if (isPartialTransfer) {
+      const transferredId = crypto.randomUUID();
+      db.update(items)
+        .set({
+          name: remainingItemName,
+        })
+        .where(eq(items.id, item.id))
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "update",
+        rowId: item.id,
+        rowName: originalItemName,
+      });
+
+      db.insert(items)
+        .values({
+          id: transferredId,
+          campaignId,
+          name: transferredItemName,
+          tags: item.tags,
+          ownerId: character.id,
+          locationId: null,
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          isSignature: false,
+        })
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "insert",
+        rowId: transferredId,
+        rowName: transferredItemName,
+      });
+
+      return {
+        success: true,
+        result: {
+          item: transferredItemName,
+          splitFrom: originalItemName,
+          remainingItem: remainingItemName,
+          target: character.name,
+          action: nextState.equipState === "equipped" ? "equipped" : "carried",
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          partialTransfer: true,
+        },
+      };
+    }
+
     db.update(items)
-      .set({ ownerId: character.id, locationId: null })
+      .set({
+        ownerId: character.id,
+        locationId: null,
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      })
       .where(eq(items.id, item.id))
       .run();
+    log.event("db.write", {
+      table: "items",
+      op: "update",
+      rowId: item.id,
+      rowName: item.name,
+    });
 
     return {
       success: true,
-      result: { item: item.name, target: character.name, action: "transferred to character" },
+      result: {
+        item: item.name,
+        target: character.name,
+        action: nextState.equipState === "equipped" ? "equipped" : "carried",
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      },
     };
   }
 
@@ -950,18 +2920,930 @@ function handleTransferItem(
       return { success: false, error: `Location not found: ${targetName}` };
     }
 
+    const nextState = resolveLocationTransferState();
+
+    if (isPartialTransfer) {
+      const transferredId = crypto.randomUUID();
+      db.update(items)
+        .set({
+          name: remainingItemName,
+        })
+        .where(eq(items.id, item.id))
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "update",
+        rowId: item.id,
+        rowName: originalItemName,
+      });
+
+      db.insert(items)
+        .values({
+          id: transferredId,
+          campaignId,
+          name: transferredItemName,
+          tags: item.tags,
+          ownerId: null,
+          locationId: location.id,
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          isSignature: false,
+        })
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "insert",
+        rowId: transferredId,
+        rowName: transferredItemName,
+      });
+
+      return {
+        success: true,
+        result: {
+          item: transferredItemName,
+          splitFrom: originalItemName,
+          remainingItem: remainingItemName,
+          target: location.name,
+          action: "dropped",
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          partialTransfer: true,
+        },
+      };
+    }
+
     db.update(items)
-      .set({ ownerId: null, locationId: location.id })
+      .set({
+        ownerId: null,
+        locationId: location.id,
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      })
       .where(eq(items.id, item.id))
       .run();
+    log.event("db.write", {
+      table: "items",
+      op: "update",
+      rowId: item.id,
+      rowName: item.name,
+    });
 
     return {
       success: true,
-      result: { item: item.name, target: location.name, action: "transferred to location" },
+      result: {
+        item: item.name,
+        target: location.name,
+        action: "dropped",
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      },
     };
   }
 
   return { success: false, error: `Invalid targetType: ${targetType}` };
+}
+
+function handleAdvanceTime(args: Record<string, unknown>): ToolResult {
+  const minutes = typeof args.minutes === "number" ? args.minutes : Number(args.minutes);
+  const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 525_600) {
+    return {
+      success: false,
+      error: "advance_time.minutes must be an integer between 1 and 525600",
+    };
+  }
+  if (!reason) {
+    return { success: false, error: "advance_time.reason is required" };
+  }
+
+  return {
+    success: true,
+    result: {
+      minutes,
+      reason,
+      clockAdvanced: true,
+    },
+  };
+}
+
+function isWorldVersionConflict(error: unknown): error is WorldVersionConflictError {
+  return error instanceof WorldVersionConflictError
+    || (error instanceof Error && error.name === "WorldVersionConflictError");
+}
+
+function readStringField(payload: unknown, key: string): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readIntegerField(payload: unknown, key: string): number | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)[key];
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value;
+}
+
+function addStringRefs(target: Set<string>, values: readonly unknown[]): void {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) target.add(trimmed);
+  }
+}
+
+function scopedRef(prefix: string, value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  const withoutPrefix = trimmed.includes(":")
+    ? trimmed.split(":").slice(1).join(":")
+    : trimmed;
+  return withoutPrefix ? `${prefix}:${withoutPrefix}` : null;
+}
+
+function scopedWriteRef(prefix: string, value: unknown, suffix: string): string | null {
+  const ref = scopedRef(prefix, value);
+  return ref ? `${ref}:${suffix}` : null;
+}
+
+function addScopedWriteRefsForToolResult(
+  refs: Set<string>,
+  input: {
+    toolName: string;
+    args: Record<string, unknown>;
+    result: ToolResult;
+  },
+): void {
+  const payload = input.result.result;
+  switch (input.toolName) {
+    case "add_chronicle_entry":
+      refs.add("world:event");
+      break;
+    case "log_event": {
+      const knowledgeRoute = readStringField(payload, "knowledgeRoute");
+      const actorMemoryMatch = /^actor:(.+)$/i.exec(knowledgeRoute ?? "");
+      if (actorMemoryMatch?.[1]) {
+        addStringRefs(refs, [scopedRef("npc", actorMemoryMatch[1])]);
+      } else {
+        refs.add("world:event");
+      }
+      break;
+    }
+    case "record_dialogue_outcome":
+      refs.add("world:dialogue");
+      break;
+    case "record_world_fact":
+      refs.add("world:fact");
+      break;
+    case "advance_time":
+      refs.add("world:time");
+      break;
+    case "add_tag":
+    case "remove_tag": {
+      const entityType = typeof input.args.entityType === "string"
+        ? input.args.entityType.trim().toLowerCase()
+        : "";
+      const entityName = input.args.entityName;
+      const resolvedEntityRef = readStringField(payload, "entityId")
+        ?? (typeof entityName === "string" ? entityName : null);
+      if (entityType === "npc") addStringRefs(refs, [scopedRef("npc", resolvedEntityRef)]);
+      if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", resolvedEntityRef)]);
+      if (entityType === "location") addStringRefs(refs, [scopedRef("location", resolvedEntityRef)]);
+      if (entityType === "item") addStringRefs(refs, [scopedRef("item", resolvedEntityRef)]);
+      if (entityType === "player") {
+        addStringRefs(refs, [
+          scopedWriteRef("player", resolvedEntityRef, "tags"),
+        ]);
+      }
+      break;
+    }
+    case "set_relationship":
+      refs.add("world:relationship");
+      break;
+    case "spawn_npc":
+    case "promote_npc":
+    case "create_scene_extra":
+      addStringRefs(refs, [
+        scopedRef("npc", readStringField(payload, "id")),
+        scopedRef("npc", readStringField(payload, "npcId")),
+        scopedRef("location", readStringField(payload, "locationId")),
+        scopedRef("location", readStringField(payload, "broadLocationId")),
+        scopedRef("location", readStringField(payload, "sceneLocationId")),
+      ]);
+      break;
+    case "spawn_item":
+      addStringRefs(refs, [scopedRef("item", readStringField(payload, "id"))]);
+      break;
+    case "reveal_location":
+    case "create_minor_poi":
+      addStringRefs(refs, [
+        scopedWriteRef("location", readStringField(payload, "id"), "revealed"),
+        scopedWriteRef("location", readStringField(payload, "parentLocationId"), "topology"),
+        scopedWriteRef("location", readStringField(payload, "anchorLocationId"), "topology"),
+      ]);
+      break;
+    case "move_to":
+      if (readStringField(payload, "actorId")) {
+        addStringRefs(refs, [
+          scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      } else {
+        addStringRefs(refs, [
+          scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      }
+      break;
+    case "move_actor":
+      if (readStringField(payload, "playerId")) {
+        addStringRefs(refs, [
+          scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      } else {
+        addStringRefs(refs, [
+          scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
+          scopedRef("npc", readStringField(payload, "actorRef")),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      }
+      break;
+    case "set_condition":
+      const playerRef = readStringField(payload, "entityId")
+        ?? readStringField(payload, "entity");
+      addStringRefs(refs, [
+        scopedWriteRef("player", playerRef, "state"),
+      ]);
+      break;
+    case "start_search":
+    case "record_player_intent":
+      refs.add("world:intent");
+      break;
+    case "transfer_item":
+      refs.add("world:inventory");
+      break;
+  }
+}
+
+function isSceneLocalLogEvent(toolName: string, result: ToolResult): boolean {
+  return (toolName === "log_event" || toolName === "record_dialogue_outcome")
+    && readStringField(result.result, "durability") === "scene_local";
+}
+
+function stateDeltaRefsForToolResult(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  result: ToolResult;
+}): string[] {
+  const refs = new Set(inferRefsFromToolResultPayload(input.result.result));
+  const payload = input.result.result;
+  switch (input.toolName) {
+    case "add_tag":
+    case "remove_tag":
+      addStringRefs(refs, [
+        input.args.entityName,
+        input.args.entityType,
+        readStringField(payload, "entity"),
+      ]);
+      break;
+    case "set_relationship":
+      addStringRefs(refs, [
+        input.args.entityA,
+        input.args.entityB,
+        readStringField(payload, "entityA"),
+        readStringField(payload, "entityB"),
+      ]);
+      break;
+    case "add_chronicle_entry":
+      addStringRefs(refs, [readStringField(payload, "entryId")]);
+      break;
+    case "log_event":
+      addStringRefs(refs, [
+        readStringField(payload, "eventId"),
+        readStringField(payload, "durability"),
+      ]);
+      break;
+    case "record_dialogue_outcome":
+      addStringRefs(refs, [
+        readStringField(payload, "eventId"),
+        readStringField(payload, "outcomeKind"),
+        readStringField(payload, "topicKind"),
+        readStringField(payload, "futureUseKind"),
+        readStringField(payload, "speakerRef"),
+        readStringField(payload, "requestedRoleText"),
+        readStringField(payload, "durability"),
+      ]);
+      break;
+    case "record_world_fact":
+      addStringRefs(refs, [
+        readStringField(payload, "knowledgeId"),
+        readStringField(payload, "factRef"),
+        readStringField(payload, "factKind"),
+        readStringField(payload, "topicKind"),
+        readStringField(payload, "futureUseKind"),
+        readStringField(payload, "durability"),
+      ]);
+      break;
+    case "advance_time": {
+      const minutes = readIntegerField(payload, "minutes");
+      addStringRefs(refs, [
+        "world_time",
+        minutes !== null ? `elapsed:${minutes}` : null,
+        readStringField(payload, "reason"),
+      ]);
+      break;
+    }
+    case "spawn_npc":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "broadLocationId"),
+      ]);
+      break;
+    case "promote_npc":
+      addStringRefs(refs, [
+        readStringField(payload, "npcId"),
+        readStringField(payload, "name"),
+        readStringField(payload, "newTier"),
+      ]);
+      break;
+    case "spawn_item":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "owner"),
+      ]);
+      break;
+    case "reveal_location":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "parentLocationId"),
+        readStringField(payload, "anchorLocationId"),
+      ]);
+      break;
+    case "set_condition":
+      addStringRefs(refs, [readStringField(payload, "entity")]);
+      break;
+    case "move_to":
+      addStringRefs(refs, [
+        readStringField(payload, "playerId"),
+        readStringField(payload, "actorId"),
+        readStringField(payload, "actorName"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "locationName"),
+      ]);
+      break;
+    case "move_actor":
+      addStringRefs(refs, [
+        readStringField(payload, "playerId"),
+        readStringField(payload, "actorId"),
+        readStringField(payload, "actorName"),
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "destinationRef"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "locationName"),
+      ]);
+      break;
+    case "create_minor_poi":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "poiType"),
+        readStringField(payload, "anchorLocationId"),
+        readStringField(payload, "areaRef"),
+      ]);
+      break;
+    case "create_scene_extra":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "role"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "sceneLocationId"),
+      ]);
+      break;
+    case "start_search":
+      addStringRefs(refs, [
+        readStringField(payload, "searchId"),
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "query"),
+      ]);
+      break;
+    case "record_player_intent":
+      addStringRefs(refs, [
+        readStringField(payload, "intentId"),
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "intentType"),
+        readStringField(payload, "targetHint"),
+      ]);
+      break;
+    case "transfer_item":
+      addStringRefs(refs, [
+        input.args.itemName,
+        input.args.targetName,
+        input.args.transferredItemName,
+        input.args.remainingItemName,
+        readStringField(payload, "item"),
+        readStringField(payload, "splitFrom"),
+        readStringField(payload, "remainingItem"),
+        readStringField(payload, "target"),
+        readStringField(payload, "equipState"),
+      ]);
+      break;
+  }
+  addScopedWriteRefsForToolResult(refs, input);
+  return [...refs].slice(0, 32);
+}
+
+function eventIdsForAuthorityTrace(input: {
+  toolName: string;
+  inferredRefs: readonly string[];
+  result: ToolResult;
+}): string[] {
+  const eventIds = new Set(
+    input.inferredRefs.filter((ref) => /^(?:event|chronicle):/i.test(ref)),
+  );
+  const payload = input.result.result;
+  switch (input.toolName) {
+    case "log_event":
+    case "record_dialogue_outcome":
+      addStringRefs(eventIds, [readStringField(payload, "eventId")]);
+      break;
+    case "add_chronicle_entry":
+      addStringRefs(eventIds, [readStringField(payload, "entryId")]);
+      break;
+  }
+  return [...eventIds];
+}
+
+function assertAuthorityWriteScopesCovered(input: {
+  stateDeltaRefs: readonly string[];
+  allowedWriteScopes?: readonly string[];
+}): void {
+  if (!input.allowedWriteScopes) return;
+  const scopeRefs = input.stateDeltaRefs.filter((ref) => /^[a-z-]+:[^:]+/i.test(ref));
+  const uncovered = findUncoveredWriteRef({
+    stateDeltaRefs: scopeRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (uncovered) {
+    throw new Error(`authority_write_scope_mismatch:${uncovered.stateDeltaRef}`);
+  }
+}
+
+function assertNoBlockedWriteScopeConflict(input: {
+  writeScopes: readonly string[];
+  blockedWriteScopes?: readonly string[];
+}): void {
+  if (!input.blockedWriteScopes || input.blockedWriteScopes.length === 0) return;
+  const scopedWriteRefs = input.writeScopes.filter((ref) => /^[a-z-]+:[^:]+/i.test(ref));
+  const conflict = findConflictingWriteScope({
+    writeScopes: scopedWriteRefs,
+    blockedWriteScopes: input.blockedWriteScopes,
+  });
+  if (conflict) {
+    throw new Error(
+      `same_turn_write_scope_conflict:${conflict.writeScope}:blocked_by:${conflict.blockedWriteScope}`,
+    );
+  }
+}
+
+function coarsePreExecutionWriteScopes(
+  toolName: string,
+  args: Record<string, unknown>,
+): string[] {
+  switch (toolName) {
+    case "add_chronicle_entry":
+      return ["world:event"];
+    case "log_event":
+      return args.durability === "scene_local" ? [] : ["world:event"];
+    case "record_dialogue_outcome":
+      return args.durability === "scene_local" ? [] : ["world:dialogue"];
+    case "record_world_fact":
+      return ["world:fact"];
+    case "advance_time":
+      return ["world:time"];
+    case "set_relationship":
+      return ["world:relationship"];
+    case "start_search":
+    case "record_player_intent":
+      return ["world:intent"];
+    case "transfer_item":
+      return ["world:inventory"];
+    default:
+      return [];
+  }
+}
+
+function preExecutionWriteScopesForToolCall(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
+}): string[] {
+  const allowedWriteScopes = input.executionContext?.authority?.allowedWriteScopes
+    ?.filter((scope) => scope.trim() && scope.trim() !== "*") ?? [];
+  if (allowedWriteScopes.length > 0) {
+    return allowedWriteScopes;
+  }
+  return coarsePreExecutionWriteScopes(input.toolName, input.args);
+}
+
+function durableMemoryRollbackDetails(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  result: ToolResult;
+}): { eventId: string; participants: string[]; importance: number } | null {
+  if (input.toolName !== "log_event" && input.toolName !== "record_dialogue_outcome") {
+    return null;
+  }
+  if (!input.result.success) return null;
+  const eventId = readStringField(input.result.result, "eventId");
+  if (!eventId) return null;
+
+  if (input.toolName === "log_event") {
+    const participants = readToolStringArray(input.args.participants);
+    const importance = typeof input.args.importance === "number" ? input.args.importance : 0;
+    return { eventId, participants, importance };
+  }
+
+  const speakerRef = readToolString(input.args.speakerRef);
+  const participants = uniqueToolStrings([
+    speakerRef,
+    ...readToolStringArray(input.args.addresseeRefs),
+    ...readToolStringArray(input.args.sourceRefs),
+  ]);
+  return { eventId, participants, importance: 5 };
+}
+
+function durableKnowledgeRollbackDetails(input: {
+  toolName: string;
+  result: ToolResult;
+}): { knowledgeId: string | null; factRef: string | null } | null {
+  if (
+    input.toolName !== "record_world_fact"
+    && input.toolName !== "record_dialogue_outcome"
+  ) {
+    return null;
+  }
+  if (!input.result.success) return null;
+  const payload = input.result.result;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (
+    readStringField(payload, "durability") !== "durable"
+    || (payload as Record<string, unknown>).persisted !== true
+  ) {
+    return null;
+  }
+  const knowledgeId = readStringField(payload, "knowledgeId");
+  const factRef = readStringField(payload, "factRef");
+  return knowledgeId || factRef ? { knowledgeId, factRef } : null;
+}
+
+function knowledgeOutputsForToolResult(input: {
+  toolName: string;
+  result: ToolResult;
+}): string[] {
+  const details = durableKnowledgeRollbackDetails(input);
+  if (!details) return [];
+  return uniqueToolStrings([details.knowledgeId, details.factRef]);
+}
+
+async function retractDurableMemoryAfterRejectedAuthority(input: {
+  campaignId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result: ToolResult;
+}): Promise<void> {
+  const details = durableMemoryRollbackDetails(input);
+  if (details) {
+    try {
+      await retractStoredEpisodicEvent({
+        campaignId: input.campaignId,
+        eventId: details.eventId,
+      });
+      await retractReflectionBudget(
+        input.campaignId,
+        details.participants,
+        details.importance,
+      );
+    } catch (retractError) {
+      log.warn("Failed to retract durable memory after rejected authority commit", {
+        toolName: input.toolName,
+        eventId: details.eventId,
+        error: retractError instanceof Error ? retractError.message : String(retractError),
+      });
+    }
+  }
+
+  const knowledgeDetails = durableKnowledgeRollbackDetails(input);
+  if (knowledgeDetails) {
+    try {
+      retractActorKnowledgeRecord({
+        campaignId: input.campaignId,
+        knowledgeId: knowledgeDetails.knowledgeId,
+        factRef: knowledgeDetails.factRef,
+        reason: "rejected_authority_commit",
+      });
+    } catch (retractError) {
+      log.warn("Failed to retract durable knowledge after rejected authority commit", {
+        toolName: input.toolName,
+        knowledgeId: knowledgeDetails.knowledgeId,
+        factRef: knowledgeDetails.factRef,
+        error: retractError instanceof Error ? retractError.message : String(retractError),
+      });
+    }
+  }
+}
+
+function runToolHandler(input: {
+  campaignId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  tick: number;
+  outcomeTier?: string;
+  executionContext?: ToolExecutionContext;
+}): ToolResult | Promise<ToolResult> {
+  switch (input.toolName) {
+    case "add_tag":
+      return handleAddTag(input.campaignId, input.args);
+    case "remove_tag":
+      return handleRemoveTag(input.campaignId, input.args);
+    case "set_relationship":
+      return handleSetRelationship(input.campaignId, input.args);
+    case "add_chronicle_entry":
+      return handleAddChronicleEntry(input.campaignId, input.args, input.tick);
+    case "log_event":
+      return handleLogEvent(input.campaignId, input.args, input.tick, input.executionContext);
+    case "record_dialogue_outcome":
+      return handleRecordDialogueOutcome(
+        input.campaignId,
+        input.args,
+        input.tick,
+        input.executionContext,
+      );
+    case "record_world_fact":
+      return handleRecordWorldFact(input.campaignId, input.args, input.executionContext);
+    case "advance_time":
+      return handleAdvanceTime(input.args);
+    case "offer_quick_actions": {
+      const sourceRefs = Array.isArray(input.args.sourceRefs)
+        ? input.args.sourceRefs.filter((ref): ref is string => typeof ref === "string")
+        : undefined;
+      return persistQuickActionOffer({
+        campaignId: input.campaignId,
+        actions: input.args.actions,
+        tick: input.tick,
+        ...(sourceRefs ? { sourceRefs } : {}),
+      }).then((result) => ({
+        success: true,
+        result,
+      }));
+    }
+    case "spawn_npc":
+      return handleSpawnNpc(input.campaignId, input.args, input.executionContext);
+    case "promote_npc":
+      return handlePromoteNpc(input.campaignId, input.args);
+    case "spawn_item":
+      return handleSpawnItem(input.campaignId, input.args);
+    case "reveal_location":
+      return handleRevealLocation(
+        input.campaignId,
+        input.args,
+        input.tick,
+        input.executionContext,
+      );
+    case "request_contested_outcome":
+      return handleRequestContestedOutcome(input.campaignId, input.args);
+    case "set_condition":
+      return handleSetCondition(input.campaignId, input.args, input.outcomeTier);
+    case "move_to":
+      return handleMoveTo(input.campaignId, input.args, input.tick, input.executionContext);
+    case "move_actor":
+      return handleMoveActor(input.campaignId, input.args, input.tick, input.executionContext);
+    case "create_minor_poi":
+      return handleCreateMinorPoi(input.campaignId, input.args, input.tick, input.executionContext);
+    case "create_scene_extra":
+      return handleCreateSceneExtra(input.campaignId, input.args, input.executionContext);
+    case "start_search":
+      return handleStartSearch(input.args, input.executionContext);
+    case "record_player_intent":
+      return handleRecordPlayerIntent(input.args, input.executionContext);
+    case "transfer_item":
+      return handleTransferItem(input.campaignId, input.args);
+    default:
+      return { success: false, error: `Unknown tool: ${input.toolName}` };
+  }
+}
+
+function finalizeAuthorityResult(input: {
+  campaignId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  tick: number;
+  result: ToolResult;
+  executionContext?: ToolExecutionContext;
+}): ToolResult {
+  const authority = input.executionContext?.authority;
+  if (!authority || !CANONICAL_WORLD_MUTATION_TOOLS.has(input.toolName)) {
+    return attachModelVisibleToolResultJson(input.result);
+  }
+  if (
+    input.result.success
+    && isObservationToolResult(input.result)
+  ) {
+    return attachModelVisibleToolResultJson(input.result);
+  }
+
+  if (!input.result.success) {
+    return attachToolResultAuthority(input.result, {
+      campaignId: input.campaignId,
+      sourceEntity: authority.sourceEntity,
+      baseWorldVersion: authority.baseWorldVersion,
+      elapsedWorldTimeMinutes: 0,
+      stateDeltaRefs: [],
+      eventRefs: [],
+      witnesses: [],
+      knowledgeOutputs: [],
+      visibilityOutputs: [],
+      resources: [],
+      failureReason: input.result.error,
+    });
+  }
+
+  if (isSceneLocalLogEvent(input.toolName, input.result)) {
+    return attachToolResultAuthority(input.result, {
+      campaignId: input.campaignId,
+      sourceEntity: authority.sourceEntity,
+      baseWorldVersion: authority.baseWorldVersion,
+      elapsedWorldTimeMinutes: 0,
+      stateDeltaRefs: ["scene_local_observation"],
+      eventRefs: [],
+      witnesses: [],
+      knowledgeOutputs: [],
+      visibilityOutputs: [],
+      resources: [],
+    });
+  }
+
+  const inferredRefs = stateDeltaRefsForToolResult(input);
+  const elapsedWorldTimeMinutes =
+    input.toolName === "advance_time"
+      ? readIntegerField(input.result.result, "minutes") ?? 0
+      : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 0;
+  assertAuthorityWriteScopesCovered({
+    stateDeltaRefs: inferredRefs,
+    allowedWriteScopes: authority.allowedWriteScopes,
+  });
+  assertNoBlockedWriteScopeConflict({
+    writeScopes: inferredRefs,
+    blockedWriteScopes: authority.blockedWriteScopes,
+  });
+  assertSimulationProposalExecutionStillClaimed({
+    campaignId: input.campaignId,
+    metadata: authority.metadata,
+  });
+  const trace = commitAuthorityTrace({
+    campaignId: input.campaignId,
+    operation: `tool:${input.toolName}`,
+    baseWorldVersion: authority.baseWorldVersion,
+    sourceEntity: authority.sourceEntity,
+    elapsedWorldTimeMinutes,
+    clockReasonKind: input.toolName === "advance_time" ? "tool_time_effect" : undefined,
+    currentTick: input.tick,
+    turnId: typeof authority.metadata?.turnId === "string"
+      ? authority.metadata.turnId
+      : `turn:${input.tick}`,
+    uiTurnOrdinal: input.tick,
+    toolResultId: authority.toolResultId,
+    eventIds: eventIdsForAuthorityTrace({
+      toolName: input.toolName,
+      inferredRefs,
+      result: input.result,
+    }),
+    stateDeltaRefs: inferredRefs,
+    metadata: {
+      toolName: input.toolName,
+      args: input.args,
+      ...(authority.metadata ? { proposalExecution: authority.metadata } : {}),
+    },
+  });
+
+  return attachToolResultAuthority(input.result, {
+    ...trace,
+    eventRefs: trace.eventRefs,
+    knowledgeOutputs: knowledgeOutputsForToolResult(input),
+    requireStateDelta: true,
+  });
+}
+
+function missingStateBearingAuthorityIssue(input: {
+  toolName: string;
+  executionContext?: ToolExecutionContext;
+  options?: ExecuteToolCallOptions;
+}): ToolResult | null {
+  if (!AUTHORITY_REQUIRED_TOOLS.has(input.toolName)) return null;
+  if (!input.executionContext) {
+    if (input.options?.authorityMode === "legacy_unscoped") return null;
+    return buildValidationFailureToolResult(
+      `${input.toolName} is state-bearing and requires execution authority. Pass a ToolExecutionContext with authority, or explicitly mark a legacy_unscoped caller.`,
+    );
+  }
+  if (input.executionContext.authority) return null;
+  return buildValidationFailureToolResult(
+    `${input.toolName} is state-bearing and requires execution authority for ${input.executionContext.scope}.`,
+  );
+}
+
+function runtimeToolSchemaFor(toolName: string) {
+  if (!Object.hasOwn(runtimeToolInputSchemas, toolName)) return null;
+  return runtimeToolInputSchemas[toolName as RuntimeToolName];
+}
+
+function describeSchemaIssues(
+  issues: readonly { path: PropertyKey[]; message: string }[],
+): string {
+  return issues
+    .slice(0, 5)
+    .map((issue) => {
+      const path = issue.path.length > 0
+        ? issue.path.map((part) => String(part)).join(".")
+        : "input";
+      return `${path}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
+function findSchemaDroppedInputKeys(
+  raw: unknown,
+  parsed: unknown,
+  path: string[] = [],
+): string[] {
+  if (Array.isArray(raw)) {
+    if (!Array.isArray(parsed)) return [];
+    return raw.flatMap((entry, index) =>
+      findSchemaDroppedInputKeys(entry, parsed[index], [...path, String(index)]));
+  }
+  if (
+    !raw
+    || typeof raw !== "object"
+    || Array.isArray(parsed)
+    || !parsed
+    || typeof parsed !== "object"
+  ) {
+    return [];
+  }
+
+  const parsedRecord = parsed as Record<string, unknown>;
+  return Object.entries(raw as Record<string, unknown>).flatMap(([key, value]) => {
+    const nextPath = [...path, key];
+    if (!Object.hasOwn(parsedRecord, key)) {
+      return [nextPath.join(".")];
+    }
+    return findSchemaDroppedInputKeys(value, parsedRecord[key], nextPath);
+  });
+}
+
+function validateRuntimeToolArgs(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+}): { args: Record<string, unknown>; failure: ToolResult | null } {
+  const schema = runtimeToolSchemaFor(input.toolName);
+  if (!schema) return { args: input.args, failure: null };
+  const parsed = schema.safeParse(input.args);
+  if (!parsed.success) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: ${describeSchemaIssues(parsed.error.issues)}`,
+      ),
+    };
+  }
+  const parsedData = parsed.data;
+  if (typeof parsedData !== "object" || parsedData === null || Array.isArray(parsedData)) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: parsed input was not an object.`,
+      ),
+    };
+  }
+  const droppedKeys = findSchemaDroppedInputKeys(input.args, parsedData);
+  if (droppedKeys.length > 0) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: unsupported input field(s): ${droppedKeys.slice(0, 5).join(", ")}`,
+      ),
+    };
+  }
+  return {
+    args: parsedData as Record<string, unknown>,
+    failure: null,
+  };
 }
 
 // -- Main executor ------------------------------------------------------------
@@ -971,45 +3853,202 @@ export async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>,
   tick: number,
-  outcomeTier?: string
+  outcomeTier?: string,
+  executionContext?: ToolExecutionContext,
+  options: ExecuteToolCallOptions = {},
 ): Promise<ToolResult> {
+  const toolCallStart = Date.now();
+  let resultForLog: ToolResult = { success: false, error: "Tool execution did not complete" };
+  let argsForExecution = args;
   try {
-    switch (toolName) {
-      case "add_tag":
-        return await handleAddTag(campaignId, args);
-      case "remove_tag":
-        return await handleRemoveTag(campaignId, args);
-      case "set_relationship":
-        return await handleSetRelationship(campaignId, args);
-      case "add_chronicle_entry":
-        return await handleAddChronicleEntry(campaignId, args, tick);
-      case "log_event":
-        return await handleLogEvent(campaignId, args, tick);
-      case "offer_quick_actions":
-        return {
-          success: true,
-          result: { actions: args.actions },
-        };
-      case "spawn_npc":
-        return await handleSpawnNpc(campaignId, args);
-      case "spawn_item":
-        return await handleSpawnItem(campaignId, args);
-      case "reveal_location":
-        return await handleRevealLocation(campaignId, args);
-      case "set_condition":
-        return await handleSetCondition(campaignId, args, outcomeTier);
-      case "move_to":
-        return await handleMoveTo(campaignId, args);
-      case "transfer_item":
-        return await handleTransferItem(campaignId, args);
-      default:
-        return { success: false, error: `Unknown tool: ${toolName}` };
+    const schemaValidation = validateRuntimeToolArgs({ toolName, args });
+    argsForExecution = schemaValidation.args;
+    if (schemaValidation.failure) {
+      resultForLog = schemaValidation.failure;
+      return resultForLog;
     }
+
+    const missingAuthority = missingStateBearingAuthorityIssue({
+      toolName,
+      executionContext,
+      options,
+    });
+    if (missingAuthority) {
+      resultForLog = missingAuthority;
+      return resultForLog;
+    }
+
+    if (executionContext?.scope === "player_turn" && toolName === "spawn_npc") {
+      resultForLog = {
+        success: false,
+        error: "spawn_npc is not a player-turn model-facing tool. Use create_scene_extra for temporary local NPCs.",
+      };
+      return resultForLog;
+    }
+
+    if (executionContext) {
+      const groundingIssue = validateToolInputGrounding({
+        toolName: toolName as RuntimeToolName,
+        toolInput: argsForExecution,
+        context: executionContext,
+      });
+      if (groundingIssue) {
+        resultForLog = buildValidationFailureToolResult(
+          `Tool grounding failed: ${groundingIssue.message}`,
+          contractFailureFromGroundingIssue({ toolName, issue: groundingIssue }),
+        );
+        return resultForLog;
+      }
+    }
+
+    const executeValidatedTool = async (): Promise<ToolResult> => {
+      const hasAuthority = Boolean(
+        executionContext?.authority && AUTHORITY_REQUIRED_TOOLS.has(toolName),
+      );
+      if (hasAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
+        return getDb().transaction(() => {
+          validateBaseWorldVersion({
+            campaignId,
+            baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+            currentTick: tick,
+          });
+          assertNoBlockedWriteScopeConflict({
+            writeScopes: preExecutionWriteScopesForToolCall({
+              toolName,
+              args: argsForExecution,
+              executionContext,
+            }),
+            blockedWriteScopes: executionContext!.authority!.blockedWriteScopes,
+          });
+          const handlerResult = runToolHandler({
+            campaignId,
+            toolName,
+            args: argsForExecution,
+            tick,
+            outcomeTier,
+            executionContext,
+          }) as ToolResult;
+          resultForLog = handlerResult;
+          return finalizeAuthorityResult({
+            campaignId,
+            toolName,
+            args: argsForExecution,
+            tick,
+            result: handlerResult,
+            executionContext,
+          });
+        });
+      }
+
+      if (hasAuthority) {
+        try {
+          validateBaseWorldVersion({
+            campaignId,
+            baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+            currentTick: tick,
+          });
+        } catch (error) {
+          if (isWorldVersionConflict(error)) {
+            return attachToolResultAuthority(
+              buildValidationFailureToolResult(error.message),
+              {
+                campaignId,
+                sourceEntity: executionContext!.authority!.sourceEntity,
+                baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+                elapsedWorldTimeMinutes: 0,
+                stateDeltaRefs: [],
+                eventRefs: [],
+                witnesses: [],
+                knowledgeOutputs: [],
+                visibilityOutputs: [],
+                resources: [],
+                failureReason: error.message,
+              },
+            );
+          }
+          throw error;
+        }
+        assertNoBlockedWriteScopeConflict({
+          writeScopes: preExecutionWriteScopesForToolCall({
+            toolName,
+            args: argsForExecution,
+            executionContext,
+          }),
+          blockedWriteScopes: executionContext!.authority!.blockedWriteScopes,
+        });
+      }
+
+      const handlerResult = await runToolHandler({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        tick,
+        executionContext,
+        outcomeTier,
+      });
+      resultForLog = handlerResult;
+      return finalizeAuthorityResult({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        tick,
+        result: handlerResult,
+        executionContext,
+      });
+    };
+
+    resultForLog = AUTHORITY_REQUIRED_TOOLS.has(toolName)
+      ? await withSqliteWriteLock(`tool:${campaignId}:${toolName}`, executeValidatedTool)
+      : await executeValidatedTool();
+    if (
+      executionContext?.authority
+      && resultForLog.success
+      && typeof resultForLog.authority?.resultWorldVersion === "number"
+    ) {
+      executionContext.authority.baseWorldVersion = resultForLog.authority.resultWorldVersion;
+      executionContext.authority.elapsedWorldTimeMinutes = 0;
+    }
+    return resultForLog;
   } catch (error) {
+    if (executionContext?.authority) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        result: resultForLog,
+      });
+    }
+    if (executionContext?.authority && isWorldVersionConflict(error)) {
+      resultForLog = attachToolResultAuthority(
+        buildValidationFailureToolResult(error.message),
+        {
+          campaignId,
+          sourceEntity: executionContext.authority.sourceEntity,
+          baseWorldVersion: executionContext.authority.baseWorldVersion,
+          elapsedWorldTimeMinutes: 0,
+          stateDeltaRefs: [],
+          eventRefs: [],
+          witnesses: [],
+          knowledgeOutputs: [],
+          visibilityOutputs: [],
+          resources: [],
+          failureReason: error.message,
+        },
+      );
+      return resultForLog;
+    }
     log.error(`Tool execution failed: ${toolName}`, error);
-    return {
+    resultForLog = {
       success: false,
       error: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
     };
+    return resultForLog;
+  } finally {
+    log.event("tool.call", {
+      toolName,
+      args: argsForExecution,
+      result: resultForLog,
+      latencyMs: Date.now() - toolCallStart,
+    });
   }
 }

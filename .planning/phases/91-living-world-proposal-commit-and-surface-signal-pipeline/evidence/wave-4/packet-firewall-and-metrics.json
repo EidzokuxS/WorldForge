@@ -1,0 +1,90 @@
+{
+  "phase": 91,
+  "plan": "91-04",
+  "artifact": "packet-firewall-and-metrics",
+  "generatedAt": "2026-05-10",
+  "packetFirewall": {
+    "nonCommittedProposalSentinels": [
+      "PENDING PROPOSAL SENTINEL: the courier sees a hidden vault.",
+      "STALE PROPOSAL SENTINEL: the old alley route is definitely open.",
+      "SUPERSEDED PROPOSAL SENTINEL: the vanished porter is present.",
+      "ACTOR RETRY SENTINEL: the guard secretly approves passage."
+    ],
+    "absenceCheckedIn": [
+      "SceneAssembly.recentContext",
+      "SceneAssembly.playerPerceivableConsequences",
+      "SceneFrame.recentEvents",
+      "NarratorPacket.hintSignals",
+      "formatNarratorPacketForPrompt",
+      "PlayerFacingPacket.hintSignals",
+      "PlayerFacingPacket.sourceRefs",
+      "formatPlayerFacingPacketForPrompt"
+    ],
+    "committedSurfaceSignal": {
+      "summary": "A stallkeeper mentions fresh wax tracks near the east awning.",
+      "sourcePath": [
+        "world_threads.metadata.sourceProposalId",
+        "world_thread_events",
+        "location_recent_events",
+      "SceneFrame.recentEvents[source=world_thread_signal]",
+      "NarratorPacket.hintSignals",
+      "PlayerFacingPacket.sourceRefs[kind=world_thread_signal]"
+      ],
+      "directProposalIdInPlayerFacingSourceRefs": false,
+      "hiddenCauseTermsBlocked": [
+        "secret patron"
+      ]
+    }
+  },
+  "metricsFixture": {
+    "proposalCounts": {
+      "totalProposals": 11,
+      "pending": 2,
+      "committed": 3,
+      "rejected": 4,
+      "canceled": 1,
+      "expired": 1,
+      "deferred": 1,
+      "superseded": 1,
+      "needsRebase": 1,
+      "needsActorRetry": 1,
+      "meaningfulCommitted": 3,
+      "discoverableSurface": 1,
+      "explicitNoSurface": 1,
+      "missingSurface": 1,
+      "worldThreadEvents": 1,
+      "locationRecentEvents": 1,
+      "staleJobs": 2
+    },
+    "metricValues": {
+      "proposal_commit_ratio": 0.2727272727272727,
+      "proposal_terminal_state_ratio": 0.8181818181818182,
+      "surface_signal_coverage": 0.6666666666666666,
+      "stale_job_count": 2
+    },
+    "defects": {
+      "missingSurfaceProposalIds": [
+        "proposal-committed-missing"
+      ],
+      "staleJobIds": [
+        "job-stale-queued",
+        "job-stale-running"
+      ]
+    }
+  },
+  "traceMerge": {
+    "helper": "addLivingWorldProposalMetricsToTrace",
+    "maps": {
+      "counts.pending": "TurnLatencyTrace.proposalEffects.queued",
+      "counts.committed": "TurnLatencyTrace.proposalEffects.committed",
+      "counts.rejected": "TurnLatencyTrace.proposalEffects.rejected",
+      "counts.deferred": "TurnLatencyTrace.proposalEffects.deferred"
+    },
+    "latencySemantics": "does not alter stages, timings, diagnostics, or output clipping flags"
+  },
+  "verification": [
+    "npm --prefix backend run test -- src/engine/__tests__/proposal-truth-boundary.test.ts src/engine/__tests__/living-world-metrics.test.ts src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/player-facing-packet.test.ts",
+    "npm --prefix backend run test -- src/engine/__tests__/turn-latency-trace.test.ts",
+    "npm --prefix backend run typecheck"
+  ]
+}

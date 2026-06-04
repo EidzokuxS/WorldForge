@@ -4,15 +4,12 @@ import { cn } from "@/lib/utils";
 
 type DivProps = React.ComponentProps<"div">;
 
-const shellSurfaceBase =
-  "rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] shadow-[0_24px_70px_rgba(0,0,0,0.18)]";
-
 export function ShellFrame({ className, ...props }: DivProps) {
   return (
     <div
       data-shell-region="outer-frame"
       className={cn(
-        "overflow-hidden rounded-[var(--shell-radius)] border [border-color:var(--shell-border)] [background:var(--shell-frame-surface)] shadow-[0_8px_30px_rgba(0,0,0,0.35)]",
+        "overflow-hidden rounded-[var(--shell-radius)] border [border-color:var(--shell-border)] [background:var(--shell-frame-surface)] shadow-[0_18px_80px_rgba(0,0,0,0.32)]",
         className,
       )}
       {...props}
@@ -38,66 +35,10 @@ export function ShellMainPanel({ className, ...props }: DivProps) {
     <div
       data-shell-region="main-panel"
       className={cn(
-        "flex min-w-0 flex-1 flex-col overflow-hidden [background:var(--shell-panel-surface)]",
+        "flex min-w-0 flex-1 flex-col overflow-hidden [background:linear-gradient(180deg,var(--shell-panel-surface)_0%,#0d0d11_100%)]",
         className,
       )}
       {...props}
     />
-  );
-}
-
-/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
-export function ShellPanel({ className, ...props }: DivProps) {
-  return (
-    <div
-      data-shell-surface="panel"
-      className={cn(shellSurfaceBase, "[background:var(--shell-panel-surface)]", className)}
-      {...props}
-    />
-  );
-}
-
-/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
-export function ShellRail({ className, ...props }: DivProps) {
-  return (
-    <div
-      data-shell-surface="rail"
-      className={cn(shellSurfaceBase, "[background:var(--shell-rail-surface)]", className)}
-      {...props}
-    />
-  );
-}
-
-interface ShellActionTrayProps extends DivProps {
-  title?: string;
-  description?: string;
-}
-
-/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
-export function ShellActionTray({
-  title,
-  description,
-  children,
-  className,
-  ...props
-}: ShellActionTrayProps) {
-  return (
-    <div
-      data-shell-region="action-tray"
-      className={cn(
-        shellSurfaceBase,
-        "sticky bottom-4 z-20 mt-6 px-4 py-3 [background:var(--shell-panel-muted)]",
-        className,
-      )}
-      {...props}
-    >
-      {title || description ? (
-        <div className="mb-3">
-          {title ? <p className="text-sm font-medium text-bone">{title}</p> : null}
-          {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
-        </div>
-      ) : null}
-      {children}
-    </div>
   );
 }

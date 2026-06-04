@@ -560,6 +560,19 @@ describe("suggestSeedSchema", () => {
         expect(result.success).toBe(true);
       }
     });
+
+    it("accepts an explicit null research artifact without assigning route semantics", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "Fantasy world",
+        category: "geography",
+        researchArtifact: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.researchArtifact).toBeNull();
+      }
+    });
   });
 
   describe("rejects invalid inputs", () => {
@@ -657,6 +670,18 @@ describe("generateWorldSchema", () => {
         },
       });
       expect(result.success).toBe(true);
+    });
+
+    it("accepts an explicit null research artifact without defining clear-artifact behavior", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "abc-123-def",
+        researchArtifact: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.researchArtifact).toBeNull();
+      }
     });
 
     it("remains backward compatible with requests that only send ipContext", () => {
@@ -1195,9 +1220,9 @@ describe("settingsPayloadSchema", () => {
     storyteller: { providerId: "p1", temperature: 0.8, maxTokens: 1024 },
     generator: { providerId: "p1", temperature: 0.7, maxTokens: 2048 },
     embedder: { providerId: "p1", temperature: 0, maxTokens: 512 },
-    fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
     images: { providerId: "p1", model: "dall-e", stylePrompt: "fantasy", enabled: false },
     research: { enabled: true, maxSearchSteps: 10 },
+    ui: { showRawReasoning: false },
   });
 
   it("accepts a complete valid settings object", () => {
@@ -1222,12 +1247,6 @@ describe("settingsPayloadSchema", () => {
 
   it("rejects missing judge role", () => {
     const { judge: _, ...rest } = validSettings();
-    const result = settingsPayloadSchema.safeParse(rest);
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects missing fallback config", () => {
-    const { fallback: _, ...rest } = validSettings();
     const result = settingsPayloadSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -1307,6 +1326,49 @@ describe("settingsPayloadSchema", () => {
     const input100 = validSettings();
     (input100.research as Record<string, unknown>).maxSearchSteps = 100;
     expect(settingsPayloadSchema.safeParse(input100).success).toBe(true);
+  });
+
+  // --- Phase 58: observability ---
+
+  const validObservability = () => ({
+    enabled: true,
+    dumpFullPrompts: false,
+    roles: {
+      judge: true,
+      storyteller: true,
+      oracle: true,
+      npcAgent: true,
+      reflection: true,
+      embedder: true,
+    },
+  });
+
+  it("accepts a complete observability block", () => {
+    const input = { ...validSettings(), observability: validObservability() };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts missing observability (pre-upgrade frontend)", () => {
+    const result = settingsPayloadSchema.safeParse(validSettings());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects malformed observability.enabled", () => {
+    const input = {
+      ...validSettings(),
+      observability: { ...validObservability(), enabled: "yes" },
+    };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects observability missing a role toggle", () => {
+    const bad = validObservability();
+    delete (bad.roles as Record<string, unknown>).oracle;
+    const input = { ...validSettings(), observability: bad };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
   });
 });
 
@@ -1648,6 +1710,19 @@ describe("importV2CardSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("no longer accepts grounding field (removed in Phase 57 — powerStats replaces grounding)", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as Record<string, unknown>).grounding).toBeUndefined();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1757,7 +1832,32 @@ describe("canonical character schemas", () => {
     ).toBe(true);
   });
 
-  it("accepts scaffold NPC edits that carry the canonical draft seam", () => {
+  it("materializes legacy save-character payloads onto the current shared draft lane", () => {
+    const result = saveCharacterSchema.safeParse({
+      campaignId: "camp-1",
+      character: {
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        tags: ["Observant", "Poor"],
+        hp: 4,
+        equippedItems: ["Iron Sword"],
+        locationName: "Signal Station",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.draft.identity.baseFacts.biography).toBe("");
+      expect(result.data.draft.identity.behavioralCore.selfImage).toBe("");
+      expect(result.data.draft.identity.liveDynamics.activeGoals).toEqual([]);
+      expect(result.data.draft.socialContext.currentLocationName).toBe("Signal Station");
+    }
+  });
+
+  it("preserves supporting tier for draft-backed save-edits NPC payloads", () => {
     const result = saveEditsSchema.safeParse({
       campaignId: "camp-1",
       scaffold: {
@@ -1779,8 +1879,468 @@ describe("canonical character schemas", () => {
               identity: {
                 ...draft.identity,
                 role: "npc",
-                tier: "key",
+                tier: "supporting",
                 displayName: "Captain Mire",
+              },
+            },
+            locationName: "Signal Station",
+            factionName: "Wardens",
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Captain Mire",
+        locationName: "Signal Station",
+        factionName: "Wardens",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
+    }
+  });
+
+  it("preserves explicit location hierarchy and legacy NPC scene placement in save-edits payloads", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: false,
+            connectedTo: ["Relay Roof"],
+            kind: "macro",
+            parentLocationName: null,
+          },
+          {
+            name: "Relay Roof",
+            description: "A wind-cut sublocation overlooking the valley.",
+            tags: ["Exposed"],
+            isStarting: true,
+            connectedTo: ["Signal Station"],
+            kind: "persistent_sublocation",
+            parentLocationName: "Signal Station",
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            sceneLocationName: "Relay Roof",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.locations[0]).toMatchObject({
+        kind: "macro",
+        parentLocationName: null,
+      });
+      expect(result.data.scaffold.locations[1]).toMatchObject({
+        kind: "persistent_sublocation",
+        parentLocationName: "Signal Station",
+      });
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        locationName: "Signal Station",
+        sceneLocationName: "Relay Roof",
+      });
+    }
+  });
+
+  it("preserves scene placement through draft-backed save-edits NPC reconciliation", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: false,
+            connectedTo: ["Relay Roof"],
+            kind: "macro",
+            parentLocationName: null,
+          },
+          {
+            name: "Relay Roof",
+            description: "A wind-cut sublocation overlooking the valley.",
+            tags: ["Exposed"],
+            isStarting: true,
+            connectedTo: ["Signal Station"],
+            kind: "persistent_sublocation",
+            parentLocationName: "Signal Station",
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            draft: {
+              ...draft,
+              identity: {
+                ...draft.identity,
+                role: "npc",
+                tier: "supporting",
+                displayName: "Captain Mire",
+              },
+              socialContext: {
+                ...draft.socialContext,
+                currentLocationName: "Signal Station",
+              },
+            },
+            locationName: "Signal Station",
+            sceneLocationName: "Relay Roof",
+            factionName: "Wardens",
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Captain Mire",
+        locationName: "Signal Station",
+        sceneLocationName: "Relay Roof",
+        factionName: "Wardens",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.socialContext.currentLocationName).toBe(
+        "Signal Station",
+      );
+    }
+  });
+
+  it("keeps legacy flat save-edits scaffolds compatible when hierarchy fields are omitted", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.locations[0]?.kind).toBeUndefined();
+      expect(result.data.scaffold.locations[0]?.parentLocationName).toBeUndefined();
+      expect(result.data.scaffold.npcs[0]?.sceneLocationName).toBeUndefined();
+    }
+  });
+
+  it("materializes a canonical supporting draft for legacy supporting scaffold NPC payloads", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Field Runner Iven",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
+      expect(result.data.scaffold.npcs[0]?.draft.profile.personaSummary).toBe(
+        "Carries sealed messages through the blizzard.",
+      );
+    }
+  });
+
+  it("adds canonical persistence columns to players and npcs without removing legacy ones", () => {
+    expect(players.characterRecord.name).toBe("character_record");
+    expect(players.derivedTags.name).toBe("derived_tags");
+    expect(players.tags.name).toBe("tags");
+
+    expect(npcs.characterRecord.name).toBe("character_record");
+    expect(npcs.derivedTags.name).toBe("derived_tags");
+    expect(npcs.persona.name).toBe("persona");
+  });
+});
+
+describe("phase 48 richer identity schemas", () => {
+  const richerDraft = {
+    identity: {
+      role: "npc" as const,
+      tier: "key" as const,
+      displayName: "Captain Mire",
+      canonicalStatus: "known_ip_canonical" as const,
+      baseFacts: {
+        biography: "A veteran signal-station commander.",
+        socialRole: ["warden", "captain"],
+        hardConstraints: ["Will not abandon the station"],
+      },
+      behavioralCore: {
+        motives: ["Protect the valley"],
+        pressureResponses: ["Turns colder under pressure"],
+        taboos: ["Will not lie to subordinates"],
+        attachments: ["The station crew"],
+        selfImage: "Guardian of the northern line",
+      },
+      liveDynamics: {
+        activeGoals: ["Hold the barricade"],
+        beliefDrift: ["The valley can still be saved"],
+        currentStrains: ["Running out of supplies"],
+        earnedChanges: ["Started trusting the player"],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "42",
+      appearance: "Storm-scarred uniform and frost-burned hands.",
+      backgroundSummary: "Raised inside the watchtowers of the north.",
+      personaSummary: "Commanding, clipped, and exhausted.",
+    },
+    socialContext: {
+      factionId: "faction-wardens",
+      factionName: "Wardens",
+      homeLocationId: "loc-station",
+      homeLocationName: "Signal Station",
+      currentLocationId: "loc-barricade",
+      currentLocationName: "North Barricade",
+      relationshipRefs: [],
+      socialStatus: ["Respected"],
+      originMode: "resident" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Hold the barricade"],
+      longTermGoals: ["Restore order in the valley"],
+      beliefs: ["The station can still be saved"],
+      drives: ["Duty"],
+      frictions: ["Suspicious of outsiders"],
+    },
+    capabilities: {
+      traits: ["Connected"],
+      skills: [{ name: "Negotiator", tier: "Master" as const }],
+      flaws: ["Cold-blooded"],
+      specialties: ["Signal doctrine"],
+      wealthTier: "Comfortable" as const,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Signal key"],
+      equippedItemRefs: ["Officer Saber"],
+      currencyNotes: "",
+      signatureItems: ["Signal key"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "import" as const,
+      importMode: "outsider" as const,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "known-ip",
+      legacyTags: ["legacy"],
+    },
+    sourceBundle: {
+      canonSources: [
+        {
+          kind: "canon",
+          label: "Episode Guide",
+          excerpt: "Captain Mire held the station through three winters.",
+        },
+      ],
+      secondarySources: [
+        {
+          kind: "card",
+          label: "Community card",
+          excerpt: "Voice is dry, clipped, and tired.",
+        },
+      ],
+      synthesis: {
+        owner: "worldforge",
+        strategy: "canon-facts-authoritative",
+        notes: ["Merged canon history with secondary voice cues."],
+      },
+    },
+    continuity: {
+      identityInertia: "anchored",
+      protectedCore: ["Will not abandon the station"],
+      mutableSurface: ["Trust in the player"],
+      changePressureNotes: ["Major defeats can force realignment."],
+    },
+  };
+
+  it("preserves richer identity, source bundle, and continuity across draft and record schemas", () => {
+    const draftResult = characterDraftSchema.safeParse(richerDraft);
+    expect(draftResult.success).toBe(true);
+    if (draftResult.success) {
+      expect(draftResult.data.identity.baseFacts.biography).toBe(
+        "A veteran signal-station commander.",
+      );
+      expect(draftResult.data.identity.behavioralCore.motives).toEqual([
+        "Protect the valley",
+      ]);
+      expect(draftResult.data.identity.liveDynamics.activeGoals).toEqual([
+        "Hold the barricade",
+      ]);
+      // sourceBundle and continuity removed from draft schema (Phase 57)
+    }
+
+    const recordResult = characterRecordSchema.safeParse({
+      ...richerDraft,
+      identity: {
+        ...richerDraft.identity,
+        id: "npc-1",
+        campaignId: "camp-1",
+      },
+    });
+    expect(recordResult.success).toBe(true);
+    if (recordResult.success) {
+      expect(recordResult.data.identity.baseFacts.hardConstraints).toEqual([
+        "Will not abandon the station",
+      ]);
+      // sourceBundle removed from record schema (Phase 57)
+    }
+  });
+
+  it("accepts persona template patches that target richer identity and fidelity seams", () => {
+    const result = personaTemplatePatchSchema.safeParse({
+      identity: {
+        baseFacts: {
+          biography: "Now serving the storm watch.",
+        },
+        behavioralCore: {
+          motives: ["Protect the valley"],
+        },
+        liveDynamics: {
+          activeGoals: ["Hold the barricade"],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.identity?.baseFacts?.biography).toBe(
+        "Now serving the storm watch.",
+      );
+    }
+  });
+
+  it("keeps richer identity fields when draft-backed save payloads materialize compatibility aliases", () => {
+    const result = saveCharacterSchema.safeParse({
+      campaignId: "camp-1",
+      draft: richerDraft,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.draft.identity.liveDynamics.currentStrains).toEqual([
+        "Running out of supplies",
+      ]);
+      // sourceBundle and continuity removed from draft schema (Phase 57)
+      expect(result.data.character.tags).toContain("Connected");
+    }
+  });
+
+  it("derives save-edits compatibility persona and goals from richer identity layers when shallow draft fields are empty", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            draft: {
+              ...richerDraft,
+              profile: {
+                ...richerDraft.profile,
+                personaSummary: "",
+              },
+              motivations: {
+                ...richerDraft.motivations,
+                shortTermGoals: [],
+                longTermGoals: [],
+                beliefs: [],
+                drives: [],
+                frictions: [],
               },
             },
             locationName: "Signal Station",
@@ -1793,16 +2353,133 @@ describe("canonical character schemas", () => {
     });
 
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]?.persona).toBe("Guardian of the northern line");
+      expect(result.data.scaffold.npcs[0]?.goals).toEqual({
+        shortTerm: ["Hold the barricade"],
+        longTerm: [],
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics?.beliefDrift).toEqual([
+        "The valley can still be saved",
+      ]);
+    }
+  });
+});
+
+describe("phase 57 powerStats schemas", () => {
+  const powerStats = {
+    attackPotency: { tier: "City Block", rank: 8 },
+    speed: { tier: "Massively Hypersonic", rank: 7 },
+    durability: { tier: "City Block", rank: 9 },
+    intelligence: { tier: "Genius", rank: 8 },
+    hax: [
+      {
+        name: "Infinity",
+        type: "Spatial Manipulation",
+        bypassTier: "City",
+        limitations: ["Can be bypassed by Domain Expansion"],
+      },
+    ],
+    vulnerabilities: [
+      { description: "Political isolation", severity: "major" as const },
+    ],
+  };
+
+  const draft = {
+    identity: {
+      role: "npc" as const,
+      tier: "key" as const,
+      displayName: "Captain Mire",
+      canonicalStatus: "known_ip_canonical" as const,
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "42",
+      appearance: "Storm-scarred uniform and frost-burned hands.",
+      backgroundSummary: "Raised inside the watchtowers of the north.",
+      personaSummary: "Commanding, clipped, and exhausted.",
+    },
+    socialContext: {
+      factionId: "faction-wardens",
+      factionName: "Wardens",
+      homeLocationId: "loc-station",
+      homeLocationName: "Signal Station",
+      currentLocationId: "loc-barricade",
+      currentLocationName: "North Barricade",
+      relationshipRefs: [],
+      socialStatus: ["Respected"],
+      originMode: "resident" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Hold the barricade"],
+      longTermGoals: ["Restore order in the valley"],
+      beliefs: ["The station can still be saved"],
+      drives: ["Duty"],
+      frictions: ["Suspicious of outsiders"],
+    },
+    capabilities: {
+      traits: ["Connected"],
+      skills: [{ name: "Negotiator", tier: "Master" as const }],
+      flaws: ["Cold-blooded"],
+      specialties: ["Signal doctrine"],
+      wealthTier: "Comfortable" as const,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Signal key"],
+      equippedItemRefs: ["Officer Saber"],
+      currencyNotes: "",
+      signatureItems: ["Signal key"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "import" as const,
+      importMode: "outsider" as const,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "known-ip",
+      legacyTags: ["legacy"],
+    },
+    powerStats,
+  };
+
+  it("preserves powerStats across draft and record schemas", () => {
+    const draftResult = characterDraftSchema.safeParse(draft);
+    expect(draftResult.success).toBe(true);
+    if (draftResult.success) {
+      expect(draftResult.data.powerStats?.attackPotency.tier).toBe("City Block");
+      expect(draftResult.data.powerStats?.hax[0]?.name).toBe("Infinity");
+      expect(draftResult.data.powerStats?.vulnerabilities[0]?.severity).toBe("major");
+    }
+
+    const recordResult = characterRecordSchema.safeParse({
+      ...draft,
+      identity: {
+        ...draft.identity,
+        id: "npc-1",
+        campaignId: "camp-1",
+      },
+    });
+    expect(recordResult.success).toBe(true);
+    if (recordResult.success) {
+      expect(recordResult.data.powerStats?.speed.tier).toBe("Massively Hypersonic");
+      expect(recordResult.data.powerStats?.intelligence.rank).toBe(8);
+    }
   });
 
-  it("adds canonical persistence columns to players and npcs without removing legacy ones", () => {
-    expect(players.characterRecord.name).toBe("character_record");
-    expect(players.derivedTags.name).toBe("derived_tags");
-    expect(players.tags.name).toBe("tags");
-
-    expect(npcs.characterRecord.name).toBe("character_record");
-    expect(npcs.derivedTags.name).toBe("derived_tags");
-    expect(npcs.persona.name).toBe("persona");
+  it("accepts draft without powerStats (undefined)", () => {
+    const { powerStats: _ps, ...draftWithout } = draft;
+    const result = characterDraftSchema.safeParse(draftWithout);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.powerStats).toBeUndefined();
+    }
   });
 });
 
@@ -2044,5 +2721,151 @@ describe("phase 30 start and loadout schemas", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+});
+
+// --- VS Battles Power Scaling schema tests (Phase 57) ---
+
+import {
+  powerStatsSchema,
+  haxAbilitySchema,
+  characterVulnerabilitySchema,
+} from "../schemas.js";
+
+describe("powerStatsSchema", () => {
+  const validPowerStats = {
+    attackPotency: { tier: "City", rank: 7 },
+    speed: { tier: "Hypersonic", rank: 5 },
+    durability: { tier: "Mountain", rank: 3 },
+    intelligence: { tier: "Genius", rank: 8 },
+    hax: [],
+    vulnerabilities: [],
+  };
+
+  it("accepts valid input with exact tier names", () => {
+    const result = powerStatsSchema.safeParse(validPowerStats);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.attackPotency.tier).toBe("City");
+      expect(result.data.speed.tier).toBe("Hypersonic");
+    }
+  });
+
+  it("normalizes variant tier names from LLM output", () => {
+    const variantInput = {
+      attackPotency: { tier: "city level", rank: 7 },
+      speed: { tier: "MHS+", rank: 5 },
+      durability: { tier: "planetary", rank: 3 },
+      intelligence: { tier: "super genius", rank: 8 },
+      hax: [],
+      vulnerabilities: [],
+    };
+    const result = powerStatsSchema.safeParse(variantInput);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.attackPotency.tier).toBe("City");
+      expect(result.data.speed.tier).toBe("Massively Hypersonic");
+      expect(result.data.durability.tier).toBe("Planet");
+      expect(result.data.intelligence.tier).toBe("Supergenius");
+    }
+  });
+
+  it("rejects completely unknown tier names", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "Cosmic Level", rank: 5 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects unknown speed tier", () => {
+    const invalid = {
+      ...validPowerStats,
+      speed: { tier: "Ultra Fast", rank: 5 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects rank below 1", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "City", rank: 0 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects rank above 10", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "City", rank: 11 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+});
+
+describe("haxAbilitySchema", () => {
+  it("accepts valid ability with bypass tier", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Infinity",
+      type: "Spatial Manipulation",
+      bypassTier: "Universal",
+      limitations: ["Domain Expansion disables it"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBe("Universal");
+    }
+  });
+
+  it("accepts ability with null bypass tier", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Enhanced Senses",
+      type: "Sensory",
+      bypassTier: null,
+      limitations: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBeNull();
+    }
+  });
+
+  it("normalizes bypass tier variants", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Reality Warp",
+      type: "Reality Manipulation",
+      bypassTier: "planetary",
+      limitations: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBe("Planet");
+    }
+  });
+});
+
+describe("characterVulnerabilitySchema", () => {
+  it("accepts valid vulnerability", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "Weak to holy weapons",
+      severity: "major",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid severity", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "Weak to fire",
+      severity: "extreme",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty description", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "",
+      severity: "minor",
+    });
+    expect(result.success).toBe(false);
   });
 });

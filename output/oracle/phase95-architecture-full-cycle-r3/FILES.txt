@@ -1,0 +1,13 @@
+docs/phase95-current-gameplay-cycle-architecture-2026-05-24.md
+backend/src/routes/chat.ts
+backend/src/engine/tool-execution-context.ts
+backend/src/engine/tool-executor.ts
+backend/src/engine/gameplay-control-plane-contract.ts
+backend/src/engine/runtime-tool-descriptors.ts
+backend/src/engine/runtime-tool-input-schemas.ts
+backend/src/engine/narration-grounding-guard.ts
+backend/src/campaign/restore-bundle.ts
+backend/src/campaign/store-manifest.ts
+backend/src/campaign/clone.ts
+backend/src/engine/state-snapshot.ts
+frontend/app/game/page.tsx

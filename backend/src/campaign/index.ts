@@ -9,7 +9,12 @@ export {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
+  saveWorldgenResearchArtifact,
+  loadWorldgenResearchArtifact,
   getActiveCampaign,
+  advanceCampaignTick,
   incrementTick,
   listPersonaTemplates,
   getPersonaTemplate,
@@ -28,7 +33,7 @@ export {
 
 export {
   assertSafeId,
-  CAMPAIGNS_DIR,
+  getCampaignsDir,
   getCampaignDir,
   getCampaignConfigPath,
   getChatHistoryPath,
@@ -44,3 +49,9 @@ export {
   pruneAutoCheckpoints,
 } from "./checkpoints.js";
 export type { CheckpointMeta } from "./checkpoints.js";
+
+export {
+  cloneCampaignCleanStart,
+  type CleanStartCampaignCloneOptions,
+  type CleanStartCampaignCloneResult,
+} from "./clone.js";

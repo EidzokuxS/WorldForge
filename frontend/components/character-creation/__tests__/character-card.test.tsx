@@ -2,7 +2,25 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CharacterCard } from "../character-card";
-import type { CharacterDraft } from "@worldforge/shared";
+import type { CharacterDraft, PowerStats } from "@worldforge/shared";
+
+const MOCK_POWER_STATS: PowerStats = {
+  attackPotency: { tier: "Wall", rank: 5 },
+  speed: { tier: "Superhuman", rank: 3 },
+  durability: { tier: "Wall", rank: 4 },
+  intelligence: { tier: "Gifted", rank: 6 },
+  hax: [
+    {
+      name: "Shadow Step",
+      type: "Spatial Manipulation",
+      bypassTier: null,
+      limitations: ["Daylight nullifies"],
+    },
+  ],
+  vulnerabilities: [
+    { description: "Cold iron", severity: "major" },
+  ],
+};
 
 const MOCK_DRAFT: CharacterDraft = {
   identity: {
@@ -104,20 +122,6 @@ describe("CharacterCard", () => {
     expect(screen.getByText("3/5")).toBeInTheDocument();
   });
 
-  it("renders tags", () => {
-    render(
-      <CharacterCard
-        draft={MOCK_DRAFT}
-        locationNames={MOCK_LOCATIONS}
-        onChange={vi.fn()}
-        onResolveStartingLocation={vi.fn()}
-      />
-    );
-
-    expect(screen.getByText("stealth")).toBeInTheDocument();
-    expect(screen.getByText("cunning")).toBeInTheDocument();
-  });
-
   it("renders equipped items", () => {
     render(
       <CharacterCard
@@ -173,10 +177,67 @@ describe("CharacterCard", () => {
     expect(screen.getByText("Background")).toBeInTheDocument();
     expect(screen.getByText("First Impression")).toBeInTheDocument();
     expect(screen.getByText("HP")).toBeInTheDocument();
-    expect(screen.getByText("Traits")).toBeInTheDocument();
-    expect(screen.getByText("Flaws")).toBeInTheDocument();
     expect(screen.getByText("Equipped Items")).toBeInTheDocument();
     expect(screen.getByText("Starting Situation")).toBeInTheDocument();
+  });
+
+  it("renders PowerStatsSection when draft.powerStats is defined", () => {
+    const draftWithStats: CharacterDraft = { ...MOCK_DRAFT, powerStats: MOCK_POWER_STATS };
+    render(
+      <CharacterCard
+        draft={draftWithStats}
+        locationNames={MOCK_LOCATIONS}
+        onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Attack Potency")).toBeInTheDocument();
+    expect(screen.getByText("Shadow Step")).toBeInTheDocument();
+    expect(screen.getByText("Cold iron")).toBeInTheDocument();
+  });
+
+  it("does not render legacy label when powerStats is present", () => {
+    const draftWithStats: CharacterDraft = { ...MOCK_DRAFT, powerStats: MOCK_POWER_STATS };
+    render(
+      <CharacterCard
+        draft={draftWithStats}
+        locationNames={MOCK_LOCATIONS}
+        onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
+        isLegacyRecord
+      />
+    );
+
+    expect(screen.queryByText(/not assessed/i)).not.toBeInTheDocument();
+  });
+
+  it("renders legacy label when powerStats missing and isLegacyRecord set", () => {
+    render(
+      <CharacterCard
+        draft={MOCK_DRAFT}
+        locationNames={MOCK_LOCATIONS}
+        onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
+        isLegacyRecord
+      />
+    );
+
+    expect(screen.getByText(/not assessed \(legacy record\)/i)).toBeInTheDocument();
+  });
+
+  it("renders neither power stats nor legacy label when both absent", () => {
+    render(
+      <CharacterCard
+        draft={MOCK_DRAFT}
+        locationNames={MOCK_LOCATIONS}
+        onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Attack Potency")).not.toBeInTheDocument();
+    expect(screen.queryByText(/not assessed/i)).not.toBeInTheDocument();
   });
 
   it("lets the user describe starting situation and apply it", async () => {

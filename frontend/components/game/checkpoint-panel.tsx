@@ -62,8 +62,17 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
 
   useEffect(() => {
     if (open) {
-      void refresh();
+      let cancelled = false;
+      window.queueMicrotask(() => {
+        if (!cancelled) {
+          void refresh();
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
+    return undefined;
   }, [open, refresh]);
 
   const handleSave = async () => {
@@ -85,7 +94,7 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
 
   const handleLoad = async (cp: CheckpointMeta) => {
     try {
-      await loadCheckpointApi(campaignId, cp.id);
+      await loadCheckpointApi(campaignId, cp.checkpointHandle);
       toast.success("Checkpoint loaded, refreshing...");
       window.location.reload();
     } catch (error) {
@@ -97,7 +106,7 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
 
   const handleDelete = async (cp: CheckpointMeta) => {
     try {
-      await deleteCheckpointApi(campaignId, cp.id);
+      await deleteCheckpointApi(campaignId, cp.checkpointHandle);
       setCheckpoints((prev) => prev.filter((c) => c.id !== cp.id));
       toast.success("Checkpoint deleted");
     } catch (error) {

@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import { assertSafeId } from "../campaign/paths.js";
 import { getImagesDir as getCampaignImagesDir } from "../campaign/paths.js";
+import { getDb } from "../db/index.js";
+import { players } from "../db/schema.js";
 import {
   generateImage,
   resolveImageProvider,
@@ -15,8 +18,53 @@ import { imageGenerateSchema } from "./schemas.js";
 
 const VALID_TYPES = new Set(["portraits", "locations", "scenes"]);
 const SAFE_FILENAME = /^[\w-]+\.png$/;
+const PLAYER_PORTRAIT_FILENAME = "player.png";
 
 const app = new Hono();
+
+function resolveLegacyPlayerPortraitPath(campaignId: string): string | null {
+  try {
+    const player = getDb()
+      .select({ id: players.id })
+      .from(players)
+      .where(eq(players.campaignId, campaignId))
+      .get();
+    if (!player) {
+      return null;
+    }
+
+    const legacyFilename = `${player.id}.png`;
+    if (!SAFE_FILENAME.test(legacyFilename)) {
+      return null;
+    }
+
+    const legacyPath = path.join(
+      getCampaignImagesDir(campaignId),
+      "portraits",
+      legacyFilename,
+    );
+    return fs.existsSync(legacyPath) ? legacyPath : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveCachedImagePath(campaignId: string, type: string, filename: string): string | null {
+  const filePath = path.join(
+    getCampaignImagesDir(campaignId),
+    type,
+    filename,
+  );
+  if (fs.existsSync(filePath)) {
+    return filePath;
+  }
+
+  if (type === "portraits" && filename === PLAYER_PORTRAIT_FILENAME) {
+    return resolveLegacyPlayerPortraitPath(campaignId);
+  }
+
+  return null;
+}
 
 /**
  * GET /:campaignId/:type/:filename — serve a cached image
@@ -35,13 +83,8 @@ app.get("/:campaignId/:type/:filename", (c) => {
       return c.json({ error: "Invalid filename." }, 400);
     }
 
-    const filePath = path.join(
-      getCampaignImagesDir(campaignId),
-      type,
-      filename
-    );
-
-    if (!fs.existsSync(filePath)) {
+    const filePath = resolveCachedImagePath(campaignId, type, filename);
+    if (!filePath) {
       return c.json({ error: "Image not found." }, 404);
     }
 

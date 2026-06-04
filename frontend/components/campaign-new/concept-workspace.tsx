@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Loader2, Plus } from "lucide-react";
+import { Loader2, Play, Plus } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useCampaignNewFlow } from "@/components/campaign-new/flow-provider";
+import { GenerationWorkspace } from "@/components/campaign-new/generation-workspace";
+import { DnaSuggestionWorkspace } from "@/components/campaign-new/dna-suggestion-workspace";
 
 interface ConceptWorkspaceProps {
   onContinue: () => Promise<void>;
@@ -16,6 +16,13 @@ interface ConceptWorkspaceProps {
 
 export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
   const w = useCampaignNewFlow();
+  if (w.isGenerating) {
+    return <GenerationWorkspace returnHref="/campaign/new" />;
+  }
+  if (w.isSuggesting && !w.dnaState) {
+    return <DnaSuggestionWorkspace returnHref="/campaign/new" />;
+  }
+
   const selectedWorldbookIds = new Set(w.selectedWorldbooks.map((item) => item.id));
   const missingCampaignName = w.campaignName.trim().length === 0;
   const missingPremise = w.campaignPremise.trim().length === 0 && !w.hasWorldbook;
@@ -40,34 +47,36 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
   const continueLabel = w.isSuggesting ? "Preparing DNA..." : "Continue to DNA";
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Two-column form layout */}
-      <div
-        className="grid flex-1"
-        style={{
-          gridTemplateColumns: "1fr clamp(240px, 18vw, 320px)",
-          gap: "clamp(24px, 2vw, 48px)",
-        }}
-      >
-        {/* Left column: form fields */}
-        <div className="flex flex-col" style={{ gap: "clamp(16px, 1.2vw, 24px)" }}>
-          <div className="space-y-[clamp(4px,0.4vw,8px)]">
-            <Label htmlFor="campaign-name">Campaign Name</Label>
+    <div className="wf-forge-shell wf-v4-page-theater">
+      <section className="wf-forge-main">
+        <div className="wf-forge-head">
+          <p className="wf-kicker wf-kicker-ember wf-forge-kicker">The forge</p>
+          <h1 className="wf-display wf-serif-em mt-4 text-[clamp(48px,4.6vw,88px)]">
+            Name a world. <em>State its law.</em>
+          </h1>
+        </div>
+
+        <div className="wf-forge-steps">
+          <ForgeStep number="i." title="Name">
+            <Label htmlFor="campaign-name" className="sr-only">Campaign Name</Label>
             <Input
               id="campaign-name"
               value={w.campaignName}
               onChange={(event) => w.setCampaignName(event.target.value)}
               placeholder="Give your campaign a name"
+              className="min-h-[54px] text-[clamp(19px,1.35vw,28px)]"
             />
-          </div>
+          </ForgeStep>
 
-          {/* Premise - flex-grows to fill available space */}
-          <div className="flex flex-1 flex-col space-y-[clamp(4px,0.4vw,8px)]">
-            <Label htmlFor="campaign-premise">Premise</Label>
+          <ForgeStep
+            number="ii."
+            title="Premise"
+            description="Describe setting, tensions, and what makes this campaign playable."
+          >
+            <Label htmlFor="campaign-premise" className="sr-only">Premise</Label>
             <Textarea
               id="campaign-premise"
-              className="flex-1"
-              style={{ minHeight: "clamp(100px, 8vw, 180px)" }}
+              className="min-h-[220px] resize-y text-[clamp(16px,1vw,20px)] leading-8"
               value={w.campaignPremise}
               onChange={(event) => w.setCampaignPremise(event.target.value)}
               placeholder={
@@ -76,160 +85,225 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
                   : "Describe your world: setting, tone, tensions, and what makes this campaign distinct."
               }
             />
-          </div>
+          </ForgeStep>
 
-          <div className="space-y-[clamp(4px,0.4vw,8px)]">
-            <Label htmlFor="campaign-franchise">
-              Franchise / IP{" "}
-              <span className="font-normal text-zinc-600">optional</span>
-            </Label>
+          <ForgeStep number="iii." title="Franchise / IP" meta="optional" description="Optional source context for known worlds.">
             <Input
               id="campaign-franchise"
               value={w.campaignFranchise}
               onChange={(event) => w.setCampaignFranchise(event.target.value)}
               placeholder="e.g. The Witcher, Naruto, Star Wars..."
             />
-          </div>
+            <div className="wf-set-row wf-research-row">
+              <div>
+                <div className="wf-set-row-h">Research Mode</div>
+                <p className="wf-set-row-sub">
+                  Let the backend research known-IP or source context during DNA/world generation.
+                </p>
+              </div>
+              <button
+                type="button"
+                id="research-toggle"
+                className="wf-set-toggle"
+                data-on={w.researchEnabled ? "true" : "false"}
+                aria-pressed={w.researchEnabled}
+                aria-label="Toggle research mode"
+                onClick={() => w.setResearchEnabled(!w.researchEnabled)}
+              />
+            </div>
+          </ForgeStep>
 
-          {/* Research toggle row */}
-          <div className="flex items-center justify-between">
-            <Label htmlFor="research-toggle" className="mb-0">Research Mode</Label>
-            <Switch
-              id="research-toggle"
-              checked={w.researchEnabled}
-              onCheckedChange={w.setResearchEnabled}
-            />
-          </div>
-        </div>
-
-        {/* Right column: sources sidebar */}
-        <div className="flex flex-col" style={{ gap: "clamp(16px, 1.2vw, 24px)" }}>
-          <div
-            className="shrink-0 font-semibold uppercase tracking-[0.08em] text-zinc-600"
-            style={{ fontSize: "clamp(11px, 0.7vw, 14px)" }}
+          <ForgeStep
+            number="iv."
+            title="Sources"
+            meta={`${w.selectedWorldbooks.length} selected`}
+            description="Reusable worldbooks from the Library. Import accepts JSON today."
           >
-            Sources
-          </div>
-
-          {w.worldbookLibraryLoading ? (
-            <div className="flex items-center gap-2 text-sm text-zinc-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading worldbooks...
-            </div>
-          ) : w.worldbookLibrary.length > 0 ? (
-            <div>
-              {w.worldbookLibrary.map((item) => {
-                const selected = selectedWorldbookIds.has(item.id);
-                return (
-                  <button
+            {w.worldbookLibraryLoading ? (
+              <div className="wf-forge-progress">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading worldbooks...
+              </div>
+            ) : w.worldbookLibrary.length > 0 ? (
+              <div className="wf-forge-sources">
+                {w.worldbookLibrary.map((item) => (
+                  <SourceItem
                     key={item.id}
-                    type="button"
-                    className={`flex w-full items-center justify-between border-b border-white/[0.06] transition-colors last:border-b-0 hover:bg-white/[0.04] ${
-                      selected ? "bg-[rgba(230,62,0,0.06)]" : ""
-                    }`}
-                    style={{ padding: "clamp(8px, 0.6vw, 14px) clamp(10px, 0.8vw, 14px)" }}
+                    name={item.displayName}
+                    detail={`${item.entryCount} reusable entries`}
+                    selected={selectedWorldbookIds.has(item.id)}
+                    sigil={item.displayName.trim().charAt(0) || "W"}
                     onClick={() => w.toggleWorldbookSelection(item)}
-                  >
-                    <div className="text-left">
-                      <div
-                        className="font-medium text-zinc-100"
-                        style={{ fontSize: "clamp(13px, 0.9vw, 16px)" }}
-                      >
-                        {item.displayName}
-                      </div>
-                      <div
-                        className="text-zinc-600"
-                        style={{ fontSize: "clamp(11px, 0.75vw, 14px)", marginTop: "2px" }}
-                      >
-                        {item.entryCount} entries
-                      </div>
-                    </div>
-                    <div
-                      className="shrink-0 rounded-[5px] border-2"
-                      style={{
-                        width: "clamp(16px, 1.1vw, 20px)",
-                        height: "clamp(16px, 1.1vw, 20px)",
-                        borderColor: selected ? "#e63e00" : "rgba(255,255,255,0.15)",
-                        background: selected ? "#e63e00" : "transparent",
-                      }}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-zinc-500">
-              No reusable worldbooks yet. Import from the library page.
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="ghost" size="sm" className="self-start">
-              <Link href="/library">
-                <BookOpen className="h-4 w-4" />
-                Open Library
-              </Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <label className="cursor-pointer">
-                <input
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      void w.handleWorldbookUpload(file);
-                    }
-                    event.target.value = "";
-                  }}
-                />
-                <Plus className="h-4 w-4" />
-                Import Worldbook
-              </label>
-            </Button>
-          </div>
-
-          {w.worldbookError ? <p className="text-sm text-red-500">{w.worldbookError}</p> : null}
+                  />
+                ))}
+                <ImportSourceItem onUpload={w.handleWorldbookUpload} />
+              </div>
+            ) : (
+              <div className="wf-forge-sources">
+                <Link href="/library" className="wf-forge-source" data-on="false">
+                  <span className="wf-forge-source-sigil">+</span>
+                  <span>
+                    <span className="wf-forge-source-name">Open Library</span>
+                    <span className="wf-forge-source-role">Choose reusable worldbooks</span>
+                  </span>
+                  <span className="wf-forge-source-check" />
+                </Link>
+                <ImportSourceItem onUpload={w.handleWorldbookUpload} />
+              </div>
+            )}
+            {w.worldbookError ? <p className="mt-4 text-sm text-red-400">{w.worldbookError}</p> : null}
+          </ForgeStep>
         </div>
-      </div>
 
-      {/* Footer bar */}
-      <div className="mt-[clamp(16px,1.2vw,24px)] flex shrink-0 items-center justify-between border-t border-white/[0.06]" style={{ padding: "clamp(12px, 1vw, 20px) 0" }}>
-        <div className="flex items-center gap-3">
-          <Button asChild variant="ghost">
-            <Link href="/">Cancel</Link>
-          </Button>
+        <div className="wf-forge-cta">
+          <button type="button" className="wf-v4-btn wf-v4-btn-primary" onClick={() => void w.handleCreateWithSeeds()} disabled={!w.canCreate}>
+            {w.creatingCampaign || w.isGenerating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {createLabel}
+          </button>
+          <button type="button" className="wf-v4-btn" onClick={() => void onContinue()} disabled={!w.canCreate}>
+            {w.isSuggesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {continueLabel}
+          </button>
+          <Link href="/" className="wf-v4-btn">
+            Cancel
+          </Link>
+          <span className="wf-forge-cta-note">DNA can be edited before generation</span>
           {conceptValidationMessage ? (
-            <span className="text-xs text-red-500">{conceptValidationMessage}</span>
+            <span className="wf-forge-validation">{conceptValidationMessage}</span>
           ) : null}
           {activeProgressLabel ? (
-            <span className="flex items-center gap-2 text-xs text-zinc-500">
+            <span className="wf-forge-progress">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {activeProgressLabel}
               {activeProgressStep ? <span>{activeProgressStep}</span> : null}
-              {activeSubLabel ? (
-                <span className="text-xs text-zinc-600">{activeSubLabel}</span>
-              ) : null}
+              {activeSubLabel ? <span>{activeSubLabel}</span> : null}
             </span>
           ) : null}
           {w.generationError ? (
-            <pre className="max-h-24 max-w-[60vw] overflow-auto whitespace-pre-wrap rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-400 select-all">
+            <pre className="wf-forge-error">
               {w.generationError}
             </pre>
           ) : null}
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void w.handleCreateWithSeeds()} disabled={!w.canCreate}>
-            {w.creatingCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {createLabel}
-          </Button>
-          <Button onClick={() => void onContinue()} disabled={!w.canCreate}>
-            {w.isSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {continueLabel}
-          </Button>
+      </section>
+
+      <aside className="wf-forge-side">
+        <div className="wf-forge-sequence">
+          <p className="wf-kicker wf-kicker-ember">Forge sequence</p>
+          <div className="wf-stage-list">
+            <SequenceItem number="i" state="active" label="Concept" detail="Name, premise, sources" />
+            <SequenceItem number="ii" state="pending" label="World DNA" detail="Six real seed cards" />
+            <SequenceItem number="iii" state="pending" label="World generation" detail="Backend pipeline" />
+            <SequenceItem number="iv" state="pending" label="World Review" detail="Save before character" />
+            <SequenceItem number="v" state="pending" label="Player character" detail="Player draft" />
+          </div>
         </div>
+      </aside>
+    </div>
+  );
+}
+
+function ForgeStep({
+  number,
+  title,
+  meta,
+  description,
+  children,
+}: {
+  number: string;
+  title: string;
+  meta?: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="wf-form-step">
+      <div className="wf-form-step-num">{number}</div>
+      <div className="min-w-0">
+        <h2 className="wf-form-step-title">
+          {title}
+          {meta ? <span className="wf-form-step-meta">{meta}</span> : null}
+        </h2>
+        {description ? <p className="wf-prose mt-1 text-[15px] italic text-[var(--fg-2)]">{description}</p> : null}
+        <div className="mt-5">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+function SequenceItem({
+  number,
+  state,
+  label,
+  detail,
+}: {
+  number: string;
+  state: "done" | "active" | "pending";
+  label: string;
+  detail: string;
+}) {
+  return (
+    <div className="wf-stage-row" data-state={state}>
+      <div />
+      <div>
+        <div className="wf-stage-num">{number}</div>
+        <div className="wf-stage-title">{label}</div>
+        <div className="wf-stage-sub">{detail}</div>
       </div>
     </div>
+  );
+}
+
+function SourceItem({
+  name,
+  detail,
+  sigil,
+  selected,
+  onClick,
+}: {
+  name: string;
+  detail: string;
+  sigil: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="wf-forge-source" data-on={selected ? "true" : "false"} onClick={onClick}>
+      <span className="wf-forge-source-sigil">{sigil.slice(0, 2)}</span>
+      <span>
+        <span className="wf-forge-source-name">{name}</span>
+        <span className="wf-forge-source-role">{detail}</span>
+      </span>
+      <span className="wf-forge-source-check">{selected ? "✓" : ""}</span>
+    </button>
+  );
+}
+
+function ImportSourceItem({ onUpload }: { onUpload: (file: File) => Promise<void> | void }) {
+  return (
+    <label className="wf-forge-source cursor-pointer" data-on="false">
+      <span className="wf-forge-source-sigil"><Plus className="h-3.5 w-3.5" /></span>
+      <span>
+        <span className="wf-forge-source-name">Import worldbook JSON</span>
+        <span className="wf-forge-source-role">Adds to reusable Library</span>
+      </span>
+      <span className="wf-forge-source-check" />
+      <input
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) {
+            void onUpload(file);
+          }
+          event.target.value = "";
+        }}
+      />
+    </label>
   );
 }

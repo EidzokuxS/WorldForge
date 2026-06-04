@@ -5,7 +5,7 @@ import type { CampaignMeta } from "@worldforge/shared";
 import type { ProviderSettings, ResolvedRole, ResolveResult, RoleSettings } from "../ai/index.js";
 import { resolveRoleModel } from "../ai/index.js";
 import { getActiveCampaign, loadCampaign } from "../campaign/index.js";
-import { getErrorMessage } from "../lib/index.js";
+import { getErrorMessage, getPlayerSafeErrorMessage } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import type { Settings } from "../settings/index.js";
 import { getDb } from "../db/index.js";
@@ -127,7 +127,7 @@ export async function requireLoadedCampaign(
     return await loadCampaign(campaignId);
   } catch (error) {
     return c.json(
-      { error: getErrorMessage(error, "Campaign not active or not found.") },
+      { error: getPlayerSafeErrorMessage(error, "Campaign not active or not found.") },
       404,
     );
   }

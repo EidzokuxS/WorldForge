@@ -1,0 +1,83 @@
+import { eq } from "drizzle-orm";
+import { getDb } from "../db/index.js";
+import { npcs } from "../db/schema.js";
+import { createLogger } from "../lib/index.js";
+
+const log = createLogger("reflection-budget");
+
+function normalizeParticipantName(name: string): string | null {
+  const normalized = name.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function adjustReflectionBudget(
+  campaignId: string,
+  participants: string[],
+  delta: number,
+): Promise<void> {
+  if (!Number.isFinite(delta) || delta === 0 || participants.length === 0) {
+    return;
+  }
+
+  const participantNames = new Set(
+    participants
+      .filter((participant): participant is string => typeof participant === "string")
+      .map(normalizeParticipantName)
+      .filter((participant): participant is string => participant !== null),
+  );
+
+  if (participantNames.size === 0) {
+    return;
+  }
+
+  const db = getDb();
+  const campaignNpcs = db
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      unprocessedImportance: npcs.unprocessedImportance,
+    })
+    .from(npcs)
+    .where(eq(npcs.campaignId, campaignId))
+    .all();
+
+  for (const npc of campaignNpcs) {
+    const normalizedName = normalizeParticipantName(npc.name);
+    if (!normalizedName || !participantNames.has(normalizedName)) {
+      continue;
+    }
+
+    db.update(npcs)
+      .set({ unprocessedImportance: Math.max(0, npc.unprocessedImportance + delta) })
+      .where(eq(npcs.id, npc.id))
+      .run();
+    log.event("db.write", {
+      table: "npcs",
+      op: "update",
+      rowId: npc.id,
+      rowName: npc.name,
+    });
+  }
+}
+
+export async function accumulateReflectionBudget(
+  campaignId: string,
+  participants: string[],
+  importance: number,
+): Promise<void> {
+  if (!Number.isFinite(importance) || importance <= 0) {
+    return;
+  }
+  await adjustReflectionBudget(campaignId, participants, importance);
+}
+
+export async function retractReflectionBudget(
+  campaignId: string,
+  participants: string[],
+  importance: number,
+): Promise<void> {
+  if (!Number.isFinite(importance) || importance <= 0) {
+    return;
+  }
+  await adjustReflectionBudget(campaignId, participants, -importance);
+}

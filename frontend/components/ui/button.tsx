@@ -5,19 +5,19 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--r-m)] border border-transparent text-sm font-semibold whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default: "border-[var(--ember-solid)] bg-[var(--ember)] text-primary-foreground hover:bg-[var(--ember-1)]",
         destructive:
-          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
+          "border-[color-mix(in_srgb,var(--danger)_75%,black)] bg-destructive text-white hover:bg-[color-mix(in_srgb,var(--danger)_90%,white)] focus-visible:ring-destructive/20 dark:bg-destructive/70 dark:focus-visible:ring-destructive/40",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-[var(--line-2)] bg-transparent text-[var(--fg-1)] shadow-none hover:border-[var(--ember)] hover:bg-[var(--ember-paper)] hover:text-[var(--fg)]",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border-[var(--line)] bg-secondary text-secondary-foreground hover:border-[var(--line-2)] hover:bg-[color-mix(in_srgb,var(--bg-3)_84%,white)]",
         ghost:
-          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+          "border-transparent text-[var(--fg-2)] hover:bg-white/[0.055] hover:text-[var(--fg)] dark:hover:bg-white/[0.055]",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

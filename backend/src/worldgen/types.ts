@@ -3,9 +3,11 @@ import type {
   IpResearchContext,
   PremiseDivergence,
   ResearchConfig,
+  WorldgenResearchArtifactV2,
 } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { WorldSeeds } from "./seed-roller.js";
+import type { WorldgenResearchFrame } from "./research-frame.js";
 
 export interface GenerateScaffoldRequest {
   campaignId: string;
@@ -13,12 +15,14 @@ export interface GenerateScaffoldRequest {
   premise: string;
   seeds?: Partial<WorldSeeds>;
   role: ResolvedRole;
-  /** Optional fallback role for retrying lore extraction when primary model fails. */
-  fallbackRole?: ResolvedRole;
   /** Pre-cached IP research context from suggest-seeds phase. Loaded from config.json. */
   ipContext?: IpResearchContext | null;
   /** Structured divergence interpretation cached beside ipContext. */
   premiseDivergence?: PremiseDivergence | null;
+  /** Persisted worldgen research frame used to steer task-specific follow-up research. */
+  researchFrame?: WorldgenResearchFrame | null;
+  /** LLM-authored v2 research artifact for automatic known-IP/source research. */
+  researchArtifact?: WorldgenResearchArtifactV2 | null;
   /** Research config for sufficiency checks — provider + API keys. */
   research?: ResearchConfig;
   /** Optional Judge role for inter-stage validation. If not provided, validation is skipped. */
@@ -43,6 +47,8 @@ export interface ScaffoldLocation {
   tags: string[];
   isStarting: boolean;
   connectedTo: string[];
+  kind?: "macro" | "persistent_sublocation";
+  parentLocationName?: string | null;
 }
 
 export interface ScaffoldFaction {
@@ -65,6 +71,7 @@ export interface ScaffoldNpc {
   goals: ScaffoldNpcGoals;
   draft?: CharacterDraft;
   locationName: string;
+  sceneLocationName?: string | null;
   factionName: string | null;
   /** NPC importance tier. "key" = canonical/plot-relevant, "supporting" = original/background.
    *  Optional until plan 24-03 rewrites the NPC generation step to always populate it. */

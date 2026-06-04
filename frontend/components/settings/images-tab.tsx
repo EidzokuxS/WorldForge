@@ -25,91 +25,95 @@ export function ImagesTab({ settings, setSettings }: ImagesTabProps) {
   };
 
   return (
-    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-      <div className="mb-[clamp(12px,1vw,20px)]">
-        <div className="text-[clamp(14px,1vw,18px)] font-semibold">Image Generation</div>
-        <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-          Configure provider, model, and style defaults for generated assets.
+    <section className="wf-set-group">
+      <div className="wf-set-group-head">
+        <div>
+          <h2 className="wf-set-group-h">Images</h2>
+          <p className="wf-set-group-sub">
+            Configure provider, model, and style defaults for generated assets.
+          </p>
         </div>
       </div>
-      <div className="space-y-[clamp(8px,0.7vw,14px)]">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Enable image generation</p>
-            <p className="text-xs text-muted-foreground">
-              Disable to keep the game in text-only mode.
-            </p>
-          </div>
-          <Switch
-            checked={settings.images.enabled}
-            onCheckedChange={(value: boolean) =>
-              updateSettings((current) => ({
-                ...current,
-                images: { ...current.images, enabled: value },
-              }))
-            }
-          />
-        </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Image Provider</Label>
-            <Select
-              value={settings.images.providerId}
-              onValueChange={(value: string) =>
-                updateSettings((current) => ({
-                  ...current,
-                  images: { ...current.images, providerId: value },
-                }))
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select image provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE_PROVIDER_ID}>None / Disabled</SelectItem>
-                {settings.providers.map((provider) => (
-                  <SelectItem key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Model / Checkpoint</Label>
-            <Input
-              value={settings.images.model}
-              onChange={(event) =>
-                updateSettings((current) => ({
-                  ...current,
-                  images: { ...current.images, model: event.target.value },
-                }))
-              }
-              placeholder="sd-xl-turbo"
-            />
-          </div>
+      <div className="wf-set-row">
+        <div>
+          <div className="wf-set-row-h">Enable image generation</div>
+          <div className="wf-set-row-sub">Disable to keep the game in text-only mode.</div>
         </div>
-
-        <div className="space-y-2">
-          <Label>Default style prompt</Label>
-          <Textarea
-            value={settings.images.stylePrompt}
-            onChange={(event) =>
-              updateSettings((current) => ({
-                ...current,
-                images: {
-                  ...current.images,
-                  stylePrompt: event.target.value,
-                },
-              }))
-            }
-            rows={5}
-            placeholder="dark fantasy art, matte painting style..."
-          />
-        </div>
+        <Switch
+          checked={settings.images.enabled}
+          onCheckedChange={(value: boolean) =>
+            updateSettings((current) => ({
+              ...current,
+              images: { ...current.images, enabled: value },
+            }))
+          }
+        />
       </div>
-    </div>
+
+      <div className="wf-set-row">
+        <div>
+          <div className="wf-set-row-h">Image Provider</div>
+          <div className="wf-set-row-sub">Provider used for generated assets.</div>
+        </div>
+        <Select
+          value={settings.images.providerId}
+          onValueChange={(value: string) =>
+            updateSettings((current) => ({
+              ...current,
+              images: { ...current.images, providerId: value },
+            }))
+          }
+        >
+          <SelectTrigger className="wf-settings-control">
+            <SelectValue placeholder="Select image provider" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE_PROVIDER_ID}>None / Disabled</SelectItem>
+            {settings.providers.map((provider) => (
+              <SelectItem key={provider.id} value={provider.id}>
+                {provider.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="wf-set-row">
+        <div>
+          <div className="wf-set-row-h">Model / Checkpoint</div>
+          <div className="wf-set-row-sub">Image model name.</div>
+        </div>
+        <Input
+          className="wf-settings-control"
+          value={settings.images.model}
+          onChange={(event) =>
+            updateSettings((current) => ({
+              ...current,
+              images: { ...current.images, model: event.target.value },
+            }))
+          }
+          placeholder="sd-xl-turbo"
+        />
+      </div>
+
+      <div className="wf-set-block">
+        <Label>Default style prompt</Label>
+        <Textarea
+          value={settings.images.stylePrompt}
+          onChange={(event) =>
+            updateSettings((current) => ({
+              ...current,
+              images: {
+                ...current.images,
+                stylePrompt: event.target.value,
+              },
+            }))
+          }
+          rows={5}
+          placeholder="dark fantasy art, matte painting style..."
+        />
+      </div>
+    </section>
   );
 }

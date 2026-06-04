@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { closeDb, connectDb } from "../db/index.js";
+import { closeDb, connectDb, getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
 import type {
@@ -10,13 +10,18 @@ import type {
   IpResearchContext,
   PersonaTemplate,
   PremiseDivergence,
+  WorldgenResearchArtifactV2,
   WorldSeeds,
 } from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
-import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
+import { assertSafeId, getCampaignsDir, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
 import { createLogger } from "../lib/index.js";
+import { ensureCampaignInventoryAuthority } from "../inventory/index.js";
+import type { WorldgenResearchFrame } from "../worldgen/research-frame.js";
+import { parseWorldgenResearchArtifact } from "../worldgen/research-artifact.js";
+import { hasAnyActiveTurn } from "./runtime-state.js";
 
 const log = createLogger("campaign-manager");
 
@@ -28,6 +33,10 @@ type CampaignConfigFile = {
   seeds?: WorldSeeds;
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
+  worldgenResearchFrame?: WorldgenResearchFrame;
+  worldgenResearchArtifact?: WorldgenResearchArtifactV2;
+  worldgenSourceHint?: string;
+  worldgenResearchEnabled?: boolean;
   worldbookSelection?: CampaignWorldbookSelection[];
   personaTemplates?: PersonaTemplate[];
   generationComplete?: boolean;
@@ -39,8 +48,9 @@ type CampaignConfigFile = {
 let activeCampaign: CampaignMeta | null = null;
 
 function ensureCampaignsDir() {
-  if (!fs.existsSync(CAMPAIGNS_DIR)) {
-    fs.mkdirSync(CAMPAIGNS_DIR, { recursive: true });
+  const dir = getCampaignsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -67,6 +77,18 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     ipContext: parsed.ipContext ?? undefined,
     premiseDivergence: parsed.premiseDivergence ?? undefined,
+    worldgenResearchFrame: parsed.worldgenResearchFrame ?? undefined,
+    worldgenResearchArtifact: parsed.worldgenResearchArtifact
+      ? parseWorldgenResearchArtifact(parsed.worldgenResearchArtifact)
+      : undefined,
+    worldgenSourceHint:
+      typeof parsed.worldgenSourceHint === "string" && parsed.worldgenSourceHint.trim()
+        ? parsed.worldgenSourceHint.trim()
+        : undefined,
+    worldgenResearchEnabled:
+      typeof parsed.worldgenResearchEnabled === "boolean"
+        ? parsed.worldgenResearchEnabled
+        : undefined,
     worldbookSelection: Array.isArray(parsed.worldbookSelection)
       ? parsed.worldbookSelection
       : undefined,
@@ -115,7 +137,7 @@ export function listCampaigns(): CampaignMeta[] {
   ensureCampaignsDir();
 
   const entries = fs
-    .readdirSync(CAMPAIGNS_DIR, { withFileTypes: true })
+    .readdirSync(getCampaignsDir(), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"));
 
   const campaignsList: CampaignMeta[] = [];
@@ -147,6 +169,8 @@ export async function createCampaign(
   initialContext?: {
     ipContext?: IpResearchContext | null;
     premiseDivergence?: PremiseDivergence | null;
+    worldgenSourceHint?: string | null;
+    worldgenResearchEnabled?: boolean | null;
     worldbookSelection?: CampaignWorldbookSelection[] | null;
   },
 ): Promise<CampaignMeta> {
@@ -156,6 +180,10 @@ export async function createCampaign(
     throw new AppError("Campaign name is required.", 400);
   }
   // Premise is optional when worldbook provides context
+
+  if (hasAnyActiveTurn()) {
+    throw new AppError("Cannot create a campaign while a turn is active.", 409);
+  }
 
   ensureCampaignsDir();
 
@@ -189,6 +217,11 @@ export async function createCampaign(
       seeds,
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,
+      worldgenSourceHint: initialContext?.worldgenSourceHint?.trim() || undefined,
+      worldgenResearchEnabled:
+        typeof initialContext?.worldgenResearchEnabled === "boolean"
+          ? initialContext.worldgenResearchEnabled
+          : undefined,
       worldbookSelection: initialContext?.worldbookSelection ?? undefined,
       personaTemplates: [],
       generationComplete: false,
@@ -222,6 +255,30 @@ export async function createCampaign(
 export async function loadCampaign(id: string): Promise<CampaignMeta> {
   assertSafeId(id);
   ensureCampaignsDir();
+  const {
+    finalizePendingCampaignRestoreAfterLoad,
+    repairPendingCampaignRestoreBeforeLoad,
+  } = await import("./restore-bundle.js");
+  const repairedPendingRestore = await repairPendingCampaignRestoreBeforeLoad(id);
+  const currentActiveCampaign = activeCampaign;
+  const isSameActiveCampaign = currentActiveCampaign?.id === id;
+
+  if (isSameActiveCampaign && !repairedPendingRestore) {
+    try {
+      getDb();
+      return currentActiveCampaign;
+    } catch {
+      log.warn(
+        `Active campaign ${id} had no open database connection; reconnecting to campaign database.`,
+      );
+    }
+  }
+
+  if (!isSameActiveCampaign && hasAnyActiveTurn()) {
+    throw new AppError("Cannot switch campaigns while a turn is active.", 409);
+  }
+
+  activeCampaign = null;
 
   const campaignDir = getCampaignDir(id);
   if (!fs.existsSync(campaignDir)) {
@@ -266,7 +323,11 @@ export async function loadCampaign(id: string): Promise<CampaignMeta> {
       throw new AppError("Campaign record could not be loaded.", 500);
     }
 
+    ensureCampaignInventoryAuthority(id);
     await openVectorDb(id);
+    if (repairedPendingRestore) {
+      await finalizePendingCampaignRestoreAfterLoad(id);
+    }
 
     const meta: CampaignMeta = {
       id: campaignRow.id,
@@ -295,6 +356,10 @@ export async function deleteCampaign(id: string): Promise<void> {
   const campaignDir = getCampaignDir(id);
   if (!fs.existsSync(campaignDir)) {
     throw new AppError("Campaign not found.", 404);
+  }
+
+  if (activeCampaign?.id === id && hasAnyActiveTurn()) {
+    throw new AppError("Cannot delete the active campaign while a turn is active.", 409);
   }
 
   if (activeCampaign?.id === id) {
@@ -370,17 +435,70 @@ export function loadPremiseDivergence(campaignId: string): PremiseDivergence | n
   }
 }
 
+export function saveWorldgenResearchFrame(
+  campaignId: string,
+  worldgenResearchFrame: WorldgenResearchFrame,
+): void {
+  assertSafeId(campaignId);
+  updateCampaignConfig(campaignId, (config) => ({ ...config, worldgenResearchFrame }));
+  log.info(`Saved worldgenResearchFrame for "${worldgenResearchFrame.franchise}" to campaign ${campaignId}`);
+}
+
+export function loadWorldgenResearchFrame(campaignId: string): WorldgenResearchFrame | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.worldgenResearchFrame ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorldgenResearchArtifact(
+  campaignId: string,
+  worldgenResearchArtifact: WorldgenResearchArtifactV2,
+): void {
+  assertSafeId(campaignId);
+  const parsedArtifact = parseWorldgenResearchArtifact(worldgenResearchArtifact);
+  updateCampaignConfig(campaignId, (config) => ({
+    ...config,
+    worldgenResearchArtifact: parsedArtifact,
+  }));
+  log.info(
+    `Saved worldgenResearchArtifact v${parsedArtifact.version} (${parsedArtifact.researchBrief.searchJobs.length} search jobs) to campaign ${campaignId}`,
+  );
+}
+
+export function loadWorldgenResearchArtifact(
+  campaignId: string,
+): WorldgenResearchArtifactV2 | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.worldgenResearchArtifact ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function getActiveCampaign(): CampaignMeta | null {
   return activeCampaign;
 }
 
 export function incrementTick(campaignId: string): number {
+  return advanceCampaignTick(campaignId, 1);
+}
+
+export function advanceCampaignTick(campaignId: string, tickDelta: number): number {
   assertSafeId(campaignId);
+  if (!Number.isInteger(tickDelta) || tickDelta < 0) {
+    throw new AppError("Tick advance must be a non-negative integer.", 400);
+  }
   const config = readCampaignConfig(campaignId);
   const prevTick = config.currentTick ?? 0;
-  const nextTick = prevTick + 1;
+  const nextTick = prevTick + tickDelta;
   updateCampaignConfig(campaignId, (current) => ({ ...current, currentTick: nextTick }));
-  log.info(`Tick incremented: ${prevTick} -> ${nextTick}`);
+  log.info(`Tick advanced: ${prevTick} -> ${nextTick} (+${tickDelta})`);
   return nextTick;
 }
 

@@ -1,10 +1,10 @@
-import { generateText } from "ai";
 import { Hono } from "hono";
 import {
   createModel,
   resolveRoleModel,
   testProviderConnection,
 } from "../ai/index.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { clampTokens, getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { parseBody } from "./helpers.js";
 import { testProviderSchema, testRoleSchema } from "./schemas.js";

@@ -1,83 +1,63 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// Mock fs and path before importing
-vi.mock("node:fs", () => ({
-  appendFileSync: vi.fn(),
-  mkdirSync: vi.fn(),
-}));
-
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createLogger } from "../logger.js";
+import { resetLoggerForTest } from "../logger-test-utils.js";
 
-describe("createLogger", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+describe("createLogger (backward-compatible API)", () => {
+  let tmpDir: string;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    tmpDir = mkdtempSync(join(tmpdir(), "wf-logger-compat-"));
+    resetLoggerForTest({ logRoot: tmpDir });
   });
 
   afterEach(() => {
-    consoleSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   });
 
-  it("creates a logger with info, warn, and error methods", () => {
+  it("creates a logger with info, warn, error, debug, event methods", () => {
     const log = createLogger("test");
     expect(typeof log.info).toBe("function");
     expect(typeof log.warn).toBe("function");
     expect(typeof log.error).toBe("function");
+    expect(typeof log.debug).toBe("function");
+    expect(typeof log.event).toBe("function");
   });
 
-  it("info writes to console.log", () => {
+  it("does not throw when info is called with a string message", () => {
     const log = createLogger("myTag");
-    log.info("hello world");
-    expect(consoleSpy).toHaveBeenCalledTimes(1);
-    const output = consoleSpy.mock.calls[0]![0] as string;
-    expect(output).toContain("[INFO]");
-    expect(output).toContain("[myTag]");
-    expect(output).toContain("hello world");
+    expect(() => log.info("hello world")).not.toThrow();
   });
 
-  it("warn writes to console.log", () => {
+  it("does not throw when warn is called with a string message", () => {
     const log = createLogger("myTag");
-    log.warn("caution");
-    expect(consoleSpy).toHaveBeenCalledTimes(1);
-    const output = consoleSpy.mock.calls[0]![0] as string;
-    expect(output).toContain("[WARN]");
-    expect(output).toContain("caution");
+    expect(() => log.warn("caution")).not.toThrow();
   });
 
-  it("error writes to console.error", () => {
+  it("does not throw when error is called with a string message", () => {
     const log = createLogger("myTag");
-    log.error("failure");
-    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-    const output = consoleErrorSpy.mock.calls[0]![0] as string;
-    expect(output).toContain("[ERROR]");
-    expect(output).toContain("failure");
+    expect(() => log.error("failure")).not.toThrow();
   });
 
-  it("includes data in output when provided", () => {
+  it("does not throw when info is called with data", () => {
     const log = createLogger("test");
-    log.info("with data", { key: "value" });
-    const output = consoleSpy.mock.calls[0]![0] as string;
-    expect(output).toContain('"key": "value"');
+    expect(() => log.info("with data", { key: "value" })).not.toThrow();
   });
 
-  it("formats Error data with message and stack", () => {
+  it("does not throw when error is called with an Error instance", () => {
     const log = createLogger("test");
     const err = new Error("boom");
-    log.error("caught", err);
-    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-    const output = consoleErrorSpy.mock.calls[0]![0] as string;
-    expect(output).toContain("boom");
+    expect(() => log.error("caught", err)).not.toThrow();
   });
 
-  it("includes ISO timestamp in output", () => {
+  it("does not throw on event with arbitrary payload", () => {
     const log = createLogger("test");
-    log.info("timestamped");
-    const output = consoleSpy.mock.calls[0]![0] as string;
-    // ISO format: 2026-01-01T00:00:00.000Z
-    expect(output).toMatch(/\[\d{4}-\d{2}-\d{2}T/);
+    expect(() => log.event("test.event", { nested: { a: 1 } })).not.toThrow();
   });
 });

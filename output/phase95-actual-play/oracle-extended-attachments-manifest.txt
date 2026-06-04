@@ -1,0 +1,20 @@
+Oracle extended-distance review attachment manifest
+
+Run purpose:
+Review the Phase 95 extended actual-play continuation after the user correctly rejected the 11-turn probe as insufficient distance evidence.
+
+Dry-run result:
+- Estimated input: about 122,795 tokens.
+- Attachments to upload: 5.
+
+Attached files:
+- C:/Users/robra/AppData/Local/Temp/worldforge-phase95-extended-oracle/transcript.md
+- C:/Users/robra/AppData/Local/Temp/worldforge-phase95-extended-oracle/verification-summary.md
+- C:/Users/robra/AppData/Local/Temp/worldforge-phase95-extended-oracle/extended-distance-summary.md
+- C:/Users/robra/AppData/Local/Temp/worldforge-phase95-extended-oracle/state.json
+- C:/Users/robra/AppData/Local/Temp/worldforge-phase95-extended-oracle/phase95-actual-player.mjs
+
+Final run result:
+- Browser run completed successfully.
+- CLI reported: files=5.
+- Saved assistant output to: R:/Projects/WorldForge/output/phase95-actual-play/oracle-extended-review.md

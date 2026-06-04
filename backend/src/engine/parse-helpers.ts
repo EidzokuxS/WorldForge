@@ -1,9 +1,5 @@
 /**
- * Shared JSON-string parsing helpers for engine modules.
- *
- * Each function safely parses a JSON string stored in SQLite (tags, goals,
- * beliefs) and returns a typed result, falling back to an empty default
- * on invalid input.
+ * Shared parsing helpers for engine modules.
  */
 
 // -- Types --------------------------------------------------------------------
@@ -60,4 +56,102 @@ export function parseBeliefs(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+// -- AI SDK step extraction ---------------------------------------------------
+
+export interface CollectedToolCall {
+  tool: string;
+  args: unknown;
+  result: unknown;
+  toolCallId?: string;
+}
+
+interface StepLike {
+  toolCalls?: Array<{ toolName: string; toolCallId?: string } & Record<string, unknown>>;
+  toolResults?: unknown[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function looksLikeToolResult(value: Record<string, unknown>): boolean {
+  return typeof value.success === "boolean"
+    || typeof value.status === "string"
+    || typeof value.kind === "string"
+    || typeof value.observationOnly === "boolean"
+    || typeof value.error === "string";
+}
+
+function unwrapAiSdkToolOutput(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const type = stringField(value, "type");
+  if (type === "json" || type === "error-json" || type === "text" || type === "error-text") {
+    return "value" in value ? value.value : null;
+  }
+  if (type === "execution-denied") {
+    return {
+      success: false,
+      error: stringField(value, "reason") ?? "tool_execution_denied",
+    };
+  }
+  return value;
+}
+
+export function extractToolResultPayload(value: unknown): unknown {
+  if (!isRecord(value)) return null;
+  if (looksLikeToolResult(value)) return value;
+  if ("output" in value) return unwrapAiSdkToolOutput(value.output);
+  if ("result" in value) return unwrapAiSdkToolOutput(value.result);
+  return unwrapAiSdkToolOutput(value);
+}
+
+export function collectToolCalls(steps: StepLike[]): CollectedToolCall[] {
+  const collected: CollectedToolCall[] = [];
+  const seenToolCallIds = new Set<string>();
+  const resultsById = new Map<string, unknown>();
+
+  for (const step of steps) {
+    const results = step.toolResults ?? [];
+    for (const result of results) {
+      if (!isRecord(result)) continue;
+      const resultId = stringField(result, "toolCallId");
+      if (resultId) {
+        resultsById.set(resultId, result);
+      }
+    }
+  }
+
+  for (const step of steps) {
+    const calls = step.toolCalls ?? [];
+    const results = step.toolResults ?? [];
+
+    for (let i = 0; i < calls.length; i++) {
+      const tc = calls[i]!;
+      const raw = tc as unknown as Record<string, unknown>;
+      const toolCallId = stringField(raw, "toolCallId") ?? undefined;
+      if (toolCallId) {
+        if (seenToolCallIds.has(toolCallId)) {
+          continue;
+        }
+        seenToolCallIds.add(toolCallId);
+      }
+      const rawResult = toolCallId && resultsById.has(toolCallId)
+        ? resultsById.get(toolCallId)
+        : results[i];
+      collected.push({
+        tool: tc.toolName,
+        args: raw.input ?? raw.args ?? {},
+        result: extractToolResultPayload(rawResult),
+        ...(toolCallId ? { toolCallId } : {}),
+      });
+    }
+  }
+  return collected;
 }

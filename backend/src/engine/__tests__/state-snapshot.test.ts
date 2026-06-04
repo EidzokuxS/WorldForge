@@ -1,446 +1,390 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-
-// -- Mocks --------------------------------------------------------------------
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
+  getSqliteConnection: vi.fn(),
+  closeDb: vi.fn(),
 }));
 
 vi.mock("../../campaign/manager.js", () => ({
-  readCampaignConfig: vi.fn(),
+  readCampaignConfig: vi.fn(() => ({ currentTick: 7 })),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../campaign/paths.js", () => ({
   getCampaignDir: vi.fn(),
+  getCampaignConfigPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/config.json`),
+  getChatHistoryPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/chat_history.json`),
+}));
+
+vi.mock("../../campaign/store-manifest.js", () => ({
+  STORE_BUNDLE_MANIFEST_FILENAME: "store-manifest.json",
+  createCampaignStoreBundleManifest: vi.fn((input) => ({
+    schemaVersion: 1,
+    campaignId: input.campaignId,
+    purpose: input.purpose ?? "checkpoint",
+    includeVectors: input.includeVectors,
+    capturedAt: 1,
+    stores: [],
+  })),
+  writeCampaignStoreBundleManifest: vi.fn(),
+  assertCampaignStoreBundleRestorable: vi.fn(),
+  assertCampaignStoreBundleRestorableWithEvidence: vi.fn(async () => ({
+    schemaVersion: 1,
+    stores: [],
+  })),
+  assertCampaignStoreBundleEvidenceMatchesManifest: vi.fn(async () => ({
+    schemaVersion: 1,
+    stores: [],
+  })),
+  readCampaignStoreBundleManifestDigest: vi.fn(() => "source-manifest-digest"),
+}));
+
+vi.mock("../../vectors/episodic-events.js", () => ({
+  clearPendingCommittedEvents: vi.fn(),
+  rebuildEpisodicEventsFromLocationRecentEvents: vi.fn(async () => ({ rebuiltCount: 0 })),
+}));
+
+vi.mock("../living-world-authority.js", () => ({
+  invalidateAuthorityAfterRestore: vi.fn(),
+  readWorldClock: vi.fn(() => ({
+    worldVersion: 7,
+    worldTimeMinutes: 90,
+    currentTick: 7,
+  })),
 }));
 
 vi.mock("node:fs", () => ({
-  default: { writeFileSync: vi.fn() },
+  default: {
+    mkdirSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    cpSync: vi.fn(),
+    existsSync: vi.fn(() => true),
+    mkdtempSync: vi.fn(() => "/campaigns/test-campaign-123/.turn-boundaries/bundle-001"),
+    readFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    rmSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
 }));
 
-import {
-  captureSnapshot,
-  restoreSnapshot,
-  type TurnSnapshot,
-} from "../state-snapshot.js";
-import { getDb } from "../../db/index.js";
-import { readCampaignConfig } from "../../campaign/manager.js";
+import { captureSnapshot, restoreSnapshot } from "../state-snapshot.js";
+import { getDb, getSqliteConnection, closeDb } from "../../db/index.js";
+import { loadCampaign, readCampaignConfig } from "../../campaign/manager.js";
 import { getCampaignDir } from "../../campaign/paths.js";
+import { assertCampaignStoreBundleRestorableWithEvidence } from "../../campaign/store-manifest.js";
+import {
+  finalizePendingCampaignRestoreAfterLoad,
+  repairPendingCampaignRestoreBeforeLoad,
+} from "../../campaign/restore-bundle.js";
+
+import {
+  clearPendingCommittedEvents,
+  rebuildEpisodicEventsFromLocationRecentEvents,
+} from "../../vectors/episodic-events.js";
 import fs from "node:fs";
 
-// -- Helpers ------------------------------------------------------------------
-
 const CAMPAIGN_ID = "test-campaign-123";
+const writtenFileContents = new Map<string, string>();
 
-function makeSnapshot(overrides: Partial<TurnSnapshot> = {}): TurnSnapshot {
-  return {
-    playerHp: 4,
-    playerTags: '["brave","strong"]',
-    playerLocationId: "loc-tavern",
-    playerEquippedItems: '["sword-01"]',
-    playerCharacterRecord: "{}",
-    playerDerivedTags: '["brave","strong"]',
-    tick: 3,
-    spawnedNpcIds: [],
-    spawnedItemIds: [],
-    revealedLocationIds: [],
-    createdRelationshipIds: [],
-    createdChronicleIds: [],
-    ...overrides,
-  };
-}
-
-function createMockDb() {
-  const selectGetResult = { get: vi.fn() };
-  const updateRun = vi.fn();
-  const deleteRun = vi.fn();
-
-  // Track per-call select results for location lookups
-  const selectGetResults: Array<unknown> = [];
-  let selectCallIndex = 0;
-
-  const db = {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue(selectGetResult),
-    }),
-    update: vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ run: updateRun }),
+describe("state snapshot rollback bundle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    writtenFileContents.clear();
+    (getCampaignDir as Mock).mockReturnValue(`/campaigns/${CAMPAIGN_ID}`);
+    (fs.existsSync as Mock).mockImplementation(
+      (targetPath: string) => {
+        const normalizedPath = String(targetPath);
+        if (normalizedPath.endsWith("restore-journal.json")) {
+          return writtenFileContents.has(normalizedPath);
+        }
+        return true;
+      },
+    );
+    (fs.writeFileSync as Mock).mockImplementation(
+      (targetPath: string, contents: string) => {
+        writtenFileContents.set(String(targetPath), String(contents));
+      },
+    );
+    (fs.renameSync as Mock).mockImplementation((from: string, to: string) => {
+      const contents = writtenFileContents.get(String(from));
+      if (contents !== undefined) {
+        writtenFileContents.set(String(to), contents);
+        writtenFileContents.delete(String(from));
+      }
+    });
+    (fs.readFileSync as Mock).mockImplementation((targetPath: string) => {
+      const normalizedPath = String(targetPath);
+      if (writtenFileContents.has(normalizedPath)) {
+        return writtenFileContents.get(normalizedPath);
+      }
+      throw new Error(`Unexpected readFileSync(${normalizedPath})`);
+    });
+    (getDb as Mock).mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          hp: 4,
+          tags: '["brave"]',
+          currentLocationId: "loc-1",
+          equippedItems: '["blade"]',
+          characterRecord: "{}",
+          derivedTags: '["brave"]',
+        }),
       }),
-    }),
-    delete: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ run: deleteRun }),
-    }),
-    _selectGetResult: selectGetResult,
-    _updateRun: updateRun,
-    _deleteRun: deleteRun,
-  };
-
-  return db;
-}
-
-// -- Tests --------------------------------------------------------------------
-
-describe("captureSnapshot", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("captures player state and tick from DB and config", () => {
-    const db = createMockDb();
-    db._selectGetResult.get.mockReturnValue({
-      hp: 3,
-      tags: '["sneaky"]',
-      currentLocationId: "loc-forest",
-      equippedItems: '["dagger"]',
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({ run: vi.fn() }),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({ run: vi.fn() }),
+        }),
+      }),
+      delete: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ run: vi.fn() }),
+      }),
     });
-    (getDb as Mock).mockReturnValue(db);
+    (getSqliteConnection as Mock).mockReturnValue({
+      backup: vi.fn().mockResolvedValue(undefined),
+    });
     (readCampaignConfig as Mock).mockReturnValue({ currentTick: 7 });
-
-    const snapshot = captureSnapshot(CAMPAIGN_ID);
-
-    expect(snapshot).toEqual({
-      playerHp: 3,
-      playerTags: '["sneaky"]',
-      playerLocationId: "loc-forest",
-      playerEquippedItems: '["dagger"]',
-      playerCharacterRecord: "{}",
-      playerDerivedTags: "[]",
-      tick: 7,
-      spawnedNpcIds: [],
-      spawnedItemIds: [],
-      revealedLocationIds: [],
-      createdRelationshipIds: [],
-      createdChronicleIds: [],
-    });
   });
 
-  it("uses default values when no player row exists", () => {
-    const db = createMockDb();
-    db._selectGetResult.get.mockReturnValue(undefined);
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
+  it("D-04/D-05 captures the authoritative pre-turn bundle with SQLite backup instead of live fs.copyFile", async () => {
+    const snapshot = await captureSnapshot(CAMPAIGN_ID);
 
-    const snapshot = captureSnapshot(CAMPAIGN_ID);
+    expect(getSqliteConnection).toHaveBeenCalledTimes(1);
+    const sqlite = (getSqliteConnection as Mock).mock.results[0]!.value as {
+      backup: Mock;
+    };
+    expect(sqlite.backup).toHaveBeenCalledTimes(1);
+    expect(sqlite.backup).toHaveBeenCalledWith(
+      expect.stringContaining("state.db"),
+    );
 
-    expect(snapshot.playerHp).toBe(5);
-    expect(snapshot.playerTags).toBe("[]");
-    expect(snapshot.playerLocationId).toBeNull();
-    expect(snapshot.playerEquippedItems).toBe("[]");
-    expect(snapshot.tick).toBe(0);
-  });
-
-  it("defaults tick to 0 when currentTick is undefined in config", () => {
-    const db = createMockDb();
-    db._selectGetResult.get.mockReturnValue({
-      hp: 5,
-      tags: "[]",
-      currentLocationId: null,
-      equippedItems: "[]",
-    });
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({ currentTick: undefined });
-
-    const snapshot = captureSnapshot(CAMPAIGN_ID);
-
-    expect(snapshot.tick).toBe(0);
-  });
-
-  it("initializes all spawned arrays as empty", () => {
-    const db = createMockDb();
-    db._selectGetResult.get.mockReturnValue({
-      hp: 5,
-      tags: "[]",
-      currentLocationId: null,
-      equippedItems: "[]",
-    });
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 1 });
-
-    const snapshot = captureSnapshot(CAMPAIGN_ID);
-
-    expect(snapshot.spawnedNpcIds).toEqual([]);
-    expect(snapshot.spawnedItemIds).toEqual([]);
-    expect(snapshot.revealedLocationIds).toEqual([]);
-    expect(snapshot.createdRelationshipIds).toEqual([]);
-    expect(snapshot.createdChronicleIds).toEqual([]);
-  });
-});
-
-describe("restoreSnapshot", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("restores player state and writes config", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 10, someSetting: true });
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test-campaign-123");
-
-    const snapshot = makeSnapshot({ playerHp: 4, tick: 3 });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
-
-    // Player state updated
-    expect(db.update).toHaveBeenCalled();
-    expect(db._updateRun).toHaveBeenCalled();
-
-    // Config written with restored tick
-    expect(fs.writeFileSync).toHaveBeenCalledWith(
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("config.json"),
-      expect.stringContaining('"currentTick": 3'),
-      "utf-8"
+      expect.stringContaining("config.json"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("chat_history.json"),
+      expect.stringContaining("chat_history.json"),
+    );
+    expect(fs.copyFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("state.db"),
+      expect.any(String),
+    );
+    expect(fs.cpSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("vectors"),
+      expect.any(String),
+      expect.anything(),
+    );
+
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        bundleDir: expect.stringContaining(".turn-boundaries"),
+      }),
     );
   });
 
-  it("preserves other config fields when restoring tick", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({
-      currentTick: 10,
-      worldName: "Testland",
-    });
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test-campaign-123");
+  it("D-10/D-16 restores state.db, config.json, and chat_history.json while purging rebuild-only vectors", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
 
-    restoreSnapshot(CAMPAIGN_ID, makeSnapshot({ tick: 2 }));
+    await restoreSnapshot(CAMPAIGN_ID, snapshot);
 
-    const writtenJson = (fs.writeFileSync as Mock).mock.calls[0][1] as string;
-    const parsed = JSON.parse(writtenJson);
-    expect(parsed.currentTick).toBe(2);
-    expect(parsed.worldName).toBe("Testland");
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("bundle-001\\state.db"),
+      expect.stringContaining(".restore-staging\\current\\state.db"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\state.db"),
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("bundle-001\\config.json"),
+      expect.stringContaining(".restore-staging\\current\\config.json"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\config.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/config.json`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("bundle-001\\chat_history.json"),
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/chat_history.json`),
+    );
+    expect(fs.cpSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("vectors"),
+      expect.any(String),
+      expect.anything(),
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining("vectors\\episodic_events.lance"),
+      expect.anything(),
+    );
+    expect(fs.rmSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("vectors\\lore_cards.lance"),
+      expect.anything(),
+    );
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
-  it("does not delete anything when spawned arrays are empty", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test-campaign-123");
+  it("D-04/D-05 invalidates stale runtime state before later gameplay reads by closing and reloading the campaign", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
 
-    restoreSnapshot(CAMPAIGN_ID, makeSnapshot());
+    await restoreSnapshot(CAMPAIGN_ID, snapshot);
 
-    expect(db.delete).not.toHaveBeenCalled();
+    expect(closeDb).toHaveBeenCalledTimes(1);
+    expect(loadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect((closeDb as Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      (loadCampaign as Mock).mock.invocationCallOrder[0],
+    );
   });
 
-  it("deletes spawned NPCs on rollback", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
+  it("removes stale SQLite sidecars before reopening a restored turn snapshot", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
 
-    const snapshot = makeSnapshot({
-      spawnedNpcIds: ["npc-1", "npc-2"],
-    });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
+    await restoreSnapshot(CAMPAIGN_ID, snapshot);
 
-    expect(db.delete).toHaveBeenCalledTimes(2);
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-wal`),
+      { force: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-shm`),
+      { force: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-journal`),
+      { force: true },
+    );
+    expect((fs.rmSync as Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      (fs.copyFileSync as Mock).mock.invocationCallOrder[0],
+    );
+    const sidecarRemovalOrders = (fs.rmSync as Mock).mock.calls
+      .map((call, index) => ({
+        target: String(call[0]),
+        order: (fs.rmSync as Mock).mock.invocationCallOrder[index],
+      }))
+      .filter((call) => call.target.includes(`${CAMPAIGN_ID}\\state.db-`))
+      .map((call) => call.order);
+    expect(Math.max(...sidecarRemovalOrders)).toBeLessThan(
+      (loadCampaign as Mock).mock.invocationCallOrder[0],
+    );
   });
 
-  it("deletes spawned items on rollback", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      spawnedItemIds: ["item-a", "item-b", "item-c"],
+  it("rolls a pending restore journal forward after a crash leaves DB copied before config/chat", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
+    let failedOnce = false;
+    (fs.copyFileSync as Mock).mockImplementation((from: string, to: string) => {
+      if (
+        !failedOnce &&
+        String(from).includes(".restore-staging\\current\\config.json") &&
+        String(to).endsWith("config.json")
+      ) {
+        failedOnce = true;
+        throw new Error("simulated crash after DB copy");
+      }
     });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
 
-    expect(db.delete).toHaveBeenCalledTimes(3);
+    await expect(restoreSnapshot(CAMPAIGN_ID, snapshot)).rejects.toThrow(
+      "simulated crash after DB copy",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
+
+    (fs.copyFileSync as Mock).mockImplementation(() => undefined);
+
+    await repairPendingCampaignRestoreBeforeLoad(CAMPAIGN_ID);
+    await loadCampaign(CAMPAIGN_ID);
+    await finalizePendingCampaignRestoreAfterLoad(CAMPAIGN_ID);
+
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\state.db"),
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\config.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/config.json`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/chat_history.json`),
+    );
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
-  it("deletes created relationships on rollback", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      createdRelationshipIds: ["rel-1"],
-    });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
-
-    expect(db.delete).toHaveBeenCalledTimes(1);
-  });
-
-  it("deletes created chronicle entries on rollback", () => {
-    const db = createMockDb();
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      createdChronicleIds: ["chr-1", "chr-2"],
-    });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
-
-    expect(db.delete).toHaveBeenCalledTimes(2);
-  });
-
-  it("cleans up bidirectional connections when deleting revealed locations", () => {
-    // Build a DB mock that tracks select/from/where chains for location lookups
-    const updateRun = vi.fn();
-    const deleteRun = vi.fn();
-
-    // The revealed location has connectedTo: ["adj-1"]
-    // adj-1 has connectedTo: ["loc-revealed", "loc-other"]
-    const locationData: Record<string, { connectedTo: string }> = {
-      "loc-revealed": { connectedTo: '["adj-1"]' },
-      "adj-1": { connectedTo: '["loc-revealed","loc-other"]' },
-    };
-
-    let selectContext = "";
-
-    const db = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockImplementation(() => ({
-        where: vi.fn().mockImplementation((condition: unknown) => {
-          // For player update, return a run-capable object
-          // For location selects, return get-capable object
-          return {
-            get: vi.fn().mockImplementation(() => {
-              // Determine which location is being queried by checking call order
-              // First call = the revealed location, second = adj-1
-              const calls = db.select.mock.calls.length;
-              if (calls <= 2) return locationData["loc-revealed"];
-              return locationData["adj-1"];
-            }),
-            run: updateRun,
-          };
-        }),
-      })),
-      update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({ run: updateRun }),
-        }),
-      }),
-      delete: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ run: deleteRun }),
-      }),
-    };
-
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      revealedLocationIds: ["loc-revealed"],
-    });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
-
-    // Should update adj-1 to remove loc-revealed from its connections
-    expect(db.update).toHaveBeenCalled();
-    // Should delete the revealed location
-    expect(db.delete).toHaveBeenCalled();
-  });
-
-  it("handles location with invalid connectedTo JSON gracefully", () => {
-    const updateRun = vi.fn();
-    const deleteRun = vi.fn();
-
-    const db = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          get: vi.fn().mockReturnValue({ connectedTo: "not-valid-json" }),
-          run: updateRun,
-        }),
-      }),
-      update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({ run: updateRun }),
-        }),
-      }),
-      delete: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ run: deleteRun }),
-      }),
-    };
-
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      revealedLocationIds: ["loc-bad"],
+  it("refuses to repair a pending turn snapshot restore when staged evidence is tampered", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
+    (closeDb as Mock).mockImplementationOnce(() => {
+      throw new Error("simulated crash before live apply");
     });
 
-    // Should not throw
-    expect(() => restoreSnapshot(CAMPAIGN_ID, snapshot)).not.toThrow();
-    // Should still delete the location
-    expect(db.delete).toHaveBeenCalled();
-  });
+    await expect(restoreSnapshot(CAMPAIGN_ID, snapshot)).rejects.toThrow(
+      "simulated crash before live apply",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
 
-  it("handles location not found in DB during rollback", () => {
-    const updateRun = vi.fn();
-    const deleteRun = vi.fn();
+    (fs.copyFileSync as Mock).mockClear();
+    (loadCampaign as Mock).mockClear();
+    (clearPendingCommittedEvents as Mock).mockClear();
+    (rebuildEpisodicEventsFromLocationRecentEvents as Mock).mockClear();
+    (assertCampaignStoreBundleRestorableWithEvidence as Mock).mockImplementation(
+      async ({ bundleDir }: { bundleDir: string }) => {
+        if (String(bundleDir).includes(".restore-staging")) {
+          throw new Error("Campaign store bundle evidence hash mismatch for state.db.");
+        }
+        return { schemaVersion: 1, stores: [] };
+      },
+    );
 
-    const db = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          get: vi.fn().mockReturnValue(undefined),
-          run: updateRun,
-        }),
+    await expect(repairPendingCampaignRestoreBeforeLoad(CAMPAIGN_ID)).rejects.toThrow(
+      /evidence hash mismatch.*state\.db/i,
+    );
+    expect(assertCampaignStoreBundleRestorableWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundleDir: expect.stringContaining(".restore-staging\\current"),
+        includeVectors: false,
       }),
-      update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({ run: updateRun }),
-        }),
-      }),
-      delete: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ run: deleteRun }),
-      }),
-    };
-
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      revealedLocationIds: ["loc-missing"],
-    });
-
-    expect(() => restoreSnapshot(CAMPAIGN_ID, snapshot)).not.toThrow();
-    expect(db.delete).toHaveBeenCalled();
-  });
-
-  it("deletes all entity types when snapshot has mixed spawned IDs", () => {
-    const deleteRun = vi.fn();
-    const updateRun = vi.fn();
-
-    const db = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          get: vi.fn().mockReturnValue(undefined),
-          run: updateRun,
-        }),
-      }),
-      update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({ run: updateRun }),
-        }),
-      }),
-      delete: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ run: deleteRun }),
-      }),
-    };
-
-    (getDb as Mock).mockReturnValue(db);
-    (readCampaignConfig as Mock).mockReturnValue({});
-    (getCampaignDir as Mock).mockReturnValue("/campaigns/test");
-
-    const snapshot = makeSnapshot({
-      spawnedNpcIds: ["npc-1"],
-      spawnedItemIds: ["item-1", "item-2"],
-      revealedLocationIds: ["loc-1"],
-      createdRelationshipIds: ["rel-1"],
-      createdChronicleIds: ["chr-1", "chr-2", "chr-3"],
-    });
-    restoreSnapshot(CAMPAIGN_ID, snapshot);
-
-    // 1 NPC + 2 items + 1 location + 1 relationship + 3 chronicle = 8 deletes
-    expect(deleteRun).toHaveBeenCalledTimes(8);
+    );
+    expect((fs.copyFileSync as Mock).mock.calls.some((call) =>
+      String(call[0]).includes(".restore-staging\\current\\state.db")
+      && String(call[1]).includes(`${CAMPAIGN_ID}\\state.db`)
+    )).toBe(false);
+    expect(loadCampaign).not.toHaveBeenCalled();
+    expect(clearPendingCommittedEvents).not.toHaveBeenCalled();
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).not.toHaveBeenCalled();
   });
 });

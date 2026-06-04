@@ -175,9 +175,9 @@ describe("createDefaultSettings", () => {
     expect(settings).toHaveProperty("storyteller");
     expect(settings).toHaveProperty("generator");
     expect(settings).toHaveProperty("embedder");
-    expect(settings).toHaveProperty("fallback");
     expect(settings).toHaveProperty("images");
     expect(settings).toHaveProperty("research");
+    expect(settings).toHaveProperty("ui");
   });
 
   it("returns a new object on every call (no shared reference)", () => {
@@ -229,8 +229,8 @@ describe("createDefaultSettings", () => {
       expect(settings.storyteller.temperature).toBe(0.8);
     });
 
-    it("has maxTokens 1024", () => {
-      expect(settings.storyteller.maxTokens).toBe(1024);
+    it("has maxTokens 4096 for full RP narration", () => {
+      expect(settings.storyteller.maxTokens).toBe(4096);
     });
 
     it("has empty model string", () => {
@@ -257,28 +257,6 @@ describe("createDefaultSettings", () => {
 
     it("has empty model string", () => {
       expect(settings.generator.model).toBe("");
-    });
-  });
-
-  // --- fallback ---
-
-  describe("fallback config", () => {
-    it("uses the first provider id", () => {
-      expect(settings.fallback.providerId).toBe(
-        BUILTIN_PROVIDER_PRESETS[0].id,
-      );
-    });
-
-    it("has model 'gpt-4o-mini'", () => {
-      expect(settings.fallback.model).toBe("gpt-4o-mini");
-    });
-
-    it("has timeoutMs 30000", () => {
-      expect(settings.fallback.timeoutMs).toBe(30_000);
-    });
-
-    it("has retryCount 1", () => {
-      expect(settings.fallback.retryCount).toBe(1);
     });
   });
 
@@ -338,6 +316,34 @@ describe("createDefaultSettings", () => {
 
     it("defaults searchProvider to 'brave'", () => {
       expect(settings.research.searchProvider).toBe("brave");
+    });
+  });
+
+  // --- observability (Phase 58) ---
+
+  describe("observability config", () => {
+    it("is enabled by default", () => {
+      expect(settings.observability.enabled).toBe(true);
+    });
+
+    it("defaults dumpFullPrompts to false", () => {
+      expect(settings.observability.dumpFullPrompts).toBe(false);
+    });
+
+    it("enables every role toggle by default", () => {
+      expect(settings.observability.roles.judge).toBe(true);
+      expect(settings.observability.roles.storyteller).toBe(true);
+      expect(settings.observability.roles.oracle).toBe(true);
+      expect(settings.observability.roles.npcAgent).toBe(true);
+      expect(settings.observability.roles.reflection).toBe(true);
+      expect(settings.observability.roles.embedder).toBe(true);
+    });
+
+    it("exposes exactly the 6 documented role keys", () => {
+      const keys = Object.keys(settings.observability.roles).sort();
+      expect(keys).toEqual(
+        ["embedder", "judge", "npcAgent", "oracle", "reflection", "storyteller"],
+      );
     });
   });
 

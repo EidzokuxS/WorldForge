@@ -5,6 +5,7 @@ import { safeGenerateObject as generateObject } from "../ai/generate-object-safe
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { clampTokens, createLogger } from "../lib/index.js";
+import { buildPremiseDivergencePromptContract } from "./prompt-contracts.js";
 
 const log = createLogger("premise-divergence");
 
@@ -42,9 +43,40 @@ function dedupeLines(values: string[]): string[] {
   );
 }
 
-const protagonistKindSchema = z
-  .enum(["canonical", "custom", "player", "original"])
-  .transform((value) => (value === "canonical" ? "canonical" : "custom"));
+function normalizeProtagonistKind(value: unknown): "canonical" | "custom" {
+  const normalized = typeof value === "string" ? normalizeForMatch(value) : "";
+
+  if (!normalized) {
+    return "custom";
+  }
+
+  if (
+    normalized.includes("canonical") ||
+    normalized.includes("canon") ||
+    normalized === "source protagonist"
+  ) {
+    return "canonical";
+  }
+
+  if (
+    normalized.includes("custom") ||
+    normalized.includes("player") ||
+    normalized.includes("original") ||
+    normalized === "oc" ||
+    normalized.includes("outsider") ||
+    normalized.includes("self insert") ||
+    normalized.includes("self insert protagonist")
+  ) {
+    return "custom";
+  }
+
+  return "custom";
+}
+
+const protagonistKindSchema = z.preprocess(
+  (value) => normalizeProtagonistKind(value),
+  z.enum(["canonical", "custom"]),
+);
 
 const premiseDivergenceSchema = z.object({
   mode: z.enum(["canonical", "coexisting", "diverged"]),
@@ -68,7 +100,10 @@ export async function interpretPremiseDivergence(
   if (!ipContext) return null;
 
   const canonicalCharacters = ipContext.canonicalNames?.characters ?? [];
+  const outputContract = buildPremiseDivergencePromptContract();
   const prompt = `You interpret how a player's campaign premise diverges from a known canon setting.
+
+${outputContract}
 
 FRANCHISE:
 ${ipContext.franchise}

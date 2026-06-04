@@ -16,6 +16,12 @@ vi.mock("../../campaign/paths.js", () => ({
   getImagesDir: vi.fn(() => "/mock/campaigns/abc-123/images"),
 }));
 
+vi.mock("../../db/index.js", () => ({
+  getDb: vi.fn(() => {
+    throw new Error("Database not connected.");
+  }),
+}));
+
 vi.mock("../../images/index.js", () => ({
   generateImage: vi.fn(),
   resolveImageProvider: vi.fn(),
@@ -42,12 +48,14 @@ import {
   resolveImageProvider,
   cacheImage,
 } from "../../images/index.js";
+import { getDb } from "../../db/index.js";
 import imageRoutes from "../images.js";
 
 const mockedFs = vi.mocked(fs);
 const mockedGenerateImage = vi.mocked(generateImage);
 const mockedResolveProvider = vi.mocked(resolveImageProvider);
 const mockedCacheImage = vi.mocked(cacheImage);
+const mockedGetDb = vi.mocked(getDb);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -59,6 +67,9 @@ const CAMPAIGN_ID = "abc-123";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedGetDb.mockImplementation(() => {
+    throw new Error("Database not connected.");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -109,6 +120,33 @@ describe("GET /api/images/:campaignId/:type/:filename", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toContain("not found");
+  });
+
+  it("serves player.png from a legacy raw player portrait behind the API boundary", async () => {
+    const fakeData = Buffer.from("legacy-player-png");
+    mockedFs.existsSync.mockImplementation((filePath) => {
+      const normalized = String(filePath).replace(/\\/g, "/");
+      return normalized.endsWith("/portraits/player-source.png");
+    });
+    mockedFs.readFileSync.mockReturnValue(fakeData);
+    mockedGetDb.mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            get: () => ({ id: "player-source" }),
+          }),
+        }),
+      }),
+    } as any);
+
+    const res = await app.request(
+      `/api/images/${CAMPAIGN_ID}/portraits/player.png`
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockedFs.readFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/player-source\.png$/)
+    );
   });
 });
 

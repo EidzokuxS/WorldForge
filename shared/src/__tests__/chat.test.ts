@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { isChatMessage } from "../chat.js";
+import {
+  formatLookupLogEntry,
+  isChatMessage,
+  parseLookupLogEntry,
+} from "../chat.js";
 
 describe("isChatMessage", () => {
   // -------------------------------------------------------------------------
@@ -163,5 +167,50 @@ describe("isChatMessage", () => {
         expect.unreachable("isChatMessage should have returned true");
       }
     });
+  });
+});
+
+describe("lookup log entries", () => {
+  it("round-trips a standard lookup entry", () => {
+    const content = formatLookupLogEntry(
+      "character_canon_fact",
+      "Gojo remains sealed until the Prison Realm is opened.",
+    );
+
+    expect(content).toBe(
+      "[Lookup: character_canon_fact] Gojo remains sealed until the Prison Realm is opened.",
+    );
+    expect(parseLookupLogEntry(content)).toEqual({
+      lookupKind: "character_canon_fact",
+      answer: "Gojo remains sealed until the Prison Realm is opened.",
+    });
+  });
+
+  it("round-trips compare lookup entries without frontend drift", () => {
+    const content = formatLookupLogEntry(
+      "compare",
+      "Gojo controls range better, but Sukuna answers with broader lethal coverage.",
+    );
+
+    expect(parseLookupLogEntry(content)).toEqual({
+      lookupKind: "compare",
+      answer: "Gojo controls range better, but Sukuna answers with broader lethal coverage.",
+    });
+  });
+
+  it("round-trips power_profile entries for compatibility", () => {
+    const content = formatLookupLogEntry(
+      "power_profile",
+      "Infinity blocks direct contact while Red and Purple escalate ranged pressure.",
+    );
+
+    expect(parseLookupLogEntry(content)).toEqual({
+      lookupKind: "power_profile",
+      answer: "Infinity blocks direct contact while Red and Purple escalate ranged pressure.",
+    });
+  });
+
+  it("returns null for non-lookup narration", () => {
+    expect(parseLookupLogEntry("The rain sweeps across the station.")).toBeNull();
   });
 });

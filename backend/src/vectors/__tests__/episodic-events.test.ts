@@ -1,62 +1,1002 @@
-import { describe, it, expect } from "vitest";
-import { computeCompositeScore } from "../episodic-events.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("computeCompositeScore", () => {
-  it("computes correct weighted score with all factors at max", () => {
-    // similarity=1.0, tick=10, importance=10, currentTick=10
-    // recency = 10/10 = 1.0, importanceNorm = 10/10 = 1.0
-    // composite = 1.0*0.4 + 1.0*0.3 + 1.0*0.3 = 1.0
-    const score = computeCompositeScore(1.0, 10, 10, 10);
-    expect(score).toBeCloseTo(1.0, 5);
+const mockGetVectorDb = vi.fn();
+const mockEmbedTexts = vi.fn();
+const mockGetDb = vi.fn();
+
+vi.mock("../connection.js", () => ({
+  getVectorDb: () => mockGetVectorDb(),
+}));
+
+vi.mock("../embeddings.js", () => ({
+  embedTexts: (...args: unknown[]) => mockEmbedTexts(...args),
+}));
+
+vi.mock("../../db/index.js", () => ({
+  getDb: () => mockGetDb(),
+}));
+
+vi.mock("../../lib/index.js", () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    event: vi.fn(),
+  }),
+  withRole: <T,>(_role: string, fn: () => T) => fn(),
+}));
+
+import {
+  clearPendingCommittedEvents,
+  computeCompositeScore,
+  drainPendingCommittedEvents,
+  drainPendingCommittedEventsByIds,
+  embedAndUpdateEvent,
+  readPendingCommittedEvents,
+  rebuildEpisodicEventsFromLocationRecentEvents,
+  retractPendingCommittedEventsForTick,
+  searchEpisodicEvents,
+  storeEpisodicEvent,
+} from "../episodic-events.js";
+
+function createMockDb({
+  hasTable = false,
+  queryRows = [],
+  vectorRows = [],
+  vectorSearchThrows = false,
+  schemaFields = [
+    "campaignId",
+    "id",
+    "text",
+    "tick",
+    "location",
+    "participants",
+    "importance",
+    "type",
+    "visibility",
+    "surfaceRoute",
+    "knowledgeRoute",
+    "hiddenCauseTerms",
+  ],
+  schemaThrows = false,
+  dropTableThrows = false,
+}: {
+  hasTable?: boolean;
+  queryRows?: Record<string, unknown>[];
+  vectorRows?: Record<string, unknown>[];
+  vectorSearchThrows?: boolean;
+  schemaFields?: string[];
+  schemaThrows?: boolean;
+  dropTableThrows?: boolean;
+} = {}) {
+  const queryBuilder = {
+    where: vi.fn().mockReturnThis(),
+    toArray: vi.fn().mockResolvedValue(queryRows),
+  };
+
+  const vectorSearchBuilder = {
+    distanceType: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
+    toArray: vectorSearchThrows
+      ? vi.fn().mockRejectedValue(new Error("vectorSearch failed"))
+      : vi.fn().mockResolvedValue(vectorRows),
+  };
+
+  const table = {
+    add: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
+    query: vi.fn().mockReturnValue(queryBuilder),
+    vectorSearch: vi.fn().mockReturnValue(vectorSearchBuilder),
+    schema: schemaThrows
+      ? vi.fn().mockRejectedValue(new Error("Dataset missing _versions"))
+      : vi.fn().mockResolvedValue({
+          fields: schemaFields.map((name) => ({ name })),
+        }),
+  };
+
+  const db = {
+    tableNames: vi.fn().mockResolvedValue(hasTable ? ["episodic_events"] : []),
+    openTable: vi.fn().mockResolvedValue(table),
+    createEmptyTable: vi.fn().mockResolvedValue(table),
+    dropTable: dropTableThrows
+      ? vi.fn().mockRejectedValue(new Error("drop failed"))
+      : vi.fn().mockResolvedValue(undefined),
+  };
+
+  return { db, table, queryBuilder, vectorSearchBuilder };
+}
+
+function createMockCampaignDb({
+  location,
+}: {
+  location?: Record<string, unknown> | null;
+} = {}) {
+  const insertRun = vi.fn();
+  const insertValues = vi.fn().mockReturnValue({ run: insertRun });
+  const insert = vi.fn().mockReturnValue({ values: insertValues });
+  const deleteRun = vi.fn();
+  const deleteWhere = vi.fn().mockReturnValue({ run: deleteRun });
+  const deleteFn = vi.fn().mockReturnValue({ where: deleteWhere });
+
+  const selectGet = vi.fn().mockReturnValue(location);
+  const where = vi.fn().mockReturnValue({ get: selectGet });
+  const from = vi.fn().mockReturnValue({ where });
+  const select = vi.fn().mockReturnValue({ from });
+
+  return {
+    db: {
+      select,
+      insert,
+      delete: deleteFn,
+    },
+    insertValues,
+    insertRun,
+    deleteRun,
+    selectGet,
+  };
+}
+
+describe("episodic-events", () => {
+  beforeEach(() => {
+    mockGetVectorDb.mockReset();
+    mockEmbedTexts.mockReset();
+    mockGetDb.mockReset();
+    mockGetDb.mockReturnValue(createMockCampaignDb({ location: null }).db);
+    clearPendingCommittedEvents("campaign-1");
+    clearPendingCommittedEvents("campaign-live");
+    clearPendingCommittedEvents("campaign-other");
+    clearPendingCommittedEvents("campaign-clear");
   });
 
-  it("computes correct weighted score with mixed values", () => {
-    // similarity=0.8, tick=5, importance=6, currentTick=10
-    // recency = 5/10 = 0.5, importanceNorm = 6/10 = 0.6
-    // composite = 0.8*0.4 + 0.5*0.3 + 0.6*0.3 = 0.32 + 0.15 + 0.18 = 0.65
-    const score = computeCompositeScore(0.8, 5, 6, 10);
-    expect(score).toBeCloseTo(0.65, 5);
+  describe("computeCompositeScore", () => {
+    it("computes correct weighted score with all factors at max", () => {
+      const score = computeCompositeScore(1.0, 10, 10, 10);
+      expect(score).toBeCloseTo(1.0, 5);
+    });
+
+    it("computes correct weighted score with mixed values", () => {
+      const score = computeCompositeScore(0.8, 5, 6, 10);
+      expect(score).toBeCloseTo(0.65, 5);
+    });
+
+    it("handles currentTick=0 (recency defaults to 1.0)", () => {
+      const score = computeCompositeScore(0.5, 0, 5, 0);
+      expect(score).toBeCloseTo(0.65, 5);
+    });
+
+    it("handles importance=0", () => {
+      const score = computeCompositeScore(1.0, 10, 0, 10);
+      expect(score).toBeCloseTo(0.7, 5);
+    });
+
+    it("handles importance=10 (max)", () => {
+      const score = computeCompositeScore(0.0, 1, 10, 10);
+      expect(score).toBeCloseTo(0.33, 5);
+    });
+
+    it("old events have lower recency", () => {
+      const scoreRecent = computeCompositeScore(0.8, 9, 5, 10);
+      const scoreOld = computeCompositeScore(0.8, 1, 5, 10);
+      expect(scoreRecent).toBeGreaterThan(scoreOld);
+    });
+
+    it("higher importance yields higher score", () => {
+      const scoreHigh = computeCompositeScore(0.5, 5, 9, 10);
+      const scoreLow = computeCompositeScore(0.5, 5, 2, 10);
+      expect(scoreHigh).toBeGreaterThan(scoreLow);
+    });
+
+    it("higher similarity yields higher score", () => {
+      const scoreHigh = computeCompositeScore(0.9, 5, 5, 10);
+      const scoreLow = computeCompositeScore(0.2, 5, 5, 10);
+      expect(scoreHigh).toBeGreaterThan(scoreLow);
+    });
   });
 
-  it("handles currentTick=0 (recency defaults to 1.0)", () => {
-    // similarity=0.5, tick=0, importance=5, currentTick=0
-    // recency = 1.0 (fallback), importanceNorm = 5/10 = 0.5
-    // composite = 0.5*0.4 + 1.0*0.3 + 0.5*0.3 = 0.20 + 0.30 + 0.15 = 0.65
-    const score = computeCompositeScore(0.5, 0, 5, 0);
-    expect(score).toBeCloseTo(0.65, 5);
+  describe("storeEpisodicEvent", () => {
+    it("creates an empty episodic table with stable schema, then adds the first row without a vector field", async () => {
+      const { db, table } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "The duel ended in a draw.",
+        tick: 12,
+        location: "Arena",
+        participants: ["Hero", "Rival"],
+        importance: 7,
+        type: "combat",
+      });
+
+      expect(db.createEmptyTable).toHaveBeenCalledTimes(1);
+      const rows = table.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).not.toHaveProperty("vector");
+      expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
+        text: "The duel ended in a draw.",
+        tick: 12,
+        location: "Arena",
+        participants: ["Hero", "Rival"],
+        importance: 7,
+        type: "combat",
+        visibility: "player_perceivable",
+        surfaceRoute: "",
+        knowledgeRoute: "",
+        hiddenCauseTerms: [],
+      });
+    });
+
+    it("adds later episodic rows without vector when the table already exists", async () => {
+      const { db, table } = createMockDb({ hasTable: true });
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "A bell rang in the tower.",
+        tick: 13,
+        location: "Tower",
+        participants: ["Hero"],
+        importance: 4,
+        type: "event",
+      });
+
+      const rows = table.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).not.toHaveProperty("vector");
+      expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
+        text: "A bell rang in the tower.",
+        tick: 13,
+        location: "Tower",
+        participants: ["Hero"],
+        importance: 4,
+        type: "event",
+        visibility: "player_perceivable",
+      });
+    });
+
+    it("recreates a listed but unreadable episodic table before storing a committed event", async () => {
+      const { db, table } = createMockDb({ hasTable: true, schemaThrows: true });
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "The warden states the current proof requirement.",
+        tick: 55,
+        location: "Lantern-Lit Gondola Pier",
+        participants: ["Lead Warden", "Mira Voss"],
+        importance: 6,
+        type: "dialogue",
+      });
+
+      expect(db.openTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).toHaveBeenCalledTimes(1);
+      expect(table.add).toHaveBeenCalledWith([
+        expect.objectContaining({
+          text: "The warden states the current proof requirement.",
+          tick: 55,
+          location: "Lantern-Lit Gondola Pier",
+          participants: ["Lead Warden", "Mira Voss"],
+          importance: 6,
+          type: "dialogue",
+        }),
+      ]);
+    });
+
+    it("queues same-turn pending evidence for committed events without requiring embeddings", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "Greta warned the player about raiders.",
+        tick: 14,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "player"],
+        importance: 6,
+        type: "dialogue",
+      });
+
+      expect(readPendingCommittedEvents("campaign-1", 14)).toEqual([
+        expect.objectContaining({
+          text: "Greta warned the player about raiders.",
+          tick: 14,
+          location: "Market Square",
+          participants: ["Greta the Merchant", "player"],
+          importance: 6,
+          type: "dialogue",
+        }),
+      ]);
+    });
+
+    it("writes a SQLite-backed location projection row with source traceability and anchored archived-scene spillover", async () => {
+      const { db: vectorDb, table: vectorTable } = createMockDb();
+      const { db: campaignDb, insertValues } = createMockCampaignDb({
+        location: {
+          id: "scene-1",
+          campaignId: "campaign-1",
+          name: "Collapsed Tunnel",
+          kind: "ephemeral_scene",
+          persistence: "ephemeral",
+          anchorLocationId: "loc-anchor",
+          archivedAtTick: 15,
+        },
+      });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "The tunnel collapse left cursed residue in the crossing.",
+        tick: 14,
+        location: "Collapsed Tunnel",
+        participants: ["Elara"],
+        importance: 6,
+        type: "event",
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          campaignId: "campaign-1",
+          locationId: "loc-anchor",
+          sourceLocationId: "scene-1",
+          anchorLocationId: "loc-anchor",
+          eventType: "event",
+          summary: "The tunnel collapse left cursed residue in the crossing.",
+          tick: 14,
+          importance: 6,
+          archivedAtTick: 15,
+          sourceEventId: expect.any(String),
+        }),
+      );
+    });
+
+    it("propagates explicit visibility routes to location projections and pending same-turn evidence", async () => {
+      const { db: vectorDb, table: vectorTable } = createMockDb();
+      const { db: campaignDb, insertValues } = createMockCampaignDb({
+        location: {
+          id: "scene-actor-memory",
+          campaignId: "campaign-1",
+          name: "Moth Court",
+          kind: "macro",
+          persistence: "persistent",
+          anchorLocationId: null,
+          archivedAtTick: null,
+        },
+      });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "Renn privately recognizes the sealed proof pattern.",
+        tick: 14,
+        location: "Moth Court",
+        participants: ["Renn"],
+        importance: 6,
+        type: "event",
+        visibility: "hidden",
+        surfaceRoute: "actor_private_memory",
+        knowledgeRoute: "memory",
+        hiddenCauseTerms: ["sealed proof pattern"],
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          visibility: "hidden",
+          surfaceRoute: "actor_private_memory",
+          knowledgeRoute: "memory",
+          hiddenCauseTerms: JSON.stringify(["sealed proof pattern"]),
+        }),
+      );
+      const rows = vectorTable.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+      expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
+        visibility: "hidden",
+        surfaceRoute: "actor_private_memory",
+        knowledgeRoute: "memory",
+        hiddenCauseTerms: ["sealed proof pattern"],
+      });
+      expect(readPendingCommittedEvents("campaign-1", 14)).toEqual([
+        expect.objectContaining({
+          text: "Renn privately recognizes the sealed proof pattern.",
+          visibility: "hidden",
+          surfaceRoute: "actor_private_memory",
+          knowledgeRoute: "memory",
+          hiddenCauseTerms: ["sealed proof pattern"],
+        }),
+      ]);
+    });
+
+    it("keeps pending evidence campaign-scoped and tick-scoped, and drain clears queued committed events", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-live", {
+        text: "Greta made a same-turn evidence note.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-live", {
+        text: "Old stale turn evidence.",
+        tick: 19,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 2,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-other", {
+        text: "Wrong campaign evidence.",
+        tick: 20,
+        location: "Elsewhere",
+        participants: ["Other NPC"],
+        importance: 9,
+        type: "event",
+      });
+
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([
+        expect.objectContaining({ text: "Greta made a same-turn evidence note." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-live", 19)).toEqual([
+        expect.objectContaining({ text: "Old stale turn evidence." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-other", 20)).toEqual([
+        expect.objectContaining({ text: "Wrong campaign evidence." }),
+      ]);
+
+      expect(drainPendingCommittedEvents("campaign-live", 20)).toEqual([
+        expect.objectContaining({ text: "Greta made a same-turn evidence note." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([]);
+      expect(readPendingCommittedEvents("campaign-live", 19)).toEqual([
+        expect.objectContaining({ text: "Old stale turn evidence." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-other", 20)).toEqual([
+        expect.objectContaining({ text: "Wrong campaign evidence." }),
+      ]);
+    });
+
+    it("promotes accepted durable memory by event id instead of post-turn tick", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      const acceptedId = await storeEpisodicEvent("campaign-live", {
+        text: "Accepted event from the old tick.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-live", {
+        text: "Unaccepted event from the same tick.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+
+      expect(drainPendingCommittedEventsByIds("campaign-live", [acceptedId])).toEqual([
+        expect.objectContaining({ id: acceptedId, text: "Accepted event from the old tick." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([
+        expect.objectContaining({ text: "Unaccepted event from the same tick." }),
+      ]);
+    });
+
+    it("retracts pending/vector/location projections for a rolled-back turn tick", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [{ id: "event-present" }],
+      });
+      const { db: campaignDb, deleteRun } = createMockCampaignDb();
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      const eventId = await storeEpisodicEvent("campaign-live", {
+        text: "This rejected turn should not remain in memory.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 7,
+        type: "event",
+      });
+
+      await expect(retractPendingCommittedEventsForTick("campaign-live", 20)).resolves.toEqual([
+        expect.objectContaining({
+          eventId,
+          vectorDeleted: true,
+          pendingEvent: expect.objectContaining({ id: eventId }),
+        }),
+      ]);
+      expect(table.delete).toHaveBeenCalledWith(`id = '${eventId}'`);
+      expect(deleteRun).toHaveBeenCalledTimes(1);
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([]);
+    });
+
+    it("clears all queued committed events for one campaign regardless of tick", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-clear", {
+        text: "Tick 20 event.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-clear", {
+        text: "Tick 21 event.",
+        tick: 21,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-other", {
+        text: "Other campaign event.",
+        tick: 20,
+        location: "Elsewhere",
+        participants: ["Other NPC"],
+        importance: 9,
+        type: "event",
+      });
+
+      clearPendingCommittedEvents("campaign-clear");
+
+      expect(readPendingCommittedEvents("campaign-clear", 20)).toEqual([]);
+      expect(readPendingCommittedEvents("campaign-clear", 21)).toEqual([]);
+      expect(readPendingCommittedEvents("campaign-other", 20)).toEqual([
+        expect.objectContaining({ text: "Other campaign event." }),
+      ]);
+    });
   });
 
-  it("handles importance=0", () => {
-    // similarity=1.0, tick=10, importance=0, currentTick=10
-    // recency = 10/10 = 1.0, importanceNorm = 0/10 = 0.0
-    // composite = 1.0*0.4 + 1.0*0.3 + 0.0*0.3 = 0.40 + 0.30 + 0.0 = 0.70
-    const score = computeCompositeScore(1.0, 10, 0, 10);
-    expect(score).toBeCloseTo(0.70, 5);
+  describe("embedAndUpdateEvent", () => {
+    it("updates the stored row with the generated vector", async () => {
+      const existing = {
+        id: "evt-1",
+        text: "The signal cut out.",
+        tick: 6,
+        location: "Listening Post",
+        participants: ["Aria"],
+        importance: 8,
+        type: "event",
+      };
+      const { db, table } = createMockDb({ hasTable: true, queryRows: [existing] });
+      mockGetVectorDb.mockReturnValue(db);
+      mockEmbedTexts.mockResolvedValue([[0.25, 0.75]]);
+
+      await embedAndUpdateEvent("evt-1", existing.text, {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(table.update).toHaveBeenCalledWith({
+        where: "id = 'evt-1'",
+        values: { vector: [0.25, 0.75] },
+      });
+    });
+
+    it("migrates legacy tables without a vector column before updating embeddings", async () => {
+      const existing = {
+        id: "evt-2",
+        text: "The signal cut out again.",
+        tick: 7,
+        location: "Listening Post",
+        participants: {
+          toArray: () => ["Aria", "Greta"],
+          isValid: vi.fn(),
+        },
+        importance: 9,
+        type: "event",
+      };
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [existing],
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type"],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      mockEmbedTexts.mockResolvedValue([[0.5, 0.5]]);
+
+      await embedAndUpdateEvent("evt-2", "The signal cut out again.", {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      const migratedTable = await db.createEmptyTable.mock.results[0]?.value;
+      expect(migratedTable.add).toHaveBeenCalledWith([
+        expect.objectContaining({
+          campaignId: "",
+          id: "evt-2",
+          text: "The signal cut out again.",
+          tick: 7,
+          location: "Listening Post",
+          participants: ["Aria", "Greta"],
+          importance: 9,
+          type: "event",
+          visibility: "player_perceivable",
+          surfaceRoute: "",
+          knowledgeRoute: "",
+          hiddenCauseTerms: [],
+        }),
+      ]);
+      expect(migratedTable.update).toHaveBeenCalledWith({
+        where: "id = 'evt-2'",
+        values: { vector: [0.5, 0.5] },
+      });
+    });
   });
 
-  it("handles importance=10 (max)", () => {
-    // similarity=0.0, tick=1, importance=10, currentTick=10
-    // recency = 1/10 = 0.1, importanceNorm = 10/10 = 1.0
-    // composite = 0.0*0.4 + 0.1*0.3 + 1.0*0.3 = 0.0 + 0.03 + 0.30 = 0.33
-    const score = computeCompositeScore(0.0, 1, 10, 10);
-    expect(score).toBeCloseTo(0.33, 5);
+  describe("rebuildEpisodicEventsFromLocationRecentEvents", () => {
+    it("rebuilds the derived episodic table from authoritative location_recent_events after rollback purge", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [
+          {
+            campaignId: "campaign-live",
+            id: "event-accepted-1",
+            text: "Mira confirms the sealed proof is valid.",
+            tick: 12,
+            location: "loc-a",
+            participants: [],
+            importance: 6,
+            type: "dialogue",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+          },
+          {
+            campaignId: "campaign-live",
+            id: "failed-turn-event",
+            text: "This failed-turn event must be purged.",
+            tick: 14,
+            location: "loc-a",
+            participants: [],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.9, 0.9],
+          },
+        ],
+      });
+      db.tableNames
+        .mockResolvedValueOnce(["episodic_events"])
+        .mockResolvedValueOnce([]);
+      mockGetVectorDb.mockReturnValue(db);
+      const recentEvents = [
+        {
+          id: "recent-row-1",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: "event-accepted-1",
+          eventType: "dialogue",
+          summary: "Mira confirms the sealed proof is valid.",
+          surfaceRoute: "player_visible",
+          visibility: "player_perceivable",
+          knowledgeRoute: null,
+          hiddenCauseTerms: "[]",
+          tick: 12,
+          importance: 6,
+          createdAt: 100,
+        },
+        {
+          id: "recent-row-2",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: null,
+          eventType: "event",
+          summary: "Renn privately notices the forged counterseal.",
+          surfaceRoute: "actor_private_log_event",
+          visibility: "hidden",
+          knowledgeRoute: "actor:npc-renn",
+          hiddenCauseTerms: JSON.stringify(["forged counterseal"]),
+          tick: 13,
+          importance: 8,
+          createdAt: 101,
+        },
+      ];
+      const all = vi.fn().mockReturnValue(recentEvents);
+      const orderBy = vi.fn().mockReturnValue({ all });
+      const where = vi.fn().mockReturnValue({ orderBy });
+      const from = vi.fn().mockReturnValue({ where });
+      const select = vi.fn().mockReturnValue({ from });
+      mockGetDb.mockReturnValue({ select });
+
+      await expect(rebuildEpisodicEventsFromLocationRecentEvents("campaign-live"))
+        .resolves.toEqual({
+          rebuiltCount: 2,
+          preservedVectorCount: 1,
+          purgedVectorCount: 1,
+        });
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).toHaveBeenCalledWith(
+        "episodic_events",
+        expect.anything(),
+      );
+      expect(table.add).toHaveBeenCalledWith([
+        expect.objectContaining({
+          campaignId: "campaign-live",
+          id: "event-accepted-1",
+          text: "Mira confirms the sealed proof is valid.",
+          tick: 12,
+          location: "loc-a",
+          participants: [],
+          importance: 6,
+          type: "dialogue",
+          visibility: "player_perceivable",
+          surfaceRoute: "player_visible",
+          knowledgeRoute: "",
+          hiddenCauseTerms: [],
+          vector: [0.1, 0.2],
+        }),
+        expect.objectContaining({
+          campaignId: "campaign-live",
+          id: "recent-row-2",
+          text: "Renn privately notices the forged counterseal.",
+          tick: 13,
+          location: "loc-a",
+          participants: [],
+          importance: 8,
+          type: "event",
+          visibility: "hidden",
+          surfaceRoute: "actor_private_log_event",
+          knowledgeRoute: "actor:npc-renn",
+          hiddenCauseTerms: ["forged counterseal"],
+        }),
+      ]);
+    });
+
+    it("fails closed without writing rebuilt rows if the stale derived table cannot be purged", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [
+          {
+            campaignId: "campaign-live",
+            id: "failed-turn-event",
+            text: "This failed-turn vector row must not survive rollback.",
+            tick: 14,
+            location: "loc-a",
+            participants: [],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.9, 0.9],
+          },
+        ],
+        dropTableThrows: true,
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      const all = vi.fn().mockReturnValue([
+        {
+          id: "recent-row-1",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: "event-accepted-1",
+          eventType: "event",
+          summary: "Only this restored receipt is authoritative.",
+          surfaceRoute: "player_visible",
+          visibility: "player_perceivable",
+          knowledgeRoute: null,
+          hiddenCauseTerms: "[]",
+          tick: 12,
+          importance: 6,
+          createdAt: 100,
+        },
+      ]);
+      const orderBy = vi.fn().mockReturnValue({ all });
+      const where = vi.fn().mockReturnValue({ orderBy });
+      const from = vi.fn().mockReturnValue({ where });
+      const select = vi.fn().mockReturnValue({ from });
+      mockGetDb.mockReturnValue({ select });
+
+      await expect(rebuildEpisodicEventsFromLocationRecentEvents("campaign-live"))
+        .rejects.toThrow("drop failed");
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).not.toHaveBeenCalled();
+      expect(table.add).not.toHaveBeenCalled();
+    });
   });
 
-  it("old events have lower recency", () => {
-    const scoreRecent = computeCompositeScore(0.8, 9, 5, 10);
-    const scoreOld = computeCompositeScore(0.8, 1, 5, 10);
-    expect(scoreRecent).toBeGreaterThan(scoreOld);
-  });
+  describe("searchEpisodicEvents", () => {
+    it("returns an empty list without running vectorSearch when the table schema lacks a vector column", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type"],
+      });
+      mockGetVectorDb.mockReturnValue(db);
 
-  it("higher importance yields higher score", () => {
-    const scoreHigh = computeCompositeScore(0.5, 5, 9, 10);
-    const scoreLow = computeCompositeScore(0.5, 5, 2, 10);
-    expect(scoreHigh).toBeGreaterThan(scoreLow);
-  });
+      const results = await searchEpisodicEvents([0.1, 0.2], 20, 5);
 
-  it("higher similarity yields higher score", () => {
-    const scoreHigh = computeCompositeScore(0.9, 5, 5, 10);
-    const scoreLow = computeCompositeScore(0.2, 5, 5, 10);
-    expect(scoreHigh).toBeGreaterThan(scoreLow);
+      expect(table.vectorSearch).not.toHaveBeenCalled();
+      expect(results).toEqual([]);
+    });
+
+    it("returns an empty list when vectorSearch fails before vectors exist", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        vectorSearchThrows: true,
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type", "vector"],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 20, 5);
+
+      expect(table.vectorSearch).toHaveBeenCalledWith([0.1, 0.2]);
+      expect(results).toEqual([]);
+    });
+
+    it("filters player memory retrieval by campaign and player-visible audience", async () => {
+      const { db } = createMockDb({
+        hasTable: true,
+        schemaFields: [
+          "campaignId",
+          "id",
+          "text",
+          "tick",
+          "location",
+          "participants",
+          "importance",
+          "type",
+          "visibility",
+          "surfaceRoute",
+          "knowledgeRoute",
+          "hiddenCauseTerms",
+          "vector",
+        ],
+        vectorRows: [
+          {
+            campaignId: "campaign-live",
+            id: "hidden-owning-actor-only",
+            text: "Hidden actor memory should not enter player prompt.",
+            tick: 21,
+            location: "Bazaar",
+            participants: ["Renn"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-renn",
+            hiddenCauseTerms: ["sealed proof"],
+            vector: [0.1, 0.2],
+            _distance: 0.01,
+          },
+          {
+            campaignId: "",
+            id: "legacy-blank-campaign",
+            text: "Legacy blank-campaign memory must not enter scoped prompts.",
+            tick: 21,
+            location: "Bazaar",
+            participants: ["Greta"],
+            importance: 10,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.015,
+          },
+          {
+            campaignId: "campaign-other",
+            id: "other-campaign-public",
+            text: "Other campaign event should not enter this prompt.",
+            tick: 21,
+            location: "Elsewhere",
+            participants: ["Greta"],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.02,
+          },
+          {
+            campaignId: "campaign-live",
+            id: "public-live",
+            text: "Public live event belongs in player memory.",
+            tick: 20,
+            location: "Bazaar",
+            participants: ["Greta"],
+            importance: 4,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.2,
+          },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 21, 5, {
+        kind: "player",
+        campaignId: "campaign-live",
+      });
+
+      expect(results.map((event) => event.id)).toEqual(["public-live"]);
+    });
+
+    it("allows actor memory retrieval to see its own hidden events but not another actor's hidden events", async () => {
+      const { db } = createMockDb({
+        hasTable: true,
+        schemaFields: [
+          "campaignId",
+          "id",
+          "text",
+          "tick",
+          "location",
+          "participants",
+          "importance",
+          "type",
+          "visibility",
+          "surfaceRoute",
+          "knowledgeRoute",
+          "hiddenCauseTerms",
+          "vector",
+        ],
+        vectorRows: [
+          {
+            campaignId: "campaign-live",
+            id: "own-hidden",
+            text: "Renn remembers the private seal.",
+            tick: 22,
+            location: "Bazaar",
+            participants: ["Renn"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-renn",
+            hiddenCauseTerms: ["private seal"],
+            vector: [0.1, 0.2],
+            _distance: 0.01,
+          },
+          {
+            campaignId: "campaign-live",
+            id: "other-hidden",
+            text: "Mira's hidden memory must stay private.",
+            tick: 22,
+            location: "Bazaar",
+            participants: ["Mira"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-mira",
+            hiddenCauseTerms: ["private seal"],
+            vector: [0.1, 0.2],
+            _distance: 0.02,
+          },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 22, 5, {
+        kind: "actor",
+        campaignId: "campaign-live",
+        actorId: "npc-renn",
+      });
+
+      expect(results.map((event) => event.id)).toEqual(["own-hidden"]);
+    });
   });
 });

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { ResearchTab } from "../research-tab";
 import type { Settings } from "@/lib/types";
 
 function createMockSettings(overrides: Partial<Settings> = {}): Settings {
+  const { ui: overrideUi, ...rest } = overrides;
+
   return {
     providers: [
       {
@@ -20,12 +21,6 @@ function createMockSettings(overrides: Partial<Settings> = {}): Settings {
     storyteller: { providerId: "prov-1", temperature: 0.8, maxTokens: 4000 },
     generator: { providerId: "prov-1", temperature: 0.7, maxTokens: 4000 },
     embedder: { providerId: "prov-1", temperature: 0, maxTokens: 0 },
-    fallback: {
-      providerId: "prov-1",
-      model: "test-model",
-      timeoutMs: 30000,
-      retryCount: 2,
-    },
     images: {
       providerId: "",
       model: "",
@@ -37,7 +32,8 @@ function createMockSettings(overrides: Partial<Settings> = {}): Settings {
       maxSearchSteps: 5,
       searchProvider: "duckduckgo",
     },
-    ...overrides,
+    ui: overrideUi ?? { showRawReasoning: false },
+    ...rest,
   };
 }
 
@@ -46,8 +42,12 @@ describe("ResearchTab", () => {
     const settings = createMockSettings();
     render(<ResearchTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("Research Agent")).toBeInTheDocument();
+    expect(screen.getByText("Research")).toBeInTheDocument();
     expect(screen.getByText("Enable research agent")).toBeInTheDocument();
+    expect(screen.getAllByText(/world formation/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/character grounding/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/live clarification/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/before world generation/i)).not.toBeInTheDocument();
     expect(screen.getByRole("switch")).toBeInTheDocument();
   });
 
@@ -63,6 +63,6 @@ describe("ResearchTab", () => {
     const settings = createMockSettings();
     render(<ResearchTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("Search Provider")).toBeInTheDocument();
+    expect(screen.getAllByText("Search Provider").length).toBeGreaterThan(0);
   });
 });

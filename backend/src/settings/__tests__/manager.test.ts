@@ -58,7 +58,6 @@ function makeMinimalValidSettings(
     storyteller: d.storyteller,
     generator: d.generator,
     embedder: d.embedder,
-    fallback: d.fallback,
     images: d.images,
     research: d.research,
     ...overrides,
@@ -92,7 +91,7 @@ describe("normalizeSettings", () => {
 
     it("returns defaults for a string", () => {
       const result = normalizeSettings("hello");
-      expect(result.fallback.retryCount).toBe(defaults().fallback.retryCount);
+      expect(result.images.enabled).toBe(defaults().images.enabled);
     });
 
     it("returns defaults for a boolean", () => {
@@ -208,11 +207,11 @@ describe("normalizeSettings", () => {
   });
 
   describe("role config normalization", () => {
-    it("uses first provider ID as fallback when role has unknown providerId", () => {
+    it("preserves an unknown providerId instead of silently rebinding it", () => {
       const result = normalizeSettings({
         judge: { providerId: "nonexistent-provider", temperature: 0.5 },
       });
-      expect(result.judge.providerId).toBe(FIRST_BUILTIN_ID);
+      expect(result.judge.providerId).toBe("nonexistent-provider");
     });
 
     it("preserves valid providerId on role", () => {
@@ -273,46 +272,6 @@ describe("normalizeSettings", () => {
         judge: { model: 123 },
       });
       expect(result.judge.model).toBe(defaults().judge.model);
-    });
-  });
-
-  describe("fallback config normalization", () => {
-    it("clamps timeoutMs to [1000, 120000] range", () => {
-      const result = normalizeSettings({
-        fallback: { timeoutMs: 500 },
-      });
-      expect(result.fallback.timeoutMs).toBeGreaterThanOrEqual(1000);
-
-      const result2 = normalizeSettings({
-        fallback: { timeoutMs: 999999 },
-      });
-      expect(result2.fallback.timeoutMs).toBeLessThanOrEqual(120000);
-    });
-
-    it("clamps retryCount to [0, 10] range", () => {
-      const result = normalizeSettings({
-        fallback: { retryCount: -1 },
-      });
-      expect(result.fallback.retryCount).toBeGreaterThanOrEqual(0);
-
-      const result2 = normalizeSettings({
-        fallback: { retryCount: 50 },
-      });
-      expect(result2.fallback.retryCount).toBeLessThanOrEqual(10);
-    });
-
-    it("rounds timeoutMs to nearest integer", () => {
-      const result = normalizeSettings({
-        fallback: { timeoutMs: 5000.5 },
-      });
-      expect(Number.isInteger(result.fallback.timeoutMs)).toBe(true);
-    });
-
-    it("rounds retryCount to nearest integer", () => {
-      const result = normalizeSettings({
-        fallback: { retryCount: 2.7 },
-      });
-      expect(Number.isInteger(result.fallback.retryCount)).toBe(true);
     });
   });
 
@@ -412,7 +371,6 @@ describe("normalizeSettings", () => {
       const result = normalizeSettings(d);
       expect(result.judge.temperature).toBe(d.judge.temperature);
       expect(result.storyteller.maxTokens).toBe(d.storyteller.maxTokens);
-      expect(result.fallback.timeoutMs).toBe(d.fallback.timeoutMs);
       expect(result.images.enabled).toBe(d.images.enabled);
     });
   });
@@ -439,40 +397,25 @@ describe("rebindProviderReferences", () => {
     expect(result.providers.find((p) => p.id === "custom-1")).toBeDefined();
   });
 
-  it("resolves judge.providerId to first provider when invalid", () => {
+  it("preserves judge.providerId when it points at a deleted provider", () => {
     const settings = defaults();
     settings.judge.providerId = "deleted-provider";
     const result = rebindProviderReferences(settings);
-    expect(
-      result.providers.some((p) => p.id === result.judge.providerId)
-    ).toBe(true);
+    expect(result.judge.providerId).toBe("deleted-provider");
   });
 
-  it("resolves storyteller.providerId to first provider when invalid", () => {
+  it("preserves storyteller.providerId when it points at a deleted provider", () => {
     const settings = defaults();
     settings.storyteller.providerId = "deleted-provider";
     const result = rebindProviderReferences(settings);
-    expect(
-      result.providers.some((p) => p.id === result.storyteller.providerId)
-    ).toBe(true);
+    expect(result.storyteller.providerId).toBe("deleted-provider");
   });
 
-  it("resolves generator.providerId to first provider when invalid", () => {
+  it("preserves generator.providerId when it points at a deleted provider", () => {
     const settings = defaults();
     settings.generator.providerId = "deleted-provider";
     const result = rebindProviderReferences(settings);
-    expect(
-      result.providers.some((p) => p.id === result.generator.providerId)
-    ).toBe(true);
-  });
-
-  it("resolves fallback.providerId to first provider when invalid", () => {
-    const settings = defaults();
-    settings.fallback.providerId = "deleted-provider";
-    const result = rebindProviderReferences(settings);
-    expect(
-      result.providers.some((p) => p.id === result.fallback.providerId)
-    ).toBe(true);
+    expect(result.generator.providerId).toBe("deleted-provider");
   });
 
   it("keeps valid provider references unchanged", () => {
@@ -585,36 +528,44 @@ describe("loadSettings", () => {
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     loadSettings();
-    expect(mockedFs.writeFileSync).toHaveBeenCalledOnce();
+    expect(mockedFs.writeFileSync).toHaveBeenCalledTimes(2);
+    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/settings\.json\.bak$/),
+      expect.any(String),
+      "utf-8",
+    );
+    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/settings\.json$/),
+      expect.any(String),
+      "utf-8",
+    );
   });
 
-  it("returns defaults when file contains invalid JSON", () => {
+  it("throws and preserves a backup when file contains invalid JSON", () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue("not valid json {{{");
     mockedFs.writeFileSync.mockImplementation(() => {});
 
-    const result = loadSettings();
-    expect(result.judge.providerId).toBe(FIRST_BUILTIN_ID);
-  });
-
-  it("writes defaults when file contains invalid JSON", () => {
-    mockedFs.existsSync.mockReturnValue(true);
-    mockedFs.readFileSync.mockReturnValue("{malformed");
-    mockedFs.writeFileSync.mockImplementation(() => {});
-
-    loadSettings();
+    expect(() => loadSettings()).toThrow(/invalid json/i);
     expect(mockedFs.writeFileSync).toHaveBeenCalledOnce();
+    expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/settings\.json\.bak$/),
+      "not valid json {{{",
+      "utf-8",
+    );
   });
 
-  it("returns defaults when readFileSync throws", () => {
+  it("throws when readFileSync fails for an existing file", () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockImplementation(() => {
       throw new Error("EACCES: permission denied");
     });
     mockedFs.writeFileSync.mockImplementation(() => {});
 
-    const result = loadSettings();
-    expect(result.judge.providerId).toBe(FIRST_BUILTIN_ID);
+    expect(() => loadSettings()).toThrow(/failed to read settings file/i);
+    expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
   });
 });
 
@@ -627,6 +578,7 @@ describe("saveSettings", () => {
   });
 
   it("normalizes and writes settings to disk", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     const input = makeMinimalValidSettings();
@@ -636,6 +588,7 @@ describe("saveSettings", () => {
   });
 
   it("returns the normalized settings", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     const result = saveSettings({});
@@ -646,7 +599,8 @@ describe("saveSettings", () => {
     expect(result.storyteller).toBeDefined();
   });
 
-  it("applies rebindProviderReferences after normalizing", () => {
+  it("keeps invalid role provider references explicit after normalizing", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     const input = makeMinimalValidSettings({
@@ -654,13 +608,11 @@ describe("saveSettings", () => {
     });
     const result = saveSettings(input);
 
-    // Provider should have been resolved to an existing one
-    expect(
-      result.providers.some((p) => p.id === result.judge.providerId)
-    ).toBe(true);
+    expect(result.judge.providerId).toBe("nonexistent-provider");
   });
 
   it("writes JSON with 2-space indentation", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     saveSettings(defaults());
@@ -675,6 +627,7 @@ describe("saveSettings", () => {
   });
 
   it("writes with utf-8 encoding", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     saveSettings(defaults());
@@ -688,9 +641,36 @@ describe("saveSettings", () => {
   });
 
   it("handles null input gracefully (returns defaults)", () => {
+    mockedFs.existsSync.mockReturnValue(false);
     mockedFs.writeFileSync.mockImplementation(() => {});
 
     const result = saveSettings(null);
     expect(result.judge.providerId).toBe(FIRST_BUILTIN_ID);
+  });
+
+  it("backs up the current settings file before overwriting it", () => {
+    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.readFileSync.mockReturnValue(JSON.stringify(defaults()));
+    mockedFs.writeFileSync.mockImplementation(() => {});
+
+    const input = makeMinimalValidSettings({
+      providers: [...defaults().providers, makeCustomProvider()],
+    });
+
+    saveSettings(input);
+
+    expect(mockedFs.writeFileSync).toHaveBeenCalledTimes(2);
+    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/settings\.json\.bak$/),
+      expect.any(String),
+      "utf-8",
+    );
+    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/settings\.json$/),
+      expect.any(String),
+      "utf-8",
+    );
   });
 });

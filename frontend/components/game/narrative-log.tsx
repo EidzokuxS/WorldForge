@@ -4,11 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Undo2, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ChatMessage } from "@worldforge/shared";
+import {
+  deriveGameMessageKind,
+  stripLookupPrefix,
+  type GameMessageKind,
+} from "@/lib/gameplay-text";
+import { RichTextMessage } from "./rich-text-message";
+import { SpecialMessageBlock } from "./special-message-block";
 
 interface NarrativeLogProps {
-  messages: ChatMessage[];
-  premise: string;
+  messages: Array<ChatMessage & { debugReasoning?: string | null }>;
   isStreaming: boolean;
+  turnPhase?: "idle" | "streaming" | "finalizing";
+  sceneProgress?: "opening" | "scene-settling" | null;
+  showRawReasoning?: boolean;
   onRetry?: () => void;
   onUndo?: () => void;
   onEdit?: (index: number, content: string) => void;
@@ -17,8 +26,10 @@ interface NarrativeLogProps {
 
 export function NarrativeLog({
   messages,
-  premise,
   isStreaming,
+  turnPhase = isStreaming ? "streaming" : "idle",
+  sceneProgress = null,
+  showRawReasoning = false,
   onRetry,
   onUndo,
   onEdit,
@@ -73,6 +84,40 @@ export function NarrativeLog({
     return -1;
   })();
 
+  const progressMessages = [
+    (isStreaming || turnPhase === "streaming") &&
+      "The storyteller is weaving the scene...",
+    sceneProgress === "opening" &&
+      "The opening scene is taking shape. The runtime is grounding your first moment before narration appears.",
+    sceneProgress === "scene-settling" &&
+      "The GM is applying world changes before the narration begins.",
+    turnPhase === "finalizing" &&
+      "The world is still resolving. Retry and undo unlock when the turn is complete.",
+  ].filter((message): message is string => Boolean(message));
+
+  const renderSupportMessage = (kind: GameMessageKind, content: string) => {
+    const normalizedContent =
+      kind === "lookup" || kind === "compare"
+        ? stripLookupPrefix(content)
+        : content;
+
+    if (
+      kind === "lookup" ||
+      kind === "compare" ||
+      kind === "system" ||
+      kind === "mechanical" ||
+      kind === "progress"
+    ) {
+      return <SpecialMessageBlock kind={kind} content={normalizedContent} />;
+    }
+
+    return (
+      <article className="mx-auto w-full max-w-2xl rounded-[1.75rem] border border-white/8 bg-white/[0.03] px-6 py-6 shadow-[0_28px_60px_-32px_rgba(0,0,0,0.85)]">
+        <RichTextMessage content={content} variant="narration" />
+      </article>
+    );
+  };
+
   return (
     <section className="flex-1 overflow-hidden">
       <div ref={containerRef} className="h-full">
@@ -80,32 +125,46 @@ export function NarrativeLog({
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-6 py-8 lg:px-12">
             {messages.length === 0 ? (
               <p className="pt-12 font-serif text-lg italic leading-relaxed text-muted-foreground">
-                {premise || "Begin your adventure..."}
+                Begin your adventure when the opening scene is ready.
               </p>
             ) : (
               messages.map((message, index) => {
+                const kind = deriveGameMessageKind(message.role, message.content);
+                const isAssistant = message.role === "assistant";
+                const reasoningText =
+                  typeof message.debugReasoning === "string"
+                    ? message.debugReasoning.trim()
+                    : "";
+                const showReasoningDisclosure =
+                  isAssistant
+                  && kind === "narration"
+                  && showRawReasoning
+                  && reasoningText.length > 0;
+
                 if (message.role === "user") {
                   return (
-                    <div key={`${message.role}-${index}`} className="pl-3">
-                      <p className="whitespace-pre-wrap font-serif text-sm italic leading-relaxed text-mystic">
-                        {`> ${message.content}`}
-                      </p>
+                    <div
+                      key={`${message.role}-${index}`}
+                      className="flex justify-end"
+                    >
+                      <div className="max-w-[85%] rounded-[1.5rem] rounded-tr-md border border-white/10 bg-white/[0.045] px-5 py-4 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.8)]">
+                        <RichTextMessage
+                          content={message.content}
+                          variant="player"
+                        />
+                      </div>
                     </div>
                   );
                 }
 
                 if (message.role === "system") {
                   return (
-                    <p
-                      key={`${message.role}-${index}`}
-                      className="whitespace-pre-wrap border-l border-border pl-3 text-sm italic leading-relaxed text-muted-foreground"
-                    >
-                      {message.content}
-                    </p>
+                    <div key={`${message.role}-${index}`}>
+                      <SpecialMessageBlock kind="system" content={message.content} />
+                    </div>
                   );
                 }
 
-                // Assistant message
                 const isLastAssistant = index === lastAssistantIndex;
                 const isEditing = editingIndex === index;
                 const wasEdited = editedIndices.has(index);
@@ -145,23 +204,39 @@ export function NarrativeLog({
                       </div>
                     ) : (
                       <>
-                        <p
+                        <div
                           onClick={() => startEditing(index, message.content)}
-                          className="cursor-pointer whitespace-pre-wrap font-serif text-base leading-relaxed text-foreground hover:bg-accent/30 rounded-md transition-colors px-1 -mx-1"
+                          className="cursor-pointer rounded-2xl transition-colors hover:bg-accent/20"
                           title="Click to edit"
                         >
-                          {message.content}
-                        </p>
+                          {renderSupportMessage(kind, message.content)}
+                        </div>
                         {wasEdited && (
                           <span className="mt-1 inline-block text-xs italic text-muted-foreground">
                             (edited)
                           </span>
                         )}
+                        {showReasoningDisclosure ? (
+                          <details className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
+                              Raw reasoning
+                            </summary>
+                            <div className="border-t border-white/10 px-4 py-3">
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/35 p-3 font-mono text-xs leading-6 text-zinc-200">
+                                {reasoningText}
+                              </pre>
+                            </div>
+                          </details>
+                        ) : null}
                       </>
                     )}
 
                     {/* Retry/Undo buttons on last assistant message */}
-                    {isLastAssistant && canRetryUndo && !isStreaming && !isEditing && (
+                    {isAssistant &&
+                      isLastAssistant &&
+                      canRetryUndo &&
+                      !isStreaming &&
+                      !isEditing && (
                       <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                         {onRetry && (
                           <button
@@ -189,12 +264,13 @@ export function NarrativeLog({
                 );
               })
             )}
-
-            {isStreaming && (
-              <p className="font-serif text-sm italic text-muted-foreground">
-                The storyteller is weaving the scene...
-              </p>
-            )}
+            {progressMessages.map((message, index) => (
+              <SpecialMessageBlock
+                key={`progress-${index}`}
+                kind="progress"
+                content={message}
+              />
+            ))}
           </div>
         </ScrollArea>
       </div>

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { accumulateReflectionBudgetMock } = vi.hoisted(() => ({
+  accumulateReflectionBudgetMock: vi.fn(),
+}));
+
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -19,11 +23,16 @@ vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
 }));
 
+vi.mock("../reflection-budget.js", () => ({
+  accumulateReflectionBudget: accumulateReflectionBudgetMock,
+}));
+
 import {
   simulateOffscreenNpcs,
   parseOffscreenUpdates,
   applyOffscreenUpdate,
 } from "../npc-offscreen.js";
+import { buildNpcOffscreenPromptContract } from "../prompt-contracts.js";
 import { getDb } from "../../db/index.js";
 import { generateText } from "ai";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
@@ -38,6 +47,33 @@ const JUDGE_PROVIDER = {
   apiKey: "test-key",
   model: "test-model",
 };
+
+describe("npc offscreen prompt contract helper", () => {
+  it("exposes exact offscreen update shape, caps, examples, and no-invention policy", () => {
+    const contract = buildNpcOffscreenPromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: npc-offscreen.v1");
+    expect(contract).toContain('{ "updates": [');
+    expect(contract).toContain('"npcName": string');
+    expect(contract).toContain('"newLocation": string|null');
+    expect(contract).toContain('"actionSummary": string');
+    expect(contract).toContain('"goalProgress": string|null');
+    expect(contract).toContain("npcName must match one listed NPC name exactly");
+    expect(contract).toContain("newLocation max 120 chars");
+    expect(contract).toContain("actionSummary max 260 chars");
+    expect(contract).toContain("goalProgress max 180 chars");
+    expect(contract).toContain("Use null when no location move or goal progress is justified.");
+    expect(contract).toContain("Compact valid example:");
+    expect(contract).toContain("Minimal valid output:");
+    expect(contract).toContain('{ "updates": [] }');
+    expect(contract).toContain("Invalid examples:");
+    expect(contract).toContain("unknown NPC name");
+    expect(contract).toContain("vague maintained their position");
+    expect(contract).toContain("Backend authority:");
+    expect(contract).toContain("backend may reject invalid updates or omit unknown NPC updates");
+    expect(contract).toContain("must not invent summaries, locations, goals, relationship facts, source roles, or canonical truth");
+  });
+});
 
 // -- Mock DB helpers ----------------------------------------------------------
 
@@ -200,6 +236,7 @@ describe("simulateOffscreenNpcs", () => {
       7,
       JUDGE_PROVIDER,
       PLAYER_LOCATION_ID,
+      undefined,
       5,
     );
 
@@ -234,13 +271,199 @@ describe("simulateOffscreenNpcs", () => {
 
     expect(generateText).toHaveBeenCalledOnce();
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    const contract = buildNpcOffscreenPromptContract();
+    expect(systemPrompt).toContain(contract);
+    expect(systemPrompt.indexOf("STRUCTURED_OUTPUT_CONTRACT: npc-offscreen.v1")).toBeLessThan(
+      systemPrompt.indexOf("Player broad location:"),
+    );
+    expect(systemPrompt).toContain(
+      '{ "updates": [{ "npcName": string, "newLocation": string|null, "actionSummary": string, "goalProgress": string|null }] }',
+    );
+    expect(systemPrompt).toContain("newLocation max 120 chars");
+    expect(systemPrompt).toContain("actionSummary max 260 chars");
+    expect(systemPrompt).toContain("goalProgress max 180 chars");
+    expect(systemPrompt).toContain("Invalid examples:");
+    expect(systemPrompt).toContain("must not invent summaries, locations, goals, relationship facts, source roles, or canonical truth");
     expect(systemPrompt).toContain("Persona: A calculating noble who hides panic behind manners.");
     expect(systemPrompt).toContain("  Traits: [Strategic, Master Intrigue, Cruel, Wealthy, Hidden, noble, Ambition, Paranoid]");
     expect(systemPrompt).toContain("Goals: short=[Secure the council vote], long=[Take the throne]");
+    expect(systemPrompt).toContain("Player broad location: Unknown");
+    expect(systemPrompt).not.toContain(`Player broad location: ${PLAYER_LOCATION_ID}`);
     expect(systemPrompt).not.toContain("A cunning noble lord");
     expect(results).toHaveLength(1);
     expect(results[0]!.npcName).toBe("Lord Blackwood");
     expect(results[0]!.actionSummary).toBe("Plotted in his study");
+  });
+
+  it("routes same broad-location actors through off-screen handling when encounter scope says they are outside the local scene", async () => {
+    setupMockDb({
+      offscreenNpcs: [
+        createMockNpc({
+          currentLocationId: PLAYER_LOCATION_ID,
+          currentSceneLocationId: "rooftop-overwatch",
+        }),
+      ],
+    });
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
+        updates: [
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Watched the platform from the rooftop pocket",
+            goalProgress: null,
+          },
+        ],
+      }),
+    });
+
+    const results = await simulateOffscreenNpcs(
+      CAMPAIGN_ID,
+      10,
+      JUDGE_PROVIDER,
+      PLAYER_LOCATION_ID,
+      "platform-7",
+    );
+
+    expect(generateText).toHaveBeenCalledOnce();
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Player scene scope: Unknown");
+    expect(systemPrompt).not.toContain("Player scene scope: platform-7");
+    expect(systemPrompt).toContain("Same broad-location actors outside the player's immediate scene still count as off-screen here.");
+    expect(results).toHaveLength(1);
+  });
+
+  it("uses a bounded richer identity slice instead of persona-plus-tags-only off-screen summaries", async () => {
+    setupMockDb({
+      offscreenNpcs: [
+        createMockNpc({
+          characterRecord: JSON.stringify({
+            identity: {
+              id: "npc-001",
+              campaignId: CAMPAIGN_ID,
+              role: "npc",
+              tier: "key",
+              displayName: "Lord Blackwood",
+              canonicalStatus: "known_ip_canonical",
+              baseFacts: {
+                biography: "A council noble balancing ambition against public order.",
+                socialRole: ["council noble", "court conspirator"],
+                hardConstraints: ["Cannot expose his pact with the regent"],
+              },
+              behavioralCore: {
+                motives: [],
+                pressureResponses: [],
+                taboos: [],
+                attachments: ["His house name", "His daughter"],
+                selfImage: "The only adult left in a room of opportunists.",
+              },
+              liveDynamics: {
+                attachments: ["His daughter"],
+                activeGoals: ["Secure the council vote", "Quiet the riot wards"],
+                beliefDrift: ["The market unrest may be useful if controlled"],
+                currentStrains: ["Paranoid", "Watching for betrayal"],
+                earnedChanges: ["Now funds informants outside the palace"],
+              },
+              personality: {
+                summary: "A noble operator who treats panic as something to discipline, not confess.",
+                voice: "Formal and measured, with threats hidden inside manners.",
+                decisionStyle: "Moves through deniable intermediaries until the moment is decisive.",
+                worldview: "Order belongs to whoever controls the room before it notices.",
+                internalContradictions: [
+                  "Calls himself a guardian of stability, but keeps feeding the unrest he thinks only he can manage.",
+                ],
+                personalMythology: "If he does not direct the succession, children inherit a bonfire.",
+                sampleLines: [
+                  "You mistake restraint for softness. I assure you, it is accounting.",
+                ],
+              },
+            },
+            profile: {
+              species: "",
+              gender: "",
+              ageText: "",
+              appearance: "",
+              backgroundSummary: "",
+              personaSummary: "A calculating noble who hides panic behind manners.",
+            },
+            socialContext: {
+              factionId: null,
+              factionName: null,
+              homeLocationId: null,
+              homeLocationName: null,
+              currentLocationId: "loc-002",
+              currentLocationName: "Council Hall",
+              relationshipRefs: [],
+              socialStatus: ["noble"],
+              originMode: "native",
+            },
+            motivations: {
+              shortTermGoals: ["Secure the council vote"],
+              longTermGoals: ["Take the throne"],
+              beliefs: ["Power rewards patience"],
+              drives: ["Ambition"],
+              frictions: ["Paranoid"],
+            },
+            capabilities: {
+              traits: ["Strategic"],
+              skills: [{ name: "Intrigue", tier: "Master" }],
+              flaws: ["Cruel"],
+              specialties: [],
+              wealthTier: "Wealthy",
+            },
+            state: {
+              hp: 5,
+              conditions: ["Hidden"],
+              statusFlags: [],
+              activityState: "active",
+            },
+            loadout: {
+              inventorySeed: [],
+              equippedItemRefs: [],
+              currencyNotes: "",
+              signatureItems: [],
+            },
+            startConditions: {},
+            provenance: {
+              sourceKind: "worldgen",
+              importMode: null,
+              templateId: null,
+              archetypePrompt: null,
+              worldgenOrigin: "scaffold",
+              legacyTags: ["noble", "cunning", "wealthy"],
+            },
+          }),
+        }),
+      ],
+    });
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
+        updates: [
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Brokered a covert pledge from two wavering councilors.",
+            goalProgress: "Secured new leverage over the succession vote",
+          },
+        ],
+      }),
+    });
+
+    await simulateOffscreenNpcs(
+      CAMPAIGN_ID,
+      10,
+      JUDGE_PROVIDER,
+      PLAYER_LOCATION_ID,
+    );
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Keep each NPC to a bounded identity slice");
+    expect(systemPrompt).toContain("Personality summary");
+    expect(systemPrompt).toContain("Voice");
+    expect(systemPrompt).toContain("Current strains");
+    expect(systemPrompt).not.toContain("Enduring motives");
+    expect(systemPrompt).not.toContain("Pressure responses");
+    expect(systemPrompt).not.toContain("serialize the full richer record");
   });
 });
 
@@ -269,6 +492,83 @@ describe("parseOffscreenUpdates", () => {
     expect(parsed[1]!.npcName).toBe("Elara");
     expect(parsed[1]!.newLocation).toBeNull();
   });
+
+  it("rejects npc names longer than the prompt contract cap", () => {
+    const raw = [
+      {
+        npcName: "N".repeat(121),
+        newLocation: null,
+        actionSummary: "Secured a coded vote pledge from a wavering councilor.",
+        goalProgress: null,
+      },
+    ];
+
+    expect(() => parseOffscreenUpdates(raw)).toThrow();
+  });
+
+  it("rejects offscreen update fields longer than the prompt contract caps", () => {
+    const cases = [
+      {
+        newLocation: "L".repeat(121),
+        actionSummary: "Secured a coded vote pledge from a wavering councilor.",
+        goalProgress: null,
+      },
+      {
+        newLocation: null,
+        actionSummary: "A".repeat(261),
+        goalProgress: null,
+      },
+      {
+        newLocation: null,
+        actionSummary: "Secured a coded vote pledge from a wavering councilor.",
+        goalProgress: "G".repeat(181),
+      },
+    ];
+
+    for (const fields of cases) {
+      expect(() =>
+        parseOffscreenUpdates([
+          {
+            npcName: "Lord Blackwood",
+            ...fields,
+          },
+        ]),
+      ).toThrow();
+    }
+  });
+
+  it("rejects more updates than listed offscreen NPCs before persistence", async () => {
+    vi.clearAllMocks();
+    setupMockDb({ offscreenNpcs: [createMockNpc()] });
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
+        updates: [
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Secured a coded vote pledge from a wavering councilor.",
+            goalProgress: null,
+          },
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Sent a second conflicting courier to the same councilor.",
+            goalProgress: null,
+          },
+        ],
+      }),
+    });
+
+    await expect(
+      simulateOffscreenNpcs(
+        CAMPAIGN_ID,
+        10,
+        JUDGE_PROVIDER,
+        PLAYER_LOCATION_ID,
+      ),
+    ).rejects.toThrow();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe("applyOffscreenUpdate", () => {
@@ -276,13 +576,13 @@ describe("applyOffscreenUpdate", () => {
     vi.clearAllMocks();
   });
 
-  it("writes new location and goal changes to DB", async () => {
+  it("quarantines new location and goal changes without writing DB state", async () => {
     const mockDb = setupMockDb({
       locationByName: { id: "loc-003", name: "Castle Keep" },
     });
 
     const storedNpc = createMockNpc();
-    await applyOffscreenUpdate(
+    const result = await applyOffscreenUpdate(
       CAMPAIGN_ID,
       {
         npcId: "npc-001",
@@ -293,7 +593,7 @@ describe("applyOffscreenUpdate", () => {
           campaignId: storedNpc.campaignId,
           persona: storedNpc.persona,
           tags: storedNpc.tags,
-          tier: storedNpc.tier,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
           currentLocationId: storedNpc.currentLocationId,
           goals: storedNpc.goals,
           beliefs: storedNpc.beliefs,
@@ -313,17 +613,111 @@ describe("applyOffscreenUpdate", () => {
       10,
     );
 
-    // Should have called update for location change
-    expect(mockDb.update).toHaveBeenCalled();
-    expect(mockDb.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentLocationId: "loc-003",
-        goals: expect.stringContaining("Formed alliance with Duke"),
-        characterRecord: expect.stringContaining("Formed alliance with Duke"),
-        derivedTags: expect.any(String),
-      }),
+    expect(result).toMatchObject({
+      npcName: "Lord Blackwood",
+      npcId: "npc-001",
+      accepted: false,
+      proposalOnly: true,
+      reason: "legacy_offscreen_authority_quarantine",
+      locationChanged: false,
+      goalsUpdated: false,
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.set).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy off-screen memory and reflection budget proposal-only", async () => {
+    const mockDb = setupMockDb({
+      locationByName: { id: "loc-003", name: "Castle Keep" },
+    });
+
+    const storedNpc = createMockNpc();
+    const result = await applyOffscreenUpdate(
+      CAMPAIGN_ID,
+      {
+        npcId: "npc-001",
+        npcName: "Lord Blackwood",
+        currentGoals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
+        currentCharacterRecord: storedNpc.characterRecord as string,
+        storedRecord: {
+          campaignId: storedNpc.campaignId,
+          persona: storedNpc.persona,
+          tags: storedNpc.tags,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
+          currentLocationId: storedNpc.currentLocationId,
+          goals: storedNpc.goals,
+          beliefs: storedNpc.beliefs,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+          characterRecord: storedNpc.characterRecord,
+          derivedTags: storedNpc.derivedTags,
+        },
+      },
+      {
+        npcName: "Lord Blackwood",
+        newLocation: "Castle Keep",
+        actionSummary: "Moved to the castle to meet allies",
+        goalProgress: "Formed alliance with Duke",
+      },
+      10,
     );
-    // Should store episodic event
-    expect(storeEpisodicEvent).toHaveBeenCalled();
+
+    expect(result.accepted).toBe(false);
+    expect(result.proposalOnly).toBe(true);
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps existing-location offscreen summaries proposal-only", async () => {
+    setupMockDb({
+      locationByName: null,
+    });
+
+    const storedNpc = createMockNpc();
+    const result = await applyOffscreenUpdate(
+      CAMPAIGN_ID,
+      {
+        npcId: "npc-001",
+        npcName: "Lord Blackwood",
+        currentGoals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
+        currentCharacterRecord: storedNpc.characterRecord as string,
+        storedRecord: {
+          campaignId: storedNpc.campaignId,
+          persona: storedNpc.persona,
+          tags: storedNpc.tags,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
+          currentLocationId: storedNpc.currentLocationId,
+          goals: storedNpc.goals,
+          beliefs: storedNpc.beliefs,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+          characterRecord: storedNpc.characterRecord,
+          derivedTags: storedNpc.derivedTags,
+        },
+      },
+      {
+        npcName: "Lord Blackwood",
+        newLocation: null,
+        actionSummary: "Held a covert strategy meeting in the council hall",
+        goalProgress: null,
+      },
+      10,
+    );
+
+    expect(result).toMatchObject({
+      actionSummary: "Held a covert strategy meeting in the council hall",
+      accepted: false,
+      proposalOnly: true,
+      locationChanged: false,
+      goalsUpdated: false,
+    });
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });
 });

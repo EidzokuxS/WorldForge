@@ -22,8 +22,10 @@ export default function CampaignConceptPage() {
 
         setContinuing(true);
         try {
-          await flow.handleNextToDna();
-          router.push(DNA_ROUTE);
+          const ready = await flow.handleNextToDna();
+          if (ready) {
+            router.push(DNA_ROUTE);
+          }
         } finally {
           setContinuing(false);
         }

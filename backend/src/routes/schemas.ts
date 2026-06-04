@@ -2,8 +2,16 @@ import { z } from "zod";
 import {
   CHARACTER_SKILL_TIERS,
   CHARACTER_WEALTH_TIERS,
+  AP_DURABILITY_TIERS,
+  SPEED_TIERS,
+  INTELLIGENCE_TIERS,
+  normalizeApDurTier,
+  normalizeSpeedTier,
+  normalizeIntelligenceTier,
 } from "@worldforge/shared";
 import type {
+  CharacterDraft,
+  CharacterRecord,
   CanonicalLoadoutPreview,
   PersonaTemplate,
   PersonaTemplateSummary,
@@ -13,9 +21,11 @@ import {
   createCharacterRecordFromDraft,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
+  reconcileDraftBackedScaffoldNpc,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { worldgenResearchArtifactSchema } from "../worldgen/research-artifact.js";
 import { LORE_CATEGORIES } from "../worldgen/types.js";
 import { WORLDBOOK_ENTRY_TYPES } from "../worldgen/worldbook-importer.js";
 
@@ -64,18 +74,29 @@ const roleConfigSchema = z.object({
   maxTokens: z.number().int().default(1024),
 });
 
+// --- Observability (Phase 58) ---
+
+export const observabilityRoleTogglesSchema = z.object({
+  judge: z.boolean(),
+  storyteller: z.boolean(),
+  oracle: z.boolean(),
+  npcAgent: z.boolean(),
+  reflection: z.boolean(),
+  embedder: z.boolean(),
+}).strip();
+
+export const observabilityConfigSchema = z.object({
+  enabled: z.boolean(),
+  dumpFullPrompts: z.boolean(),
+  roles: observabilityRoleTogglesSchema,
+}).strip();
+
 export const settingsPayloadSchema = z.object({
   providers: z.array(providerSchema),
   judge: roleConfigSchema,
   storyteller: roleConfigSchema,
   generator: roleConfigSchema,
   embedder: roleConfigSchema,
-  fallback: z.object({
-    providerId: z.string(),
-    model: z.string(),
-    timeoutMs: z.number(),
-    retryCount: z.number(),
-  }).strip(),
   images: z.object({
     providerId: z.string(),
     model: z.string(),
@@ -89,7 +110,61 @@ export const settingsPayloadSchema = z.object({
     braveApiKey: z.string().optional(),
     zaiApiKey: z.string().optional(),
   }).strip(),
+  ui: z.object({
+    showRawReasoning: z.boolean(),
+  }).strip(),
+  observability: observabilityConfigSchema.optional(),
 }).strip();
+
+// --- VS Battles Power Scaling schemas (Phase 57) ---
+
+const coercedApDurTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeApDurTier(val) ?? val;
+  },
+  z.enum(AP_DURABILITY_TIERS),
+);
+
+const coercedSpeedTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeSpeedTier(val) ?? val;
+  },
+  z.enum(SPEED_TIERS),
+);
+
+const coercedIntelligenceTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeIntelligenceTier(val) ?? val;
+  },
+  z.enum(INTELLIGENCE_TIERS),
+);
+
+export const tierRankSchema = <T extends z.ZodTypeAny>(tierSchema: T) =>
+  z.object({ tier: tierSchema, rank: z.number().int().min(1).max(10) });
+
+export const haxAbilitySchema = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  bypassTier: coercedApDurTierSchema.nullable(),
+  limitations: z.array(z.string()),
+});
+
+export const characterVulnerabilitySchema = z.object({
+  description: z.string().min(1),
+  severity: z.enum(["minor", "major", "critical"]),
+});
+
+export const powerStatsSchema = z.object({
+  attackPotency: tierRankSchema(coercedApDurTierSchema),
+  speed: tierRankSchema(coercedSpeedTierSchema),
+  durability: tierRankSchema(coercedApDurTierSchema),
+  intelligence: tierRankSchema(coercedIntelligenceTierSchema),
+  hax: z.array(haxAbilitySchema),
+  vulnerabilities: z.array(characterVulnerabilitySchema),
+});
 
 // --- Endpoint schemas ---
 
@@ -100,10 +175,54 @@ export const chatBodySchema = z.object({
     .pipe(z.string().min(1, "playerAction is required.")),
 });
 
+export const campaignIdSchema = z
+  .preprocess(
+    (value) => (typeof value === "string" ? value.trim() : ""),
+    z.string().min(1, "campaignId is required."),
+  );
+
+export const chatHistoryQuerySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
 export const chatActionBodySchema = z.object({
+  campaignId: campaignIdSchema,
   playerAction: z.string().min(1).max(2000),
   intent: z.string().min(1).max(2000),
   method: z.string().max(500).default(""),
+  quickActionHandle: z.string().trim().min(1).max(128).optional(),
+});
+
+export const lookupKindSchema = z.enum([
+  "world_canon_fact",
+  "character_canon_fact",
+  "power_profile",
+  "event_clarification",
+]);
+
+export const chatLookupBodySchema = z.object({
+  campaignId: campaignIdSchema,
+  lookupKind: lookupKindSchema,
+  subject: z.string().trim().min(1).max(300),
+  compareAgainst: z.string().trim().min(1).max(300).optional(),
+  question: z.string().trim().min(1).max(1000).optional(),
+});
+
+export const chatRetryBodySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
+export const chatResumeBodySchema = z.object({
+  campaignId: campaignIdSchema,
+  resumeToken: z.string().trim().min(1).optional(),
+});
+
+export const chatUndoBodySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
+export const chatOpeningBodySchema = z.object({
+  campaignId: campaignIdSchema,
 });
 
 const createCampaignBaseSchema = z.object({
@@ -189,9 +308,17 @@ const premiseDivergenceSchema = z.object({
   ambiguityNotes: z.array(z.string()),
 }).nullable().optional();
 
+const worldgenResearchArtifactPayloadSchema = worldgenResearchArtifactSchema.nullable().optional();
+
 export const createCampaignSchema = createCampaignBaseSchema.extend({
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  worldgenSourceHint: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(z.string().min(1))
+    .optional(),
+  worldgenResearchEnabled: z.boolean().optional(),
   worldbookSelection: z.array(worldbookSelectionSchema).optional(),
 });
 
@@ -203,6 +330,7 @@ export const suggestSeedSchema = z.object({
   category: seedCategorySchema,
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  researchArtifact: worldgenResearchArtifactPayloadSchema,
 });
 
 export const generateWorldSchema = z.object({
@@ -212,6 +340,7 @@ export const generateWorldSchema = z.object({
     .pipe(z.string().min(1, "campaignId is required.")),
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  researchArtifact: worldgenResearchArtifactPayloadSchema,
 });
 
 export const testProviderSchema = z.object({
@@ -265,11 +394,65 @@ const characterRelationshipRefSchema = z.object({
   reason: z.string().default(""),
 });
 
+// D-07/D-08: stable identity layers are explicit, while live dynamics track
+// change inside the current campaign run.
+const characterIdentityBaseFactsSchema = z.object({
+  biography: z.string().default(""),
+  socialRole: z.array(z.string()).default([]),
+  hardConstraints: z.array(z.string()).default([]),
+});
+
+const characterIdentityBehavioralCoreSchema = z.object({
+  motives: z.array(z.string()).optional(),
+  pressureResponses: z.array(z.string()).optional(),
+  taboos: z.array(z.string()).optional(),
+  attachments: z.array(z.string()).default([]),
+  selfImage: z.string().default(""),
+});
+
+const characterIdentityLiveDynamicsSchema = z.object({
+  attachments: z.array(z.string()).default([]),
+  activeGoals: z.array(z.string()).default([]),
+  beliefDrift: z.array(z.string()).default([]),
+  currentStrains: z.array(z.string()).default([]),
+  earnedChanges: z.array(z.string()).default([]),
+});
+
+export const characterPersonalitySchema = z.object({
+  summary: z.string().max(400).default(""),
+  voice: z.string().max(600).default(""),
+  decisionStyle: z.string().max(400).default(""),
+  worldview: z.string().max(400).default(""),
+  internalContradictions: z.array(z.string().max(300)).max(5).default([]),
+  personalMythology: z.string().max(400).default(""),
+  sampleLines: z.array(z.string().max(300)).max(3).default([]),
+});
+
 const characterIdentityDraftSchema = z.object({
   role: characterRoleSchema,
   tier: characterTierSchema,
   displayName: z.string().min(1),
   canonicalStatus: canonicalStatusSchema,
+  baseFacts: characterIdentityBaseFactsSchema.default({
+    biography: "",
+    socialRole: [],
+    hardConstraints: [],
+  }),
+  behavioralCore: characterIdentityBehavioralCoreSchema.default({
+    motives: [],
+    pressureResponses: [],
+    taboos: [],
+    attachments: [],
+    selfImage: "",
+  }),
+  liveDynamics: characterIdentityLiveDynamicsSchema.default({
+    attachments: [],
+    activeGoals: [],
+    beliefDrift: [],
+    currentStrains: [],
+    earnedChanges: [],
+  }),
+  personality: characterPersonalitySchema.optional(),
 });
 
 const characterProfileSchema = z.object({
@@ -307,9 +490,9 @@ const characterMotivationsSchema = z.object({
 });
 
 const characterCapabilitiesSchema = z.object({
-  traits: z.array(z.string()).default([]),
+  traits: z.array(z.string()).optional(),
   skills: z.array(characterSkillSchema).default([]),
-  flaws: z.array(z.string()).default([]),
+  flaws: z.array(z.string()).optional(),
   specialties: z.array(z.string()).default([]),
   wealthTier: characterWealthTierSchema.nullable(),
 });
@@ -340,6 +523,16 @@ export const characterStartConditionsSchema = z.object({
 });
 
 export const personaTemplatePatchSchema = z.object({
+  identity: z.object({
+    role: characterRoleSchema.optional(),
+    tier: characterTierSchema.optional(),
+    displayName: z.string().min(1).optional(),
+    canonicalStatus: canonicalStatusSchema.optional(),
+    baseFacts: characterIdentityBaseFactsSchema.partial().optional(),
+    behavioralCore: characterIdentityBehavioralCoreSchema.partial().optional(),
+    liveDynamics: characterIdentityLiveDynamicsSchema.partial().optional(),
+    personality: characterPersonalitySchema.partial().optional(),
+  }).partial().optional(),
   profile: characterProfileSchema.partial().optional(),
   socialContext: characterSocialContextSchema.partial().optional(),
   motivations: characterMotivationsSchema.partial().optional(),
@@ -347,6 +540,7 @@ export const personaTemplatePatchSchema = z.object({
   state: characterStateSchema.partial().optional(),
   loadout: characterLoadoutSchema.partial().optional(),
   startConditions: characterStartConditionsSchema.partial().optional(),
+  powerStats: powerStatsSchema.partial().optional(),
   provenance: z.object({
     templateId: z.string().nullable().optional(),
     archetypePrompt: z.string().nullable().optional(),
@@ -431,7 +625,7 @@ const characterProvenanceSchema = z.object({
   templateId: z.string().nullable(),
   archetypePrompt: z.string().nullable(),
   worldgenOrigin: z.string().nullable(),
-  legacyTags: z.array(z.string()).default([]),
+  legacyTags: z.array(z.string()).optional(),
 });
 
 export const characterDraftSchema = z.object({
@@ -444,6 +638,7 @@ export const characterDraftSchema = z.object({
   loadout: characterLoadoutSchema,
   startConditions: characterStartConditionsSchema.default({}),
   provenance: characterProvenanceSchema,
+  powerStats: powerStatsSchema.optional(),
 });
 
 export const characterRecordSchema = characterDraftSchema.extend({
@@ -467,7 +662,7 @@ const legacyCharacterSchema = z.object({
 
 function materializeDraftRecord(
   campaignId: string,
-  draft: z.infer<typeof characterDraftSchema>,
+  draft: CharacterDraft,
 ) {
   return createCharacterRecordFromDraft(draft, {
     id: `draft:${draft.identity.displayName || "character"}`,
@@ -476,13 +671,13 @@ function materializeDraftRecord(
 }
 
 function recordToDraft(
-  record: z.infer<typeof characterRecordSchema>,
+  record: CharacterRecord,
 ): z.infer<typeof characterDraftSchema> {
   const { id: _id, campaignId: _campaignId, ...identity } = record.identity;
-  return {
+  return characterDraftSchema.parse({
     ...record,
     identity,
-  };
+  });
 }
 
 function legacyCharacterToDraft(
@@ -517,14 +712,16 @@ const scaffoldNpcLegacySchema = z.object({
     longTerm: z.array(z.string()),
   }),
   locationName: z.string(),
+  sceneLocationName: z.string().nullable().optional(),
   factionName: z.string().nullable(),
-  tier: z.enum(["key", "supporting"]).default("key"),
+  tier: z.enum(["key", "supporting"]).optional(),
 });
 
 function legacyNpcToDraft(
   npc: z.infer<typeof scaffoldNpcLegacySchema>,
 ) {
-  return recordToDraft(
+  const scaffoldTier = npc.tier ?? "key";
+  const draft = recordToDraft(
     fromLegacyNpcRow(
       {
         id: "legacy-npc",
@@ -532,7 +729,7 @@ function legacyNpcToDraft(
         name: npc.name,
         persona: npc.persona,
         tags: JSON.stringify(npc.tags),
-        tier: npc.tier === "key" ? "key" : "persistent",
+        tier: scaffoldTier === "key" ? "key" : "persistent",
         currentLocationId: null,
         goals: JSON.stringify({
           short_term: npc.goals.shortTerm,
@@ -549,9 +746,27 @@ function legacyNpcToDraft(
       },
     ),
   );
+
+  return {
+    ...draft,
+    identity: {
+      ...draft.identity,
+      tier: scaffoldTier === "key" ? "key" : "supporting",
+    },
+  };
 }
 
 // --- World review schemas ---
+
+const scaffoldLocationSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()),
+  isStarting: z.boolean(),
+  connectedTo: z.array(z.string()),
+  kind: z.enum(["macro", "persistent_sublocation"]).optional(),
+  parentLocationName: z.string().nullable().optional(),
+});
 
 const regenerateSectionBaseSchema = z.object({
   campaignId: z.string().min(1),
@@ -575,17 +790,10 @@ export const regenerateSectionSchema = z.discriminatedUnion("section", [
     section: z.literal("npcs"),
     refinedPremise: z.string().min(1),
     locationNames: z.array(z.string()),
+    locations: z.array(scaffoldLocationSchema).optional(),
     factionNames: z.array(z.string()),
   }),
 ]);
-
-const scaffoldLocationSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  tags: z.array(z.string()),
-  isStarting: z.boolean(),
-  connectedTo: z.array(z.string()),
-});
 
 const scaffoldFactionSchema = z.object({
   name: z.string(),
@@ -597,34 +805,64 @@ const scaffoldFactionSchema = z.object({
 
 const scaffoldNpcSchema = z
   .union([
-    scaffoldNpcLegacySchema,
     scaffoldNpcLegacySchema.extend({
       draft: characterDraftSchema,
     }),
     z.object({
       draft: characterDraftSchema,
       locationName: z.string().optional(),
+      sceneLocationName: z.string().nullable().optional(),
       factionName: z.string().nullable().optional(),
-      tier: z.enum(["key", "supporting"]).default("key"),
+      tier: z.enum(["key", "supporting"]).optional(),
     }),
+    scaffoldNpcLegacySchema,
   ])
   .transform((input) => {
     if ("draft" in input) {
-      const legacy = toLegacyNpcDraft(
+      const legacyFromDraft = toLegacyNpcDraft(
         materializeDraftRecord("draft-campaign", input.draft),
       );
+      const editableNpc = "name" in input
+        ? {
+            ...input,
+            locationName: input.locationName ?? legacyFromDraft.locationName,
+            factionName: input.factionName ?? legacyFromDraft.factionName,
+            tier: input.tier ?? legacyFromDraft.tier,
+          }
+        : {
+            ...legacyFromDraft,
+            locationName: input.locationName ?? legacyFromDraft.locationName,
+            sceneLocationName: input.sceneLocationName ?? legacyFromDraft.sceneLocationName,
+            factionName: input.factionName ?? legacyFromDraft.factionName,
+            tier: input.tier ?? legacyFromDraft.tier,
+            draft: input.draft,
+          };
+      const reconciledDraft = reconcileDraftBackedScaffoldNpc({
+        ...editableNpc,
+        draft: input.draft,
+      });
+      const legacy = toLegacyNpcDraft(
+        materializeDraftRecord("draft-campaign", reconciledDraft),
+      );
+
       return {
         ...legacy,
-        locationName: input.locationName ?? legacy.locationName,
-        factionName: input.factionName ?? legacy.factionName,
-        tier: input.tier ?? legacy.tier,
-        draft: input.draft,
+        locationName: editableNpc.locationName ?? legacy.locationName,
+        sceneLocationName: editableNpc.sceneLocationName,
+        factionName: editableNpc.factionName ?? legacy.factionName,
+        tier: editableNpc.tier ?? legacy.tier,
+        draft: reconciledDraft,
       };
     }
 
+    const tier = input.tier ?? "key";
     return {
       ...input,
-      draft: legacyNpcToDraft(input),
+      tier,
+      draft: legacyNpcToDraft({
+        ...input,
+        tier,
+      }),
     };
   });
 
@@ -692,6 +930,11 @@ const characterRoleFields = {
   role: roleField,
   locationNames: z.array(z.string()).optional(),
   factionNames: z.array(z.string()).optional(),
+  overrideText: z
+    .string()
+    .trim()
+    .max(2000, "overrideText must be <= 2000 characters.")
+    .optional(),
 } as const;
 
 const keyRoleLocationRefine = {
@@ -724,6 +967,7 @@ export const importV2CardSchema = z.object({
   personality: z.string().default(""),
   scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  mesExample: z.string().default(""),
   importMode: z.enum(["native", "outsider"]).default("native"),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
@@ -749,6 +993,7 @@ export const promoteNpcBodySchema = z.object({
 // --- Chat control schemas ---
 
 export const chatEditBodySchema = z.object({
+  campaignId: campaignIdSchema,
   messageIndex: z.number().int().min(0),
   newContent: z.string().min(1),
 });

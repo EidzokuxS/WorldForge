@@ -45,11 +45,11 @@ export function RoleConfigCard({
   onTestRole,
 }: RoleConfigCardProps) {
   return (
-    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-      <div className="mb-[clamp(12px,1vw,20px)] flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="wf-set-card wf-role-card">
+      <div className="wf-set-card-head">
         <div>
-          <div className="text-[clamp(14px,1vw,18px)] font-semibold">{title}</div>
-          <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">{description}</div>
+          <div className="wf-set-card-h">{title}</div>
+          <div className="wf-set-card-sub">{description}</div>
         </div>
         <Button
           variant="secondary"
@@ -64,8 +64,8 @@ export function RoleConfigCard({
           {isTesting ? "Testing..." : "Test Role"}
         </Button>
       </div>
-      <div className="grid gap-[clamp(12px,1vw,20px)] md:grid-cols-2">
-        <div className="space-y-2">
+      <div className="wf-settings-field-grid">
+        <div className="wf-field">
           <Label htmlFor={`${roleName}-provider`}>Provider</Label>
           <Select
             value={config.providerId}
@@ -86,7 +86,7 @@ export function RoleConfigCard({
           </Select>
         </div>
 
-        <div className="space-y-2">
+        <div className="wf-field">
           <Label htmlFor={`${roleName}-model`}>
             Model (leave empty for provider default)
           </Label>
@@ -102,7 +102,7 @@ export function RoleConfigCard({
 
         {!hideAdvanced && (
           <>
-            <div className="space-y-2">
+            <div className="wf-field">
               <div className="flex items-center justify-between">
                 <Label>Default temperature</Label>
                 <span className="text-xs text-muted-foreground">
@@ -122,7 +122,7 @@ export function RoleConfigCard({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="wf-field">
               <Label htmlFor={`${roleName}-max-tokens`}>Max tokens</Label>
               <Input
                 id={`${roleName}-max-tokens`}

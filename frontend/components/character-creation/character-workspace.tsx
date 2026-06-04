@@ -12,7 +12,7 @@ export function CharacterWorkspace({
   className,
 }: CharacterWorkspaceProps) {
   return (
-    <div className={cn("flex flex-1 flex-col min-h-0", className)}>
+    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       {children}
     </div>
   );

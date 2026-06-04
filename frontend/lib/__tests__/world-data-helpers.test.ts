@@ -1,15 +1,30 @@
-import { describe, it, expect } from "vitest";
-import type { CharacterDraft } from "@worldforge/shared";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type {
+  CharacterDraft,
+  CharacterRecord,
+  LocationKind,
+  LocationPersistence,
+} from "@worldforge/shared";
 import {
   buildIdMaps,
   buildRelationshipMaps,
   toEditableScaffold,
 } from "../world-data-helpers";
+import { getWorldData } from "../api";
 import type { WorldData, LoreCardItem } from "../api-types";
 
+const API_HANDLES = {
+  placeOne: "pdto_place_11111111111111111111111111111111",
+  placeTwo: "pdto_place_22222222222222222222222222222222",
+  placeScene: "pdto_place_33333333333333333333333333333333",
+  routeOne: "pdto_route_11111111111111111111111111111111",
+  eventOne: "pdto_event_11111111111111111111111111111111",
+} as const;
+
 /** Minimal WorldData fixture with 2 locations, 1 faction, 2 NPCs, 2 relationships. */
-function makeWorldData(overrides?: Partial<WorldData>): WorldData {
+function makeWorldData(overrides: Record<string, unknown> = {}): WorldData {
   return {
+    currentScene: null,
     locations: [
       {
         id: "loc-1",
@@ -39,6 +54,7 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
         tags: ["friendly"],
         tier: "key",
         currentLocationId: "loc-1",
+        sceneScopeId: null,
         goals: { short_term: ["serve drinks"], long_term: ["retire"] },
         beliefs: [],
       },
@@ -50,6 +66,7 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
         tags: ["mysterious"],
         tier: "temporary",
         currentLocationId: null,
+        sceneScopeId: null,
         goals: { short_term: [], long_term: [] },
         beliefs: [],
       },
@@ -88,6 +105,255 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("WorldData location typing", () => {
+  it("reuses shared location lifecycle vocabulary", () => {
+    type WorldLocation = WorldData["locations"][number];
+
+    expectTypeOf<WorldLocation["locationKind"]>().toEqualTypeOf<
+      LocationKind | null | undefined
+    >();
+    expectTypeOf<WorldLocation["persistence"]>().toEqualTypeOf<
+      LocationPersistence | null | undefined
+    >();
+  });
+});
+
+function makeCharacterRecord(overrides?: Partial<CharacterRecord>): CharacterRecord {
+  const typedOverrides = overrides ?? {};
+
+  return {
+    identity: {
+      id: "npc-1",
+      campaignId: "c1",
+      role: "npc",
+      tier: "key",
+      displayName: "Bartender",
+      canonicalStatus: "original",
+      baseFacts: {
+        biography: "Keeps the tavern running.",
+        socialRole: ["innkeeper"],
+        hardConstraints: ["Protect the staff"],
+      },
+      behavioralCore: {
+        motives: ["Keep the peace"],
+        pressureResponses: ["Stall for time"],
+        taboos: ["Betray guests"],
+        attachments: ["Tavern regulars"],
+        selfImage: "Steady host",
+      },
+      liveDynamics: {
+        activeGoals: ["Observe newcomers"],
+        beliefDrift: [],
+        currentStrains: [],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "",
+      ageText: "",
+      appearance: "",
+      backgroundSummary: "Local fixture",
+      personaSummary: "Friendly innkeeper",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: "loc-1",
+      homeLocationName: "Tavern",
+      currentLocationId: "loc-1",
+      currentLocationName: "Tavern",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "resident",
+    },
+    motivations: {
+      shortTermGoals: ["Serve drinks"],
+      longTermGoals: ["Retire"],
+      beliefs: [],
+      drives: [],
+      frictions: [],
+    },
+    capabilities: {
+      traits: ["Observant"],
+      skills: [],
+      flaws: ["Soft-hearted"],
+      specialties: ["Defusing fights"],
+      wealthTier: null,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: [],
+      equippedItemRefs: [],
+      currencyNotes: "",
+      signatureItems: [],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "worldgen",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: [],
+    },
+    powerStats: {
+      attackPotency: { tier: "Human", rank: 3 },
+      speed: { tier: "Human", rank: 5 },
+      durability: { tier: "Human", rank: 4 },
+      intelligence: { tier: "Above Average", rank: 6 },
+      hax: [],
+      vulnerabilities: [{ description: "Overprotective of tavern guests", severity: "minor" }],
+    },
+    ...typedOverrides,
+  };
+}
+
+describe("getWorldData", () => {
+  it("parses connected paths and recent happenings while deriving compatibility connectedTo from the path graph", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        locations: [
+          {
+            id: API_HANDLES.placeOne,
+            campaignId: "c1",
+            name: "Shibuya Crossing",
+            description: "Macro hub",
+            tags: JSON.stringify(["urban"]),
+            isStarting: true,
+            kind: "macro",
+            persistence: "persistent",
+            connectedPaths: [
+              {
+                edgeId: API_HANDLES.routeOne,
+                toLocationId: API_HANDLES.placeTwo,
+                toLocationName: "Shibuya Station",
+                travelCost: 2,
+              },
+            ],
+            recentHappenings: [
+              {
+                id: API_HANDLES.eventOne,
+                locationId: API_HANDLES.placeOne,
+                sourceLocationId: API_HANDLES.placeScene,
+                anchorLocationId: API_HANDLES.placeOne,
+                eventType: "ephemeral_scene",
+                summary: "A rooftop clash spilled cursed residue into the crossing.",
+                tick: 12,
+                importance: 4,
+                archivedAtTick: 13,
+                createdAt: 1700000000000,
+              },
+            ],
+          },
+        ],
+        npcs: [],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+        personaTemplates: [],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("c1");
+
+    expect(world.locations[0]).toMatchObject({
+      connectedTo: [API_HANDLES.placeTwo],
+      connectedPaths: [
+        {
+          edgeId: API_HANDLES.routeOne,
+          toLocationId: API_HANDLES.placeTwo,
+          toLocationName: "Shibuya Station",
+          travelCost: 2,
+        },
+      ],
+      recentHappenings: [
+        expect.objectContaining({
+          summary: "A rooftop clash spilled cursed residue into the crossing.",
+        }),
+      ],
+      locationKind: "macro",
+      persistence: "persistent",
+    });
+  });
+
+  it("keeps richer world fields optional enough for older payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        locations: [
+          {
+            id: API_HANDLES.placeOne,
+            campaignId: "c1",
+            name: "Old Tavern",
+            description: "Compatibility payload",
+            tags: JSON.stringify(["safe"]),
+            connectedTo: JSON.stringify([API_HANDLES.placeTwo]),
+            isStarting: true,
+          },
+        ],
+        npcs: [],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("c1");
+
+    expect(world.locations[0]).toMatchObject({
+      connectedTo: [API_HANDLES.placeTwo],
+      connectedPaths: [],
+      recentHappenings: [],
+      locationKind: null,
+      persistence: null,
+    });
+  });
+});
+
+describe("toEditableScaffold", () => {
+  it("preserves characterRecord on scaffold NPCs so advanced review surfaces can inspect power stats", () => {
+    const record = makeCharacterRecord();
+    const world = makeWorldData({
+      npcs: [
+        {
+          id: "npc-1",
+          campaignId: "c1",
+          name: "Bartender",
+          persona: "Friendly innkeeper",
+          tags: ["friendly"],
+          tier: "key",
+          currentLocationId: "loc-1",
+          goals: { short_term: ["serve drinks"], long_term: ["retire"] },
+          beliefs: [],
+          characterRecord: record,
+          draft: undefined,
+          npc: undefined,
+        },
+      ],
+    });
+
+    const scaffold = toEditableScaffold(world, "Premise", []);
+
+    expect(scaffold.npcs[0]?.characterRecord).toEqual(record);
+    expect(scaffold.npcs[0]?.characterRecord?.powerStats?.attackPotency.tier).toBe("Human");
+  });
+});
 
 describe("buildIdMaps", () => {
   const world = makeWorldData();
@@ -169,6 +435,110 @@ describe("toEditableScaffold", () => {
 
     expect(scaffold.locations[0].connectedTo).toEqual(["Market"]);
     expect(scaffold.locations[1].connectedTo).toEqual(["Tavern"]);
+  });
+
+  it("prefers connected path destinations over stale connectedTo compatibility arrays", () => {
+    const world = makeWorldData({
+      locations: [
+        {
+          id: "loc-1",
+          campaignId: "c1",
+          name: "Tavern",
+          description: "A cozy tavern",
+          tags: ["safe"],
+          connectedTo: ["stale-edge"],
+          connectedPaths: [
+            {
+              edgeId: "edge-1",
+              toLocationId: "loc-2",
+              toLocationName: "Market",
+              travelCost: 2,
+            },
+          ],
+          recentHappenings: [],
+          isStarting: true,
+        },
+        {
+          id: "loc-2",
+          campaignId: "c1",
+          name: "Market",
+          description: "A busy market",
+          tags: ["trade"],
+          connectedTo: [],
+          connectedPaths: [],
+          recentHappenings: [],
+          isStarting: false,
+        },
+      ],
+    });
+
+    const scaffold = toEditableScaffold(world, "A test premise", lore);
+
+    expect(scaffold.locations[0].connectedTo).toEqual(["Market"]);
+  });
+
+  it("preserves dense location hierarchy and NPC scene placement in editable scaffolds", () => {
+    const world = makeWorldData({
+      locations: [
+        {
+          id: "loc-macro",
+          campaignId: "c1",
+          name: "Shibuya District",
+          description: "Macro urban area",
+          tags: ["urban"],
+          connectedTo: ["loc-scene"],
+          isStarting: true,
+          locationKind: "macro",
+          parentLocationId: null,
+        },
+        {
+          id: "loc-scene",
+          campaignId: "c1",
+          name: "Platform B5",
+          description: "A persistent underground scene",
+          tags: ["station"],
+          connectedTo: ["loc-macro"],
+          isStarting: false,
+          locationKind: "persistent_sublocation",
+          parentLocationId: "loc-macro",
+        },
+      ],
+      npcs: [
+        {
+          id: "npc-scoped",
+          campaignId: "c1",
+          name: "Station Warden",
+          persona: "Tracks every cursed train arrival.",
+          tags: ["warden"],
+          tier: "supporting",
+          currentLocationId: "loc-macro",
+          sceneScopeId: "loc-scene",
+          goals: { short_term: ["Seal Platform B5"], long_term: ["Keep Shibuya moving"] },
+          beliefs: [],
+        },
+      ],
+      relationships: [],
+    });
+
+    const scaffold = toEditableScaffold(world, "A test premise", lore);
+
+    expect(scaffold.locations[0]).toMatchObject({
+      name: "Shibuya District",
+      kind: "macro",
+      parentLocationName: null,
+      connectedTo: ["Platform B5"],
+    });
+    expect(scaffold.locations[1]).toMatchObject({
+      name: "Platform B5",
+      kind: "persistent_sublocation",
+      parentLocationName: "Shibuya District",
+      connectedTo: ["Shibuya District"],
+    });
+    expect(scaffold.npcs[0]).toMatchObject({
+      name: "Station Warden",
+      locationName: "Shibuya District",
+      sceneLocationName: "Platform B5",
+    });
   });
 
   it("maps NPC currentLocationId to locationName", () => {
@@ -325,6 +695,259 @@ describe("toEditableScaffold", () => {
     });
     expect(scaffold.npcs[0].tags).toContain("observant");
     expect(scaffold.npcs[0].tags).toContain("Order");
+  });
+
+  it("preserves characterRecord on editable NPCs so advanced review surfaces can inspect full metadata", () => {
+    const characterRecord: CharacterRecord = {
+      identity: {
+        id: "npc-1",
+        campaignId: "c1",
+        role: "npc",
+        tier: "key",
+        displayName: "Grounded Bartender",
+        canonicalStatus: "known_ip_diverged",
+        baseFacts: {
+          biography: "Runs a rumor exchange out of the tavern cellar.",
+          socialRole: ["broker"],
+          hardConstraints: ["Won't betray paying clients."],
+        },
+        behavioralCore: {
+          motives: ["Protect the cellar network"],
+          pressureResponses: ["Clams up under direct threats"],
+          taboos: ["Selling out allies"],
+          attachments: ["The tavern staff"],
+          selfImage: "A careful broker with too many secrets.",
+        },
+        liveDynamics: {
+          activeGoals: ["Keep the network hidden"],
+          beliefDrift: [],
+          currentStrains: ["Heat from local sorcerers"],
+          earnedChanges: [],
+        },
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "A broker with one eye on every table.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: "Guild",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Tavern",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Keep the network hidden"],
+        longTermGoals: ["Outlast the crackdown"],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["observant"],
+        skills: [],
+        flaws: ["paranoid"],
+        specialties: ["networking"],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+      powerStats: {
+        attackPotency: { tier: "Human", rank: 2 },
+        speed: { tier: "Human", rank: 5 },
+        durability: { tier: "Human", rank: 3 },
+        intelligence: { tier: "Gifted", rank: 4 },
+        hax: [],
+        vulnerabilities: [{ description: "Heat from local sorcerers", severity: "major" }],
+      },
+    };
+
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-1",
+            campaignId: "c1",
+            name: "Grounded Bartender",
+            persona: "Friendly innkeeper",
+            tags: ["friendly"],
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: { short_term: ["serve drinks"], long_term: ["retire"] },
+            beliefs: [],
+            characterRecord,
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].characterRecord).toEqual(characterRecord);
+    expect(scaffold.npcs[0].characterRecord?.powerStats?.attackPotency.tier).toBe("Human");
+  });
+
+  it("prefers draft.identity.tier over legacy row tier when both are present", () => {
+    const draft: CharacterDraft = {
+      identity: {
+        role: "npc",
+        tier: "supporting",
+        displayName: "Archivist Pell",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "Tracks every ship that enters port",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: null,
+        currentLocationName: "Market",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: [],
+        skills: [],
+        flaws: [],
+        specialties: [],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+    };
+
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-1",
+            campaignId: "c1",
+            name: "Archivist Pell",
+            persona: "Legacy persona",
+            tags: [],
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+            draft,
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("supporting");
+  });
+
+  it("maps legacy persistent runtime rows to supporting scaffold NPCs when draft is missing", () => {
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-2",
+            campaignId: "c1",
+            name: "Harbor Clerk",
+            persona: "Keeps the manifests",
+            tags: [],
+            tier: "persistent",
+            currentLocationId: "loc-1",
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("supporting");
+  });
+
+  it("falls back to key only when neither draft tier nor legacy row tier exists", () => {
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-3",
+            campaignId: "c1",
+            name: "Unknown Stranger",
+            persona: "No file on record",
+            tags: [],
+            tier: undefined as unknown as string,
+            currentLocationId: null,
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("key");
   });
 
   it("transforms lore cards into simplified objects", () => {

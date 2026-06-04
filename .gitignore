@@ -34,6 +34,7 @@ yarn-error.log*
 # Tasks (local workflow)
 tasks/
 rpi/
+.planning/
 
 # E2E test artifacts
 e2e/
@@ -41,13 +42,27 @@ qa-results/
 qa-screenshots/
 backend/e2e/
 backend/logs/
+pinchtab/
 
 # Tool configs
+.agents/
 .claude/
+.codex/
 .serena/
 .desloppify/
+.playwright-cli/
 .playwright-mcp/
 scorecard.png
 .gitnexus
 AGENTS.md
 start.bat
+
+# Local scratch artifacts
+output/
+.planning/phases/**/external-reviews/*.err.log
+.planning/phases/**/external-reviews/*pid*.json
+.planning/phases/**/external-reviews/run-*.ps1
+.tmp-lancedb-test*/
+tmp/
+settings.json.bak
+*.lnk

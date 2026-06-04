@@ -8,7 +8,6 @@ export {
 export type {
   Provider,
   RoleConfig,
-  FallbackConfig,
   ImageConfig,
   Settings,
 } from "@worldforge/shared";

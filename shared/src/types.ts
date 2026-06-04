@@ -14,13 +14,6 @@ export interface RoleConfig {
   maxTokens: number;
 }
 
-export interface FallbackConfig {
-  providerId: string;
-  model: string;
-  timeoutMs: number;
-  retryCount: number;
-}
-
 export interface ImageConfig {
   providerId: string;
   model: string;
@@ -38,6 +31,38 @@ export interface ResearchConfig {
   braveApiKey?: string;
   /** Z.AI API key — required when searchProvider is "zai" */
   zaiApiKey?: string;
+}
+
+export interface UiConfig {
+  showRawReasoning: boolean;
+}
+
+/**
+ * Phase 58 — observability role keys. Used to toggle logging per LLM role.
+ * Note: `tool` and `prompt` are runtime-only pseudo-roles used inside logger-setup;
+ * the user-facing Settings surface is limited to real LLM-consuming roles.
+ */
+export type ObservabilityRoleKey =
+  | "judge"
+  | "storyteller"
+  | "oracle"
+  | "npcAgent"
+  | "reflection"
+  | "embedder";
+
+export interface ObservabilityRoleToggles {
+  judge: boolean;
+  storyteller: boolean;
+  oracle: boolean;
+  npcAgent: boolean;
+  reflection: boolean;
+  embedder: boolean;
+}
+
+export interface ObservabilityConfig {
+  enabled: boolean;
+  dumpFullPrompts: boolean;
+  roles: ObservabilityRoleToggles;
 }
 
 export type PremiseDivergenceMode = "canonical" | "coexisting" | "diverged";
@@ -77,9 +102,10 @@ export interface Settings {
   storyteller: RoleConfig;
   generator: RoleConfig;
   embedder: RoleConfig;
-  fallback: FallbackConfig;
   images: ImageConfig;
   research: ResearchConfig;
+  ui: UiConfig;
+  observability: ObservabilityConfig;
 }
 
 /** Cached IP research context — persisted in campaign config.json */
@@ -116,6 +142,72 @@ export interface IpResearchContext {
   }>;
 }
 
+export type WorldgenResearchUse = string;
+
+export type WorldgenSourceRole =
+  | "world_basis"
+  | "mechanics_overlay"
+  | "tone_overlay"
+  | "reference_only"
+  | "ambiguous";
+
+export interface WorldgenResearchSourceUsageRule {
+  sourceLabel: string;
+  role: WorldgenSourceRole;
+  useFor: WorldgenResearchUse[];
+  avoidFor: WorldgenResearchUse[];
+  rationale: string;
+}
+
+export interface WorldgenResearchSearchJob {
+  id: string;
+  sourceLabel: string;
+  query: string;
+  purpose: string;
+  useFor: WorldgenResearchUse[];
+}
+
+export interface WorldgenResearchSearchResult {
+  jobId: string;
+  title: string;
+  description: string;
+  url: string;
+}
+
+export interface WorldgenResearchCitation {
+  jobId?: string;
+  url?: string;
+  note: string;
+}
+
+export interface WorldgenResearchArtifactV2 {
+  version: 2;
+  rawPremise: string;
+  rawKnownIP?: string | null;
+  researchBrief: {
+    interpretationSummary: string;
+    ambiguityNotes: string[];
+    sourceUsageRules: WorldgenResearchSourceUsageRule[];
+    searchJobs: WorldgenResearchSearchJob[];
+  };
+  searchResults: WorldgenResearchSearchResult[];
+  generatedContext: {
+    keyFacts: string[];
+    tonalNotes: string[];
+    citations?: WorldgenResearchCitation[];
+    canonicalNames?: {
+      locations?: string[];
+      factions?: string[];
+      characters?: string[];
+    };
+  };
+  provenance: {
+    createdAt: string;
+    model?: string;
+    searchProvider?: string;
+  };
+}
+
 /**
  * Reusable processed worldbook metadata exposed to selection flows.
  * The backing record stays outside campaigns; campaigns only store a snapshot.
@@ -134,9 +226,35 @@ export interface CampaignWorldbookSelection extends WorldbookLibraryItemSummary 
 
 export type ChatRole = "user" | "assistant" | "system";
 
+export interface ChatMessageResumeNarrationMetadata {
+  sagaId: string;
+  narratorAttemptId: string;
+}
+
+export type ChatMessagePresentationAuthority =
+  | "settled_packet_presentation"
+  | "visible_prose_non_authority";
+
+export interface ChatMessagePresentationMetadata {
+  authority: ChatMessagePresentationAuthority;
+  source:
+    | "settled_turn_packet"
+    | "opening_scene"
+    | "legacy_final_narration"
+    | "deterministic_noop";
+  sagaId?: string;
+  narratorAttemptId?: string;
+}
+
+export interface ChatMessageMetadata {
+  resumeNarration?: ChatMessageResumeNarrationMetadata;
+  presentation?: ChatMessagePresentationMetadata;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  metadata?: ChatMessageMetadata;
 }
 
 export interface WorldSeeds {
@@ -158,6 +276,60 @@ export interface CampaignMeta {
   updatedAt: number;
   seeds?: WorldSeeds;
   generationComplete?: boolean;
+}
+
+export const LOCATION_KINDS = [
+  "macro",
+  "persistent_sublocation",
+  "ephemeral_scene",
+] as const;
+
+export type LocationKind = (typeof LOCATION_KINDS)[number];
+
+export const LOCATION_PERSISTENCE_MODES = [
+  "persistent",
+  "ephemeral",
+] as const;
+
+export type LocationPersistence = (typeof LOCATION_PERSISTENCE_MODES)[number];
+
+export interface LocationConnectedPathSummary {
+  edgeId: string;
+  toLocationId: string;
+  travelCost: number;
+  discovered: boolean;
+}
+
+export interface LocationRecentHappeningSummary {
+  id: string;
+  locationId: string;
+  sourceLocationId: string | null;
+  anchorLocationId: string | null;
+  eventType: string;
+  summary: string;
+  tick: number;
+  importance: number;
+  archivedAtTick: number | null;
+  createdAt: number;
+}
+
+export interface LocationGraphNodeSummary {
+  id: string;
+  campaignId: string;
+  name: string;
+  description: string;
+  kind: LocationKind;
+  parentLocationId: string | null;
+  anchorLocationId: string | null;
+  persistence: LocationPersistence;
+  expiresAtTick: number | null;
+  archivedAtTick: number | null;
+  tags: string[];
+  isStarting: boolean;
+  connectedPaths: LocationConnectedPathSummary[];
+  recentHappenings: LocationRecentHappeningSummary[];
+  /** Legacy compatibility projection while Phase 43 migrates readers off raw adjacency. */
+  connectedToLocationIds?: string[];
 }
 
 export const CHARACTER_WEALTH_TIERS = [
@@ -193,11 +365,68 @@ export type CharacterWealthTier = (typeof CHARACTER_WEALTH_TIERS)[number];
 
 export type CharacterSkillTier = (typeof CHARACTER_SKILL_TIERS)[number];
 
+/**
+ * D-07/D-08: stable facts define what remains true about the character even
+ * when live campaign dynamics shift.
+ */
+export interface CharacterIdentityBaseFacts {
+  biography: string;
+  socialRole: string[];
+  hardConstraints: string[];
+}
+
+/**
+ * D-07/D-08: the behavioral core captures durable motives and pressure logic,
+ * not short-lived scene state.
+ */
+export interface CharacterIdentityBehavioralCore {
+  motives?: string[];
+  pressureResponses?: string[];
+  taboos?: string[];
+  attachments: string[];
+  selfImage: string;
+}
+
+/**
+ * D-07/D-08: live dynamics track what this campaign run has changed without
+ * overwriting the deeper identity baseline.
+ */
+export interface CharacterIdentityLiveDynamics {
+  attachments: string[];
+  activeGoals: string[];
+  beliefDrift: string[];
+  currentStrains: string[];
+  earnedChanges: string[];
+}
+
+export interface CharacterPersonality {
+  summary: string;
+  voice: string;
+  decisionStyle: string;
+  worldview: string;
+  internalContradictions: string[];
+  personalMythology: string;
+  sampleLines: string[];
+}
+
+export type CharacterIdentitySourceKind = "canon" | "card" | "research" | "runtime";
+
+export interface CharacterIdentitySourceCitation {
+  kind: CharacterIdentitySourceKind;
+  label: string;
+  excerpt: string;
+}
+
+
 export interface CharacterIdentityDraft {
   role: CharacterRole;
   tier: CharacterTier;
   displayName: string;
   canonicalStatus: CharacterCanonicalStatus;
+  baseFacts?: CharacterIdentityBaseFacts;
+  behavioralCore?: CharacterIdentityBehavioralCore;
+  liveDynamics?: CharacterIdentityLiveDynamics;
+  personality?: CharacterPersonality;
 }
 
 export interface CharacterIdentity extends CharacterIdentityDraft {
@@ -247,9 +476,9 @@ export interface CharacterSkill {
 }
 
 export interface CharacterCapabilities {
-  traits: string[];
+  traits?: string[];
   skills: CharacterSkill[];
-  flaws: string[];
+  flaws?: string[];
   specialties: string[];
   wealthTier: CharacterWealthTier | null;
 }
@@ -293,7 +522,7 @@ export interface CharacterProvenance {
   templateId: string | null;
   archetypePrompt: string | null;
   worldgenOrigin: string | null;
-  legacyTags: string[];
+  legacyTags?: string[];
 }
 
 export interface CharacterDraft {
@@ -306,6 +535,7 @@ export interface CharacterDraft {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  powerStats?: PowerStats;
 }
 
 export interface CharacterRecord {
@@ -318,9 +548,18 @@ export interface CharacterRecord {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  powerStats?: PowerStats;
 }
 
 export interface CharacterDraftPatch {
+  identity?: Partial<
+    Omit<CharacterIdentityDraft, "baseFacts" | "behavioralCore" | "liveDynamics" | "personality">
+  > & {
+    baseFacts?: Partial<CharacterIdentityBaseFacts>;
+    behavioralCore?: Partial<CharacterIdentityBehavioralCore>;
+    liveDynamics?: Partial<CharacterIdentityLiveDynamics>;
+    personality?: Partial<CharacterPersonality>;
+  };
   profile?: Partial<CharacterProfile>;
   socialContext?: Partial<CharacterSocialContext>;
   motivations?: Partial<CharacterMotivations>;
@@ -331,6 +570,7 @@ export interface CharacterDraftPatch {
   provenance?: Partial<
     Pick<CharacterProvenance, "templateId" | "archetypePrompt" | "worldgenOrigin">
   >;
+  powerStats?: Partial<PowerStats>;
 }
 
 export type PersonaTemplateRoleScope = "player" | "npc" | "any";
@@ -380,3 +620,52 @@ export interface PlayerCharacter {
 }
 
 export type CharacterImportMode = "native" | "outsider";
+
+// --- VS Battles Power Scaling (Phase 57) ---
+
+export const AP_DURABILITY_TIERS = [
+  "Human", "Street", "Wall", "Building", "City Block", "Town",
+  "City", "Mountain", "Island", "Country", "Continental",
+  "Moon", "Planet", "Star", "Solar System", "Galaxy",
+  "Universal", "Multiversal+",
+] as const;
+export type ApDurabilityTier = (typeof AP_DURABILITY_TIERS)[number];
+
+export const SPEED_TIERS = [
+  "Human", "Superhuman", "Subsonic", "Supersonic", "Hypersonic",
+  "Massively Hypersonic", "Sub-Relativistic", "Relativistic",
+  "FTL", "MFTL", "Infinite",
+] as const;
+export type SpeedTier = (typeof SPEED_TIERS)[number];
+
+export const INTELLIGENCE_TIERS = [
+  "Average", "Above Average", "Gifted", "Genius",
+  "Extraordinary Genius", "Supergenius",
+] as const;
+export type IntelligenceTier = (typeof INTELLIGENCE_TIERS)[number];
+
+export interface TierRank<T extends string = string> {
+  tier: T;
+  rank: number; // 1-10 within tier
+}
+
+export interface HaxAbility {
+  name: string;
+  type: string; // e.g. "Spatial Manipulation"
+  bypassTier: ApDurabilityTier | null; // what durability this ignores
+  limitations: string[];
+}
+
+export interface CharacterVulnerability {
+  description: string;
+  severity: "minor" | "major" | "critical";
+}
+
+export interface PowerStats {
+  attackPotency: TierRank<ApDurabilityTier>;
+  speed: TierRank<SpeedTier>;
+  durability: TierRank<ApDurabilityTier>;
+  intelligence: TierRank<IntelligenceTier>;
+  hax: HaxAbility[];
+  vulnerabilities: CharacterVulnerability[];
+}
