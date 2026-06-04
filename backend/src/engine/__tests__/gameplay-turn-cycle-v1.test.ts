@@ -312,7 +312,8 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     expect(prompt).toContain("speaker-provided street directions toward a named POI/micro-location");
     expect(prompt).toContain("do not use move_actor to a different nearby/known route");
-    expect(prompt).toContain("Use scene-local log_event for following directions plus start_search/find_poi_candidates/find_location_candidates/create_minor_poi/reveal_location");
+    expect(prompt).toContain("Use scene-local log_event for the attempted following-directions/local-navigation beat plus start_search/find_poi_candidates/find_location_candidates/create_minor_poi/reveal_location");
+    expect(prompt).toContain("A candidate lookup alone does not own walking progress along the directions");
   });
 
   it("tells Stage 4 not to substitute a legal connected route for an unmodeled target", () => {
@@ -1267,6 +1268,64 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.prompt).toContain("Конкретная находка");
     expect(built.prompt).toContain("это не доказывает их отсутствие");
+  });
+
+  it("forbids narrator from turning POI lookup into local-navigation progress", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-lookup",
+      turnId: "turn-lookup",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я следую указаниям к Laundry King и ищу синюю вывеску.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player follows speaker directions toward Laundry King.",
+        sceneQuestion: "Is Laundry King established?",
+        actionInterpretation: {
+          intent: "follow directions to Laundry King",
+          targetRefs: ["Laundry King"],
+        },
+        rationale: "The POI is unmodeled.",
+        evidenceRefs: ["Player", "Nishimura Koji"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "find_poi_candidates",
+        input: { query: "Laundry King blue sign" },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            toolName: "find_poi_candidates",
+            queryMatched: false,
+            candidates: [],
+            count: 0,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("Candidate lookup acceptedEvidence");
+    expect(built.system).toContain("Never narrate walking along directions");
+    expect(built.prompt).toContain("Совпавшие видимые точки интереса этим lookup не подтверждены");
   });
 
   it("forbids narrator from turning phone start_search found=false into device status truth", () => {
