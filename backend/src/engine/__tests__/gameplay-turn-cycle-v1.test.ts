@@ -1691,10 +1691,14 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(toolContractHint("record_dialogue_outcome")).toMatchObject({
       input: {
         futureUseKind: expect.stringContaining("route_choice|permission_check|evidence"),
+        outcomeKind: expect.stringContaining("never use unavailable/no_current_answer with speakerRef"),
+        authorityKind: expect.stringContaining("no_visible_authority only with unavailable/no_current_answer"),
         claims: [expect.objectContaining({
           claimKind: expect.stringContaining("use other for procedure/document/authority/policy categories"),
+          summary: expect.stringContaining("including unavailable/no_current_answer"),
         })],
-        requestedRoleText: expect.stringContaining("never empty string"),
+        requestedRoleText: expect.stringContaining("must also omit speakerRef"),
+        quote: expect.stringContaining("every outcome needs quote or claims"),
       },
     });
     expect(JSON.stringify(toolContractHint("record_dialogue_outcome"))).toContain(
@@ -1715,6 +1719,9 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("claims[].claimKind must be one of");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("use other rather than inventing a new enum");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never send empty strings for optional fields");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("every outcome requires quote or claims");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("visible speaker/speakerRef, never use outcomeKind=unavailable");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("no_current_answer are only for no visible/current speaker");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("acceptedContext exposes a prior stateReceipts");
   });
 
