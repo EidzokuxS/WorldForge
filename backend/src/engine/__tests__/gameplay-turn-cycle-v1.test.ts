@@ -278,6 +278,16 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("Never use toolNeed=movement or move_actor for scene-local positioning");
   });
 
+  it("tells Stage 3 to split dialogue from local stance and possession posture", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("dialogue/social action also includes local stance or possession posture");
+    expect(prompt).toContain("keeping distance, stepping back, taking cover");
+    expect(prompt).toContain("explicitly not handing an item over");
+    expect(prompt).toContain("create a separate scene-local log_event step before the dialogue step");
+    expect(prompt).toContain("Do not fold those physical micro-actions into record_dialogue_outcome");
+  });
+
   it("tells Stage 3 not to turn already-held item stowing into transfer_item", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
@@ -1107,6 +1117,79 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.system).toContain("screen brightness/darkness");
   });
 
+  it("treats playerAction as framing rather than settlement evidence for physical micro-actions", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я держу дистанцию, не отдаю пакет и спрашиваю, тот ли это склад.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player asks a visible NPC whether this is the warehouse.",
+        sceneQuestion: "What does the NPC answer?",
+        actionInterpretation: {
+          intent: "ask about the warehouse address",
+          targetRefs: ["Kenjaku", "Worn courier bag"],
+        },
+        rationale: "Dialogue answer must be recorded.",
+        evidenceRefs: ["Player", "Kenjaku"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "record_dialogue_outcome",
+        input: {
+          speakerRef: "Kenjaku",
+          addresseeRefs: ["Player"],
+          outcomeKind: "redirected",
+          topicKind: "other",
+          authorityKind: "not_authorized",
+          truthStatus: "speaker_asserted",
+          durability: "scene_local",
+          quote: "Ворота - деталь второстепенная.",
+          claims: [{
+            claimKind: "other",
+            polarity: "redirects",
+            subjectText: "подтверждение адреса",
+            summary: "Kenjaku уходит от прямого подтверждения адреса.",
+          }],
+          stateEffects: [],
+        },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            outcomeKind: "redirected",
+            topicKind: "other",
+            quote: "Ворота - деталь второстепенная.",
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+
+    expect(built.system).toContain("playerAction is the player's attempted/requested first-person action, not accepted evidence by itself");
+    expect(built.system).toContain("stepping back, keeping distance, taking cover");
+    expect(built.system).toContain("not handing something over");
+    expect(built.prompt).toContain("playerAction is request/framing, not settlement evidence");
+  });
+
   it("keeps empty candidate lookup evidence scoped to its own category", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
@@ -1279,12 +1362,13 @@ describe("gameplay turn cycle v1 contracts", () => {
     };
 
     const built = buildNarratorPromptFromSettledPacketV1(packet);
-    expect(built.system).toContain("The playerAction is the player's first-person action");
+    expect(built.system).toContain("The playerAction is the player's attempted/requested first-person action, not accepted evidence by itself");
     expect(built.system).toContain("Never make a non-player gmRead targetRef or evidenceRef");
     expect(built.system).toContain("Never narrate a non-player actor as present, visible, nearby");
     expect(built.system).toContain("Movement acceptedEvidence is not device/status evidence");
     expect(built.system).toContain("signal, message, call, instruction, alert, or status appeared or did not appear");
     expect(built.prompt).toContain("\"playerActionSubject\": \"player\"");
+    expect(built.prompt).toContain("playerAction is request/framing, not settlement evidence");
     expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs are never the subject");
     expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs/narrationGuardrails never establish NPC presence or visibility");
     expect(built.prompt).toContain("Совпавшие видимые люди или акторы этим lookup не подтверждены");
