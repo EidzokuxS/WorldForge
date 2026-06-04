@@ -196,6 +196,33 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(checklist.steps[1]!.dependsOnStepIds).toEqual(["step-1"]);
   });
 
+  it("accepts explicit player route authority in checklist target binding", () => {
+    const checklist = mutatingGmActionChecklistV1Schema.parse({
+      version: "gm-action-checklist.v1",
+      turnPath: "mutating",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Move to the explicitly selected connected destination.",
+        evidenceRefs: ["Player", "Shibuya Back-Alley Meeting Point"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Player arrives at Shibuya Back-Alley Meeting Point.",
+        targetBinding: {
+          targetText: "Shibuya Back-Alley Meeting Point",
+          targetKind: "connected_destination",
+          sourceAuthority: "player_explicit",
+          movementAuthority: "exact_connected_destination",
+          allowedDestinationRefs: ["Shibuya Back-Alley Meeting Point"],
+          authorityRefs: ["Shibuya Back-Alley Meeting Point"],
+        },
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "movement",
+      }],
+    });
+
+    expect(checklist.steps[0]?.targetBinding?.sourceAuthority).toBe("player_explicit");
+  });
+
   it("rejects invalid multi-step checklist graphs and budgets", () => {
     const step = (stepId: string, dependsOnStepIds: string[] = []) => ({
       stepId,

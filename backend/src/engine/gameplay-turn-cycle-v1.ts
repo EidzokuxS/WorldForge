@@ -88,6 +88,7 @@ const gmChecklistStepV1Schema = z
       sourceAuthority: z.enum([
         "backend_scene_frame",
         "accepted_same_target_receipt",
+        "player_explicit",
         "speaker_asserted",
         "player_prose_only",
         "none",
@@ -1800,7 +1801,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
     "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step with toolNeed=start_search; never fold that observation into toolNeed=movement or move_actor.",
     "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
-    "For any travel, route, or local-navigation step, targetBinding must declare targetText, targetKind, sourceAuthority, movementAuthority, allowedDestinationRefs, and authorityRefs. Use movementAuthority=exact_connected_destination only when allowedDestinationRefs names the same exact connected destination requested by the player or proven by accepted same-target evidence. Use movementAuthority=none for speaker-asserted unmodeled POIs, player-prose-only targets, current-scene local positioning, and unresolved targets.",
+    "For any travel, route, or local-navigation step, targetBinding must declare targetText, targetKind, sourceAuthority, movementAuthority, allowedDestinationRefs, and authorityRefs. sourceAuthority must be backend_scene_frame|accepted_same_target_receipt|player_explicit|speaker_asserted|player_prose_only|none. Use movementAuthority=exact_connected_destination only when allowedDestinationRefs names the same exact connected destination requested by the player or proven by accepted same-target evidence. Use movementAuthority=none for speaker-asserted unmodeled POIs, player-prose-only targets, current-scene local positioning, and unresolved targets.",
     "If the player follows speaker-provided street directions toward a named POI/micro-location that is not an exposed connected destination in the SceneFrame, set targetBinding.targetKind=unmodeled_poi_or_micro_location and movementAuthority=none; do not use move_actor to a different nearby/known route. Use scene-local log_event for following directions plus start_search/find_poi_candidates/find_location_candidates/create_minor_poi/reveal_location as appropriate to establish the target before any current-scene change.",
     "If a dialogue/social action also includes local stance or possession posture such as keeping distance, stepping back, taking cover, gripping/holding/readying an already-held item, or explicitly not handing an item over, create a separate scene-local log_event step before the dialogue step when that physical micro-action should be narrated as completed. Do not fold those physical micro-actions into record_dialogue_outcome.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
@@ -2299,7 +2300,7 @@ function structuredTargetBindingForStepV1(
       requestedTargetKind: "connected_destination",
       sourceAuthority: binding.sourceAuthority === "accepted_same_target_receipt"
         ? "backend_scene_frame"
-        : binding.sourceAuthority === "backend_scene_frame"
+        : binding.sourceAuthority === "backend_scene_frame" || binding.sourceAuthority === "player_explicit"
           ? "backend_scene_frame"
           : "player_prose_only",
       movementAuthority: "exact_connected_destination",
