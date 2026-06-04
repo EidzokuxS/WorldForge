@@ -250,6 +250,7 @@ const DEFAULT_PLAYER_TURN_ALLOWED_TOOLS: RuntimeToolName[] = [
   "find_actor_candidates",
   "find_poi_candidates",
   "inspect_known_fact",
+  "start_search",
   "check_route",
   "move_actor",
   "create_minor_poi",

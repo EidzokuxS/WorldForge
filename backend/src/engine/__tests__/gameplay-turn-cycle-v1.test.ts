@@ -358,6 +358,10 @@ describe("gameplay turn cycle v1 contracts", () => {
       { allowedTools: ["inspect_known_fact", "start_search", "record_world_fact"] },
     )).toEqual(["start_search"]);
     expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "start_search" },
+      { allowedTools: ["list_visible_affordances", "inspect_known_fact"] },
+    )).toEqual([]);
+    expect(selectAllowedToolNamesForStepV1(
       { toolNeed: "inspect_known_fact" },
       {
         allowedTools: [
@@ -565,6 +569,41 @@ describe("gameplay turn cycle v1 contracts", () => {
     );
 
     expect(validation.failure).toMatch(/does not match checklist stepId/u);
+  });
+
+  it("fails closed when an exact runtime toolNeed is not exposed", () => {
+    const schema = toolRequestSchemaForAllowedToolsV1([]);
+    expect(() =>
+      schema.parse({
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "list_visible_affordances",
+        input: { scope: "current_scene", maxResults: 4 },
+        evidenceRefs: [],
+      }),
+    ).toThrow(/No runtime tool is exposed/u);
+
+    const validation = validateAndNormalizeToolRequestV1(
+      {
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "list_visible_affordances",
+        input: { scope: "current_scene", maxResults: 4 },
+        evidenceRefs: [],
+      },
+      { allowedTools: ["list_visible_affordances"] } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "Actively check the phone for a signal.",
+        evidenceRefs: ["Burner phone"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "The phone check is recorded.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "start_search",
+      },
+    );
+    expect(validation.failure).toMatch(/does not satisfy checklist toolNeed=start_search/u);
   });
 
   it("aborts before packet persistence when required mutating tool step has no receipt", () => {

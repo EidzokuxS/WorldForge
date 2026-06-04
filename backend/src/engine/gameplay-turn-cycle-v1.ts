@@ -194,7 +194,16 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
 ].join(" ");
 
 export function toolRequestSchemaForAllowedToolsV1(allowedToolNames: readonly RuntimeToolName[]) {
-  const names = allowedToolNames.length > 0 ? allowedToolNames : runtimeToolNames;
+  if (allowedToolNames.length === 0) {
+    return gmToolRequestV1Schema.superRefine((request, ctx) => {
+      ctx.addIssue({
+        code: "custom",
+        path: ["toolName"],
+        message: `No runtime tool is exposed for this checklist toolNeed; received ${request.toolName}.`,
+      });
+    });
+  }
+  const names = allowedToolNames;
   const variants = names.map((toolName) =>
     z.object({
       version: z.literal(TOOL_REQUEST_VERSION_V1).default(TOOL_REQUEST_VERSION_V1),
@@ -1864,8 +1873,8 @@ export function selectAllowedToolNamesForStepV1(
     const allowedLookupTools = lookupTools.filter((toolName) => frame.allowedTools.includes(toolName));
     return allowedLookupTools.length > 0 ? allowedLookupTools : ["inspect_known_fact"];
   }
-  if (toolNeed && isRuntimeToolName(toolNeed) && frame.allowedTools.includes(toolNeed)) {
-    return [toolNeed];
+  if (toolNeed && isRuntimeToolName(toolNeed)) {
+    return frame.allowedTools.includes(toolNeed) ? [toolNeed] : [];
   }
   if (
     toolNeed === "actor_creation"
@@ -2296,18 +2305,84 @@ async function executeToolStepV1(input: {
   };
 }
 
+function toolSettlementRequiresFrameRefreshV1(
+  settlement: GmToolStepSettlementV1,
+): boolean {
+  if (settlement.status !== "accepted" || settlement.result?.success !== true) {
+    return false;
+  }
+  if (!settlement.toolName) {
+    return false;
+  }
+  if (typeof settlement.result.authority?.resultWorldVersion === "number") {
+    return true;
+  }
+  return !isBridgeLookupToolName(settlement.toolName);
+}
+
+async function refreshGameplayFrameEnvelopeV1(input: {
+  envelope: GameplayFrameEnvelopeV1;
+  options: Pick<TurnOptions, "playerAction" | "intent" | "method">;
+}): Promise<GameplayFrameEnvelopeV1> {
+  const clock = readWorldClock(input.envelope.campaignId);
+  const tick = Math.max(
+    input.envelope.baseTick,
+    clock.currentTick,
+    clock.worldTimeMinutes,
+  );
+  const refreshedFrame = await buildSceneFrame({
+    campaignId: input.envelope.campaignId,
+    tick,
+    playerAction: input.options.playerAction,
+    intent: input.options.intent,
+    method: input.options.method,
+    elapsedWorldTimeMinutes: Math.max(0, clock.worldTimeMinutes - input.envelope.baseTick),
+    runActorExposureCatchup: false,
+  });
+  return {
+    ...input.envelope,
+    frame: refreshedFrame,
+  };
+}
+
+function createStepExecutionContextV1(input: {
+  frame: SceneFrame;
+  read: GmRead;
+  settlements: readonly GmToolStepSettlementV1[];
+}): ToolExecutionContext {
+  const context = createPlayerTurnToolExecutionContext({
+    frame: input.frame,
+    addressedTarget: addressedTargetFromGmReadV1(input.read),
+  });
+  for (const settlement of input.settlements) {
+    if (settlement.status !== "accepted" || settlement.result?.success !== true || !settlement.toolName) {
+      continue;
+    }
+    applySuccessfulToolObservationToExecutionContext({
+      toolName: settlement.toolName,
+      toolInput: settlement.input,
+      result: settlement.result,
+      context,
+    });
+  }
+  return context;
+}
+
 async function settleChecklistV1(input: {
   envelope: GameplayFrameEnvelopeV1;
   read: GmRead;
   checklist: GmActionChecklistV1 | null;
+  options: Pick<TurnOptions, "playerAction" | "intent" | "method">;
   provider: TurnOptions["judgeProvider"];
 }): Promise<GmToolStepSettlementV1[]> {
   if (!input.checklist) return [];
 
   const settlements: GmToolStepSettlementV1[] = [];
-  const context = createPlayerTurnToolExecutionContext({
-    frame: input.envelope.frame,
-    addressedTarget: addressedTargetFromGmReadV1(input.read),
+  let currentEnvelope = input.envelope;
+  let context = createStepExecutionContextV1({
+    frame: currentEnvelope.frame,
+    read: input.read,
+    settlements,
   });
   let executions = 0;
   while (executions < GM_TOOL_LOOP_MAX_EXECUTIONS_V1) {
@@ -2315,7 +2390,7 @@ async function settleChecklistV1(input: {
     const step = nextExecutableChecklistStepV1(input.checklist, settlements);
     if (!step) break;
     const settlement = await executeToolStepV1({
-      envelope: input.envelope,
+      envelope: currentEnvelope,
       read: input.read,
       step,
       provider: input.provider,
@@ -2328,6 +2403,17 @@ async function settleChecklistV1(input: {
       throw new Error(
         `Required backend tool step ${step.stepId} failed before settled packet persistence: ${settlement.reason ?? "Backend tool step failed."}`,
       );
+    }
+    if (toolSettlementRequiresFrameRefreshV1(settlement)) {
+      currentEnvelope = await refreshGameplayFrameEnvelopeV1({
+        envelope: currentEnvelope,
+        options: input.options,
+      });
+      context = createStepExecutionContextV1({
+        frame: currentEnvelope.frame,
+        read: input.read,
+        settlements,
+      });
     }
   }
 
@@ -2465,6 +2551,7 @@ export async function* processGameplayTurnCycleV1(
     envelope,
     read: gmRead,
     checklist,
+    options,
     provider: options.judgeProvider,
   });
   assertRequiredToolStepsAcceptedV1({ checklist, stepSettlements });

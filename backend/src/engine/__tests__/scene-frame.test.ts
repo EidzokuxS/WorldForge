@@ -1079,7 +1079,7 @@ describe("SceneFrame builder", () => {
     expect(frame.allowedTools).toContain("create_minor_poi");
     expect(frame.allowedTools).toContain("reveal_location");
     expect(frame.allowedTools).not.toContain("add_chronicle_entry");
-    expect(frame.allowedTools).not.toContain("start_search");
+    expect(frame.allowedTools).toContain("start_search");
     expect(frame.allowedTools).not.toContain("record_player_intent");
     expect(frame.allowedTools).toContain("advance_time");
     expect(frame.allowedTools).not.toContain("spawn_npc");
