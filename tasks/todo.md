@@ -73,6 +73,39 @@ P18 entity tag mutation checkpoint:
   - DB grounding: `Sealed lacquer message tube` tags became `["starting-loadout","equipped","suspicious"]`; `world_clocks.world_version=3`; latest authority trace operation `gameplay-cycle-v2.entity.tag.v2`, source entity type `item`, metadata `entityScope="inventory_item"`, `operation="add"`, `tag="suspicious"`.
   - Artifacts: `output/p18-entity-tag-live/load.json`, `turn-entity-tag.sse.txt`, `turn-entity-tag.db.json`, `backend-3199.log`.
 
+P19 support actor create checkpoint:
+- Oracle/GPT-5.5 Pro review `p19-support-actor-create`:
+  - Dry-run: browser mode, forced one bundled attachment via `--browser-bundle-files`, 17 files, about 126k tokens, one `attachments-bundle.txt`.
+  - Real run completed on GPT-5.5 Pro / Extended Pro with one bundled attachment.
+  - Recommendation accepted: implement `support_actor.create.v2` now as a first-class DB-backed mutation handler, but keep it deliberately narrow: temporary, visible, current-scene, reactive support NPCs only.
+  - Accepted boundaries:
+    - create one NPC row, advance world version, write v2 authority trace, then require SceneFrame refresh before narrator/dependent steps;
+    - no actor lifecycle, private knowledge, factions, relationships, inventory, durable world facts, schedules, memory, location events, clock ledger, or persistent/key NPC promotion;
+    - duplicate/existing same-scene temporary actor is rejected/no-op, not accepted observation/terminal receipt, because `support_actor_create` is mutation-receipt-required.
+- Implementation target:
+  - Tighten `support_actor.create.v2` schema with `anchorScope=current_scene`, bounded role kind/name/persona/tags/identity fields, and evidence refs.
+  - Add `support_actor_create` to live GM Read/tool-request/checklist surfaces.
+  - Add DB-backed handler transaction with rollback test hook and authority trace operation `gameplay-cycle-v2.support_actor.create.v2`.
+  - Add focused tests for schema, checklist, handler mutation, duplicate rejection, rollback, and refreshed exposure to `visible_actor`.
+- Implemented `support_actor.create.v2` live slice:
+  - `support_actor_create` is now in live v2 capabilities, GM Read admission, simple checklist compiler, and clean tool-request prompt.
+  - Tool request schema now requires `anchorScope="current_scene"`, `anchorRef`, bounded ordinary `roleKind`, `roleLabel`, optional `displayName`, public persona summary/cues, canonical tags, explicit temporary/current-scene/reactive identity bounds, `reason`, and evidence refs.
+  - DB handler resolves `anchorRef` through the backend-only ref registry as `current_scene`, inserts one `npcs` row with `tier="temporary"`, advances world version, writes `gameplay-cycle-v2.support_actor.create.v2` authority trace, and writes no location events, clock ledger, actor lifecycle, faction, memory, relationship, inventory, or world-fact rows.
+  - Exact duplicate same-scene temporary support actor create is rejected/no-op with no worldVersion advance and no authority trace.
+- Verification:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 114 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+- Live/manual diagnostic evidence:
+  - Used zero-turn clone `7cec9dd4-8ac9-44b0-8280-f29cb7528417` at `Lowwater Bazaar` as P19 diagnostic smoke; after this one turn it is not acceptance evidence.
+  - Two transport attempts with `message`/missing `intent` returned route schema error `"Invalid input: expected string, received undefined"` before gameplay settlement; DB remained clean with 0 v2 packets, 0 temporary NPCs, 0 authority traces, and worldVersion 0.
+  - Real action sent with `campaignId`, `playerAction`, `intent`, and `method`: `Я оглядываюсь в Lowwater Bazaar и ищу рядом обычного временного рыночного носильщика, который сможет подсказать дорогу.`
+  - Result: HTTP 200, SSE reached `narrative` and `done`; narration: `В Lowwater Bazaar вы замечаете Bazaar Porter — типичного временного рыночного носильщика.`
+  - Latest packet `v2packet-mq02fr6j-23ecfef98dd2`: `gmRead.path="tool_plan"`, checklist effect `support_actor_create`, accepted receipt `receipt-step-1` with `toolId="support_actor.create.v2"`, `evidenceAuthority="mutation_receipt"`, `mutationApplied=true`, `mutationAuthority="actor"`, `baseWorldVersion=0`, `resultWorldVersion=1`, plus accepted post-refresh `scene_beat.record.v2` visibility receipt.
+  - DB grounding: inserted temporary NPC `Bazaar Porter`; authority trace operation `gameplay-cycle-v2.support_actor.create.v2`, source entity type `npc`, state deltas `npc:<id>:created` and `scene:<id>:actors`; `world_clocks.world_version=1`, `world_time_minutes=0`.
+  - Backend ran on stable `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3199/3001` clear.
+  - Artifacts: `output/p19-support-actor-live/load-r5.json`, `turn-support-actor-r5.sse.txt`, `turn-support-actor-r5.db.json`.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

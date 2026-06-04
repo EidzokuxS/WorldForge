@@ -776,13 +776,49 @@ const worldFactRecordRequestV2Schema = z.object({
   }).strict(),
 }).strict();
 
+const supportActorTagV2Schema = z.string()
+  .trim()
+  .min(1)
+  .max(40)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/u);
+
 const supportActorCreateRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,
   capabilityId: z.literal("support_actor_create"),
   toolId: z.literal("support_actor.create.v2"),
   effectBinding: z.object({
-    roleLabel: shortText,
+    anchorScope: z.literal("current_scene"),
     anchorRef: modelSafeRefSchema,
+    roleKind: z.enum([
+      "attendant",
+      "bystander",
+      "clerk",
+      "courier",
+      "crowd_voice",
+      "dockhand",
+      "guard",
+      "guide",
+      "helper",
+      "laborer",
+      "porter",
+      "vendor",
+      "witness",
+    ]),
+    roleLabel: shortText,
+    displayName: optionalNonEmptyString(80),
+    persona: z.object({
+      publicSummary: z.string().trim().min(1).max(240),
+      visibleCue: optionalNonEmptyString(160),
+      voiceHint: optionalNonEmptyString(160),
+    }).strict(),
+    tags: z.array(supportActorTagV2Schema).max(6).default([]),
+    identityBounds: z.object({
+      tier: z.literal("temporary"),
+      persistence: z.literal("current_scene"),
+      significance: z.literal("minor_support"),
+      agency: z.literal("reactive_only"),
+      mayBecomePersistentHere: z.literal(false),
+    }).strict(),
     reason: z.string().trim().min(1).max(500),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),

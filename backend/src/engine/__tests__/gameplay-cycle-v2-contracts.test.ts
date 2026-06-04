@@ -219,7 +219,7 @@ function scopedForecast(): ScopedForecastExcerpt {
 
 function movementToolPlanFixture(options: {
   privateGuardTerms?: string[];
-  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "entity_tag" | "quick_action_offer">;
+  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "entity_tag" | "quick_action_offer">;
 } = {}) {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -615,6 +615,85 @@ function dialogueToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function supportActorToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "support_actor_create"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player looks for a temporary local helper in the current scene.",
+      sceneQuestion: "What support actor creation must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+      actionInterpretation: {
+        intent: "Find a nearby dockhand helper.",
+        method: "look around the current scene",
+        targetRefs: ["Atrium Floor"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Creating a visible temporary support actor requires backend mutation authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["support_actor_create"],
+        actorRefs: ["Player"],
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Create one temporary current-scene support actor if accepted by backend authority.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Support actor GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-support-actor-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Create a temporary local dockhand.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Create one temporary dockhand support actor in the current scene.",
+        actorRef: "Player",
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        requiredCapabilityId: "support_actor_create",
+        intendedEffect: {
+          kind: "support_actor_create",
+          summary: "A temporary dockhand support actor becomes visible in the current scene.",
+          stateScope: "actor",
+        },
+        expectedVisibleEffect: "A temporary dockhand support actor is available in the current scene.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Support actor checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function entityTagToolPlanFixture() {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -980,7 +1059,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("toolName");
   });
 
-  it("compiles simple movement, dialogue, and scene-beat GM Reads without executable payloads", () => {
+  it("compiles simple movement, dialogue, support actor, entity tag, and scene-beat GM Reads without executable payloads", () => {
     const movement = movementAdmissionFixture();
     const acceptedMovement = validateGmReadChecklistV2({
       packet: movement.packet,
@@ -1064,6 +1143,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
     });
 
+    const supportActor = supportActorToolPlanFixture();
+    const compiledSupportActor = compileSimpleGmActionChecklistV2({
+      packet: supportActor.packet,
+      gmRead: supportActor.gmRead,
+    });
+    expect(compiledSupportActor?.status).toBe("accepted");
+    if (!compiledSupportActor || compiledSupportActor.status !== "accepted") {
+      throw new Error("Simple support-actor checklist must compile.");
+    }
+    expect(compiledSupportActor.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "support_actor_create",
+      targetRefs: ["Atrium Floor"],
+      intendedEffect: {
+        kind: "support_actor_create",
+        stateScope: "actor",
+      },
+    });
+
     const entityTag = entityTagToolPlanFixture();
     const compiledEntityTag = compileSimpleGmActionChecklistV2({
       packet: entityTag.packet,
@@ -1085,10 +1182,12 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       movement: compiledMovement.checklist,
       dialogue: compiledDialogue.checklist,
       sceneBeat: compiledSceneBeat.checklist,
+      supportActor: compiledSupportActor.checklist,
       entityTag: compiledEntityTag.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
     expect(publicShape).not.toContain("dialogue.record.v2");
+    expect(publicShape).not.toContain("support_actor.create.v2");
     expect(publicShape).not.toContain("scene_beat.record.v2");
     expect(publicShape).not.toContain("entity.tag.v2");
     expect(publicShape).not.toContain("effectBinding");
@@ -1314,6 +1413,66 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       throw new Error("Player ref must resolve.");
     }
     expect(actor.entry.ids.playerActorId).toBe("player-alpha");
+  });
+
+  it("exposes refreshed temporary support actors as playable visible_actor refs after mutation", () => {
+    const refreshedFrame = sceneFrame({
+      worldVersion: 8,
+      roster: {
+        ...sceneFrame().roster,
+        support: [{
+          id: "actor-temp-dockhand",
+          actorId: "actor-temp-dockhand",
+          type: "npc",
+          label: "Local Dockhand",
+          locationId: "location-alpha",
+          sceneScopeId: "scene-alpha",
+          awareness: "clear",
+          awarenessHint: "waiting near the loading marks",
+        }],
+      },
+    });
+    const refreshedAttempt = refreshedAttemptContext({
+      baseWorldVersion: 8,
+    });
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: refreshedAttempt,
+      frame: refreshedFrame,
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Atrium Floor", "Player", "Local Dockhand"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "dialogue_record"],
+      },
+    }));
+    const registry = buildGameplayRefRegistryV2({
+      turnId: packet.turnId,
+      frame: refreshedFrame,
+    });
+
+    expect(packet.scene.actors).toContainEqual({
+      ref: "Local Dockhand",
+      label: "Local Dockhand",
+      role: "support",
+      awarenessHint: "waiting near the loading marks",
+    });
+    expect(packet.citableRefs).toContain("Local Dockhand");
+    expect(resolveGameplayRefV2({
+      registry,
+      ref: "Local Dockhand",
+      allowedKinds: ["visible_actor"],
+    })).toMatchObject({
+      status: "resolved",
+      entry: {
+        kind: "visible_actor",
+        ids: {
+          actorId: "actor-temp-dockhand",
+          sceneScopeId: "scene-alpha",
+        },
+      },
+    });
+    expect(JSON.stringify(packet)).not.toContain("actor-temp-dockhand");
   });
 
   it("admits explicit movement from packet and registry without tool payload authority", () => {
@@ -2775,6 +2934,65 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("record_dialogue_outcome");
     expect(JSON.stringify(result.request)).not.toContain("stateEffects");
     expect(JSON.stringify(result.request)).not.toContain("worldFact");
+  });
+
+  it("accepts a clean support_actor.create.v2 request with bounded temporary current-scene identity", () => {
+    const { packet, checklist } = supportActorToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-support-actor-1",
+        stepId: "step-1",
+        capabilityId: "support_actor_create",
+        toolId: "support_actor.create.v2",
+        effectBinding: {
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          roleKind: "dockhand",
+          roleLabel: "local dockhand",
+          displayName: "Local Dockhand",
+          persona: {
+            publicSummary: "A practical local worker who can answer visible route questions.",
+            visibleCue: "waiting near the loading marks",
+            voiceHint: "short and concrete",
+          },
+          tags: ["dockhand", "local-helper"],
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+            mayBecomePersistentHere: false,
+          },
+          reason: "The player is looking for a nearby ordinary helper in the current scene.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Support actor tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("support_actor.create.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      anchorScope: "current_scene",
+      anchorRef: "Atrium Floor",
+      identityBounds: {
+        tier: "temporary",
+        persistence: "current_scene",
+        significance: "minor_support",
+        agency: "reactive_only",
+        mayBecomePersistentHere: false,
+      },
+    });
+    expect(JSON.stringify(result.request)).not.toContain("create_scene_extra");
+    expect(JSON.stringify(result.request)).not.toContain("spawn_npc");
+    expect(JSON.stringify(result.request)).not.toContain("toolName");
   });
 
   it("accepts a clean entity.tag.v2 request with scoped entity authority", () => {
@@ -5865,6 +6083,241 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes support_actor.create.v2 as atomic temporary current-scene actor mutation", async () => {
+    const fixture = dbTempFixture("wf-v2-db-support-actor-");
+    try {
+      seedP16World();
+      const { packet, checklist } = supportActorToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "support-actor-db-1",
+          stepId: "step-1",
+          capabilityId: "support_actor_create",
+          toolId: "support_actor.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            roleKind: "dockhand",
+            roleLabel: "local dockhand",
+            displayName: "Local Dockhand",
+            persona: {
+              publicSummary: "A practical local worker who can answer visible route questions.",
+              visibleCue: "waiting near the loading marks",
+              voiceHint: "short and concrete",
+            },
+            tags: ["dockhand", "local-helper"],
+            identityBounds: {
+              tier: "temporary",
+              persistence: "current_scene",
+              significance: "minor_support",
+              agency: "reactive_only",
+              mayBecomePersistentHere: false,
+            },
+            reason: "The player is looking for a nearby ordinary helper in the current scene.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-support-actor-db-1",
+        emittedAt: 25,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        toolId: "support_actor.create.v2",
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "actor",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+      });
+      expect(execution.receipt.visibleSummary).toContain("Local Dockhand");
+      expect(execution.receipt.evidenceRefs).toContain("Atrium Floor");
+
+      const actors = getDb().select().from(npcs).where(eq(npcs.name, "Local Dockhand")).all();
+      expect(actors).toHaveLength(1);
+      expect(actors[0]).toMatchObject({
+        campaignId: "campaign-alpha",
+        tier: "temporary",
+        currentLocationId: "location-alpha",
+        currentSceneLocationId: "scene-alpha",
+      });
+      expect(JSON.parse(actors[0].tags)).toEqual(expect.arrayContaining([
+        "temporary-support",
+        "dockhand",
+        "local-helper",
+      ]));
+      const record = JSON.parse(actors[0].characterRecord) as {
+        identity?: { role?: string; tier?: string; displayName?: string };
+        socialContext?: { currentLocationId?: string };
+      };
+      expect(record.identity).toMatchObject({
+        role: "npc",
+        tier: "temporary",
+        displayName: "Local Dockhand",
+      });
+      expect(record.socialContext?.currentLocationId).toBe("location-alpha");
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 8,
+        worldTimeMinutes: 10,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.support_actor.create.v2",
+        sourceEntityType: "npc",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:support-actor-db-1",
+      });
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects support_actor.create.v2 duplicate no-op without mutating DB state or advancing world version", async () => {
+    const fixture = dbTempFixture("wf-v2-db-support-actor-noop-");
+    try {
+      seedP16World();
+      getDb().insert(npcs).values({
+        id: "actor-existing-temp",
+        campaignId: "campaign-alpha",
+        name: "Local Dockhand",
+        persona: "An existing temporary helper.",
+        characterRecord: "{}",
+        derivedTags: "[]",
+        tags: JSON.stringify(["temporary-support", "dockhand"]),
+        tier: "temporary",
+        currentLocationId: "location-alpha",
+        currentSceneLocationId: "scene-alpha",
+        goals: '{"short_term":[],"long_term":[]}',
+        beliefs: "[]",
+        unprocessedImportance: 0,
+        inactiveTicks: 0,
+        createdAt: 1_000,
+      }).run();
+      const { packet, checklist } = supportActorToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "support-actor-noop-db-1",
+          stepId: "step-1",
+          capabilityId: "support_actor_create",
+          toolId: "support_actor.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            roleKind: "dockhand",
+            roleLabel: "local dockhand",
+            displayName: "Local Dockhand",
+            persona: {
+              publicSummary: "A practical local worker.",
+            },
+            tags: ["dockhand"],
+            identityBounds: {
+              tier: "temporary",
+              persistence: "current_scene",
+              significance: "minor_support",
+              agency: "reactive_only",
+              mayBecomePersistentHere: false,
+            },
+            reason: "The player is looking for a nearby ordinary helper in the current scene.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-support-actor-noop-db-1",
+        emittedAt: 26,
+      });
+
+      expect(execution.status).toBe("rejected");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("already present in the current scene");
+      expect(getDb().select().from(npcs).where(eq(npcs.name, "Local Dockhand")).all()).toHaveLength(1);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back support_actor.create.v2 row insert when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-support-actor-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = supportActorToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "support-actor-rollback-db-1",
+          stepId: "step-1",
+          capabilityId: "support_actor_create",
+          toolId: "support_actor.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            roleKind: "dockhand",
+            roleLabel: "local dockhand",
+            displayName: "Rollback Dockhand",
+            persona: {
+              publicSummary: "A practical local worker.",
+            },
+            tags: ["dockhand"],
+            identityBounds: {
+              tier: "temporary",
+              persistence: "current_scene",
+              significance: "minor_support",
+              agency: "reactive_only",
+              mayBecomePersistentHere: false,
+            },
+            reason: "The player is looking for a nearby ordinary helper in the current scene.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterSupportActorInsertBeforeAuthorityTrace: () => {
+              throw new Error("forced support actor authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-support-actor-rollback-db-1",
+        emittedAt: 27,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt.failureReason).toContain("forced support actor authority failure");
+      expect(getDb().select().from(npcs).where(eq(npcs.name, "Rollback Dockhand")).all()).toHaveLength(0);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
     } finally {
       fixture.cleanup();
     }

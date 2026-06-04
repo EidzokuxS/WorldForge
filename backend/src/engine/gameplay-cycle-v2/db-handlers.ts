@@ -63,6 +63,19 @@ type DestinationResolution =
     reason: string;
   };
 
+type CurrentSceneResolution =
+  | {
+    status: "resolved";
+    entry: GameplayRefRegistryEntryV2;
+    sceneLocationId: string;
+    broadLocationId: string;
+    label: string;
+  }
+  | {
+    status: "failed";
+    reason: string;
+  };
+
 type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>["effectBinding"]["entityScope"];
 
 type EntityTagResolution =
@@ -83,6 +96,7 @@ type EntityTagResolution =
 
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
+  afterSupportActorInsertBeforeAuthorityTrace?: () => void;
   afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
 }
 
@@ -131,6 +145,16 @@ function canonicalTag(raw: string): string | null {
   if (!normalized || normalized.length > 80) return null;
   if (!/^[a-z0-9][a-z0-9_-]*$/u.test(normalized)) return null;
   return normalized;
+}
+
+function canonicalSupportTag(raw: string): string | null {
+  const normalized = canonicalTag(raw);
+  if (!normalized || normalized.length > 40) return null;
+  return normalized;
+}
+
+function normalizeActorName(raw: string): string {
+  return raw.trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
 function authoritySourceKey(input: {
@@ -261,6 +285,36 @@ function resolveDestination(input: {
     label: entry.label,
     travelCost: Math.max(0, entry.metadata.travelCost ?? 0),
     connected: entry.metadata.connected === true,
+  };
+}
+
+function resolveCurrentScene(input: {
+  registry: GameplayRefRegistryV2;
+  anchorRef: string;
+}): CurrentSceneResolution {
+  const resolution = resolveGameplayRefV2({
+    registry: input.registry,
+    ref: input.anchorRef,
+    allowedKinds: ["current_scene"],
+  });
+  if (resolution.status !== "resolved") {
+    return { status: "failed", reason: resolution.reason };
+  }
+  const entry = resolution.entry;
+  const sceneLocationId = entry.ids.sceneScopeId ?? entry.ids.locationId;
+  const broadLocationId = entry.ids.currentLocationId ?? entry.ids.broadLocationId;
+  if (!sceneLocationId) {
+    return { status: "failed", reason: `Current scene ref "${input.anchorRef}" lacks a scene location id.` };
+  }
+  if (!broadLocationId) {
+    return { status: "failed", reason: `Current scene ref "${input.anchorRef}" lacks a broad location id.` };
+  }
+  return {
+    status: "resolved",
+    entry,
+    sceneLocationId,
+    broadLocationId,
+    label: entry.label,
   };
 }
 
@@ -646,6 +700,192 @@ function commitActorMoveV2(input: {
       resultWorldVersion,
       resultWorldTimeMinutes,
       elapsedWorldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
+function commitSupportActorCreateV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: Extract<GameplayToolRequestV2, { toolId: "support_actor.create.v2" }>;
+  anchor: Extract<CurrentSceneResolution, { status: "resolved" }>;
+  displayName: string;
+  tags: string[];
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  actorId: string;
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const actorId = crypto.randomUUID();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const locationNames = locationNameById(input.packet.campaignId);
+  const broadLocationName = locationNames.get(input.anchor.broadLocationId) ?? input.anchor.label;
+  const canonicalTags = [
+    "temporary-support",
+    input.request.effectBinding.roleKind,
+    ...input.tags,
+  ];
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const existing = db
+      .select({
+        id: npcs.id,
+        name: npcs.name,
+        tier: npcs.tier,
+        currentSceneLocationId: npcs.currentSceneLocationId,
+      })
+      .from(npcs)
+      .where(and(
+        eq(npcs.campaignId, input.packet.campaignId),
+        eq(npcs.currentSceneLocationId, input.anchor.sceneLocationId),
+        eq(npcs.tier, "temporary"),
+      ))
+      .all()
+      .find((row) => normalizeActorName(row.name) === normalizeActorName(input.displayName));
+    if (existing) {
+      throw new Error(`A matching temporary support actor "${existing.name}" is already present in the current scene.`);
+    }
+
+    const seedRow = {
+      id: actorId,
+      campaignId: input.packet.campaignId,
+      name: input.displayName,
+      persona: input.request.effectBinding.persona.publicSummary,
+      characterRecord: "{}",
+      derivedTags: "[]",
+      tags: stringifyStringArray([...new Set(canonicalTags)]),
+      tier: "temporary" as const,
+      currentLocationId: input.anchor.broadLocationId,
+      currentSceneLocationId: input.anchor.sceneLocationId,
+      goals: '{"short_term":[],"long_term":[]}',
+      beliefs: "[]",
+      unprocessedImportance: 0,
+      inactiveTicks: 0,
+      createdAt: timestamp,
+    } satisfies typeof npcs.$inferInsert;
+    const record = hydrateStoredNpcRecord(seedRow, {
+      currentLocationName: broadLocationName,
+      sourceKind: "generator",
+      originMode: "native",
+    });
+    const projection = projectNpcRecord({
+      ...record,
+      profile: {
+        ...record.profile,
+        personaSummary: input.request.effectBinding.persona.publicSummary,
+        appearance: input.request.effectBinding.persona.visibleCue
+          ?? record.profile.appearance,
+      },
+      identity: {
+        ...record.identity,
+        tier: "temporary",
+      },
+      socialContext: {
+        ...record.socialContext,
+        currentLocationId: input.anchor.broadLocationId,
+        currentLocationName: broadLocationName,
+        originMode: "native",
+      },
+      motivations: {
+        ...record.motivations,
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+    });
+    const insert = db.insert(npcs)
+      .values({
+        id: actorId,
+        campaignId: input.packet.campaignId,
+        ...projection,
+        currentSceneLocationId: input.anchor.sceneLocationId,
+        unprocessedImportance: 0,
+        inactiveTicks: 0,
+        createdAt: timestamp,
+      })
+      .run();
+    if (insert.changes !== 1) {
+      throw new Error("Support actor creation did not insert exactly one NPC row.");
+    }
+
+    input.testHooks?.afterSupportActorInsertBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before support_actor.create.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.support_actor.create.v2",
+        sourceEntityType: "npc",
+        sourceEntityId: actorId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray([
+          `npc:${actorId}:created`,
+          `scene:${input.anchor.sceneLocationId}:actors`,
+        ]),
+        witnesses: stringifyStringArray(input.request.effectBinding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          anchorRef: input.request.effectBinding.anchorRef,
+          anchorScope: input.request.effectBinding.anchorScope,
+          actorId,
+          displayName: input.displayName,
+          roleKind: input.request.effectBinding.roleKind,
+          roleLabel: input.request.effectBinding.roleLabel,
+          tags: input.tags,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      actorId,
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
       authorityTraceId,
     };
   });
@@ -1045,6 +1285,54 @@ function dialogueRecordHandler(
   };
 }
 
+function supportActorCreateHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: Extract<GameplayToolRequestV2, { toolId: "support_actor.create.v2" }>,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const anchor = resolveCurrentScene({
+    registry,
+    anchorRef: request.effectBinding.anchorRef,
+  });
+  if (anchor.status !== "resolved") return failedOutcome(packet, anchor.reason);
+  const invalidTag = request.effectBinding.tags.find((tag) => canonicalSupportTag(tag) !== tag);
+  if (invalidTag) {
+    return failedOutcome(packet, `Invalid support actor tag "${invalidTag}". Use lowercase letters, numbers, hyphen, or underscore only.`);
+  }
+  const displayName = request.effectBinding.displayName?.trim()
+    || request.effectBinding.roleLabel.trim();
+
+  try {
+    const commit = commitSupportActorCreateV2({
+      packet,
+      request,
+      anchor,
+      displayName,
+      tags: request.effectBinding.tags,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "actor",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${displayName} appears as a temporary ${request.effectBinding.roleLabel} in ${anchor.label}.`,
+      evidenceRefs: [
+        request.effectBinding.anchorRef,
+        ...request.effectBinding.evidenceRefs,
+      ],
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "support_actor.create.v2 failed before committing actor creation.";
+    const isNoOp = reason.includes("already present in the current scene");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 function entityTagHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>,
@@ -1119,6 +1407,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "dialogue.record.v2 handler received the wrong request type.");
       }
       return dialogueRecordHandler(packet, request, refRegistry);
+    },
+    "support_actor.create.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "support_actor.create.v2") {
+        return failedOutcome(packet, "support_actor.create.v2 handler received the wrong request type.");
+      }
+      return supportActorCreateHandler(packet, request, refRegistry, options.testHooks);
     },
     "entity.tag.v2": ({ packet, request, refRegistry }) => {
       if (request.toolId !== "entity.tag.v2") {
