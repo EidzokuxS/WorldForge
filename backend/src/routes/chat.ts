@@ -56,8 +56,11 @@ import {
   hasPreparedSettledTurnPacketRecovery,
   hasTurnSagaSnapshotRecovery,
   NarrationRepairExhaustedError,
+  GameplayCycleV2PendingNarrationError,
   PendingNarrationError,
+  findLatestGameplayCycleV2PendingNarrationPacket,
   queuePostTurnSimulationProposals,
+  resumeGameplayCycleV2PendingNarration,
 } from "../engine/index.js";
 import type {
   TurnSagaRecord,
@@ -404,6 +407,12 @@ function resumeTokenForSaga(
   return `resume_${sha256Prefix(`${saga.campaignId}:${saga.id}:${saga.turnId}`)}`;
 }
 
+function resumeTokenForGameplayCycleV2Packet(
+  packet: Pick<GameplayCycleV2PendingNarrationError, "campaignId" | "packetId" | "turnId">,
+): string {
+  return `resume_v2_${sha256Prefix(`${packet.campaignId}:${packet.packetId}:${packet.turnId}`)}`;
+}
+
 const pendingNarrationRecoveryStates = [
   "resume_ready",
   "finalizing_turn",
@@ -448,9 +457,28 @@ function pendingNarrationBlockResponse(
   message: string,
 ): Response | null {
   const pendingSaga = findPendingNarrationSaga({ campaignId });
-  return pendingSaga
-    ? c.json(pendingNarrationData(pendingSaga, message), 409)
+  if (pendingSaga) {
+    return c.json(pendingNarrationData(pendingSaga, message), 409);
+  }
+  const pendingV2Packet = findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
+  return pendingV2Packet
+    ? c.json(gameplayCycleV2PendingNarrationData(pendingV2Packet, message), 409)
     : null;
+}
+
+async function streamGameplayCycleV2PendingNarrationError(input: {
+  error: GameplayCycleV2PendingNarrationError;
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
+  message: string;
+}): Promise<void> {
+  await input.stream.writeSSE({
+    event: "error",
+    data: JSON.stringify({
+      ...gameplayCycleV2PendingNarrationData(input.error, input.message),
+      settled: true,
+      recoverable: true,
+    }),
+  });
 }
 
 function noteTerminalTurnEvent(
@@ -970,6 +998,26 @@ function pendingNarrationStatus(
   };
 }
 
+function gameplayCycleV2PendingNarrationData(
+  packet: Pick<GameplayCycleV2PendingNarrationError, "campaignId" | "packetId" | "turnId">,
+  message: string,
+): PendingNarrationPublicData & {
+  runtime: "gameplay-cycle-v2";
+  packetId: string;
+  turnId: string;
+} {
+  return {
+    error: message,
+    pendingNarration: true,
+    resumable: true,
+    recoveryState: "resume_ready",
+    resumeToken: resumeTokenForGameplayCycleV2Packet(packet),
+    runtime: "gameplay-cycle-v2",
+    packetId: packet.packetId,
+    turnId: packet.turnId,
+  };
+}
+
 async function streamPendingTurnNarration(args: {
   campaignId: string;
   saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId">;
@@ -1032,6 +1080,74 @@ async function streamPendingTurnNarration(args: {
     await writeTurnEventSSE(args.stream, {
       type: "error",
       data: pendingNarrationData(args.saga, message),
+    });
+    return "pending";
+  }
+}
+
+async function streamGameplayCycleV2PendingTurnNarration(args: {
+  campaignId: string;
+  packetId: string;
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+}): Promise<"resumed" | "pending"> {
+  try {
+    const writeRouteEvent = createRouteTurnEventWriter(args.campaignId, args.stream);
+    const generator = resumeGameplayCycleV2PendingNarration({
+      campaignId: args.campaignId,
+      packetId: args.packetId,
+      storytellerProvider: args.storytellerProvider,
+      storytellerTemperature: args.storytellerTemperature,
+      storytellerMaxTokens: args.storytellerMaxTokens,
+    });
+
+    let terminalEventType: "done" | "error" | null = null;
+    for await (const event of generator) {
+      if (event.type === "done" || event.type === "error") {
+        terminalEventType = event.type;
+      }
+      await writeRouteEvent(event);
+    }
+    if (terminalEventType === "done") return "resumed";
+    await writeTurnEventSSE(args.stream, {
+      type: "error",
+      data: {
+        error: "Gameplay-cycle-v2 pending narration resume ended before a terminal done event.",
+        pendingNarration: true,
+        runtime: "gameplay-cycle-v2",
+        packetId: args.packetId,
+        resumable: true,
+        recoveryState: "resume_ready",
+      },
+    });
+    return "pending";
+  } catch (error) {
+    const pendingError = error instanceof GameplayCycleV2PendingNarrationError
+      ? error
+      : null;
+    await writeTurnEventSSE(args.stream, {
+      type: "error",
+      data: pendingError
+        ? gameplayCycleV2PendingNarrationData(
+          pendingError,
+          getPlayerSafeErrorMessage(
+            error,
+            "Gameplay-cycle-v2 pending narration could not be completed yet.",
+          ),
+        )
+        : {
+          error: getPlayerSafeErrorMessage(
+            error,
+            "Gameplay-cycle-v2 pending narration could not be completed yet.",
+          ),
+          pendingNarration: true,
+          runtime: "gameplay-cycle-v2",
+          packetId: args.packetId,
+          resumable: true,
+          recoveryState: "resume_ready",
+        },
     });
     return "pending";
   }
@@ -1161,11 +1277,21 @@ app.get("/history", async (c) => {
     const premise = getCampaignPremise(campaignId);
     const messages = getChatHistory(campaignId).map(toPlayerFacingChatMessage);
     const pendingSaga = findPendingNarrationSaga({ campaignId });
+    const pendingV2Packet = pendingSaga
+      ? null
+      : findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
     return c.json({
       messages,
       premise,
       hasLiveTurnSnapshot: Boolean(getLiveGameplayBoundaryAtTail(campaignId)),
-      pendingNarration: pendingNarrationStatus(pendingSaga),
+      pendingNarration: pendingSaga
+        ? pendingNarrationStatus(pendingSaga)
+        : pendingV2Packet
+          ? gameplayCycleV2PendingNarrationData(
+            pendingV2Packet,
+            "A previous gameplay-cycle-v2 turn is still waiting for final narration.",
+          )
+          : null,
     });
   } catch (error) {
     return c.json(
@@ -1587,6 +1713,29 @@ app.post("/action", async (c) => {
             outcome = result === "resumed" ? "pending_resumed" : "pending";
             return;
           }
+          if (error instanceof GameplayCycleV2PendingNarrationError) {
+            outcome = "pending";
+            setLastTurnSnapshot(
+              campaignId,
+              snapshot,
+              {
+                acceptedDurableEventIds: [],
+                producedDurableEventIds: [],
+                playerAction,
+                chatHistoryLengthBeforeTurn,
+                chatHistoryLengthAfterTurn: getChatHistory(campaignId).length,
+              },
+            );
+            await streamGameplayCycleV2PendingNarrationError({
+              error,
+              stream,
+              message: getPlayerSafeErrorMessage(
+                error,
+                "Turn resolved but final narration is pending.",
+              ),
+            });
+            return;
+          }
           const pendingResult = await streamPendingNarrationBeforeRollback({
             campaignId,
             stream,
@@ -1726,38 +1875,102 @@ app.post("/resume", async (c) => {
 
     const pendingSaga = findPendingNarrationSaga({ campaignId });
     if (!pendingSaga) {
-      endTurn(campaignId);
-      turnStartedForCampaign = null;
-      return c.json({ error: "No pending narration to resume." }, 400);
+      const pendingV2Packet = findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
+      if (!pendingV2Packet) {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+        return c.json({ error: "No pending narration to resume." }, 400);
+      }
+      if (!resumeToken) {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+        return c.json(
+          gameplayCycleV2PendingNarrationData(
+            pendingV2Packet,
+            "Resume token is required for gameplay-cycle-v2 pending narration recovery.",
+          ),
+          400,
+        );
+      }
+      if (resumeToken !== resumeTokenForGameplayCycleV2Packet(pendingV2Packet)) {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+        return c.json(
+          gameplayCycleV2PendingNarrationData(
+            pendingV2Packet,
+            "Resume token no longer matches the gameplay-cycle-v2 pending narration packet.",
+          ),
+          409,
+        );
+      }
+
+      const settings = loadSettings();
+      const stResult = resolveStoryteller(settings);
+      if ("error" in stResult) {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+        return c.json({ error: stResult.error }, stResult.status);
+      }
+
+      c.header("Cache-Control", "no-cache, no-transform");
+      const turnId = randomUUID();
+      const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+      return streamSSE(c, async (stream) => {
+        const unregisterAbortCleanup = registerTurnAbortCleanup({
+          signal: c.req.raw.signal,
+          campaignId,
+          route: "/resume",
+        });
+        try {
+          await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+            try {
+              await streamGameplayCycleV2PendingTurnNarration({
+                campaignId,
+                packetId: pendingV2Packet.packetId,
+                stream,
+                storytellerProvider: stResult.resolved.provider,
+                storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+                storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+              });
+            } finally {
+              endTurn(campaignId);
+              turnStartedForCampaign = null;
+            }
+          });
+        } finally {
+          unregisterAbortCleanup();
+        }
+      });
     }
+    const legacyPendingSaga = pendingSaga;
     if (!resumeToken) {
       endTurn(campaignId);
       turnStartedForCampaign = null;
       return c.json(
         pendingNarrationData(
-          pendingSaga,
+          legacyPendingSaga,
           "Resume token is required for pending narration recovery.",
         ),
         400,
       );
     }
-    if (resumeToken !== resumeTokenForSaga(pendingSaga)) {
+    if (resumeToken !== resumeTokenForSaga(legacyPendingSaga)) {
       endTurn(campaignId);
       turnStartedForCampaign = null;
       return c.json(
         pendingNarrationData(
-          pendingSaga,
+          legacyPendingSaga,
           "Resume token no longer matches the pending narration turn.",
         ),
         409,
       );
     }
-    if (!sagaCanResumeNarration(pendingSaga)) {
+    if (!sagaCanResumeNarration(legacyPendingSaga)) {
       endTurn(campaignId);
       turnStartedForCampaign = null;
       return c.json(
         pendingNarrationData(
-          pendingSaga,
+          legacyPendingSaga,
           "Pending turn has not reached a resumable narration boundary yet.",
         ),
         409,
@@ -1799,7 +2012,7 @@ app.post("/resume", async (c) => {
             });
             await streamPendingTurnNarration({
               campaignId,
-              saga: pendingSaga,
+              saga: legacyPendingSaga,
               stream,
               storytellerProvider: stResult.resolved.provider,
               storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
@@ -2142,6 +2355,29 @@ app.post("/retry", async (c) => {
               message: getPlayerSafeErrorMessage(error, "Narration is pending repair."),
             });
             outcome = result === "resumed" ? "pending_resumed" : "pending";
+            return;
+          }
+          if (error instanceof GameplayCycleV2PendingNarrationError) {
+            outcome = "pending";
+            setLastTurnSnapshot(
+              campaignId,
+              previousSnapshot,
+              {
+                acceptedDurableEventIds: [],
+                producedDurableEventIds: [],
+                playerAction,
+                chatHistoryLengthBeforeTurn: previousBoundary.chatHistoryLengthBeforeTurn,
+                chatHistoryLengthAfterTurn: getChatHistory(campaignId).length,
+              },
+            );
+            await streamGameplayCycleV2PendingNarrationError({
+              error,
+              stream,
+              message: getPlayerSafeErrorMessage(
+                error,
+                "Retry resolved but final narration is pending.",
+              ),
+            });
             return;
           }
           const pendingResult = await streamPendingNarrationBeforeRollback({

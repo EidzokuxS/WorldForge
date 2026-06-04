@@ -63,6 +63,27 @@ export type GameplayRefRegistryProviderV2 = (input: {
   packet: ModelFacingTurnPacketV2;
 }) => GameplayRefRegistryV2 | null | undefined | Promise<GameplayRefRegistryV2 | null | undefined>;
 
+export type GameplayToolRequestCandidateProviderV2 = (input: {
+  packet: ModelFacingTurnPacketV2;
+  checklist: GmActionChecklistV2;
+  gmRead: GmReadChecklistV2;
+  step: GmActionChecklistV2["steps"][number];
+  stepIndex: number;
+  receipts: GameplayRuntimeReceiptV2[];
+  refreshes: FrameRefreshResultV2[];
+}) => unknown | Promise<unknown>;
+
+export type LocalConsequenceCandidateProviderV2 = (input: {
+  initialPacket: ModelFacingTurnPacketV2;
+  latestPacket: ModelFacingTurnPacketV2;
+  checklist: GmActionChecklistV2;
+  gmRead: GmReadChecklistV2;
+  ledger: GameplayRuntimeReceiptLedgerV2;
+  schedule: LocalConsequenceScheduleV2;
+  consequence: LocalConsequenceScheduleV2["entries"][number];
+  consequenceIndex: number;
+}) => unknown | Promise<unknown>;
+
 function defaultReceiptId(stepId: string): string {
   return `receipt-${stepId}`;
 }
@@ -101,12 +122,14 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
   initialPacket: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
   checklist: GmActionChecklistV2;
-  requestsByStepId: Partial<Record<string, unknown>>;
+  requestsByStepId?: Partial<Record<string, unknown>>;
+  requestCandidateProvider?: GameplayToolRequestCandidateProviderV2;
   handlers: GameplayToolHandlerRegistryV2;
   refRegistryProvider?: GameplayRefRegistryProviderV2;
   refreshedFrameProvider?: RefreshedFrameProviderV2;
   localConsequenceRefreshedFrameProvider?: LocalConsequenceRefreshedFrameProviderV2;
   localConsequenceCandidatesByConsequenceId?: Partial<Record<string, unknown>>;
+  localConsequenceCandidateProvider?: LocalConsequenceCandidateProviderV2;
   receiptIdForStep?: (stepId: string, index: number) => string;
   emittedAtForStep?: (stepId: string, index: number) => number;
   receiptIdForLocalConsequence?: (consequenceId: string, index: number) => string;
@@ -123,8 +146,36 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
       acceptedReceiptForStep(receipts, dependencyStepId));
     if (!dependenciesAccepted) continue;
 
-    const request = input.requestsByStepId[step.stepId];
-    if (!request) continue;
+    const request = input.requestsByStepId?.[step.stepId]
+      ?? (input.requestCandidateProvider
+        ? await input.requestCandidateProvider({
+          packet: latestPacket,
+          checklist: input.checklist,
+          gmRead: input.gmRead,
+          step,
+          stepIndex: index,
+          receipts: [...receipts],
+          refreshes: [...refreshes],
+        })
+        : undefined);
+    if (!request) {
+      return {
+        status: "blocked",
+        reason: `Missing gameplay-cycle-v2 tool request candidate for checklist step ${step.stepId}.`,
+        initialPacket: input.initialPacket,
+        latestPacket,
+        ledger: buildLedger({
+          ledgerId: input.ledgerId,
+          initialPacket: input.initialPacket,
+          checklist: input.checklist,
+          receipts,
+        }),
+        receipts,
+        refreshes,
+        settledPacket: null,
+        localConsequenceSchedule: null,
+      };
+    }
 
     const refRegistry = input.refRegistryProvider
       ? await input.refRegistryProvider({ packet: latestPacket })
@@ -211,7 +262,25 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
     maxRequiredEntries: input.maxRequiredLocalConsequenceEntries,
   });
   if (localConsequenceSchedule.route === "required_before_packet") {
-    if (input.localConsequenceCandidatesByConsequenceId) {
+    const localCandidates: Partial<Record<string, unknown>> = {
+      ...(input.localConsequenceCandidatesByConsequenceId ?? {}),
+    };
+    if (input.localConsequenceCandidateProvider) {
+      for (const [index, consequence] of localConsequenceSchedule.entries.entries()) {
+        if (localCandidates[consequence.consequenceId]) continue;
+        localCandidates[consequence.consequenceId] = await input.localConsequenceCandidateProvider({
+          initialPacket: input.initialPacket,
+          latestPacket,
+          checklist: input.checklist,
+          gmRead: input.gmRead,
+          ledger,
+          schedule: localConsequenceSchedule,
+          consequence,
+          consequenceIndex: index,
+        });
+      }
+    }
+    if (Object.keys(localCandidates).length > 0) {
       const localExecution = await executeRequiredLocalConsequencesV2({
         executionId: `local-execution-${input.scheduleId}`,
         ledgerId: input.ledgerId,
@@ -220,7 +289,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
         checklist: input.checklist,
         ledger,
         schedule: localConsequenceSchedule,
-        candidatesByConsequenceId: input.localConsequenceCandidatesByConsequenceId,
+        candidatesByConsequenceId: localCandidates,
         handlers: input.handlers,
         refRegistryProvider: input.refRegistryProvider,
         refreshedFrameProvider: input.localConsequenceRefreshedFrameProvider,

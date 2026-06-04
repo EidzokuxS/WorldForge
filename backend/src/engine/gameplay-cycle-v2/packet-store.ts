@@ -229,6 +229,26 @@ export function markGameplayCycleV2PacketNarratorRendering(
   });
 }
 
+export function markGameplayCycleV2PacketNarratorFailedPendingRetry(
+  packetId: string,
+): PersistedGameplayCycleV2Packet {
+  const persisted = readGameplayCycleV2Packet(packetId);
+  if (!persisted) {
+    throw new Error(`gameplay-cycle-v2 packet not found: ${packetId}`);
+  }
+  return persistSettledTurnPacketV2({
+    packet: persisted.packet,
+    persistence: assertSettledPacketPersistenceV2({
+      ...persisted.persistence,
+      status: "resolved_pending_narration",
+      narratorAttemptStatus: "failed_pending_retry",
+    }),
+    checklist: persisted.checklist,
+    receiptLedger: persisted.receiptLedger,
+    narratorView: persisted.narratorView,
+  });
+}
+
 export function finalizeGameplayCycleV2Packet(input: {
   packetId: string;
   apiProjection: ApiResponseProjectionV2;
@@ -329,4 +349,24 @@ export function readGameplayCycleV2Packet(
     createdAt: row.createdAt as number,
     updatedAt: row.updatedAt as number,
   };
+}
+
+export function findLatestGameplayCycleV2PendingNarrationPacket(
+  campaignId: string,
+): PersistedGameplayCycleV2Packet | null {
+  ensureGameplayCycleV2PacketStore();
+  const row = getSqliteConnection()
+    .prepare(`
+      SELECT
+        packet_id AS packetId
+      FROM ${TABLE_NAME}
+      WHERE campaign_id = ?
+        AND status = 'resolved_pending_narration'
+        AND narrator_attempt_status = 'failed_pending_retry'
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1
+    `)
+    .get(campaignId) as { packetId?: string } | undefined;
+  if (!row?.packetId) return null;
+  return readGameplayCycleV2Packet(row.packetId);
 }

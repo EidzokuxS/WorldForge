@@ -196,7 +196,7 @@ import { retractReflectionBudget } from "./reflection-budget.js";
 import { retractActorKnowledgeRecord } from "./knowledge-model.js";
 import { toPlayerFacingQuickActions } from "./player-facing-events.js";
 import { processGameplayTurnCycleV1 } from "./gameplay-turn-cycle-v1.js";
-import { processGameplayTurnCycleV2NoMutation } from "./gameplay-cycle-v2/runtime.js";
+import { processGameplayTurnCycleV2 } from "./gameplay-cycle-v2/runtime.js";
 
 const log = createLogger("turn-processor");
 const VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT = 2;
@@ -230,7 +230,7 @@ const PENDING_NARRATION_WORKER_STALE_AFTER_MS = 5 * 60_000;
 const PENDING_NARRATION_WORKER_HEARTBEAT_MS = 60_000;
 const GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION = GROUNDED_SENTENCE_DRAFT_VERSION;
 
-function isGameplayCycleV2NoMutationEnabled(): boolean {
+function isGameplayCycleV2Enabled(): boolean {
   const value = process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
@@ -4343,8 +4343,8 @@ function recordLiveTurnAuthorityStage(input: {
 export async function* processTurn(
   options: TurnOptions
 ): AsyncGenerator<TurnEvent> {
-  const events = isGameplayCycleV2NoMutationEnabled()
-    ? processGameplayTurnCycleV2NoMutation(options)
+  const events = isGameplayCycleV2Enabled()
+    ? processGameplayTurnCycleV2(options)
     : processGameplayTurnCycleV1(options);
 
   for await (const event of events) {

@@ -37,6 +37,15 @@ export {
   sanitizeNarrative,
 } from "./turn-processor.js";
 
+export {
+  GameplayCycleV2PendingNarrationError,
+  resumeGameplayCycleV2PendingNarration,
+} from "./gameplay-cycle-v2/runtime.js";
+
+export {
+  findLatestGameplayCycleV2PendingNarrationPacket,
+} from "./gameplay-cycle-v2/packet-store.js";
+
 export type {
   HiddenTurnSummary,
   OpeningSceneOptions,

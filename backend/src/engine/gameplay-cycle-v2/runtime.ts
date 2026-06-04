@@ -28,18 +28,33 @@ import {
   assertSceneFrameEnvelopeV2,
   assertTurnAttemptContextV2,
   assertTurnStartEnvelopeV2,
+  gameplayToolRequestV2Schema,
+  gmActionChecklistV2Schema,
   gmReadCandidateV2LooseSchema,
+  localConsequenceToolRequestCandidateV2Schema,
   type ApiResponseProjectionV2,
+  type GameplayRuntimeReceiptLedgerV2,
+  type GmActionChecklistStepV2,
+  type GmActionChecklistV2,
+  type GmReadChecklistV2,
+  type LocalConsequenceScheduleEntryV2,
+  type LocalConsequenceScheduleV2,
   type ModelFacingTurnPacketV2,
   type NarratorViewV2,
   type RuntimeCapabilityIdV2,
+  type SceneFrameEnvelopeV2,
   type SettledTurnPacketV2,
+  type TurnAttemptContextV2,
 } from "./contracts.js";
 import {
   buildModelFacingTurnPacketV2,
   formatModelFacingTurnPacketForPromptV2,
 } from "./projection.js";
 import { validateGmReadV2 } from "./gm-read.js";
+import { validateGmActionChecklistV2 } from "./action-checklist.js";
+import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
+import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
+import { buildGameplayRefRegistryV2 } from "./ref-registry.js";
 import {
   buildOraclePayloadV2,
   buildOracleSettlementV2,
@@ -52,15 +67,43 @@ import {
 } from "./settled-packet.js";
 import {
   finalizeGameplayCycleV2Packet,
+  markGameplayCycleV2PacketNarratorFailedPendingRetry,
   markGameplayCycleV2PacketNarratorRendering,
   persistSettledTurnPacketV2,
+  readGameplayCycleV2Packet,
 } from "./packet-store.js";
 
-const NO_MUTATION_CAPABILITIES: RuntimeCapabilityIdV2[] = [
+const LIVE_GAMEPLAY_CAPABILITIES: RuntimeCapabilityIdV2[] = [
   "observe_visible",
   "oracle_roll",
   "route_options",
+  "route_check",
+  "movement",
+  "scene_beat_record",
 ];
+
+export class GameplayCycleV2PendingNarrationError extends Error {
+  readonly packetId: string;
+  readonly campaignId: string;
+  readonly turnId: string;
+
+  constructor(input: {
+    packetId: string;
+    campaignId: string;
+    turnId: string;
+    cause: unknown;
+  }) {
+    const causeMessage = input.cause instanceof Error
+      ? input.cause.message
+      : String(input.cause);
+    super(`gameplay-cycle-v2 narration pending retry for packet ${input.packetId}: ${causeMessage}`);
+    this.name = "GameplayCycleV2PendingNarrationError";
+    this.packetId = input.packetId;
+    this.campaignId = input.campaignId;
+    this.turnId = input.turnId;
+    this.cause = input.cause;
+  }
+}
 
 function providerSummary(provider: ProviderConfig) {
   return {
@@ -135,14 +178,73 @@ function currentBaseTick(campaignId: string): number {
   return Math.max(campaignTick, clock.currentTick, clock.worldTimeMinutes);
 }
 
+interface LiveSceneFrameContextV2 {
+  frame: SceneFrame;
+  envelope: SceneFrameEnvelopeV2;
+  packet: ModelFacingTurnPacketV2;
+  refRegistry: ReturnType<typeof buildGameplayRefRegistryV2>;
+}
+
+function attemptAtWorldVersion(input: {
+  attempt: TurnAttemptContextV2;
+  worldVersion: number;
+}): TurnAttemptContextV2 {
+  return assertTurnAttemptContextV2({
+    ...input.attempt,
+    baseWorldVersion: input.worldVersion,
+  });
+}
+
+async function buildLiveSceneFrameContextV2(input: {
+  campaignId: string;
+  playerAction: string;
+  attempt: TurnAttemptContextV2;
+  forecast: ReturnType<typeof loadWorldTrajectoryForecast>;
+}): Promise<LiveSceneFrameContextV2> {
+  const frame = await buildSceneFrame({
+    campaignId: input.campaignId,
+    tick: input.attempt.baseTick,
+    playerAction: input.playerAction,
+    runActorExposureCatchup: false,
+    allowedTools: [],
+    toolExposureMode: "internal",
+  });
+  const envelope = assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: input.attempt,
+    frame,
+    scopedForecastExcerpt: buildScopedForecastExcerpt({
+      forecast: input.forecast,
+      localRefs: forecastLocalRefs(frame),
+    }),
+    refs: {
+      visibleRefs: visibleRefsFromFrame(frame),
+      privateGuardTerms: frame.perception.forbiddenActorLabels ?? [],
+      allowedCapabilityIds: LIVE_GAMEPLAY_CAPABILITIES,
+    },
+  });
+  return {
+    frame,
+    envelope,
+    packet: buildModelFacingTurnPacketV2(envelope),
+    refRegistry: buildGameplayRefRegistryV2({
+      turnId: input.attempt.turnId,
+      frame,
+    }),
+  };
+}
+
 function buildGmReadSystemPrompt(): string {
   return [
     "You are the WorldForge GM Read layer.",
     "Return only the interpretation object for gameplay-cycle-v2.",
-    "This slice accepts direct, continue, clarification, or roll_oracle only.",
+    "This slice accepts direct, continue, clarification, roll_oracle, or tool_plan.",
     "Use roll_oracle only when the player action contains true uncertainty/risk that cannot be settled from the current SceneFrame alone.",
     "Immediate uncertainty about whether a visible actor notices, resists, is distracted by, or reacts to the player's current risky attempt is eligible for roll_oracle.",
     "Do not use roll_oracle to reveal hidden memories, private intentions, secret knowledge, offscreen facts, or facts about actors who are not visible/cited.",
+    "Use tool_plan when the turn needs an accepted backend action checklist for route checks, movement, or a scene-local beat receipt.",
+    "For tool_plan, include checklistRequest with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal.",
+    "For this live slice, checklistRequest.requiredEffectKinds may use only route_check, movement, or scene_beat.",
     "Do not narrate. Do not mutate state. Do not include tool names, tool inputs, executable payloads, combat transitions, or future checklist steps.",
     "Cite only citableRefs from the model-facing packet.",
     "For direct/continue, omit clarificationPrompt entirely. For clarification, include a non-empty clarificationPrompt. Never emit empty strings or null for optional fields.",
@@ -151,15 +253,189 @@ function buildGmReadSystemPrompt(): string {
     "For roll_oracle, uncertaintyKind must be one of: physical_risk, perception, social_pressure, opposition, chance.",
     "The three outcomeMeanings must define what each tier means before the roll; narrator will use the selected meaning as settled truth.",
     "Oracle settles uncertainty only; it is not a movement, discovery, item-state, NPC-knowledge, or world-mutation receipt.",
-    "If the player action needs world mutation, movement, combat, hidden knowledge, or a backend tool, choose clarification for this slice unless the only missing piece is true Oracle uncertainty.",
+    "If the player action needs unimplemented mutation, combat, hidden knowledge, or a backend capability outside route_check/movement/scene_beat, choose clarification.",
   ].join("\n");
 }
 
 function buildGmReadPrompt(packet: ModelFacingTurnPacketV2): string {
   return JSON.stringify({
-    task: "Interpret this player turn without mutation.",
+    task: "Interpret this player turn. Select no-mutation, Oracle uncertainty, or backend checklist admission.",
     packet: formatModelFacingTurnPacketForPromptV2(packet),
   }, null, 2);
+}
+
+function buildChecklistSystemPrompt(): string {
+  return [
+    "You are the WorldForge GM Action Checklist layer for gameplay-cycle-v2.",
+    "Return only gm-action-checklist.v2 JSON.",
+    "The checklist is intent-only. Do not include tool ids, tool inputs, executable payloads, state deltas, receipts, results, or narration.",
+    "Use only refs from the current model-facing packet citableRefs and from the accepted GM Read checklistRequest.",
+    "For this live slice, allowed intendedEffect.kind values are route_check, movement, and scene_beat.",
+    "Each step must have exactly one intended state/evidence effect and the matching requiredCapabilityId.",
+    "Use step-1, step-2, ... in dependency order. Dependencies may only refer to earlier steps.",
+    "Checklist intent is not settled truth; backend receipts decide truth.",
+  ].join("\n");
+}
+
+function buildChecklistPrompt(input: {
+  packet: ModelFacingTurnPacketV2;
+  gmRead: GmReadChecklistV2;
+}): string {
+  return JSON.stringify({
+    task: "Produce an intent-only backend-owned action checklist for the accepted GM Read.",
+    packet: formatModelFacingTurnPacketForPromptV2(input.packet),
+    acceptedGmRead: input.gmRead,
+    allowedEffectKinds: ["route_check", "movement", "scene_beat"],
+  }, null, 2);
+}
+
+function buildToolRequestSystemPrompt(): string {
+  return [
+    "You are the WorldForge gameplay-tool-request.v2 planner.",
+    "Return exactly one gameplay-tool-request.v2 JSON object for the selected checklist step.",
+    "Use the current model-facing packet only; if this step follows a mutation, the packet already reflects that mutation.",
+    "Use only clean v2 tool ids: route.check.v2, actor.move.v2, or scene_beat.record.v2.",
+    "Do not include old runtime tool names, root input/payload fields, state deltas, receipts, results, narration, or backend ids.",
+    "Every effectBinding ref must be cited by the selected checklist step and by the current packet citableRefs.",
+    "The backend validates and executes the request; you only propose the candidate.",
+  ].join("\n");
+}
+
+function buildToolRequestPrompt(input: {
+  packet: ModelFacingTurnPacketV2;
+  checklist: GmActionChecklistV2;
+  step: GmActionChecklistStepV2;
+}): string {
+  return JSON.stringify({
+    task: "Produce exactly one selected-step gameplay-tool-request.v2 candidate.",
+    packet: formatModelFacingTurnPacketForPromptV2(input.packet),
+    checklist: input.checklist,
+    selectedStep: input.step,
+  }, null, 2);
+}
+
+function localConsequenceStepId(index: number): `step-${number}` {
+  return `step-${index + 1}` as `step-${number}`;
+}
+
+function buildLocalConsequenceSystemPrompt(): string {
+  return [
+    "You are the WorldForge local consequence request layer for gameplay-cycle-v2.",
+    "Return one local-consequence-tool-request-candidate.v2 JSON object.",
+    "The nested request must be scene_beat.record.v2 for the selected local consequence.",
+    "scene_beat.record.v2 is terminal and non-mutating in this slice; do not write durable events or claim structural state changes.",
+    "Use only refs from the current model-facing packet and the local consequence evidenceRefs.",
+    "Do not narrate, do not include legacy tool names, and do not include backend ids.",
+  ].join("\n");
+}
+
+function buildLocalConsequencePrompt(input: {
+  latestPacket: ModelFacingTurnPacketV2;
+  ledger: GameplayRuntimeReceiptLedgerV2;
+  schedule: LocalConsequenceScheduleV2;
+  consequence: LocalConsequenceScheduleEntryV2;
+  consequenceIndex: number;
+}): string {
+  return JSON.stringify({
+    task: "Produce one required local consequence scene-beat request candidate.",
+    packet: formatModelFacingTurnPacketForPromptV2(input.latestPacket),
+    acceptedReceiptLedger: input.ledger,
+    schedule: input.schedule,
+    selectedConsequence: input.consequence,
+    requiredNestedRequest: {
+      version: "gameplay-tool-request.v2",
+      stepId: localConsequenceStepId(input.consequenceIndex),
+      capabilityId: "scene_beat_record",
+      toolId: "scene_beat.record.v2",
+      effectBinding: {
+        actorRef: input.consequence.actorRef,
+        evidenceRefs: input.consequence.evidenceRefs,
+      },
+    },
+  }, null, 2);
+}
+
+function runtimeContractError(message: string): Error {
+  return new Error(`gameplay-cycle-v2 pre-settlement contract failed: ${message}`);
+}
+
+async function generateActionChecklistCandidateV2(input: {
+  options: TurnOptions;
+  packet: ModelFacingTurnPacketV2;
+  gmRead: GmReadChecklistV2;
+}): Promise<GmActionChecklistV2> {
+  const rawChecklist = (await safeGenerateObject({
+    model: createModel(input.options.judgeProvider, { role: "judge" }),
+    schema: gmActionChecklistV2Schema,
+    system: buildChecklistSystemPrompt(),
+    prompt: buildChecklistPrompt({
+      packet: input.packet,
+      gmRead: input.gmRead,
+    }),
+    temperature: 0.1,
+    maxTokens: 2_000,
+    retries: 1,
+    strictSchema: false,
+  })).object;
+  const validation = validateGmActionChecklistV2({
+    packet: input.packet,
+    gmRead: input.gmRead,
+    candidate: rawChecklist,
+  });
+  if (validation.status !== "accepted") {
+    throw runtimeContractError(
+      `GM action checklist rejected: ${validation.issues.map((issue) => issue.message).join("; ")}`,
+    );
+  }
+  return validation.checklist;
+}
+
+async function generateToolRequestCandidateV2(input: {
+  options: TurnOptions;
+  packet: ModelFacingTurnPacketV2;
+  checklist: GmActionChecklistV2;
+  step: GmActionChecklistStepV2;
+}): Promise<unknown> {
+  return (await safeGenerateObject({
+    model: createModel(input.options.judgeProvider, { role: "judge" }),
+    schema: gameplayToolRequestV2Schema,
+    system: buildToolRequestSystemPrompt(),
+    prompt: buildToolRequestPrompt({
+      packet: input.packet,
+      checklist: input.checklist,
+      step: input.step,
+    }),
+    temperature: 0.1,
+    maxTokens: 1_400,
+    retries: 1,
+    strictSchema: false,
+  })).object;
+}
+
+async function generateLocalConsequenceCandidateV2(input: {
+  options: TurnOptions;
+  latestPacket: ModelFacingTurnPacketV2;
+  ledger: GameplayRuntimeReceiptLedgerV2;
+  schedule: LocalConsequenceScheduleV2;
+  consequence: LocalConsequenceScheduleEntryV2;
+  consequenceIndex: number;
+}): Promise<unknown> {
+  return (await safeGenerateObject({
+    model: createModel(input.options.judgeProvider, { role: "judge" }),
+    schema: localConsequenceToolRequestCandidateV2Schema,
+    system: buildLocalConsequenceSystemPrompt(),
+    prompt: buildLocalConsequencePrompt({
+      latestPacket: input.latestPacket,
+      ledger: input.ledger,
+      schedule: input.schedule,
+      consequence: input.consequence,
+      consequenceIndex: input.consequenceIndex,
+    }),
+    temperature: 0.1,
+    maxTokens: 1_400,
+    retries: 1,
+    strictSchema: false,
+  })).object;
 }
 
 function buildNarratorSystemPrompt(): string {
@@ -221,7 +497,7 @@ function buildApiProjectionInput(input: {
   });
 }
 
-export async function* processGameplayTurnCycleV2NoMutation(
+export async function* processGameplayTurnCycleV2(
   options: TurnOptions,
 ): AsyncGenerator<TurnEvent> {
   const turnId = publicRuntimeId("v2turn");
@@ -268,41 +544,26 @@ export async function* processGameplayTurnCycleV2NoMutation(
     type: "scene-settling",
     data: {
       stage: "scene-frame",
-      phase: "gameplay-cycle-v2-no-mutation",
+      phase: "gameplay-cycle-v2",
       tick: baseTick,
     },
   };
 
-  const frame = await buildSceneFrame({
-    campaignId: options.campaignId,
-    tick: baseTick,
-    playerAction: options.playerAction,
-    runActorExposureCatchup: false,
-    allowedTools: [],
-    toolExposureMode: "internal",
-  });
   const forecast = loadWorldTrajectoryForecast(options.campaignId);
-  const sceneEnvelope = assertSceneFrameEnvelopeV2({
-    version: "scene-frame-envelope.v2",
+  const initialFrameContext = await buildLiveSceneFrameContextV2({
+    campaignId: options.campaignId,
+    playerAction: options.playerAction,
     attempt,
-    frame,
-    scopedForecastExcerpt: buildScopedForecastExcerpt({
-      forecast,
-      localRefs: forecastLocalRefs(frame),
-    }),
-    refs: {
-      visibleRefs: visibleRefsFromFrame(frame),
-      privateGuardTerms: frame.perception.forbiddenActorLabels ?? [],
-      allowedCapabilityIds: NO_MUTATION_CAPABILITIES,
-    },
+    forecast,
   });
-  const modelPacket = buildModelFacingTurnPacketV2(sceneEnvelope);
+  const frame = initialFrameContext.frame;
+  const modelPacket = initialFrameContext.packet;
 
   yield {
     type: "scene-settling",
     data: {
       stage: "gm-read",
-      phase: "gameplay-cycle-v2-no-mutation",
+      phase: "gameplay-cycle-v2",
       tick: baseTick,
     },
   };
@@ -349,7 +610,7 @@ export async function* processGameplayTurnCycleV2NoMutation(
       type: "scene-settling",
       data: {
         stage: "oracle",
-        phase: "gameplay-cycle-v2-no-mutation",
+        phase: "gameplay-cycle-v2",
         tick: baseTick,
       },
     };
@@ -375,6 +636,104 @@ export async function* processGameplayTurnCycleV2NoMutation(
       gmRead,
       oracleSettlement,
     });
+  } else if (gmRead.path === "tool_plan") {
+    yield {
+      type: "scene-settling",
+      data: {
+        stage: "action-checklist",
+        phase: "gameplay-cycle-v2",
+        tick: baseTick,
+      },
+    };
+    const checklist = await generateActionChecklistCandidateV2({
+      options,
+      packet: modelPacket,
+      gmRead,
+    });
+    yield {
+      type: "scene-settling",
+      data: {
+        stage: "tool-execution",
+        phase: "gameplay-cycle-v2",
+        tick: baseTick,
+      },
+    };
+    const handlers = createDbBackedGameplayToolHandlersV2();
+    const sceneContextCache = new Map<number, LiveSceneFrameContextV2>([
+      [initialFrameContext.packet.baseWorldVersion, initialFrameContext],
+    ]);
+    const sceneContextForWorldVersion = async (worldVersion: number) => {
+      const cached = sceneContextCache.get(worldVersion);
+      if (cached) return cached;
+      const refreshed = await buildLiveSceneFrameContextV2({
+        campaignId: options.campaignId,
+        playerAction: options.playerAction,
+        attempt: attemptAtWorldVersion({
+          attempt,
+          worldVersion,
+        }),
+        forecast,
+      });
+      sceneContextCache.set(worldVersion, refreshed);
+      return refreshed;
+    };
+    const composition = await composeGameplayCycleMutatingTurnV2({
+      packetId: publicRuntimeId("v2packet"),
+      ledgerId: `ledger-${turnId}`,
+      scheduleId: `schedule-${turnId}`,
+      initialPacket: modelPacket,
+      gmRead,
+      checklist,
+      handlers,
+      refRegistryProvider: async ({ packet }) =>
+        (await sceneContextForWorldVersion(packet.baseWorldVersion)).refRegistry,
+      requestCandidateProvider: async ({ packet, checklist: requestChecklist, step }) =>
+        generateToolRequestCandidateV2({
+          options,
+          packet,
+          checklist: requestChecklist,
+          step,
+        }),
+      refreshedFrameProvider: async ({ receipt }) =>
+        (await sceneContextForWorldVersion(receipt.resultWorldVersion)).envelope,
+      localConsequenceCandidateProvider: async ({
+        latestPacket,
+        ledger,
+        schedule,
+        consequence,
+        consequenceIndex,
+      }) => generateLocalConsequenceCandidateV2({
+        options,
+        latestPacket,
+        ledger,
+        schedule,
+        consequence,
+        consequenceIndex,
+      }),
+      localConsequenceRefreshedFrameProvider: async ({ receipt }) =>
+        (await sceneContextForWorldVersion(receipt.resultWorldVersion)).envelope,
+    });
+    if (composition.status !== "settled") {
+      throw runtimeContractError(composition.reason);
+    }
+    if (
+      composition.settledPacket.failedSteps.length > 0
+      || composition.settledPacket.skippedSteps.length > 0
+    ) {
+      throw runtimeContractError(
+        "Tool-plan composition produced failed or skipped required steps before packet persistence.",
+      );
+    }
+    settledPacket = composition.settledPacket;
+    const packetPersistence = buildSettledPacketPersistencePendingV2(settledPacket);
+    const narratorView = buildNarratorViewV2(settledPacket);
+    persistSettledTurnPacketV2({
+      packet: settledPacket,
+      persistence: packetPersistence,
+      checklist,
+      receiptLedger: composition.ledger,
+      narratorView,
+    });
   } else {
     settledPacket = buildNoReceiptSettledTurnPacketV2({
       packetId: publicRuntimeId("v2packet"),
@@ -382,13 +741,16 @@ export async function* processGameplayTurnCycleV2NoMutation(
       gmRead,
     });
   }
-  const packetPersistence = buildSettledPacketPersistencePendingV2(settledPacket);
-  const narratorView = buildNarratorViewV2(settledPacket);
-  persistSettledTurnPacketV2({
-    packet: settledPacket,
-    persistence: packetPersistence,
-    narratorView,
-  });
+  const existingNarratorView = buildNarratorViewV2(settledPacket);
+  if (gmRead.path !== "tool_plan") {
+    const packetPersistence = buildSettledPacketPersistencePendingV2(settledPacket);
+    persistSettledTurnPacketV2({
+      packet: settledPacket,
+      persistence: packetPersistence,
+      narratorView: existingNarratorView,
+    });
+  }
+  const narratorView = existingNarratorView;
 
   if (options.onBeforeVisibleNarration) {
     await Promise.resolve(options.onBeforeVisibleNarration(buildHiddenSummary({
@@ -403,19 +765,30 @@ export async function* processGameplayTurnCycleV2NoMutation(
     type: "scene-settling",
     data: {
       stage: "narrator",
-      phase: "gameplay-cycle-v2-no-mutation",
+      phase: "gameplay-cycle-v2",
       tick: baseTick,
     },
   };
   markGameplayCycleV2PacketNarratorRendering(settledPacket.packetId);
 
-  const narration = await generateText({
-    model: createModel(options.storytellerProvider, { role: "storyteller" }),
-    system: buildNarratorSystemPrompt(),
-    prompt: buildNarratorPrompt(narratorView),
-    temperature: options.storytellerTemperature,
-    maxOutputTokens: options.storytellerMaxTokens,
-  });
+  let narration: Awaited<ReturnType<typeof generateText>>;
+  try {
+    narration = await generateText({
+      model: createModel(options.storytellerProvider, { role: "storyteller" }),
+      system: buildNarratorSystemPrompt(),
+      prompt: buildNarratorPrompt(narratorView),
+      temperature: options.storytellerTemperature,
+      maxOutputTokens: options.storytellerMaxTokens,
+    });
+  } catch (error) {
+    markGameplayCycleV2PacketNarratorFailedPendingRetry(settledPacket.packetId);
+    throw new GameplayCycleV2PendingNarrationError({
+      packetId: settledPacket.packetId,
+      campaignId: settledPacket.campaignId,
+      turnId: settledPacket.turnId,
+      cause: error,
+    });
+  }
   const narrativeText = assertNarrativeText(narration.text);
 
   appendChatMessages(options.campaignId, [
@@ -454,10 +827,104 @@ export async function* processGameplayTurnCycleV2NoMutation(
   yield {
     type: "finalizing_turn",
     data: {
-      stage: "gameplay-cycle-v2-no-mutation",
+      stage: "gameplay-cycle-v2",
       tick: newTick,
     },
   };
 
+  yield projection.doneEvent;
+}
+
+export const processGameplayTurnCycleV2NoMutation = processGameplayTurnCycleV2;
+
+export async function* resumeGameplayCycleV2PendingNarration(input: {
+  campaignId: string;
+  packetId: string;
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+}): AsyncGenerator<TurnEvent> {
+  const persisted = readGameplayCycleV2Packet(input.packetId);
+  if (!persisted || persisted.campaignId !== input.campaignId) {
+    throw new Error(`gameplay-cycle-v2 pending packet not found: ${input.packetId}`);
+  }
+  if (
+    persisted.status !== "resolved_pending_narration"
+    || persisted.narratorAttemptStatus !== "failed_pending_retry"
+  ) {
+    throw new Error(`gameplay-cycle-v2 packet ${input.packetId} is not pending narration retry.`);
+  }
+  const narratorView = persisted.narratorView ?? buildNarratorViewV2(persisted.packet);
+
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "narrator",
+      phase: "gameplay-cycle-v2-resume",
+      tick: persisted.packet.baseTick,
+    },
+  };
+  markGameplayCycleV2PacketNarratorRendering(persisted.packetId);
+
+  let narration: Awaited<ReturnType<typeof generateText>>;
+  try {
+    narration = await generateText({
+      model: createModel(input.storytellerProvider, { role: "storyteller" }),
+      system: buildNarratorSystemPrompt(),
+      prompt: buildNarratorPrompt(narratorView),
+      temperature: input.storytellerTemperature,
+      maxOutputTokens: input.storytellerMaxTokens,
+    });
+  } catch (error) {
+    markGameplayCycleV2PacketNarratorFailedPendingRetry(persisted.packetId);
+    throw new GameplayCycleV2PendingNarrationError({
+      packetId: persisted.packetId,
+      campaignId: persisted.campaignId,
+      turnId: persisted.turnId,
+      cause: error,
+    });
+  }
+
+  const narrativeText = assertNarrativeText(narration.text);
+  appendChatMessages(input.campaignId, [
+    {
+      role: "user",
+      content: persisted.packet.playerAction,
+    },
+    {
+      role: "assistant",
+      content: narrativeText,
+      metadata: {
+        presentation: {
+          authority: "settled_packet_presentation",
+          source: "settled_turn_packet",
+        },
+      },
+    },
+  ]);
+
+  const newTick = advanceCampaignTick(input.campaignId, 1);
+  syncWorldClockTurnBoundary({
+    campaignId: input.campaignId,
+    currentTick: newTick,
+  });
+  const projection = buildApiProjectionInput({
+    packet: persisted.packet,
+    narrativeText,
+    tick: newTick,
+  });
+  finalizeGameplayCycleV2Packet({
+    packetId: persisted.packetId,
+    apiProjection: projection,
+  });
+
+  yield projection.narrativeEvent;
+  yield {
+    type: "finalizing_turn",
+    data: {
+      stage: "gameplay-cycle-v2-resume",
+      tick: newTick,
+    },
+  };
   yield projection.doneEvent;
 }

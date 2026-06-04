@@ -158,7 +158,7 @@ export type GmReadChecklistValidationResultV2 =
 
 export interface GmReadAnyValidationAcceptedV2 {
   status: "accepted";
-  read: GmReadNoMutationV2 | GmReadOracleV2;
+  read: GmReadNoMutationV2 | GmReadOracleV2 | GmReadChecklistV2;
   issues: [];
 }
 
@@ -347,6 +347,9 @@ export function validateGmReadV2(input: {
     : "";
   if (path === "roll_oracle") {
     return validateGmReadOracleV2(input);
+  }
+  if (path === "tool_plan") {
+    return validateGmReadChecklistV2(input);
   }
   return validateGmReadNoMutationV2(input);
 }

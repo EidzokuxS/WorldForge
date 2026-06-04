@@ -175,6 +175,49 @@ P16 DB-backed handler decision and implementation:
   - GitNexus `detect_changes(scope=all)` reported low risk and no affected processes for tracked files; new untracked v2 files remain unavailable to symbol-level GitNexus until `npx gitnexus analyze --embeddings` after commit.
   - Backend ports `3199` and `3001` were not listening after verification.
 
+P17 live mutating adapter decision and implementation checkpoint:
+- Develop branch maintenance:
+  - User reported GitHub showing `develop` behind `main`.
+  - Fixed by fast-forwarding `develop` from `45517081` to `b2335b58` and pushing `origin/develop`.
+- Oracle/GPT-5.5 Pro session: `p17-live-mutating-adapter`.
+  - Dry-run: browser mode, forced one bundled text attachment via `--browser-bundle-files`, 18 files, about 173.5k tokens.
+  - Real run completed on GPT-5.5 Pro / Extended Pro with one `attachments-bundle.txt`.
+  - Recommendation accepted:
+    - Replace/rename the live no-mutation adapter into full `processGameplayTurnCycleV2()`.
+    - Admit `tool_plan` as first-class GM Read path while keeping GM Read free of tool payloads, narration, and mutation.
+    - Generate `gm-action-checklist.v2` from the accepted GM Read, then generate exactly one `gameplay-tool-request.v2` per executable step.
+    - Do not pre-generate dependent requests against the initial packet; request generation must happen against the latest model-facing packet after any accepted mutation refresh.
+    - Use `composeGameplayCycleMutatingTurnV2()` plus `createDbBackedGameplayToolHandlersV2()`.
+    - Provide `buildGameplayRefRegistryV2()` from each current/refreshed SceneFrame.
+    - Keep the legacy `turn_sagas` bridge out of this slice.
+    - Fail closed before packet persistence for invalid checklist/request/composition/frame-refresh; after packet persistence, use v2 pending/rendering/finalized packet-store semantics.
+  - Critical red flags accepted: old schemas/executor/`ToolResult`, semantic label parsing, stale dependent request packets, `route.check.v2` as movement, `scene_beat.record.v2` durable writes, and transport-owned mutation truth.
+- Implemented so far:
+  - `validateGmReadV2()` now admits `tool_plan` through the checklist validator.
+  - `processGameplayTurnCycleV2()` is the live adapter; `processGameplayTurnCycleV2NoMutation` remains only as an alias.
+  - Live SceneFrame envelopes now expose the minimal P17 live capability surface: `observe_visible`, `oracle_roll`, `route_options`, `route_check`, `movement`, and `scene_beat_record`.
+  - Runtime added model-generation adapters for GM action checklist, selected-step tool requests, and required local consequence candidates.
+  - Runtime routes `tool_plan` through `composeGameplayCycleMutatingTurnV2()` and `createDbBackedGameplayToolHandlersV2()`, persists checklist + receipt ledger audit with the v2 packet, and keeps old post-turn hooks out.
+  - Runtime fails closed before packet persistence when composition contains failed or skipped required primary steps, so audit-only rejected requests cannot become player-facing settled truth.
+  - Packet store now has a v2 narrator failed-pending-retry transition that preserves packet/checklist/ledger/narrator view and keeps API projection empty.
+  - `GameplayCycleV2PendingNarrationError` now carries packet/campaign/turn ids after the v2 packet is persisted and narrator rendering fails.
+  - `/api/chat/action` and `/api/chat/retry` catch that typed v2 pending error, emit a recoverable `pendingNarration` SSE error with `runtime=gameplay-cycle-v2`, and do not restore the pre-turn snapshot.
+  - `/api/chat/resume` can now resume v2 pending narration from the preserved v2 packet using a v2 resume token, finalizing the packet/API projection after successful narrator output.
+  - `composeGameplayCycleMutatingTurnV2()` now accepts request/local-consequence provider callbacks so dependent requests are generated against the latest refreshed packet instead of stale initial refs.
+  - `turn-processor.ts` switches `WORLDFORGE_GAMEPLAY_CYCLE_V2` to full `processGameplayTurnCycleV2()`.
+- Focused P17 tests added:
+  - unified GM Read validator accepts clean `tool_plan` and rejects payload smuggling;
+  - composer request provider receives baseWorldVersion `7` for step 1 and refreshed baseWorldVersion `8` for dependent step 2 after accepted movement;
+  - runtime source-boundary test now expects full v2 adapter wiring and rejects legacy ownership imports/surfaces.
+  - `/api/chat/action` route test proves a `GameplayCycleV2PendingNarrationError` emits v2 pending narration SSE and does not call legacy pending saga resume or `restoreSnapshot`.
+  - `/api/chat/resume` route test proves v2 pending packets resume through the v2 runtime path instead of legacy saga replay.
+- Verification:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` (85 tests).
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` (60 tests).
+  - `npm --prefix backend run typecheck`.
+- Known P17 gap before live/manual acceptance:
+  - v2 pending narration transport/resume is contract-tested, but no live `/api/chat/action` manual evidence has been counted for this slice yet.
+
 ## Primitive Rewrite Cycle
 
 Development loop for each primitive:
