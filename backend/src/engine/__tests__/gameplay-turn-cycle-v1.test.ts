@@ -1270,6 +1270,63 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).toContain("это не доказывает их отсутствие");
   });
 
+  it("forbids narrator from turning visual start_search found=false into absence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-visual-search",
+      turnId: "turn-visual-search",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я ищу синюю вывеску Laundry King и жёлтый конбини.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player searches the current alley for visual landmarks.",
+        sceneQuestion: "Are the visual landmarks established?",
+        actionInterpretation: {
+          intent: "search for Laundry King sign and yellow konbini",
+          targetRefs: ["Laundry King", "yellow konbini"],
+        },
+        rationale: "The visual details are unconfirmed.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "start_search",
+        input: { query: "blue Laundry King sign or yellow konbini", method: "look" },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            kind: "search_started",
+            query: "blue Laundry King sign or yellow konbini",
+            status: "active",
+            targetTruth: "unconfirmed",
+            found: false,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("For any start_search acceptedEvidence with found=false");
+    expect(built.system).toContain("never state that the searched thing is absent");
+    expect(built.prompt).toContain("это не доказывает их отсутствие");
+  });
+
   it("forbids narrator from turning POI lookup into local-navigation progress", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
