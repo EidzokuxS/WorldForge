@@ -88,6 +88,7 @@ const LIVE_GAMEPLAY_CAPABILITIES: RuntimeCapabilityIdV2[] = [
   "route_options",
   "route_check",
   "movement",
+  "dialogue_record",
   "scene_beat_record",
 ];
 
@@ -259,13 +260,16 @@ function buildGmReadSystemPrompt(): string {
     "Use roll_oracle only when the player action contains true uncertainty/risk that cannot be settled from the current SceneFrame alone.",
     "Immediate uncertainty about whether a visible actor notices, resists, is distracted by, or reacts to the player's current risky attempt is eligible for roll_oracle.",
     "Do not use roll_oracle to reveal hidden memories, private intentions, secret knowledge, offscreen facts, or facts about actors who are not visible/cited.",
-    "Use tool_plan when the turn needs an accepted backend action checklist for route checks, movement, or a scene-local beat receipt.",
+    "Use tool_plan when the turn needs an accepted backend action checklist for route checks, movement, visible dialogue outcomes, or a scene-local beat receipt.",
     "For tool_plan, include checklistRequest with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal.",
     "For explicit travel to a connected visible destination, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"movement\"].",
     "For route availability checks without travel, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"route_check\"].",
+    "For a visible speaker's answer, refusal, warning, redirect, silence, or other concrete dialogue outcome, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"dialogue_outcome\"].",
+    "For dialogue_outcome, checklistRequest.actorRefs must name the visible speaker who owns the response; targetRefs may include the player or addressed visible actors; evidenceRefs must include the visible speaker and scene refs.",
     "For local posture/scene beat without structural state change, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"scene_beat\"].",
     "Valid checklistRequest.turnPath values are only: mutating, procedural, combat. Never use movement, route_check, or scene_beat as turnPath values.",
-    "For this live slice, checklistRequest.requiredEffectKinds may use only route_check, movement, or scene_beat.",
+    "For this live slice, checklistRequest.requiredEffectKinds may use only route_check, movement, dialogue_outcome, or scene_beat.",
+    "dialogue_outcome is terminal and non-mutating in this slice: it records the visible response for narration only and does not create NPC memory, world facts, item state, relationship state, or durable social state.",
     "Do not narrate. Do not mutate state. Do not include tool names, tool inputs, executable payloads, combat transitions, or future checklist steps.",
     "Cite only citableRefs from the model-facing packet.",
     "For direct/continue, omit clarificationPrompt entirely. For clarification, include a non-empty clarificationPrompt. Never emit empty strings or null for optional fields.",
@@ -274,7 +278,7 @@ function buildGmReadSystemPrompt(): string {
     "For roll_oracle, uncertaintyKind must be one of: physical_risk, perception, social_pressure, opposition, chance.",
     "The three outcomeMeanings must define what each tier means before the roll; narrator will use the selected meaning as settled truth.",
     "Oracle settles uncertainty only; it is not a movement, discovery, item-state, NPC-knowledge, or world-mutation receipt.",
-    "If the player action needs unimplemented mutation, combat, hidden knowledge, or a backend capability outside route_check/movement/scene_beat, choose clarification.",
+    "If the player action needs unimplemented mutation, combat, hidden knowledge, durable dialogue memory, or a backend capability outside route_check/movement/dialogue_outcome/scene_beat, choose clarification.",
   ].join("\n");
 }
 
@@ -357,7 +361,10 @@ function buildToolRequestSystemPrompt(): string {
     "You are the WorldForge gameplay-tool-request.v2 planner.",
     "Return exactly one gameplay-tool-request.v2 JSON object for the selected checklist step.",
     "Use the current model-facing packet only; if this step follows a mutation, the packet already reflects that mutation.",
-    "Use only clean v2 tool ids: route.check.v2, actor.move.v2, or scene_beat.record.v2.",
+    "Use only clean v2 tool ids: route.check.v2, actor.move.v2, dialogue.record.v2, or scene_beat.record.v2.",
+    "For dialogue.record.v2, bind speakerRef to the selected visible speaker, addresseeRefs to Player or visible addressees when cited by the step, outcomeKind to answer/refusal/warning/redirect/silence/other, summary to only the concrete visible response, and quotedSpeech to the speaker's actual visible utterance unless outcomeKind is silence.",
+    "For non-silence dialogue.record.v2 outcomes, quotedSpeech is required. For silence, omit quotedSpeech.",
+    "dialogue.record.v2 is terminal and non-mutating in this slice; do not include durable memory, world fact, relationship, item, location, or hidden-knowledge claims.",
     "Do not include old runtime tool names, root input/payload fields, state deltas, receipts, results, narration, or backend ids.",
     "Every effectBinding ref must be cited by the selected checklist step and by the current packet citableRefs.",
     "The backend validates and executes the request; you only propose the candidate.",

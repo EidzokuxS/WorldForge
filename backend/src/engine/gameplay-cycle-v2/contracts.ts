@@ -742,7 +742,27 @@ const dialogueRecordRequestV2Schema = z.object({
     quotedSpeech: optionalNonEmptyString(700),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
-}).strict();
+}).strict().superRefine((request, ctx) => {
+  const outcomeKind = request.effectBinding.outcomeKind;
+  const quotedSpeech = request.effectBinding.quotedSpeech?.trim();
+  if (outcomeKind === "silence") {
+    if (quotedSpeech) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["effectBinding", "quotedSpeech"],
+        message: "Silence dialogue outcomes must not include quotedSpeech.",
+      });
+    }
+    return;
+  }
+  if (!quotedSpeech) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["effectBinding", "quotedSpeech"],
+      message: "Non-silence dialogue outcomes require quotedSpeech so the terminal receipt records the visible response content.",
+    });
+  }
+});
 
 const worldFactRecordRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,

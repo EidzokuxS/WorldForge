@@ -198,6 +198,7 @@ const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
   "route_check",
   "movement",
   "scene_beat",
+  "dialogue_outcome",
 ]);
 
 function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActionChecklistV2["steps"][number]["intendedEffect"]["stateScope"] {
@@ -207,6 +208,7 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
     case "route_check":
       return "location";
     case "scene_beat":
+    case "dialogue_outcome":
       return "local_scene";
     default:
       return "local_scene";
@@ -224,6 +226,8 @@ function purposeForSimpleEffect(input: {
       return "Settle route availability through backend route observation authority.";
     case "scene_beat":
       return "Settle the local scene beat through backend terminal scene-beat authority.";
+    case "dialogue_outcome":
+      return "Settle the visible dialogue outcome through backend terminal dialogue authority.";
     default:
       return input.gmRead.checklistRequest.checklistGoal;
   }
@@ -241,6 +245,8 @@ function expectedVisibleEffectForSimpleEffect(input: {
       return `Accepted route availability receipt for ${target}.`;
     case "scene_beat":
       return "Accepted terminal scene-beat receipt.";
+    case "dialogue_outcome":
+      return "Accepted terminal dialogue receipt.";
     default:
       return "Accepted backend receipt.";
   }

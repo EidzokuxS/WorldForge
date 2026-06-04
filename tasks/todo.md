@@ -6,6 +6,45 @@ Working branch/worktree: `codex/rebuild-gm-turn-cycle` in normal worktree `R:\Pr
 Canonical architecture source: `docs/gm-turn-architecture-review-2026-05-03.md`.
 Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem_fixes_latency_memory_v5.md`.
 
+## Current Session Focus 2026-06-05
+
+User reminder accepted: final acceptance counts only as several different zero-turn campaigns/clones that each reach about 60 clean turns with zero failed, replayed, restored, or invalid player-facing turns. All shorter lanes below are diagnostic burn-ins only.
+
+6+1 canvas for the next v2 slice:
+- A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
+- A2 Current-State Map — Status: in_progress. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `854371c6`. Output: [inspected] v2 runtime already has live `tool_plan` adapter, DB-backed handlers, pending narration packet store, explicit movement admission, and simple checklist compiler; next work must harden the remaining runtime primitive instead of adding prompt guards.
+- A3 Reference/Oracle — Status: pending. Scope: use Oracle/GPT-5.5 Pro only for new ownership/schema/persistence decisions. Output: [inspected] accepted P17 ordering already covers simple live movement/checklist ownership; no new Oracle call is needed for continuing that already accepted slice unless the next primitive changes authority.
+- A4 Architecture/Protocol — Status: pending. Scope: name the next primitive's authoritative input/output/downstream consumer/failure contract before edits.
+- A5 Verification/Proof — Status: pending. Scope: contract tests first, then `/api/chat/action` diagnostic turns if the primitive reaches live runtime.
+- A6 Cleanup/Migration/Risk — Status: pending. Scope: avoid legacy `turn_sagas`, old runtime tool schemas, old `ToolResult`, semantic regex patches, and v1 narrator guard piles.
+- +1 Integration — Status: in_progress. Decision: continue P17 live v2 burn-in/gap closure until it can support 10-15 clean diagnostic turns, then move to the next missing primitive; do not start final 60-turn acceptance until diagnostics stop discovering contract failures.
+
+P17 dialogue terminal receipt checkpoint:
+- Oracle/GPT-5.5 Pro attempt `p17-dialogue-record-terminal`:
+  - Dry-run succeeded with one bundled attachment, 13 files, about 91.6k tokens.
+  - Real Oracle Chrome run failed before context delivery because the ChatGPT model selector was unavailable and no cookies were applied. This is invalid Oracle evidence.
+  - Built-in browser reached a logged-in ChatGPT/Extended Pro composer, but ChatGPT upload opened a system file picker that Browser Plugin could not reliably drive or verify. No context bundle was delivered there either.
+  - Local decision uses the already accepted P16/P17 ordering: after route/movement/scene-beat, add `dialogue.record.v2` as terminal non-mutating receipt; durable dialogue memory/world facts remain deferred to a later explicit capability.
+- Implemented `dialogue.record.v2` live slice:
+  - `dialogue_record` is now in the live v2 capability list.
+  - GM Read prompt admits visible speaker answer/refusal/warning/redirect/silence as `requiredEffectKinds=["dialogue_outcome"]`.
+  - Backend simple checklist compiler can compile one-step intent-only `dialogue_outcome` checklists without tool ids, payloads, receipts, or narration.
+  - Tool request prompt allows only clean `dialogue.record.v2` and states it is terminal/non-mutating.
+  - DB-backed handler resolves `speakerRef` through typed visible-actor registry, addressees through player/visible-actor refs, returns a terminal receipt, preserves worldVersion, and writes no authority trace or durable event.
+  - Contract fix after live diagnostic: non-silence dialogue outcomes now require `quotedSpeech`; `silence` must omit it. This prevents accepted content-free dialogue receipts.
+- Verification:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 104 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+  - Source separation scan over `backend/src/engine/gameplay-cycle-v2` found only deliberate denylist strings, not old runtime imports.
+- Live/manual diagnostic evidence:
+  - Stable backend ran on `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3199/3001` clear.
+  - Lane `f59ada43-e849-4c0c-880b-bf854ffff8c9` was already diagnostic with 4 clean v2 packets at `Transmission Basement`.
+  - Turn 5 action to `Relay-Tech Dorin` reached `done`, but exposed a contract failure: accepted `dialogue.record.v2` receipt had no concrete response content, and narrator correctly said the answer content was not fixed. This lane is diagnostic-invalid and does not count.
+  - Fix: `dialogue.record.v2` non-silence requests require `quotedSpeech`.
+  - Turn 6 diagnostic follow-up reached `done` with accepted `dialogue.record.v2`, `evidenceAuthority=terminal_receipt`, `mutationApplied=false`, `baseWorldVersion=resultWorldVersion=2`, no failed/skipped steps, no legacy `settled_turn_packets`, `turn_sagas`, or `narrator_attempts`. Packet evidence stored Dorin's concrete quoted procedure/direction response.
+  - Artifact files: `output/p17-dialogue-live/turn5.sse.txt`, `turn5.db.json`, `turn6.sse.txt`, `turn6.db.json`.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

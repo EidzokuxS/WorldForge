@@ -638,6 +638,50 @@ function sceneBeatHandler(
   };
 }
 
+function dialogueRecordHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: Extract<GameplayToolRequestV2, { toolId: "dialogue.record.v2" }>,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const speaker = resolveGameplayRefV2({
+    registry,
+    ref: request.effectBinding.speakerRef,
+    allowedKinds: ["visible_actor"],
+  });
+  if (speaker.status !== "resolved") {
+    return failedOutcome(packet, speaker.reason);
+  }
+  for (const addresseeRef of request.effectBinding.addresseeRefs) {
+    const addressee = resolveGameplayRefV2({
+      registry,
+      ref: addresseeRef,
+      allowedKinds: ["player_actor", "visible_actor"],
+    });
+    if (addressee.status !== "resolved") {
+      return failedOutcome(packet, addressee.reason);
+    }
+  }
+
+  const quotedSpeech = request.effectBinding.quotedSpeech
+    ? ` Quote: ${request.effectBinding.quotedSpeech}`
+    : "";
+  return {
+    status: "accepted",
+    mutationApplied: false,
+    mutationAuthority: "none",
+    resultWorldVersion: packet.baseWorldVersion,
+    visibleSummary: `${speaker.entry.label} dialogue outcome (${request.effectBinding.outcomeKind}): ${request.effectBinding.summary}${quotedSpeech}`,
+    evidenceRefs: [
+      request.effectBinding.speakerRef,
+      ...request.effectBinding.addresseeRefs,
+      ...request.effectBinding.evidenceRefs,
+    ],
+    durableEventIds: [],
+  };
+}
+
 export function createDbBackedGameplayToolHandlersV2(
   options: CreateDbBackedGameplayToolHandlersV2Options = {},
 ): GameplayToolHandlerRegistryV2 {
@@ -659,6 +703,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "scene_beat.record.v2 handler received the wrong request type.");
       }
       return sceneBeatHandler(packet, request, refRegistry);
+    },
+    "dialogue.record.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "dialogue.record.v2") {
+        return failedOutcome(packet, "dialogue.record.v2 handler received the wrong request type.");
+      }
+      return dialogueRecordHandler(packet, request, refRegistry);
     },
   };
 }

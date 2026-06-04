@@ -535,6 +535,85 @@ function sceneBeatToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function dialogueToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Player", "Clerk Mara"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "dialogue_record"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "A visible actor can answer the player's procedural question.",
+      sceneQuestion: "What visible dialogue outcome must be recorded?",
+      focalActorRefs: ["Clerk Mara"],
+      evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+      actionInterpretation: {
+        intent: "Ask Clerk Mara for the desk procedure.",
+        method: "spoken question",
+        targetRefs: ["Clerk Mara"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "The visible answer needs terminal receipt evidence without durable memory.",
+      checklistRequest: {
+        turnPath: "procedural",
+        requiredEffectKinds: ["dialogue_outcome"],
+        actorRefs: ["Clerk Mara"],
+        targetRefs: ["Player"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        checklistGoal: "Record Clerk Mara's visible answer as terminal dialogue evidence only.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Dialogue GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-dialogue-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "procedural",
+      turnIntent: "Record a visible dialogue outcome.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Record Clerk Mara's answer.",
+        actorRef: "Clerk Mara",
+        targetRefs: ["Player"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        requiredCapabilityId: "dialogue_record",
+        intendedEffect: {
+          kind: "dialogue_outcome",
+          summary: "Clerk Mara answers the procedural question.",
+          stateScope: "local_scene",
+        },
+        expectedVisibleEffect: "Clerk Mara's answer is available to narration.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Dialogue checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function dbTempFixture(prefix: string): {
   tempDir: string;
   cleanup: () => void;
@@ -800,7 +879,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("toolName");
   });
 
-  it("compiles simple movement and scene-beat GM Reads without executable payloads", () => {
+  it("compiles simple movement, dialogue, and scene-beat GM Reads without executable payloads", () => {
     const movement = movementAdmissionFixture();
     const acceptedMovement = validateGmReadChecklistV2({
       packet: movement.packet,
@@ -848,6 +927,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
     });
 
+    const dialogue = dialogueToolPlanFixture();
+    const compiledDialogue = compileSimpleGmActionChecklistV2({
+      packet: dialogue.packet,
+      gmRead: dialogue.gmRead,
+    });
+    expect(compiledDialogue?.status).toBe("accepted");
+    if (!compiledDialogue || compiledDialogue.status !== "accepted") {
+      throw new Error("Simple dialogue checklist must compile.");
+    }
+    expect(compiledDialogue.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "dialogue_record",
+      targetRefs: ["Player"],
+      intendedEffect: {
+        kind: "dialogue_outcome",
+        stateScope: "local_scene",
+      },
+    });
+
     const sceneBeat = sceneBeatToolPlanFixture();
     const compiledSceneBeat = compileSimpleGmActionChecklistV2({
       packet: sceneBeat.packet,
@@ -867,9 +964,11 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     const publicShape = JSON.stringify({
       movement: compiledMovement.checklist,
+      dialogue: compiledDialogue.checklist,
       sceneBeat: compiledSceneBeat.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
+    expect(publicShape).not.toContain("dialogue.record.v2");
     expect(publicShape).not.toContain("scene_beat.record.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
@@ -2523,6 +2622,70 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain('"input"');
   });
 
+  it("accepts a terminal dialogue v2 tool request without durable state semantics", () => {
+    const { packet, checklist } = dialogueToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-dialogue-1",
+        stepId: "step-1",
+        capabilityId: "dialogue_record",
+        toolId: "dialogue.record.v2",
+        effectBinding: {
+          speakerRef: "Clerk Mara",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answer",
+          summary: "Clerk Mara says the ledger must stay on the desk.",
+          quotedSpeech: "Keep the ledger here until I stamp it.",
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Dialogue tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("dialogue.record.v2");
+    expect(JSON.stringify(result.request)).not.toContain("record_dialogue_outcome");
+    expect(JSON.stringify(result.request)).not.toContain("stateEffects");
+    expect(JSON.stringify(result.request)).not.toContain("worldFact");
+  });
+
+  it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
+    const { packet, checklist } = dialogueToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-dialogue-empty",
+        stepId: "step-1",
+        capabilityId: "dialogue_record",
+        toolId: "dialogue.record.v2",
+        effectBinding: {
+          speakerRef: "Clerk Mara",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answer",
+          summary: "Clerk Mara gives an answer, but the content is not recorded.",
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) =>
+      issue.path === "effectBinding.quotedSpeech"
+      && issue.message.includes("Non-silence dialogue outcomes require quotedSpeech")
+    )).toBe(true);
+  });
+
   it("rejects old runtime tool request surfaces and executable payload fields", () => {
     const { packet, checklist } = movementToolPlanFixture();
 
@@ -2585,6 +2748,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
           addresseeRefs: [],
           outcomeKind: "other",
           summary: "Wrong tool for a movement step.",
+          quotedSpeech: "This is the wrong tool for the selected step.",
           evidenceRefs: ["Player", "Atrium", "North Hall"],
         },
       },
@@ -5488,6 +5652,55 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         resultWorldVersion: 7,
         durableEventIds: [],
       });
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes dialogue.record.v2 as terminal receipt without DB mutation", async () => {
+    const fixture = dbTempFixture("wf-v2-db-dialogue-");
+    try {
+      seedP16World();
+      const { packet, checklist } = dialogueToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "dialogue-db-1",
+          stepId: "step-1",
+          capabilityId: "dialogue_record",
+          toolId: "dialogue.record.v2",
+          effectBinding: {
+            speakerRef: "Clerk Mara",
+            addresseeRefs: ["Player"],
+            outcomeKind: "answer",
+            summary: "Clerk Mara says the ledger must stay on the desk.",
+            quotedSpeech: "Keep the ledger here until I stamp it.",
+            evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-dialogue-db-1",
+        emittedAt: 25,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        evidenceAuthority: "terminal_receipt",
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+        durableEventIds: [],
+      });
+      expect(execution.receipt.visibleSummary).toContain("Clerk Mara dialogue outcome (answer)");
+      expect(execution.receipt.visibleSummary).toContain("Keep the ledger here until I stamp it.");
       const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
