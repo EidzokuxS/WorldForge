@@ -218,6 +218,29 @@ P17 live mutating adapter decision and implementation checkpoint:
 - Known P17 gap before live/manual acceptance:
   - v2 pending narration transport/resume is contract-tested, but no live `/api/chat/action` manual evidence has been counted for this slice yet.
 
+P17 explicit movement / route-check / local consequence burn-in checkpoint:
+- Oracle/GPT-5.5 Pro:
+  - Existing valid P17 explicit movement review accepted the hybrid ownership rule: model owns open-ended interpretation; backend owns closed-world admission, checklist request construction, validation, mutation authority, receipts, and persistence.
+  - New Oracle dry-run for deterministic simple checklist compiler succeeded with one bundled attachment (`p17-checklist-compiler`, 10 files, ~119k tokens), but the real browser run was invalid because the Oracle Chrome profile was not logged into ChatGPT and no context was delivered. Do not count it as review evidence.
+  - Local decision from the accepted P17 invariant: for a GM Read that already validates as one simple live-slice effect (`route_check`, `movement`, `scene_beat`), backend may compile the intent-only `gm-action-checklist.v2`; it still must not emit tool requests, receipts, mutation, or narration.
+- Fixes implemented after diagnostic lanes:
+  - `compileSimpleGmActionChecklistV2()` now compiles one-step backend-owned checklists for simple accepted GM Read checklist requests. Runtime uses it before falling back to model-generated checklists for future multi-effect/open-ended cases.
+  - Explicit movement completion now only repairs GM Read candidates whose structured `checklistRequest.requiredEffectKinds` includes `movement`; route checks are no longer rewritten into movement.
+  - GM Read loose schema accepts empty/non-empty non-executable sidecars (`noMutationReason`, `clarificationPrompt`) and strips them before strict validation.
+  - Local consequence scheduler no longer emits accepted evidence saying visible NPCs "may need response"; scheduled scene-beat receipts now record visibility only.
+- Diagnostic evidence:
+  - Lane-11/12: route-check text could be rewritten into movement; invalid.
+  - Lane-13/14: sidecar/schema failures restored before settlement; invalid.
+  - Lane-15: reached 5 clean turns, then turn 6 route-check to `Ground-Floor Barricade` exposed brittle model-generated checklist failure; invalid.
+  - Same diagnostic campaign after compiler fix replayed the failing route-check successfully with a backend-compiled checklist and observation-only `route.check.v2` receipt.
+  - Lane-16 fresh clone reached 4 turns, then narrator overstated local consequence evidence as NPC attention; invalid.
+  - Lane-17 fresh clone `f59ada43-e849-4c0c-880b-bf854ffff8c9` reached 4 clean turns after both fixes: route-check, movement, route-check, movement into `Transmission Basement`. DB after turn 4: `gameplay_cycle_v2_packets=4`, legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `authority_traces=2`, `turn_clock_ledger=2`, `chat_history=8`, player scene `Transmission Basement`, `worldVersion=2`, `currentTick=4`.
+  - Lane-17 local consequence evidence is visibility-only: Venn the Borrowed and Relay-Tech Dorin are present in Transmission Basement after movement; narration only states presence, not attention/reaction.
+- Verification so far:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 101 tests after the compiler and visibility-only fixes.
+- Not acceptance:
+  - Lane-17 is a focused regression burn-in only. Final acceptance still requires several different zero-turn campaigns/clones at about 60 clean turns each with zero failed, replayed, restored, or invalid player-facing turns.
+
 P17 live/manual diagnostic and Oracle follow-up:
 - Live setup:
   - Started stable backend on `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped it after diagnostics. Ports `3199/3001` were empty before the Oracle run.

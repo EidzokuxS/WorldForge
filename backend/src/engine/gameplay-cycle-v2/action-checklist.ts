@@ -2,9 +2,11 @@ import { z } from "zod";
 import {
   assertGmActionChecklistV2,
   gmActionChecklistV2Schema,
+  type GmActionChecklistEffectKindV2,
   type GmActionChecklistV2,
   type GmReadChecklistV2,
   type ModelFacingTurnPacketV2,
+  type RuntimeCapabilityIdV2,
 } from "./contracts.js";
 import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 
@@ -190,6 +192,106 @@ function validateGmReadAlignment(input: {
     }
   });
   return issues;
+}
+
+const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
+  "route_check",
+  "movement",
+  "scene_beat",
+]);
+
+function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActionChecklistV2["steps"][number]["intendedEffect"]["stateScope"] {
+  switch (kind) {
+    case "movement":
+      return "actor";
+    case "route_check":
+      return "location";
+    case "scene_beat":
+      return "local_scene";
+    default:
+      return "local_scene";
+  }
+}
+
+function purposeForSimpleEffect(input: {
+  kind: GmActionChecklistEffectKindV2;
+  gmRead: GmReadChecklistV2;
+}): string {
+  switch (input.kind) {
+    case "movement":
+      return "Settle the explicit movement through backend movement authority.";
+    case "route_check":
+      return "Settle route availability through backend route observation authority.";
+    case "scene_beat":
+      return "Settle the local scene beat through backend terminal scene-beat authority.";
+    default:
+      return input.gmRead.checklistRequest.checklistGoal;
+  }
+}
+
+function expectedVisibleEffectForSimpleEffect(input: {
+  kind: GmActionChecklistEffectKindV2;
+  targetRefs: readonly string[];
+}): string {
+  const target = input.targetRefs[0] ?? "the requested target";
+  switch (input.kind) {
+    case "movement":
+      return `Accepted movement receipt for ${target}.`;
+    case "route_check":
+      return `Accepted route availability receipt for ${target}.`;
+    case "scene_beat":
+      return "Accepted terminal scene-beat receipt.";
+    default:
+      return "Accepted backend receipt.";
+  }
+}
+
+export function compileSimpleGmActionChecklistV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  gmRead: GmReadChecklistV2;
+}): ActionChecklistValidationResultV2 | null {
+  const requestedKinds = input.gmRead.checklistRequest.requiredEffectKinds;
+  if (requestedKinds.length !== 1) return null;
+  const kind = requestedKinds[0];
+  if (!BACKEND_COMPILED_SIMPLE_EFFECTS.has(kind)) return null;
+
+  const actorRef = input.gmRead.checklistRequest.actorRefs[0];
+  const targetRefs = uniqueStrings(input.gmRead.checklistRequest.targetRefs);
+  const evidenceRefs = uniqueStrings(input.gmRead.checklistRequest.evidenceRefs);
+  const requiredCapabilityId = capabilityForEffectKindV2(kind) as RuntimeCapabilityIdV2;
+  const candidate: GmActionChecklistV2 = {
+    version: "gm-action-checklist.v2",
+    checklistId: `chk-${input.packet.turnId}-${kind}`,
+    campaignId: input.packet.campaignId,
+    turnId: input.packet.turnId,
+    baseWorldVersion: input.packet.baseWorldVersion,
+    sourceGmReadPath: input.gmRead.path,
+    turnPath: input.gmRead.checklistRequest.turnPath,
+    turnIntent: input.gmRead.actionInterpretation.intent,
+    steps: [
+      {
+        stepId: "step-1",
+        purpose: purposeForSimpleEffect({ kind, gmRead: input.gmRead }),
+        actorRef,
+        targetRefs,
+        evidenceRefs,
+        requiredCapabilityId,
+        intendedEffect: {
+          kind,
+          summary: input.gmRead.checklistRequest.checklistGoal,
+          stateScope: stateScopeForSimpleEffect(kind),
+        },
+        expectedVisibleEffect: expectedVisibleEffectForSimpleEffect({ kind, targetRefs }),
+        dependsOnStepIds: [],
+      },
+    ],
+  };
+
+  return validateGmActionChecklistV2({
+    packet: input.packet,
+    gmRead: input.gmRead,
+    candidate,
+  });
 }
 
 export function validateGmActionChecklistV2(input: {

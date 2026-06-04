@@ -522,18 +522,24 @@ const gmReadCandidateV2LooseBaseSchema = z.object({
   rationale: z.string().trim().min(1).max(800).optional(),
 });
 
+const gmReadCandidateV2LooseSidecars = {
+  noMutationReason: z.string().trim().max(500).optional(),
+  clarificationPrompt: z.string().trim().max(500).optional(),
+};
+
 export const gmReadCandidateV2LooseSchema: z.ZodType<unknown> = z.discriminatedUnion("path", [
   gmReadCandidateV2LooseBaseSchema.extend({
     path: gmReadNoMutationPathV2Schema,
-    noMutationReason: z.string().trim().min(1).max(500).optional(),
-    clarificationPrompt: optionalNonEmptyString(500),
+    ...gmReadCandidateV2LooseSidecars,
   }).strict(),
   gmReadCandidateV2LooseBaseSchema.extend({
     path: z.literal("roll_oracle"),
+    ...gmReadCandidateV2LooseSidecars,
     oracleRequest: gmReadOracleRequestV2Schema.partial().passthrough().optional(),
   }).strict(),
   gmReadCandidateV2LooseBaseSchema.extend({
     path: z.literal("tool_plan"),
+    ...gmReadCandidateV2LooseSidecars,
     checklistRequest: gmReadChecklistRequestV2Schema.partial().passthrough().optional(),
   }).strict(),
 ]);

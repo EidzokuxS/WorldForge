@@ -42,7 +42,7 @@ function entryForActor(input: {
     route: "required_before_packet",
     actorRef: input.actorRef,
     triggerReceiptId: input.receipt.receiptId,
-    reason: `Visible actor ${input.actorLabel} may need an immediate local response to accepted receipt ${input.receipt.receiptId}.`,
+    reason: `Visible actor ${input.actorLabel} is present in ${input.currentSceneRef} after accepted receipt ${input.receipt.receiptId}; this records visibility only.`,
     requiredCapabilityId: "scene_beat_record",
     intendedEffectKind: "scene_beat",
     evidenceRefs: [input.actorRef, input.currentSceneRef, ...input.receipt.evidenceRefs]

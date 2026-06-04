@@ -51,13 +51,17 @@ import {
   formatModelFacingTurnPacketForPromptV2,
 } from "./projection.js";
 import { validateGmReadV2 } from "./gm-read.js";
-import { validateGmActionChecklistV2 } from "./action-checklist.js";
+import {
+  compileSimpleGmActionChecklistV2,
+  validateGmActionChecklistV2,
+} from "./action-checklist.js";
 import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
 import {
   admitExplicitMovementV2,
   completeGmReadWithExplicitMovementAdmissionV2,
+  type ExplicitMovementAdmissionV2,
 } from "./explicit-movement-admission.js";
 import { buildGameplayRefRegistryV2 } from "./ref-registry.js";
 import {
@@ -274,10 +278,20 @@ function buildGmReadSystemPrompt(): string {
   ].join("\n");
 }
 
-function buildGmReadPrompt(packet: ModelFacingTurnPacketV2): string {
+function buildGmReadPrompt(
+  packet: ModelFacingTurnPacketV2,
+  explicitMovementAdmission: ExplicitMovementAdmissionV2,
+): string {
   return JSON.stringify({
     task: "Interpret this player turn. Select no-mutation, Oracle uncertainty, or backend checklist admission.",
     packet: formatModelFacingTurnPacketForPromptV2(packet),
+    backendAdmissibleExactMovement: explicitMovementAdmission.status === "admitted"
+      ? {
+        destinationRef: explicitMovementAdmission.destinationRef,
+        checklistRequest: explicitMovementAdmission.checklistRequest,
+        rule: "Use this only when your GM Read interpretation is actual travel/movement. For route checks without travel, use route_check instead.",
+      }
+      : null,
   }, null, 2);
 }
 
@@ -413,6 +427,21 @@ async function generateActionChecklistCandidateV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
 }): Promise<GmActionChecklistV2> {
+  const compiledChecklist = compileSimpleGmActionChecklistV2({
+    packet: input.packet,
+    gmRead: input.gmRead,
+  });
+  if (compiledChecklist) {
+    if (compiledChecklist.status !== "accepted") {
+      throw runtimeContractError(
+        `Backend-compiled GM action checklist rejected: ${
+          compiledChecklist.issues.map((issue) => issue.message).join("; ")
+        }`,
+      );
+    }
+    return compiledChecklist.checklist;
+  }
+
   const rawChecklist = (await safeGenerateObject({
     model: createModel(input.options.judgeProvider, { role: "judge" }),
     schema: actionChecklistGenerationSchemaFor(input.gmRead),
@@ -630,7 +659,7 @@ export async function* processGameplayTurnCycleV2(
       model: createModel(options.judgeProvider, { role: "judge" }),
       schema: gmReadCandidateV2LooseSchema,
       system: buildGmReadSystemPrompt(),
-      prompt: buildGmReadPrompt(modelPacket),
+      prompt: buildGmReadPrompt(modelPacket, explicitMovementAdmission),
       temperature: 0.1,
       maxTokens: 1_600,
       retries: 1,

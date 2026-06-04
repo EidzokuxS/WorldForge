@@ -128,6 +128,17 @@ function candidateWantsBackendChecklist(candidate: Record<string, unknown>): boo
     || isRecord(candidate.checklistRequest);
 }
 
+function candidateAllowsMovementCompletion(candidate: Record<string, unknown>): boolean {
+  const checklistRequest = isRecord(candidate.checklistRequest)
+    ? candidate.checklistRequest
+    : null;
+  if (!checklistRequest) {
+    return false;
+  }
+  const requiredEffectKinds = stringArray(checklistRequest.requiredEffectKinds);
+  return requiredEffectKinds.includes("movement");
+}
+
 function candidateTargetsAdmission(input: {
   candidate: Record<string, unknown>;
   admission: Extract<ExplicitMovementAdmissionV2, { status: "admitted" }>;
@@ -149,6 +160,7 @@ export function completeGmReadWithExplicitMovementAdmissionV2(input: {
   if (input.admission.status !== "admitted") return input.candidate;
   if (!isRecord(input.candidate)) return input.candidate;
   if (!candidateWantsBackendChecklist(input.candidate)) return input.candidate;
+  if (!candidateAllowsMovementCompletion(input.candidate)) return input.candidate;
   if (!candidateTargetsAdmission({
     candidate: input.candidate,
     admission: input.admission,

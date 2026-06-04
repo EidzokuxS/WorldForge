@@ -52,6 +52,7 @@ import {
   markGameplayCycleV2PacketNarratorFailedPendingRetry,
   persistSettledTurnPacketV2,
   readGameplayCycleV2Packet,
+  compileSimpleGmActionChecklistV2,
   validateGmActionChecklistV2,
   validateGameplayToolRequestV2,
   normalizeRuntimeReceiptEvidenceV2,
@@ -766,6 +767,119 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(capabilityForEffectKindV2("route_check")).toBe("route_check");
   });
 
+  it("compiles a simple route-check GM Read into a backend-owned intent checklist", () => {
+    const { packet, gmRead } = routeCheckToolPlanFixture();
+    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Simple route-check checklist must compile.");
+    }
+    expect(compiled.checklist).toMatchObject({
+      version: "gm-action-checklist.v2",
+      campaignId: packet.campaignId,
+      turnId: packet.turnId,
+      baseWorldVersion: packet.baseWorldVersion,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "procedural",
+      steps: [{
+        stepId: "step-1",
+        actorRef: "Player",
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        requiredCapabilityId: "route_check",
+        intendedEffect: {
+          kind: "route_check",
+          stateScope: "location",
+        },
+      }],
+    });
+    const publicShape = JSON.stringify(compiled.checklist);
+    expect(publicShape).not.toContain("route.check.v2");
+    expect(publicShape).not.toContain("effectBinding");
+    expect(publicShape).not.toContain("toolName");
+  });
+
+  it("compiles simple movement and scene-beat GM Reads without executable payloads", () => {
+    const movement = movementAdmissionFixture();
+    const acceptedMovement = validateGmReadChecklistV2({
+      packet: movement.packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player explicitly moves to North Hall.",
+        sceneQuestion: "What backend movement must settle?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement needs backend settlement.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+          checklistGoal: "Settle the explicit movement only through an accepted movement receipt.",
+        },
+      },
+    });
+    expect(acceptedMovement.status).toBe("accepted");
+    if (acceptedMovement.status !== "accepted") {
+      throw new Error("Movement GM Read must be accepted.");
+    }
+    const compiledMovement = compileSimpleGmActionChecklistV2({
+      packet: movement.packet,
+      gmRead: acceptedMovement.read,
+    });
+    expect(compiledMovement?.status).toBe("accepted");
+    if (!compiledMovement || compiledMovement.status !== "accepted") {
+      throw new Error("Simple movement checklist must compile.");
+    }
+    expect(compiledMovement.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "movement",
+      intendedEffect: {
+        kind: "movement",
+        stateScope: "actor",
+      },
+    });
+
+    const sceneBeat = sceneBeatToolPlanFixture();
+    const compiledSceneBeat = compileSimpleGmActionChecklistV2({
+      packet: sceneBeat.packet,
+      gmRead: sceneBeat.gmRead,
+    });
+    expect(compiledSceneBeat?.status).toBe("accepted");
+    if (!compiledSceneBeat || compiledSceneBeat.status !== "accepted") {
+      throw new Error("Simple scene-beat checklist must compile.");
+    }
+    expect(compiledSceneBeat.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "scene_beat_record",
+      targetRefs: [],
+      intendedEffect: {
+        kind: "scene_beat",
+        stateScope: "local_scene",
+      },
+    });
+    const publicShape = JSON.stringify({
+      movement: compiledMovement.checklist,
+      sceneBeat: compiledSceneBeat.checklist,
+    });
+    expect(publicShape).not.toContain("actor.move.v2");
+    expect(publicShape).not.toContain("scene_beat.record.v2");
+    expect(publicShape).not.toContain("effectBinding");
+  });
+
+  it("leaves multi-effect GM Reads outside the simple backend checklist compiler", () => {
+    const { packet, gmRead } = movementToolPlanFixture();
+
+    expect(compileSimpleGmActionChecklistV2({ packet, gmRead })).toBeNull();
+  });
+
   it("accepts a SceneFrame envelope only when frame and attempt authority match", () => {
     const parsed = assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
@@ -1094,6 +1208,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
         turnNeed: "backend_action_checklist",
         rationale: "Movement requires backend settlement.",
+        checklistRequest: {
+          requiredEffectKinds: ["movement"],
+        },
         noMutationReason: "",
         clarificationPrompt: "",
       },
@@ -1132,6 +1249,66 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       admission,
       candidate: ordinaryDirect,
     })).toBe(ordinaryDirect);
+
+    const missingEffectKind = {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player mentions North Hall.",
+      sceneQuestion: "What backend-owned effect must settle this?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "North Hall"],
+      actionInterpretation: {
+        intent: "Mentions North Hall without a structured movement effect.",
+        method: null,
+        targetRefs: ["North Hall"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "No structured effect kind was emitted.",
+    };
+    expect(completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: missingEffectKind,
+    })).toBe(missingEffectKind);
+  });
+
+  it("does not rewrite a route-check GM Read into movement admission", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I do not move; I check whether North Hall is reachable.",
+    });
+    const admission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+    expect(admission.status).toBe("admitted");
+
+    const routeCheck = {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player wants route availability without travel.",
+      sceneQuestion: "Is North Hall reachable from here?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+      actionInterpretation: {
+        intent: "Check route availability without moving.",
+        method: "visual route check",
+        targetRefs: ["North Hall"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Route availability is observation-only.",
+      checklistRequest: {
+        turnPath: "procedural",
+        requiredEffectKinds: ["route_check"],
+        actorRefs: ["Player"],
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+        checklistGoal: "Check whether the visible route is available without moving.",
+      },
+    };
+
+    expect(completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: routeCheck,
+    })).toBe(routeCheck);
   });
 
   it("does not rescue executable payloads through explicit movement completion", () => {
@@ -1160,6 +1337,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
         turnNeed: "backend_action_checklist",
         rationale: "Movement requires backend settlement.",
+        checklistRequest: {
+          requiredEffectKinds: ["movement"],
+        },
         toolName: "move_actor",
       },
     })).toThrow();
@@ -1635,7 +1815,41 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(gmReadCandidateV2LooseSchema.safeParse({
       ...baseToolPlan,
       noMutationReason: "",
-    }).success).toBe(false);
+      clarificationPrompt: "",
+    }).success).toBe(true);
+    const emptySidecarValidation = validateGmReadV2({
+      packet: movementAdmissionFixture().packet,
+      candidate: {
+        ...baseToolPlan,
+        noMutationReason: "",
+        clarificationPrompt: "",
+      },
+    });
+    expect(emptySidecarValidation.status).toBe("accepted");
+    if (emptySidecarValidation.status !== "accepted") {
+      throw new Error("Empty non-executable sidecars must strip before final validation.");
+    }
+    expect("noMutationReason" in emptySidecarValidation.read).toBe(false);
+    expect("clarificationPrompt" in emptySidecarValidation.read).toBe(false);
+    expect(gmReadCandidateV2LooseSchema.safeParse({
+      ...baseToolPlan,
+      noMutationReason: "Sidecar from model repair, not tool-plan truth.",
+      clarificationPrompt: "Sidecar from model repair, not a clarification path.",
+    }).success).toBe(true);
+    const sidecarValidation = validateGmReadV2({
+      packet: movementAdmissionFixture().packet,
+      candidate: {
+        ...baseToolPlan,
+        noMutationReason: "Sidecar from model repair, not tool-plan truth.",
+        clarificationPrompt: "Sidecar from model repair, not a clarification path.",
+      },
+    });
+    expect(sidecarValidation.status).toBe("accepted");
+    if (sidecarValidation.status !== "accepted") {
+      throw new Error("Sidecar tool_plan candidate must validate after stripping.");
+    }
+    expect("noMutationReason" in sidecarValidation.read).toBe(false);
+    expect("clarificationPrompt" in sidecarValidation.read).toBe(false);
     expect(gmReadCandidateV2LooseSchema.safeParse({
       ...baseToolPlan,
       oracleRequest: {
@@ -3700,6 +3914,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       requiredCapabilityId: "scene_beat_record",
       intendedEffectKind: "scene_beat",
     });
+    expect(schedule.entries[0]?.reason).toContain("records visibility only");
+    expect(schedule.entries[0]?.reason).not.toMatch(/\bmay need\b|\bresponse\b|\battention\b|\breaction\b|\bknowledge\b/iu);
     expect(JSON.stringify(schedule)).not.toContain("Hidden Clerk");
   });
 
