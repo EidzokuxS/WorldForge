@@ -969,4 +969,48 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     expect(body.narrative).toBe("You arrive at the edge of the dark forest.");
     expect(mockedResolveStart).toHaveBeenCalled();
   });
+
+  it("loads the campaign by id when active session is missing", async () => {
+    mockedGetActive.mockReturnValue(null);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      premise: "A dark world",
+    } as any);
+
+    const mockAll = vi.fn(() => [
+      { id: "loc-1", name: "Forest", isStarting: false },
+      { id: "loc-2", name: "Tavern", isStarting: true },
+    ]);
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+    mockedGetDb.mockReturnValue({ select: mockSelect } as any);
+
+    mockedResolveStart.mockResolvedValue({
+      locationId: "loc-2",
+      locationName: "Tavern",
+      startConditions: {
+        startLocationId: "loc-2",
+        arrivalMode: "settled",
+        immediateSituation: "You begin in Tavern.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "expected",
+        resolvedNarrative: null,
+        sourcePrompt: null,
+      },
+      narrative: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/resolve-starting-location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
+  });
 });
