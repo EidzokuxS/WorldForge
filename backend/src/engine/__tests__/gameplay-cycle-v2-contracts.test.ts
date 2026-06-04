@@ -219,7 +219,7 @@ function scopedForecast(): ScopedForecastExcerpt {
 
 function movementToolPlanFixture(options: {
   privateGuardTerms?: string[];
-  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "minor_poi_create" | "entity_tag" | "quick_action_offer">;
+  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "minor_poi_create" | "entity_tag" | "item_transfer" | "quick_action_offer">;
 } = {}) {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -852,6 +852,85 @@ function entityTagToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function itemTransferToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player", "Clerk Mara", "sealed note", "brass ledger"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "item_transfer"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player puts down a modeled inventory item in the current scene.",
+      sceneQuestion: "What item custody mutation must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+      actionInterpretation: {
+        intent: "Drop the sealed note in the current scene.",
+        method: "put it down",
+        targetRefs: ["sealed note", "Atrium Floor"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "A modeled item custody/location change requires backend item authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["item_transfer"],
+        actorRefs: ["Player"],
+        targetRefs: ["sealed note", "Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+        checklistGoal: "Move the modeled inventory item into the current scene.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Item-transfer GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-item-transfer-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Drop the sealed note.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Move sealed note from player inventory to the current scene.",
+        actorRef: "Player",
+        targetRefs: ["sealed note", "Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+        requiredCapabilityId: "item_transfer",
+        intendedEffect: {
+          kind: "item_transfer",
+          summary: "The sealed note is no longer in player inventory and is visible in the current scene.",
+          stateScope: "item",
+        },
+        expectedVisibleEffect: "The sealed note is placed in the current scene.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Item-transfer checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function dbTempFixture(prefix: string): {
   tempDir: string;
   cleanup: () => void;
@@ -1138,7 +1217,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("toolName");
   });
 
-  it("compiles simple movement, dialogue, support actor, entity tag, and scene-beat GM Reads without executable payloads", () => {
+  it("compiles simple movement, dialogue, support actor, entity tag, item transfer, and scene-beat GM Reads without executable payloads", () => {
     const movement = movementAdmissionFixture();
     const acceptedMovement = validateGmReadChecklistV2({
       packet: movement.packet,
@@ -1275,18 +1354,38 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         stateScope: "item",
       },
     });
+
+    const itemTransfer = itemTransferToolPlanFixture();
+    const compiledItemTransfer = compileSimpleGmActionChecklistV2({
+      packet: itemTransfer.packet,
+      gmRead: itemTransfer.gmRead,
+    });
+    expect(compiledItemTransfer?.status).toBe("accepted");
+    if (!compiledItemTransfer || compiledItemTransfer.status !== "accepted") {
+      throw new Error("Simple item-transfer checklist must compile.");
+    }
+    expect(compiledItemTransfer.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "item_transfer",
+      targetRefs: ["sealed note", "Atrium Floor"],
+      intendedEffect: {
+        kind: "item_transfer",
+        stateScope: "item",
+      },
+    });
     const publicShape = JSON.stringify({
       movement: compiledMovement.checklist,
       dialogue: compiledDialogue.checklist,
       sceneBeat: compiledSceneBeat.checklist,
       supportActor: compiledSupportActor.checklist,
       entityTag: compiledEntityTag.checklist,
+      itemTransfer: compiledItemTransfer.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
     expect(publicShape).not.toContain("dialogue.record.v2");
     expect(publicShape).not.toContain("support_actor.create.v2");
     expect(publicShape).not.toContain("scene_beat.record.v2");
     expect(publicShape).not.toContain("entity.tag.v2");
+    expect(publicShape).not.toContain("item.transfer.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
 
@@ -3167,6 +3266,107 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("add_tag");
     expect(JSON.stringify(result.request)).not.toContain("entityName");
     expect(JSON.stringify(result.request)).not.toContain("entityType");
+  });
+
+  it("accepts a clean item.transfer.v2 request with scoped custody authority", () => {
+    const { packet, checklist } = itemTransferToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-item-transfer-1",
+        stepId: "step-1",
+        capabilityId: "item_transfer",
+        toolId: "item.transfer.v2",
+        effectBinding: {
+          action: "drop_to_current_scene",
+          itemScope: "player_inventory_item",
+          itemRef: "sealed note",
+          sourceScope: "player_inventory",
+          sourceRef: "Player",
+          targetScope: "current_scene",
+          targetRef: "Atrium Floor",
+          equip: { mode: "unequipped" },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Item transfer tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("item.transfer.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      action: "drop_to_current_scene",
+      itemScope: "player_inventory_item",
+      itemRef: "sealed note",
+      sourceScope: "player_inventory",
+      targetScope: "current_scene",
+      targetRef: "Atrium Floor",
+    });
+    expect(JSON.stringify(result.request)).not.toContain("transfer_item");
+    expect(JSON.stringify(result.request)).not.toContain("itemName");
+    expect(JSON.stringify(result.request)).not.toContain("targetName");
+  });
+
+  it("rejects legacy and partial-stack item.transfer.v2 request shapes", () => {
+    const { packet, checklist } = itemTransferToolPlanFixture();
+
+    const legacy = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-item-transfer-legacy",
+        stepId: "step-1",
+        capabilityId: "item_transfer",
+        toolId: "item.transfer.v2",
+        effectBinding: {
+          itemName: "sealed note",
+          targetName: "Atrium Floor",
+          targetType: "location",
+          transferredItemName: "half the coins",
+          remainingItemName: "remaining coins",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+        },
+      },
+    });
+
+    expect(legacy.status).toBe("rejected");
+    expect(legacy.issues.some((issue) => issue.path.includes("action"))).toBe(true);
+    expect(legacy.issues.some((issue) => issue.path.includes("itemScope"))).toBe(true);
+
+    const uncitedTarget = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-item-transfer-uncited",
+        stepId: "step-1",
+        capabilityId: "item_transfer",
+        toolId: "item.transfer.v2",
+        effectBinding: {
+          action: "give_to_visible_actor",
+          itemScope: "player_inventory_item",
+          itemRef: "sealed note",
+          sourceScope: "player_inventory",
+          sourceRef: "Player",
+          targetScope: "visible_actor_inventory",
+          targetRef: "Clerk Mara",
+          equip: { mode: "unchanged" },
+          evidenceRefs: ["Player", "Atrium", "sealed note"],
+        },
+      },
+    });
+
+    expect(uncitedTarget.status).toBe("rejected");
+    expect(uncitedTarget.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
   });
 
   it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
@@ -6961,6 +7161,292 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       expect(execution.receipt.failureReason).toContain("forced entity tag authority failure");
       const item = getDb().select().from(items).where(eq(items.id, "item-secret-id")).get();
       expect(JSON.parse(item?.tags ?? "[]")).toEqual(["document"]);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes item.transfer.v2 drop as atomic item-location mutation with authority trace", async () => {
+    const fixture = dbTempFixture("wf-v2-db-item-transfer-drop-");
+    try {
+      seedP16World();
+      const { packet, checklist } = itemTransferToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "item-transfer-drop-db-1",
+          stepId: "step-1",
+          capabilityId: "item_transfer",
+          toolId: "item.transfer.v2",
+          effectBinding: {
+            action: "drop_to_current_scene",
+            itemScope: "player_inventory_item",
+            itemRef: "sealed note",
+            sourceScope: "player_inventory",
+            sourceRef: "Player",
+            targetScope: "current_scene",
+            targetRef: "Atrium Floor",
+            equip: { mode: "unequipped" },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-item-transfer-drop-db-1",
+        emittedAt: 30,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "item",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        durableEventIds: [],
+      });
+      const item = getDb().select().from(items).where(eq(items.id, "item-player-1")).get();
+      expect(item).toMatchObject({
+        ownerId: null,
+        locationId: "scene-alpha",
+        equipState: "carried",
+        equippedSlot: null,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.item.transfer.v2",
+        sourceEntityType: "item",
+        sourceEntityId: "item-player-1",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:item-transfer-drop-db-1",
+      });
+      expect(JSON.parse(traces[0]?.stateDeltaRefs ?? "[]")).toEqual(["item:item-player-1:custody"]);
+      expect(JSON.parse(traces[0]?.metadata ?? "{}")).toMatchObject({
+        action: "drop_to_current_scene",
+        itemScope: "player_inventory_item",
+        sourceScope: "player_inventory",
+        targetScope: "current_scene",
+        previous: {
+          ownerId: "player-alpha",
+          locationId: null,
+          equipState: "carried",
+          equippedSlot: null,
+        },
+        next: {
+          ownerId: null,
+          locationId: "scene-alpha",
+          equipState: "carried",
+          equippedSlot: null,
+        },
+      });
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes item.transfer.v2 take from visible scene item into player inventory", async () => {
+    const fixture = dbTempFixture("wf-v2-db-item-transfer-take-");
+    try {
+      seedP16World();
+      const { packet, checklist } = itemTransferToolPlanFixture();
+      const takeChecklist = {
+        ...checklist,
+        steps: [{
+          ...checklist.steps[0],
+          targetRefs: ["brass ledger", "Player"],
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor", "brass ledger"],
+        }],
+      };
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist: takeChecklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "item-transfer-take-db-1",
+          stepId: "step-1",
+          capabilityId: "item_transfer",
+          toolId: "item.transfer.v2",
+          effectBinding: {
+            action: "take_to_player_inventory",
+            itemScope: "visible_scene_item",
+            itemRef: "brass ledger",
+            sourceScope: "current_scene",
+            sourceRef: "Atrium Floor",
+            targetScope: "player_inventory",
+            targetRef: "Player",
+            equip: { mode: "carried" },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor", "brass ledger"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-item-transfer-take-db-1",
+        emittedAt: 31,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: true,
+        mutationAuthority: "item",
+        resultWorldVersion: 8,
+      });
+      const item = getDb().select().from(items).where(eq(items.id, "item-secret-id")).get();
+      expect(item).toMatchObject({
+        ownerId: "player-alpha",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes item.transfer.v2 equip and rejects same-slot no-op without advancing world version", async () => {
+    const fixture = dbTempFixture("wf-v2-db-item-transfer-equip-");
+    try {
+      seedP16World();
+      const { packet, checklist } = itemTransferToolPlanFixture();
+      const equipChecklist = {
+        ...checklist,
+        steps: [{
+          ...checklist.steps[0],
+          targetRefs: ["sealed note", "Player"],
+          evidenceRefs: ["Player", "Atrium", "sealed note"],
+        }],
+      };
+      const request = {
+        version: "gameplay-tool-request.v2" as const,
+        requestId: "item-transfer-equip-db-1",
+        stepId: "step-1",
+        capabilityId: "item_transfer" as const,
+        toolId: "item.transfer.v2" as const,
+        effectBinding: {
+          action: "equip_player_item" as const,
+          itemScope: "player_inventory_item" as const,
+          itemRef: "sealed note",
+          sourceScope: "player_inventory" as const,
+          sourceRef: "Player",
+          targetScope: "player_inventory" as const,
+          targetRef: "Player",
+          equip: { mode: "equipped" as const, slot: "main-hand" },
+          evidenceRefs: ["Player", "Atrium", "sealed note"],
+        },
+      };
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist: equipChecklist,
+        stepId: "step-1",
+        request,
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-item-transfer-equip-db-1",
+        emittedAt: 32,
+      });
+
+      expect(execution.status).toBe("accepted");
+      let item = getDb().select().from(items).where(eq(items.id, "item-player-1")).get();
+      expect(item).toMatchObject({
+        ownerId: "player-alpha",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "main-hand",
+      });
+
+      const rejected = await executeGameplayToolRequestV2({
+        packet: { ...packet, baseWorldVersion: 8 },
+        checklist: { ...equipChecklist, baseWorldVersion: 8 },
+        stepId: "step-1",
+        request: { ...request, requestId: "item-transfer-equip-noop-db-1" },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: {
+          ...registryForPacket(sceneFrame({ worldVersion: 8 })),
+          baseWorldVersion: 8,
+        },
+        receiptId: "receipt-item-transfer-equip-noop-db-1",
+        emittedAt: 33,
+      });
+      expect(rejected.status).toBe("rejected");
+      expect(rejected.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 8,
+      });
+      item = getDb().select().from(items).where(eq(items.id, "item-player-1")).get();
+      expect(item?.equippedSlot).toBe("main-hand");
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back item.transfer.v2 row changes when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-item-transfer-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = itemTransferToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "item-transfer-rollback-db-1",
+          stepId: "step-1",
+          capabilityId: "item_transfer",
+          toolId: "item.transfer.v2",
+          effectBinding: {
+            action: "drop_to_current_scene",
+            itemScope: "player_inventory_item",
+            itemRef: "sealed note",
+            sourceScope: "player_inventory",
+            sourceRef: "Player",
+            targetScope: "current_scene",
+            targetRef: "Atrium Floor",
+            equip: { mode: "unequipped" },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor", "sealed note"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterItemTransferRowUpdateBeforeAuthorityTrace: () => {
+              throw new Error("forced item transfer authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-item-transfer-rollback-db-1",
+        emittedAt: 34,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced item transfer authority failure");
+      const item = getDb().select().from(items).where(eq(items.id, "item-player-1")).get();
+      expect(item).toMatchObject({
+        ownerId: "player-alpha",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
       const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);

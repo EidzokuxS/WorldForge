@@ -850,12 +850,84 @@ const itemTransferRequestV2Schema = z.object({
   capabilityId: z.literal("item_transfer"),
   toolId: z.literal("item.transfer.v2"),
   effectBinding: z.object({
+    action: z.enum([
+      "give_to_visible_actor",
+      "drop_to_current_scene",
+      "place_at_visible_location",
+      "take_to_player_inventory",
+      "equip_player_item",
+      "unequip_player_item",
+    ]),
+    itemScope: z.enum(["player_inventory_item", "visible_scene_item"]),
     itemRef: modelSafeRefSchema,
-    fromRef: modelSafeRefSchema.optional(),
-    toRef: modelSafeRefSchema,
+    sourceScope: z.enum(["player_inventory", "current_scene", "visible_location"]),
+    sourceRef: modelSafeRefSchema,
+    targetScope: z.enum([
+      "player_inventory",
+      "visible_actor_inventory",
+      "current_scene",
+      "visible_location",
+    ]),
+    targetRef: modelSafeRefSchema,
+    equip: z.discriminatedUnion("mode", [
+      z.object({ mode: z.literal("unchanged") }).strict(),
+      z.object({ mode: z.literal("carried") }).strict(),
+      z.object({
+        mode: z.literal("equipped"),
+        slot: z.string().trim().min(1).max(80),
+      }).strict(),
+      z.object({ mode: z.literal("unequipped") }).strict(),
+    ]).default({ mode: "unchanged" }),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
-}).strict();
+}).strict().superRefine((request, ctx) => {
+  const binding = request.effectBinding;
+  const addIssue = (message: string, path: Array<string | number> = ["effectBinding"]) => {
+    ctx.addIssue({ code: "custom", path, message });
+  };
+  switch (binding.action) {
+    case "give_to_visible_actor":
+      if (binding.itemScope !== "player_inventory_item") addIssue("give_to_visible_actor requires itemScope=player_inventory_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "player_inventory") addIssue("give_to_visible_actor requires sourceScope=player_inventory.", ["effectBinding", "sourceScope"]);
+      if (binding.sourceRef !== "Player") addIssue("give_to_visible_actor requires sourceRef=Player.", ["effectBinding", "sourceRef"]);
+      if (binding.targetScope !== "visible_actor_inventory") addIssue("give_to_visible_actor requires targetScope=visible_actor_inventory.", ["effectBinding", "targetScope"]);
+      if (binding.equip.mode === "equipped") addIssue("give_to_visible_actor cannot equip the transferred item.", ["effectBinding", "equip"]);
+      break;
+    case "drop_to_current_scene":
+      if (binding.itemScope !== "player_inventory_item") addIssue("drop_to_current_scene requires itemScope=player_inventory_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "player_inventory") addIssue("drop_to_current_scene requires sourceScope=player_inventory.", ["effectBinding", "sourceScope"]);
+      if (binding.sourceRef !== "Player") addIssue("drop_to_current_scene requires sourceRef=Player.", ["effectBinding", "sourceRef"]);
+      if (binding.targetScope !== "current_scene") addIssue("drop_to_current_scene requires targetScope=current_scene.", ["effectBinding", "targetScope"]);
+      if (binding.equip.mode === "equipped") addIssue("drop_to_current_scene cannot equip the transferred item.", ["effectBinding", "equip"]);
+      break;
+    case "place_at_visible_location":
+      if (binding.itemScope !== "player_inventory_item") addIssue("place_at_visible_location requires itemScope=player_inventory_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "player_inventory") addIssue("place_at_visible_location requires sourceScope=player_inventory.", ["effectBinding", "sourceScope"]);
+      if (binding.sourceRef !== "Player") addIssue("place_at_visible_location requires sourceRef=Player.", ["effectBinding", "sourceRef"]);
+      if (binding.targetScope !== "visible_location") addIssue("place_at_visible_location requires targetScope=visible_location.", ["effectBinding", "targetScope"]);
+      if (binding.equip.mode === "equipped") addIssue("place_at_visible_location cannot equip the transferred item.", ["effectBinding", "equip"]);
+      break;
+    case "take_to_player_inventory":
+      if (binding.itemScope !== "visible_scene_item") addIssue("take_to_player_inventory requires itemScope=visible_scene_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "current_scene" && binding.sourceScope !== "visible_location") addIssue("take_to_player_inventory requires a current_scene or visible_location source.", ["effectBinding", "sourceScope"]);
+      if (binding.targetScope !== "player_inventory") addIssue("take_to_player_inventory requires targetScope=player_inventory.", ["effectBinding", "targetScope"]);
+      if (binding.targetRef !== "Player") addIssue("take_to_player_inventory requires targetRef=Player.", ["effectBinding", "targetRef"]);
+      if (binding.equip.mode === "unequipped") addIssue("take_to_player_inventory cannot use equip.mode=unequipped.", ["effectBinding", "equip"]);
+      break;
+    case "equip_player_item":
+      if (binding.itemScope !== "player_inventory_item") addIssue("equip_player_item requires itemScope=player_inventory_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "player_inventory" || binding.targetScope !== "player_inventory") addIssue("equip_player_item must stay within player inventory.");
+      if (binding.sourceRef !== "Player" || binding.targetRef !== "Player") addIssue("equip_player_item requires Player source and target refs.");
+      if (binding.equip.mode !== "equipped") addIssue("equip_player_item requires equip.mode=equipped.", ["effectBinding", "equip"]);
+      break;
+    case "unequip_player_item":
+      if (binding.itemScope !== "player_inventory_item") addIssue("unequip_player_item requires itemScope=player_inventory_item.", ["effectBinding", "itemScope"]);
+      if (binding.sourceScope !== "player_inventory" || binding.targetScope !== "player_inventory") addIssue("unequip_player_item must stay within player inventory.");
+      if (binding.sourceRef !== "Player" || binding.targetRef !== "Player") addIssue("unequip_player_item requires Player source and target refs.");
+      if (binding.equip.mode !== "unequipped" && binding.equip.mode !== "carried") addIssue("unequip_player_item requires equip.mode=unequipped or carried.", ["effectBinding", "equip"]);
+      break;
+  }
+});
 
 const actorConditionSetRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,

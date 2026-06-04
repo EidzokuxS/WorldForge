@@ -132,6 +132,35 @@ P20 minor POI create checkpoint:
   - Authority trace operation `gameplay-cycle-v2.minor_poi.create.v2`, source entity type `location`, state deltas `minor_poi:<id>:created` and `scene:<sceneId>:minor_pois`, metadata `exposure="visible_target_only"`, `movementCandidate=false`, `routeEdgeCreated=false`, `worldFactCreated=false`, `itemCreated=false`.
   - Artifacts: `output/p20-minor-poi-live/load.json`, `turn-minor-poi.sse.txt`, `turn-minor-poi.db.json`, backend logs.
 
+P21 item transfer checkpoint:
+- User reminder still applies: this slice is diagnostic proof only; final acceptance remains several different fresh zero-turn campaigns/clones at about 60 clean turns each with zero failed/replayed/restored/invalid player-facing turns.
+- Oracle/GPT-5.5 Pro review `p21-item-transfer-boundary`:
+  - Dry-run: browser mode, forced one bundled attachment via `--browser-bundle-files`, 16 files, about 182.5k tokens, one `attachments-bundle.txt`.
+  - Real browser run completed on GPT-5.5 Pro / Extended Pro with model selection verified.
+  - Recommendation accepted: implement narrow `item.transfer.v2` before `world_fact.record.v2`; durable world facts are a separate knowledge-authority slice and too easy to turn into a generic narration-truth sink.
+  - Accepted boundary: modeled item custody/location/equip-state only. In scope: player inventory item -> visible actor/current scene/visible current-scene local location, visible current-scene item -> player inventory, player item equip/unequip. Out of scope: unmodeled currency, partial stacks, containers, item creation, hidden/offscreen items, NPC inventory handoff, barter/economy, world facts, memories, relationships, search/discovery, and no-op restow.
+- Implemented `item.transfer.v2` live slice:
+  - Added `item_transfer` to live v2 capabilities, GM Read admission, simple checklist compiler, and clean tool-request prompt.
+  - Replaced placeholder request schema with action/scope/equip contract: `action`, `itemScope`, `itemRef`, `sourceScope/sourceRef`, `targetScope/targetRef`, `equip`, and evidence refs.
+  - Added DB-backed handler transaction: resolves refs through `gameplay-ref-registry.v2` only, updates exactly one `items` row, rejects no-op/mismatch/offscene/slot-conflict requests without worldVersion advance, advances world clock only for real mutation, writes `gameplay-cycle-v2.item.transfer.v2` authority trace, and rolls back on authority failure.
+  - Contract correction after first live diagnostic: outgoing transfers from an equipped item may request `equip.mode="unequipped"`; backend normalizes the resulting row to `equipState="carried"`, `equippedSlot=null`.
+- Verification:
+  - GitNexus impact before edits was LOW for `buildGmReadSystemPrompt`, `buildToolRequestSystemPrompt`, `compileSimpleGmActionChecklistV2`, `createDbBackedGameplayToolHandlersV2`, `getRuntimeCapabilityDefinitionV2`, `toModelFacingCapabilitiesV2`, and `buildGameplayRefRegistryV2`; schema consts were not indexed as impact targets.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 124 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+  - Source scan found no new v2 imports of old runtime schemas/executor/ToolResult; remaining `transfer_item` strings are v2 denylist entries and pre-existing `scene-frame` legacy adapter surface.
+- Live/manual diagnostic evidence:
+  - First clone `1920b62c-4052-4934-b3b3-7d181108837d` exposed a schema contract failure: model produced `equip.mode="unequipped"` for dropping an equipped item, but schema only allowed `carried|unchanged`; route restored pre-turn state, leaving `chat=0`, v2/legacy packet rows 0, `authority_traces=0`, worldVersion 0, and item still player-owned/equipped. This clone is diagnostic-invalid.
+  - Fresh retry clone `162c12a2-14f3-4c51-9912-288fe2f84935` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; preflight showed zero-turn state, player `Mira Voss`, current scene `Lowwater Bazaar`, inventory item `Sealed lacquer message tube`.
+  - Started stable backend on `PORT=3206` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3206/3001/3199/3205` clear.
+  - Real action sent with `campaignId`, `playerAction`, `intent`, and `method`: `Я кладу Sealed lacquer message tube на видное место в текущей сцене Lowwater Bazaar и отпускаю её, чтобы она больше не была у меня в руках.`
+  - Result: HTTP 200, SSE reached `narrative`, `finalizing_turn`, and `done`; narration: `Вы кладёте Sealed lacquer message tube на видное место в Lowwater Bazaar. Запечатанная лаковая трубка теперь лежит здесь, а ваши руки свободны.`
+  - DB/packet grounding: `gmRead.path="tool_plan"`, checklist effect `item_transfer`, accepted receipt `receipt-step-1` with `toolId="item.transfer.v2"`, `evidenceAuthority="mutation_receipt"`, `mutationApplied=true`, `mutationAuthority="item"`, `baseWorldVersion=0`, `resultWorldVersion=1`, no failed/skipped steps.
+  - Item row changed from player-owned/equipped to `ownerId=null`, `locationId=<Lowwater Bazaar id>`, `equipState="carried"`, `equippedSlot=null`; refreshed SceneFrame no longer has the tube in player inventory and resolves it as a visible target.
+  - Authority trace operation `gameplay-cycle-v2.item.transfer.v2`, source entity type `item`, state delta `item:<id>:custody`, metadata records previous/next owner/location/equip state; no legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts`, `simulation_proposals`, `turn_clock_ledger`, or `location_recent_events` rows.
+  - Artifacts: `output/p21-item-transfer-live/load-r2.json`, `turn-item-transfer-r2.sse.txt`, `turn-item-transfer-r2.events.json`, `turn-item-transfer-r2.db.json`, backend logs.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

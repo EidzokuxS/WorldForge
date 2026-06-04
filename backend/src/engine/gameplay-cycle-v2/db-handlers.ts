@@ -77,6 +77,9 @@ type CurrentSceneResolution =
   };
 
 type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>["effectBinding"]["entityScope"];
+type ItemTransferRequestV2 = Extract<GameplayToolRequestV2, { toolId: "item.transfer.v2" }>;
+type ItemTransferBindingV2 = ItemTransferRequestV2["effectBinding"];
+type ItemRow = typeof items.$inferSelect;
 
 type EntityTagResolution =
   | {
@@ -94,8 +97,32 @@ type EntityTagResolution =
     reason: string;
   };
 
+type ItemTransferResolution =
+  | {
+    status: "resolved";
+    itemEntry: GameplayRefRegistryEntryV2;
+    itemId: string;
+    itemLabel: string;
+    playerEntry: GameplayRefRegistryEntryV2;
+    playerActorId: string;
+    sourceLocationId: string | null;
+    targetOwnerId: string | null;
+    targetLocationId: string | null;
+    targetLabel: string;
+    targetEntityType: "player" | "npc" | "location";
+    targetEntityId: string;
+    nextEquipState: "carried" | "equipped";
+    nextEquippedSlot: string | null;
+    stateDeltaRefs: string[];
+  }
+  | {
+    status: "failed";
+    reason: string;
+  };
+
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
+  afterItemTransferRowUpdateBeforeAuthorityTrace?: () => void;
   afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
   afterSupportActorInsertBeforeAuthorityTrace?: () => void;
   afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
@@ -458,6 +485,312 @@ function resolveEntityTagTarget(input: {
     default:
       return { status: "failed", reason: `Unsupported entity tag scope "${input.scope}".` };
   }
+}
+
+function resolvePlayerEntry(input: {
+  registry: GameplayRefRegistryV2;
+  playerRef: string;
+}): {
+  status: "resolved";
+  entry: GameplayRefRegistryEntryV2;
+  playerActorId: string;
+} | {
+  status: "failed";
+  reason: string;
+} {
+  const resolution = resolveGameplayRefV2({
+    registry: input.registry,
+    ref: input.playerRef,
+    allowedKinds: ["player_actor"],
+  });
+  if (resolution.status !== "resolved") return { status: "failed", reason: resolution.reason };
+  const playerActorId = resolution.entry.ids.playerActorId;
+  if (!playerActorId) return { status: "failed", reason: `Player ref "${input.playerRef}" lacks a player actor id.` };
+  return {
+    status: "resolved",
+    entry: resolution.entry,
+    playerActorId,
+  };
+}
+
+function resolveItemTransferItem(input: {
+  registry: GameplayRefRegistryV2;
+  binding: ItemTransferBindingV2;
+}): {
+  status: "resolved";
+  entry: GameplayRefRegistryEntryV2;
+  itemId: string;
+  label: string;
+} | {
+  status: "failed";
+  reason: string;
+} {
+  const allowedKinds: GameplayRefRegistryEntryV2["kind"][] = input.binding.itemScope === "player_inventory_item"
+    ? ["inventory_item"]
+    : ["visible_target"];
+  const resolution = resolveGameplayRefV2({
+    registry: input.registry,
+    ref: input.binding.itemRef,
+    allowedKinds,
+  });
+  if (resolution.status !== "resolved") return { status: "failed", reason: resolution.reason };
+  if (input.binding.itemScope === "visible_scene_item" && resolution.entry.metadata.targetKind !== "item") {
+    return { status: "failed", reason: `Visible item ref "${input.binding.itemRef}" is not an item target.` };
+  }
+  const itemId = resolution.entry.ids.itemId;
+  if (!itemId) return { status: "failed", reason: `Item ref "${input.binding.itemRef}" lacks an item id.` };
+  return {
+    status: "resolved",
+    entry: resolution.entry,
+    itemId,
+    label: resolution.entry.label,
+  };
+}
+
+function resolveItemTransferLocation(input: {
+  registry: GameplayRefRegistryV2;
+  ref: string;
+  scope: "current_scene" | "visible_location";
+}): {
+  status: "resolved";
+  entry: GameplayRefRegistryEntryV2;
+  locationId: string;
+  label: string;
+} | {
+  status: "failed";
+  reason: string;
+} {
+  if (input.scope === "current_scene") {
+    const scene = resolveCurrentScene({
+      registry: input.registry,
+      anchorRef: input.ref,
+    });
+    if (scene.status !== "resolved") return { status: "failed", reason: scene.reason };
+    return {
+      status: "resolved",
+      entry: scene.entry,
+      locationId: scene.sceneLocationId,
+      label: scene.label,
+    };
+  }
+
+  const resolution = resolveGameplayRefV2({
+    registry: input.registry,
+    ref: input.ref,
+    allowedKinds: ["visible_target"],
+  });
+  if (resolution.status !== "resolved") return { status: "failed", reason: resolution.reason };
+  if (resolution.entry.metadata.targetKind !== "location") {
+    return { status: "failed", reason: `Visible target ref "${input.ref}" is not a location target.` };
+  }
+  const locationId = resolution.entry.ids.locationId;
+  if (!locationId) return { status: "failed", reason: `Visible location ref "${input.ref}" lacks a location id.` };
+  return {
+    status: "resolved",
+    entry: resolution.entry,
+    locationId,
+    label: resolution.entry.label,
+  };
+}
+
+function locationIsCurrentSceneLocal(input: {
+  locationId: string;
+  packet: ModelFacingTurnPacketV2;
+  registry: GameplayRefRegistryV2;
+}): boolean {
+  const sceneEntry = input.registry.entries.find((entry) => entry.kind === "current_scene");
+  const sceneLocationId = sceneEntry?.ids.sceneScopeId ?? sceneEntry?.ids.locationId ?? null;
+  const broadLocationId = sceneEntry?.ids.currentLocationId ?? sceneEntry?.ids.broadLocationId ?? null;
+  if (input.locationId === sceneLocationId) return true;
+  const row = getDb().select().from(locations).where(and(
+    eq(locations.id, input.locationId),
+    eq(locations.campaignId, input.packet.campaignId),
+  )).get();
+  if (!row) return false;
+  return row.parentLocationId === sceneLocationId || row.anchorLocationId === broadLocationId;
+}
+
+function readItemRow(input: {
+  packet: ModelFacingTurnPacketV2;
+  itemId: string;
+}): ItemRow | null {
+  return getDb().select().from(items).where(and(
+    eq(items.id, input.itemId),
+    eq(items.campaignId, input.packet.campaignId),
+  )).get() ?? null;
+}
+
+function validateItemTransferSource(input: {
+  binding: ItemTransferBindingV2;
+  item: ItemRow;
+  playerActorId: string;
+  sourceLocationId: string | null;
+}): string | null {
+  switch (input.binding.sourceScope) {
+    case "player_inventory":
+      if (input.item.ownerId !== input.playerActorId || input.item.locationId !== null) {
+        return `${input.binding.itemRef} is not currently in player inventory.`;
+      }
+      return null;
+    case "current_scene":
+    case "visible_location":
+      if (input.item.ownerId !== null) {
+        return `${input.binding.itemRef} is actor-owned, not located in the scene.`;
+      }
+      if (!input.sourceLocationId || input.item.locationId !== input.sourceLocationId) {
+        return `${input.binding.itemRef} is not located at the requested source.`;
+      }
+      return null;
+    default:
+      return "Unsupported item transfer source scope.";
+  }
+}
+
+function resolveItemTransfer(input: {
+  packet: ModelFacingTurnPacketV2;
+  registry: GameplayRefRegistryV2;
+  request: ItemTransferRequestV2;
+}): ItemTransferResolution {
+  const binding = input.request.effectBinding;
+  const item = resolveItemTransferItem({
+    registry: input.registry,
+    binding,
+  });
+  if (item.status !== "resolved") return { status: "failed", reason: item.reason };
+
+  const player = resolvePlayerEntry({
+    registry: input.registry,
+    playerRef: binding.action === "take_to_player_inventory" ? binding.targetRef : binding.sourceRef,
+  });
+  if (player.status !== "resolved") return { status: "failed", reason: player.reason };
+
+  const sourceLocation = binding.sourceScope === "current_scene" || binding.sourceScope === "visible_location"
+    ? resolveItemTransferLocation({
+      registry: input.registry,
+      ref: binding.sourceRef,
+      scope: binding.sourceScope,
+    })
+    : null;
+  if (sourceLocation?.status === "failed") return { status: "failed", reason: sourceLocation.reason };
+  if (sourceLocation?.status === "resolved" && sourceLocation.entry.kind === "movement_option") {
+    return { status: "failed", reason: "Item transfer source cannot be a movement destination." };
+  }
+  if (
+    binding.sourceScope === "visible_location"
+    && sourceLocation?.status === "resolved"
+    && !locationIsCurrentSceneLocal({
+      locationId: sourceLocation.locationId,
+      packet: input.packet,
+      registry: input.registry,
+    })
+  ) {
+    return { status: "failed", reason: `Visible location ref "${binding.sourceRef}" is not a current-scene local item source.` };
+  }
+
+  let targetOwnerId: string | null = null;
+  let targetLocationId: string | null = null;
+  let targetLabel = player.entry.label;
+  let targetEntityType: "player" | "npc" | "location" = "player";
+  let targetEntityId = player.playerActorId;
+  let nextEquipState: "carried" | "equipped" = "carried";
+  let nextEquippedSlot: string | null = null;
+
+  switch (binding.action) {
+    case "give_to_visible_actor": {
+      const actorResolution = resolveGameplayRefV2({
+        registry: input.registry,
+        ref: binding.targetRef,
+        allowedKinds: ["visible_actor"],
+      });
+      if (actorResolution.status !== "resolved") return { status: "failed", reason: actorResolution.reason };
+      const actorId = actorResolution.entry.ids.actorId;
+      if (!actorId) return { status: "failed", reason: `Visible actor ref "${binding.targetRef}" lacks an actor id.` };
+      if (actorResolution.entry.metadata.actorType !== "npc") {
+        return { status: "failed", reason: `Visible actor ref "${binding.targetRef}" is not an NPC actor.` };
+      }
+      if (actorResolution.entry.ids.sceneScopeId !== player.entry.ids.sceneScopeId) {
+        return { status: "failed", reason: `Visible actor ref "${binding.targetRef}" is not in the current scene.` };
+      }
+      targetOwnerId = actorId;
+      targetLabel = actorResolution.entry.label;
+      targetEntityType = "npc";
+      targetEntityId = actorId;
+      break;
+    }
+    case "drop_to_current_scene": {
+      const target = resolveItemTransferLocation({
+        registry: input.registry,
+        ref: binding.targetRef,
+        scope: "current_scene",
+      });
+      if (target.status !== "resolved") return { status: "failed", reason: target.reason };
+      targetLocationId = target.locationId;
+      targetLabel = target.label;
+      targetEntityType = "location";
+      targetEntityId = target.locationId;
+      break;
+    }
+    case "place_at_visible_location": {
+      const target = resolveItemTransferLocation({
+        registry: input.registry,
+        ref: binding.targetRef,
+        scope: "visible_location",
+      });
+      if (target.status !== "resolved") return { status: "failed", reason: target.reason };
+      if (!locationIsCurrentSceneLocal({
+        locationId: target.locationId,
+        packet: input.packet,
+        registry: input.registry,
+      })) {
+        return { status: "failed", reason: `Visible location ref "${binding.targetRef}" is not a current-scene local placement target.` };
+      }
+      targetLocationId = target.locationId;
+      targetLabel = target.label;
+      targetEntityType = "location";
+      targetEntityId = target.locationId;
+      break;
+    }
+    case "take_to_player_inventory":
+      targetOwnerId = player.playerActorId;
+      targetEntityType = "player";
+      targetEntityId = player.playerActorId;
+      if (binding.equip.mode === "equipped") {
+        nextEquipState = "equipped";
+        nextEquippedSlot = binding.equip.slot;
+      }
+      break;
+    case "equip_player_item":
+      targetOwnerId = player.playerActorId;
+      nextEquipState = "equipped";
+      nextEquippedSlot = binding.equip.mode === "equipped" ? binding.equip.slot : null;
+      break;
+    case "unequip_player_item":
+      targetOwnerId = player.playerActorId;
+      break;
+  }
+
+  const stateDeltaRefs = [`item:${item.itemId}:custody`];
+  if (binding.action === "equip_player_item" || binding.action === "unequip_player_item" || binding.equip.mode === "equipped") {
+    stateDeltaRefs.push(`item:${item.itemId}:equip_state`);
+  }
+
+  return {
+    status: "resolved",
+    itemEntry: item.entry,
+    itemId: item.itemId,
+    itemLabel: item.label,
+    playerEntry: player.entry,
+    playerActorId: player.playerActorId,
+    sourceLocationId: sourceLocation?.status === "resolved" ? sourceLocation.locationId : null,
+    targetOwnerId,
+    targetLocationId,
+    targetLabel,
+    targetEntityType,
+    targetEntityId,
+    nextEquipState,
+    nextEquippedSlot,
+    stateDeltaRefs,
+  };
 }
 
 function locationNameById(campaignId: string): Map<string, string> {
@@ -1231,6 +1564,166 @@ function commitEntityTagV2(input: {
   });
 }
 
+function commitItemTransferV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: ItemTransferRequestV2;
+  transfer: Extract<ItemTransferResolution, { status: "resolved" }>;
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const item = readItemRow({
+      packet: input.packet,
+      itemId: input.transfer.itemId,
+    });
+    if (!item) throw new Error(`Item transfer target not found: ${input.transfer.itemId}.`);
+
+    const binding = input.request.effectBinding;
+    const sourceFailure = validateItemTransferSource({
+      binding,
+      item,
+      playerActorId: input.transfer.playerActorId,
+      sourceLocationId: input.transfer.sourceLocationId,
+    });
+    if (sourceFailure) throw new Error(sourceFailure);
+
+    if (
+      binding.action === "equip_player_item"
+      || binding.action === "unequip_player_item"
+      || binding.action === "take_to_player_inventory"
+    ) {
+      if (input.transfer.targetOwnerId !== input.transfer.playerActorId) {
+        throw new Error(`${input.transfer.itemLabel} is not being transferred to player inventory.`);
+      }
+    }
+
+    if (input.transfer.nextEquipState === "equipped" && input.transfer.nextEquippedSlot) {
+      const slotConflict = db.select().from(items).where(and(
+        eq(items.campaignId, input.packet.campaignId),
+        eq(items.ownerId, input.transfer.playerActorId),
+        eq(items.equipState, "equipped"),
+        eq(items.equippedSlot, input.transfer.nextEquippedSlot),
+      )).all().find((candidate) => candidate.id !== input.transfer.itemId);
+      if (slotConflict) {
+        throw new Error(`Equip slot ${input.transfer.nextEquippedSlot} is already occupied by ${slotConflict.name}.`);
+      }
+    }
+
+    const nextState = {
+      ownerId: input.transfer.targetOwnerId,
+      locationId: input.transfer.targetLocationId,
+      equipState: input.transfer.nextEquipState,
+      equippedSlot: input.transfer.nextEquippedSlot,
+    };
+    const changed =
+      item.ownerId !== nextState.ownerId
+      || item.locationId !== nextState.locationId
+      || item.equipState !== nextState.equipState
+      || item.equippedSlot !== nextState.equippedSlot;
+    if (!changed) {
+      throw new Error(`No item transfer mutation was needed for ${input.transfer.itemLabel}.`);
+    }
+
+    const rowUpdate = db.update(items)
+      .set(nextState)
+      .where(and(
+        eq(items.id, input.transfer.itemId),
+        eq(items.campaignId, input.packet.campaignId),
+      ))
+      .run();
+    if (rowUpdate.changes !== 1) {
+      throw new Error("Item transfer update did not affect exactly one row.");
+    }
+
+    input.testHooks?.afterItemTransferRowUpdateBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before item.transfer.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.item.transfer.v2",
+        sourceEntityType: "item",
+        sourceEntityId: input.transfer.itemId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray(input.transfer.stateDeltaRefs),
+        witnesses: stringifyStringArray(input.request.effectBinding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          action: binding.action,
+          itemScope: binding.itemScope,
+          itemRef: binding.itemRef,
+          sourceScope: binding.sourceScope,
+          sourceRef: binding.sourceRef,
+          targetScope: binding.targetScope,
+          targetRef: binding.targetRef,
+          targetEntityType: input.transfer.targetEntityType,
+          targetEntityId: input.transfer.targetEntityId,
+          previous: {
+            ownerId: item.ownerId,
+            locationId: item.locationId,
+            equipState: item.equipState,
+            equippedSlot: item.equippedSlot,
+          },
+          next: nextState,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function routeCheckHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "route.check.v2" }>,
@@ -1586,6 +2079,54 @@ function entityTagHandler(
   }
 }
 
+function itemTransferHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: ItemTransferRequestV2,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const transfer = resolveItemTransfer({
+    packet,
+    registry,
+    request,
+  });
+  if (transfer.status !== "resolved") return failedOutcome(packet, transfer.reason);
+
+  try {
+    const commit = commitItemTransferV2({
+      packet,
+      request,
+      transfer,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "item",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${transfer.itemLabel} moves to ${transfer.targetLabel}.`,
+      evidenceRefs: [
+        request.effectBinding.itemRef,
+        request.effectBinding.sourceRef,
+        request.effectBinding.targetRef,
+        ...request.effectBinding.evidenceRefs,
+      ],
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "item.transfer.v2 failed before committing item mutation.";
+    const isNoOp = reason.includes("No item transfer mutation")
+      || reason.includes("already")
+      || reason.includes("not currently")
+      || reason.includes("not located")
+      || reason.includes("not being transferred")
+      || reason.includes("occupied");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 export function createDbBackedGameplayToolHandlersV2(
   options: CreateDbBackedGameplayToolHandlersV2Options = {},
 ): GameplayToolHandlerRegistryV2 {
@@ -1631,6 +2172,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "entity.tag.v2 handler received the wrong request type.");
       }
       return entityTagHandler(packet, request, refRegistry, options.testHooks);
+    },
+    "item.transfer.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "item.transfer.v2") {
+        return failedOutcome(packet, "item.transfer.v2 handler received the wrong request type.");
+      }
+      return itemTransferHandler(packet, request, refRegistry, options.testHooks);
     },
   };
 }
