@@ -776,6 +776,12 @@ function playerSafeDoneBoundary(value: unknown): Record<string, unknown> {
       data[key] = booleanValue;
     }
   }
+  for (const key of ["turnId", "packetId", "runtime"] as const) {
+    const stringValue = playerSafeText(value[key]);
+    if (stringValue) {
+      data[key] = stringValue;
+    }
+  }
   return data;
 }
 
