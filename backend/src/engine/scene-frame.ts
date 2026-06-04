@@ -925,17 +925,19 @@ function collectTargetCandidates(input: {
   const actorCandidates: SceneFrameTargetCandidate[] = [
     ...input.roster.active,
     ...input.roster.support,
-  ].map((actor) => ({
-    id: `actor:${actor.id}`,
-    type: "actor",
-    label: actor.awareness === "clear"
-      ? actor.label
-      : actor.awarenessHint ?? "Unidentified nearby presence",
-    actorId: actor.id,
-    locationId: actor.locationId,
-    awareness: actor.awareness,
-    tags: actor.tags ? [...actor.tags] : [],
-  }));
+  ]
+    .filter((actor) => actor.type !== "player")
+    .map((actor) => ({
+      id: `actor:${actor.id}`,
+      type: "actor",
+      label: actor.awareness === "clear"
+        ? actor.label
+        : actor.awarenessHint ?? "Unidentified nearby presence",
+      actorId: actor.id,
+      locationId: actor.locationId,
+      awareness: actor.awareness,
+      tags: actor.tags ? [...actor.tags] : [],
+    }));
   const itemCandidates = input.itemRows
     .filter(
       (item) =>

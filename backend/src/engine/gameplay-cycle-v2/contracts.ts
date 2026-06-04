@@ -511,9 +511,8 @@ export const gmReadV2Schema = z.discriminatedUnion("path", [
 
 export type GmReadV2 = z.infer<typeof gmReadV2Schema>;
 
-export const gmReadCandidateV2LooseSchema = z.object({
+const gmReadCandidateV2LooseBaseSchema = z.object({
   version: z.literal("gm-read.v2"),
-  path: gmReadPathV2Schema,
   situationSummary: z.string().trim().min(1).max(800).optional(),
   sceneQuestion: z.string().trim().min(1).max(400).optional(),
   focalActorRefs: z.array(modelSafeRefSchema).max(6).optional(),
@@ -521,11 +520,23 @@ export const gmReadCandidateV2LooseSchema = z.object({
   actionInterpretation: gmReadActionInterpretationV2Schema.partial().passthrough().optional(),
   turnNeed: gmReadTurnNeedV2Schema.optional(),
   rationale: z.string().trim().min(1).max(800).optional(),
-  noMutationReason: z.string().trim().min(1).max(500).optional(),
-  clarificationPrompt: optionalNonEmptyString(500),
-  oracleRequest: gmReadOracleRequestV2Schema.partial().passthrough().optional(),
-  checklistRequest: gmReadChecklistRequestV2Schema.partial().passthrough().optional(),
-}).passthrough();
+});
+
+export const gmReadCandidateV2LooseSchema: z.ZodType<unknown> = z.discriminatedUnion("path", [
+  gmReadCandidateV2LooseBaseSchema.extend({
+    path: gmReadNoMutationPathV2Schema,
+    noMutationReason: z.string().trim().min(1).max(500).optional(),
+    clarificationPrompt: optionalNonEmptyString(500),
+  }).strict(),
+  gmReadCandidateV2LooseBaseSchema.extend({
+    path: z.literal("roll_oracle"),
+    oracleRequest: gmReadOracleRequestV2Schema.partial().passthrough().optional(),
+  }).strict(),
+  gmReadCandidateV2LooseBaseSchema.extend({
+    path: z.literal("tool_plan"),
+    checklistRequest: gmReadChecklistRequestV2Schema.partial().passthrough().optional(),
+  }).strict(),
+]);
 
 export const oracleOutcomeTierV2Schema = z.enum([
   "strong_hit",

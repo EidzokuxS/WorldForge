@@ -1857,6 +1857,47 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedProcessTurn).not.toHaveBeenCalled();
   });
 
+  it("restores the pre-turn snapshot when gameplay-cycle-v2 fails before settlement", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    } as any;
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: "scene-settling",
+          data: { stage: "gm-read", phase: "gameplay-cycle-v2" },
+        } as any;
+        throw new Error("gameplay-cycle-v2 pre-settlement contract failed: GM Read generation failed before settlement");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Go to Silt Warrens",
+        intent: "Go to Silt Warrens",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: error");
+    expect(body).toContain("Turn processing failed. The pre-turn state was restored; please retry.");
+    expect(body).not.toContain("\"pendingNarration\":true");
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+  });
+
   it("projects progress events through the player-facing SSE allow-list", async () => {
     setupStoryteller();
     setupDbMock();

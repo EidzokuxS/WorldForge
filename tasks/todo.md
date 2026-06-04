@@ -218,6 +218,42 @@ P17 live mutating adapter decision and implementation checkpoint:
 - Known P17 gap before live/manual acceptance:
   - v2 pending narration transport/resume is contract-tested, but no live `/api/chat/action` manual evidence has been counted for this slice yet.
 
+P17 live/manual diagnostic and Oracle follow-up:
+- Live setup:
+  - Started stable backend on `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped it after diagnostics. Ports `3199/3001` were empty before the Oracle run.
+  - Clean source campaign `30e161da-db4b-4d8c-ab93-154fab7aa03f` verified with empty `chat_history`.
+  - Diagnostic lane-1 clone `dc6b0d59-d809-45c1-ad89-715d0186ba00`; lane-2 clone `9dbfa40c-027d-49a5-961e-751186f0a8a3`; lane-3 clone `0bef1a0c-0c56-4f4c-b536-f6df01960398`; lane-4 clone `28819789-fc57-40fb-b7d3-10885fc667dd`.
+- Evidence:
+  - Lane-1 first valid action reached `done` with `runtime=gameplay-cycle-v2`, packet `v2packet-mpzt2sku-f7fbf63095d0`, and only `gameplay_cycle_v2_packets=1`; no legacy `turn_sagas`, `settled_turn_packets`, or `narrator_attempts`. It covered Oracle/no-mutation, not mutating tool-plan acceptance.
+  - Lane-1 second action exposed a pre-fix failure: explicit connected movement to `Silt Warrens` finalized as fake clarification after GM Read generation failed validation. This lane is diagnostic only.
+  - Fix applied: runtime no longer synthesizes player-facing clarification when GM Read generation fails; runtime now rejects non-accepted `validateGmReadV2()` results before settlement.
+  - Lanes 2-4 replayed the explicit connected movement action and now fail closed with restored snapshot, no packet/chat/saga/narrator rows. This proves restore/no-fake-clarification, but not live mutating acceptance.
+  - Additional fixes attempted: path-scoped loose GM Read candidate schema, exact `checklistRequest.turnPath` prompt contract, and structural discriminator normalization from checklist ownership. Focused tests pass, but live movement still fails because the model/repair path omits `checklistRequest`.
+- Follow-up implementation/evidence after Oracle decision:
+  - Added `explicitMovementAdmissionV2` as a backend-owned admission layer for exact visible connected movement. It emits no tool payload, state delta, receipt, narration, travel success, or safety claim; it only completes a backend-owned checklist request when the action exactly cites a unique connected movement option.
+  - Runtime now fails closed on GM Read generation/validation failure before settlement instead of synthesizing fake clarification.
+  - GM Read validation now uses path-scoped loose candidate parsing, strips non-executable sidecars, and rejects executable sidecars/payload smuggling.
+  - Action checklist generation is constrained by GM Read `requiredEffectKinds` and derived capability ids; generated steps outside that contract are rejected.
+  - Post-mutation frame refresh now uses the refreshed world clock/tick rather than the stale initial turn tick.
+  - Local consequence request generation is deterministic and backend-owned for `scene_beat.record.v2`; no model call, no missing `summary`, no invalid `destinationRef`.
+  - SceneFrame/model projection/ref-registry boundaries now keep the player only under canonical `Player`; player labels such as `Mira Voss` are not exposed as visible actor/target evidence.
+  - Diagnostic lanes 5-10 exposed and drove fixes for checklist overreach, stale refreshed tick, local consequence schema, mixed Oracle-shaped GM Read admission, top-level GM Read evidence closure, and player-label actor/target leakage. These lanes do not count as acceptance.
+  - Lane-11 clone `db6e13e1-f9f2-47ae-9237-e64637c972de` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f` reached `narrative` + `done` through real `/api/chat/action` with `runtime=gameplay-cycle-v2`.
+  - Lane-11 player action: `Я выбираю Silt Warrens как менее открытый путь и иду туда, держа sealed lacquer message tube закрытой в courier satchel.`
+  - Lane-11 DB proof: `gameplay_cycle_v2_packets=1`, legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `chat_history=2`, player location `Silt Warrens`, packet `v2packet-mpzwqym9-e7ce6532ba40` finalized with `gmRead.path=tool_plan`, accepted receipt `receipt-step-1`, no failed/skipped steps, and no `Mira Voss` in packet/narration.
+  - Backend process on `3199` was stopped after lane-11 evidence.
+- Verification after fixes:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` (97 tests).
+  - `npm --prefix backend test -- scene-frame.test.ts` (22 tests).
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` (61 tests).
+  - `npm --prefix backend run typecheck`.
+- Oracle/GPT-5.5 Pro session: `p17-explicit-movement-admission`.
+  - Dry-run: browser mode, one bundled attachment planned, 10 files, about 118.2k tokens.
+  - Real run completed on GPT-5.5 Pro / Extended Pro with `--browser-bundle-files`; saved to `output/oracle/p17-explicit-movement-admission/response.md`.
+  - Recommendation accepted: hybrid. Keep GM Read as auditable turn-intent center, but add a backend-owned explicit movement admission layer for exact visible connected movement. The layer emits only a checklist/admission seed and passes through the same validators; it must not emit tools, payloads, receipts, state deltas, narration, travel success, safety claims, or NPC reactions.
+  - Required invariant: model owns open-ended interpretation; backend owns closed-world admission, ref resolution, capability availability, mutation authority, and packet persistence.
+  - Next implementation: `explicitMovementAdmissionV2` after SceneFrame/model packet creation, using only player action, movement candidates/citable refs/ref registry/capability surface; complete a missing/malformed movement `checklistRequest` only when an exact visible connected destination label is unambiguous and no executable/private/uncited/contradictory payload is present. Fail closed before persistence otherwise.
+
 ## Primitive Rewrite Cycle
 
 Development loop for each primitive:

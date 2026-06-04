@@ -22,6 +22,7 @@ import {
   assertTurnAttemptContextV2,
   buildApiResponseProjectionV2,
   assertTurnStartEnvelopeV2,
+  admitExplicitMovementV2,
   apiResponseProjectionV2Schema,
   buildNarratorViewV2,
   buildModelFacingTurnPacketV2,
@@ -32,6 +33,7 @@ import {
   buildOracleSettledTurnPacketV2,
   buildSettledPacketPersistencePendingV2,
   capabilityForEffectKindV2,
+  completeGmReadWithExplicitMovementAdmissionV2,
   composeGameplayCycleMutatingTurnV2,
   formatModelFacingTurnPacketForPromptV2,
   GAMEPLAY_CYCLE_V2_FORBIDDEN_CORE_IMPORTS,
@@ -41,6 +43,7 @@ import {
   gameplayRuntimeReceiptV2Schema,
   buildRuntimeReceiptLedgerV2,
   buildRuntimeSettledTurnPacketV2,
+  gmReadCandidateV2LooseSchema,
   createDbBackedGameplayToolHandlersV2,
   refreshFrameAfterAcceptedMutationV2,
   scheduleLocalConsequencesV2,
@@ -662,6 +665,42 @@ function registryForPacket(frame: SceneFrame = sceneFrame()) {
   });
 }
 
+function movementAdmissionFixture(options: {
+  playerAction?: string;
+  frame?: Partial<SceneFrame>;
+  visibleRefs?: string[];
+  capabilityIds?: Array<"observe_visible" | "movement" | "route_check">;
+} = {}) {
+  const playerAction = options.playerAction ?? "I go to North Hall.";
+  const attempt = assertTurnAttemptContextV2({
+    ...attemptContext(),
+    playerAction,
+  });
+  const frame = sceneFrame({
+    playerAction,
+    ...options.frame,
+  });
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt,
+    frame,
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: options.visibleRefs ?? ["Atrium", "Atrium Floor", "Player", "North Hall"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: options.capabilityIds ?? ["observe_visible", "movement", "route_check"],
+    },
+  }));
+  return {
+    frame,
+    packet,
+    registry: buildGameplayRefRegistryV2({
+      turnId: packet.turnId,
+      frame,
+    }),
+  };
+}
+
 describe("gameplay-cycle-v2 primitive contracts", () => {
   it("accepts a transport-owned turn start envelope without gameplay semantics", () => {
     const parsed = assertTurnStartEnvelopeV2(startEnvelope());
@@ -827,6 +866,54 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(packet)).not.toContain("item-secret-id");
   });
 
+  it("projects the player only through the canonical Player ref", () => {
+    const frame = sceneFrame({
+      roster: {
+        active: [{
+          id: "actor-player-1",
+          actorId: "player-alpha",
+          type: "player",
+          label: "Mira Voss",
+          locationId: "location-alpha",
+          sceneScopeId: "scene-alpha",
+          awareness: "clear",
+          awarenessHint: "ready to move",
+        }, ...sceneFrame().roster.active],
+        support: [],
+        background: [],
+      },
+      targetCandidates: [{
+        id: "target-player-1",
+        type: "actor",
+        label: "Mira Voss",
+        actorId: "player-alpha",
+        tags: ["player"],
+      }, ...sceneFrame().targetCandidates],
+    });
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame,
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "Clerk Mara", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "movement", "route_check"],
+      },
+    }));
+
+    expect(packet.scene.actors.map((actor) => actor.ref)).toEqual(["Player", "Clerk Mara"]);
+    expect(packet.scene.targets.map((target) => target.ref)).not.toContain("Mira Voss");
+    expect(packet.citableRefs).toContain("Player");
+    expect(packet.citableRefs).not.toContain("Mira Voss");
+
+    const registry = buildGameplayRefRegistryV2({ turnId: packet.turnId, frame });
+    expect(registry.entries.find((entry) =>
+      entry.ref === "Mira Voss" && entry.kind === "visible_actor")).toBeUndefined();
+    expect(registry.entries.find((entry) =>
+      entry.ref === "Mira Voss" && entry.kind === "visible_target")).toBeUndefined();
+  });
+
   it("keeps private guard terms out of the prompt payload", () => {
     const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
@@ -893,6 +980,234 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       throw new Error("Player ref must resolve.");
     }
     expect(actor.entry.ids.playerActorId).toBe("player-alpha");
+  });
+
+  it("admits explicit movement from packet and registry without tool payload authority", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I choose North Hall and walk there.",
+    });
+
+    const admission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+
+    expect(admission.status).toBe("admitted");
+    if (admission.status !== "admitted") throw new Error("Expected movement admission.");
+    expect(admission.destinationRef).toBe("North Hall");
+    expect(admission.checklistRequest).toEqual({
+      turnPath: "mutating",
+      requiredEffectKinds: ["movement"],
+      actorRefs: ["Player"],
+      targetRefs: ["North Hall"],
+      evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+      checklistGoal: "Settle the explicit movement only through an accepted movement receipt.",
+    });
+    expect(JSON.stringify(admission)).not.toMatch(/\bmove_actor\b|\btoolName\b|\binput\b/u);
+  });
+
+  it("does not admit ambiguous, disconnected, or capability-missing movement", () => {
+    const duplicate = movementAdmissionFixture({
+      playerAction: "I go to North Hall.",
+      frame: {
+        movementCandidates: [
+          {
+            id: "route-secret-id",
+            locationId: "location-beta",
+            label: "North Hall",
+            connected: true,
+            travelCost: 1,
+          },
+          {
+            id: "route-secret-id-2",
+            locationId: "location-gamma",
+            label: "North Hall",
+            connected: true,
+            travelCost: 1,
+          },
+        ],
+      },
+    });
+    expect(admitExplicitMovementV2({
+      packet: duplicate.packet,
+      refRegistry: duplicate.registry,
+    })).toMatchObject({
+      status: "not_admitted",
+      reason: "movement destination mention is ambiguous.",
+    });
+
+    const disconnected = movementAdmissionFixture({
+      playerAction: "I go to North Hall.",
+      frame: {
+        movementCandidates: [{
+          id: "route-secret-id",
+          locationId: "location-beta",
+          label: "North Hall",
+          connected: false,
+          travelCost: 1,
+        }],
+      },
+    });
+    expect(admitExplicitMovementV2({
+      packet: disconnected.packet,
+      refRegistry: disconnected.registry,
+    })).toMatchObject({
+      status: "not_admitted",
+    });
+
+    const noCapability = movementAdmissionFixture({
+      playerAction: "I go to North Hall.",
+      capabilityIds: ["observe_visible", "route_check"],
+    });
+    expect(admitExplicitMovementV2({
+      packet: noCapability.packet,
+      refRegistry: noCapability.registry,
+    })).toMatchObject({
+      status: "not_admitted",
+      reason: "movement capability is not available.",
+    });
+  });
+
+  it("completes only backend-owned explicit movement GM Reads", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I choose North Hall and walk there.",
+    });
+    const admission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+    expect(admission.status).toBe("admitted");
+
+    const completed = completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: {
+        version: "gm-read.v2",
+        path: "direct",
+        situationSummary: "The player is leaving for North Hall.",
+        sceneQuestion: "What backend-owned effect must settle the travel?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Atrium Floor", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement requires backend settlement.",
+        noMutationReason: "",
+        clarificationPrompt: "",
+      },
+    });
+    const validation = validateGmReadV2({
+      packet,
+      candidate: completed,
+    });
+    expect(validation.status).toBe("accepted");
+    if (validation.status !== "accepted") throw new Error("Expected completed GM Read.");
+    expect(validation.read.path).toBe("tool_plan");
+    if (validation.read.path === "tool_plan") {
+      expect(validation.read.evidenceRefs).toContain("Player");
+      expect(validation.read.checklistRequest.requiredEffectKinds).toEqual(["movement"]);
+      expect(validation.read.checklistRequest.targetRefs).toEqual(["North Hall"]);
+    }
+
+    const ordinaryDirect = {
+      version: "gm-read.v2",
+      path: "direct",
+      situationSummary: "The player looks toward North Hall.",
+      sceneQuestion: "What is visible?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "North Hall"],
+      actionInterpretation: {
+        intent: "Look at North Hall.",
+        method: null,
+        targetRefs: ["North Hall"],
+      },
+      turnNeed: "none",
+      rationale: "No state change requested.",
+      noMutationReason: "Visible scene evidence is enough.",
+      clarificationPrompt: "",
+    };
+    expect(completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: ordinaryDirect,
+    })).toBe(ordinaryDirect);
+  });
+
+  it("does not rescue executable payloads through explicit movement completion", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I choose North Hall and walk there.",
+    });
+    const admission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+    expect(admission.status).toBe("admitted");
+
+    expect(() => completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: {
+        version: "gm-read.v2",
+        path: "direct",
+        situationSummary: "The player is leaving for North Hall.",
+        sceneQuestion: "What backend-owned effect must settle the travel?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement requires backend settlement.",
+        toolName: "move_actor",
+      },
+    })).toThrow();
+  });
+
+  it("does not rewrite Oracle-shaped GM Reads through explicit movement admission", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "Can I reach North Hall without being noticed?",
+    });
+    const admission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+    expect(admission.status).toBe("admitted");
+
+    const mixedOracle = {
+      version: "gm-read.v2",
+      path: "roll_oracle",
+      situationSummary: "The player wants to move under uncertain observation.",
+      sceneQuestion: "Can the player reach North Hall without being noticed?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "North Hall"],
+      actionInterpretation: {
+        intent: "Reach North Hall unnoticed.",
+        method: "careful movement",
+        targetRefs: ["North Hall"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Mixed malformed candidate.",
+      oracleRequest: {
+        question: "Can the player reach North Hall without being noticed?",
+        stakes: "Detection changes the scene pressure.",
+        uncertaintyKind: "perception",
+        actorRef: "Player",
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "North Hall"],
+        outcomeMeanings: {
+          strong_hit: "The player reaches it unnoticed.",
+          weak_hit: "The player reaches it with a trace.",
+          miss: "The movement draws attention.",
+        },
+      },
+    };
+
+    expect(completeGmReadWithExplicitMovementAdmissionV2({
+      admission,
+      candidate: mixedOracle,
+    })).toBe(mixedOracle);
   });
 
   it("fails closed when a model-safe ref is ambiguous for a handler-owned kind", () => {
@@ -1207,6 +1522,132 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     expect(smuggled.status).toBe("fallback_clarification");
     expect(smuggled.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+  });
+
+  it("normalizes GM Read discriminator fields from structured checklist ownership", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "route_check", "movement", "scene_beat_record"],
+      },
+    }));
+
+    const result = validateGmReadV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "direct",
+        situationSummary: "The player wants to move to a visible connected destination.",
+        sceneQuestion: "Which backend-owned effect must settle the move?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement requires backend-owned mutation authority.",
+        noMutationReason: "",
+        clarificationPrompt: "",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          checklistGoal: "Move the player only if the accepted movement tool receipt applies.",
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.read.path).toBe("tool_plan");
+    if (result.read.path === "tool_plan") {
+      expect(result.read.turnNeed).toBe("backend_action_checklist");
+      expect(result.read.checklistRequest.requiredEffectKinds).toEqual(["movement"]);
+    }
+
+    const smuggledSidecar = validateGmReadV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "direct",
+        situationSummary: "The player wants to move.",
+        sceneQuestion: "Bad sidecar.",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "North Hall"],
+        actionInterpretation: {
+          intent: "Move.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Bad.",
+        oracleRequest: {
+          toolName: "move_actor",
+        },
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "North Hall"],
+          checklistGoal: "Bad.",
+        },
+      },
+    });
+    expect(smuggledSidecar.status).toBe("fallback_clarification");
+    expect(smuggledSidecar.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+  });
+
+  it("keeps GM Read candidate generation sidecars path-scoped before final validation", () => {
+    const baseToolPlan = {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player wants to move to a connected destination.",
+      sceneQuestion: "Which backend effect owns the move?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "North Hall"],
+      actionInterpretation: {
+        intent: "Move to North Hall.",
+        method: "walk",
+        targetRefs: ["North Hall"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Movement requires backend-owned mutation authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["movement"],
+        actorRefs: ["Player"],
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        checklistGoal: "Move the player after an accepted movement receipt.",
+      },
+    };
+
+    expect(gmReadCandidateV2LooseSchema.safeParse(baseToolPlan).success).toBe(true);
+    expect(gmReadCandidateV2LooseSchema.safeParse({
+      ...baseToolPlan,
+      noMutationReason: "",
+    }).success).toBe(false);
+    expect(gmReadCandidateV2LooseSchema.safeParse({
+      ...baseToolPlan,
+      oracleRequest: {
+        question: "",
+        stakes: "",
+        outcomeMeanings: { strong_hit: "", weak_hit: "", miss: "" },
+        uncertaintyKind: "perception",
+        actorRef: "",
+        targetRefs: [],
+        evidenceRefs: [],
+      },
+    }).success).toBe(false);
   });
 
   it("falls back to clarification when GM Read contains executable payload fields", () => {
@@ -2917,6 +3358,133 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(refresh.refreshedPacket.scene.movementOptions.map((option) => option.label))
       .toContain("Atrium");
     expect(refresh.refreshedPacket.citableRefs).toContain("North Hall");
+  });
+
+  it("refreshes post-mutation packets with the refreshed SceneFrame tick", async () => {
+    const { packet, checklist } = movementToolPlanFixture();
+    const execution = await executeGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      request: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-move-refresh-tick",
+        stepId: "step-1",
+        capabilityId: "movement",
+        toolId: "actor.move.v2",
+        effectBinding: {
+          actorRef: "Player",
+          destinationRef: "North Hall",
+          travelMode: "walk",
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+        },
+      },
+      handlers: {
+        "actor.move.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "local_scene",
+          resultWorldVersion: 8,
+          visibleSummary: "Player arrives at North Hall.",
+          evidenceRefs: ["Player", "North Hall"],
+        }),
+      },
+      receiptId: "receipt-move-refresh-tick",
+      emittedAt: 22,
+    });
+    const ledger = buildRuntimeReceiptLedgerV2({
+      ledgerId: "ledger-move-refresh-tick",
+      modelPacket: packet,
+      checklist,
+      receipts: [execution.receipt],
+    });
+
+    const refresh = refreshFrameAfterAcceptedMutationV2({
+      previousPacket: packet,
+      ledger,
+      refreshedEnvelope: {
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext({ baseTick: 3, baseWorldVersion: 8 }),
+        frame: sceneFrame({
+          tick: 3,
+          worldVersion: 8,
+          currentLocationId: "location-beta",
+          currentSceneScopeId: "scene-beta",
+          currentLocationName: "North Hall",
+          currentSceneScopeName: "North Hall",
+        }),
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["North Hall", "Player", "Atrium"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "movement"],
+        },
+      },
+    });
+
+    expect(refresh.status).toBe("refreshed");
+    if (refresh.status !== "refreshed") throw new Error("Frame refresh must be accepted.");
+    expect(refresh.refreshedPacket.baseTick).toBe(3);
+    expect(refresh.refreshedPacket.baseWorldVersion).toBe(8);
+  });
+
+  it("rejects refreshed frames whose tick does not match the refreshed attempt", async () => {
+    const { packet, checklist } = movementToolPlanFixture();
+    const execution = await executeGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      request: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-move-refresh-bad-tick",
+        stepId: "step-1",
+        capabilityId: "movement",
+        toolId: "actor.move.v2",
+        effectBinding: {
+          actorRef: "Player",
+          destinationRef: "North Hall",
+          travelMode: "walk",
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+        },
+      },
+      handlers: {
+        "actor.move.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "local_scene",
+          resultWorldVersion: 8,
+          visibleSummary: "Player arrives at North Hall.",
+          evidenceRefs: ["Player", "North Hall"],
+        }),
+      },
+      receiptId: "receipt-move-refresh-bad-tick",
+      emittedAt: 23,
+    });
+    const ledger = buildRuntimeReceiptLedgerV2({
+      ledgerId: "ledger-move-refresh-bad-tick",
+      modelPacket: packet,
+      checklist,
+      receipts: [execution.receipt],
+    });
+
+    const refresh = refreshFrameAfterAcceptedMutationV2({
+      previousPacket: packet,
+      ledger,
+      refreshedEnvelope: {
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext({ baseTick: 3, baseWorldVersion: 8 }),
+        frame: sceneFrame({ tick: 2, worldVersion: 8 }),
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Player", "North Hall"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "movement"],
+        },
+      },
+    });
+
+    expect(refresh.status).toBe("rejected");
+    expect(refresh.reason).toContain("SceneFrame tick must match the turn attempt base tick");
   });
 
   it("rejects stale refreshed frames after accepted mutation receipts", async () => {
@@ -5065,8 +5633,41 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("visible actor notices");
     expect(source).toContain("eligible for roll_oracle");
     expect(source).toContain("Use tool_plan when the turn needs an accepted backend action checklist");
+    expect(source).toContain("checklistRequest.turnPath=mutating");
+    expect(source).toContain("Valid checklistRequest.turnPath values are only: mutating, procedural, combat");
     expect(source).not.toContain("gameplay-cycle-v2-no-mutation");
     expect(source).not.toContain("options.onPostTurn");
     expect(source).not.toContain("buildNoMutationSummary");
+  });
+
+  it("does not synthesize a player-facing clarification when GM Read generation fails", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("GM Read generation failed before settlement");
+    expect(source).toContain('gmReadValidation.status !== "accepted"');
+    expect(source).toContain("GM Read rejected before settlement");
+    expect(source).toContain("throw runtimeContractError");
+    expect(source).not.toContain("The GM Read layer could not produce a valid no-mutation interpretation.");
+    expect(source).not.toContain("Please clarify what you want to do next.");
+  });
+
+  it("constructs local consequence scene-beat requests from backend schedule ownership", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf-8",
+    );
+    const functionBody = source.slice(
+      source.indexOf("async function generateLocalConsequenceCandidateV2"),
+      source.indexOf("function buildNarratorSystemPrompt"),
+    );
+
+    expect(functionBody).toContain('toolId: "scene_beat.record.v2"');
+    expect(functionBody).toContain("summary: input.consequence.reason");
+    expect(functionBody).toContain("evidenceRefs: input.consequence.evidenceRefs");
+    expect(functionBody).not.toContain("safeGenerateObject");
+    expect(functionBody).not.toContain("destinationRef");
   });
 });

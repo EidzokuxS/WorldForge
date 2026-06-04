@@ -57,6 +57,43 @@ function executablePayloadPaths(value: unknown): string[] {
   return offenders;
 }
 
+function removeNonExecutableSidecar(candidate: Record<string, unknown>, key: string): void {
+  if (!(key in candidate)) return;
+  if (executablePayloadPaths(candidate[key]).length > 0) return;
+  delete candidate[key];
+}
+
+function normalizeGmReadCandidateDiscriminatorV2(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const normalized: Record<string, unknown> = { ...candidate };
+  const path = typeof normalized.path === "string" ? normalized.path.trim() : "";
+  const turnNeed = typeof normalized.turnNeed === "string" ? normalized.turnNeed.trim() : "";
+  const hasChecklistRequest = isRecord(normalized.checklistRequest);
+  const hasOracleRequest = isRecord(normalized.oracleRequest);
+
+  if (path === "tool_plan" || turnNeed === "backend_action_checklist" || hasChecklistRequest) {
+    normalized.path = "tool_plan";
+    normalized.turnNeed = "backend_action_checklist";
+    removeNonExecutableSidecar(normalized, "noMutationReason");
+    removeNonExecutableSidecar(normalized, "clarificationPrompt");
+    removeNonExecutableSidecar(normalized, "oracleRequest");
+    return normalized;
+  }
+
+  if (path === "roll_oracle" || turnNeed === "oracle_uncertainty" || hasOracleRequest) {
+    normalized.path = "roll_oracle";
+    normalized.turnNeed = "oracle_uncertainty";
+    removeNonExecutableSidecar(normalized, "noMutationReason");
+    removeNonExecutableSidecar(normalized, "clarificationPrompt");
+    removeNonExecutableSidecar(normalized, "checklistRequest");
+    return normalized;
+  }
+
+  removeNonExecutableSidecar(normalized, "oracleRequest");
+  removeNonExecutableSidecar(normalized, "checklistRequest");
+  return normalized;
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -342,14 +379,15 @@ export function validateGmReadV2(input: {
   packet: ModelFacingTurnPacketV2;
   candidate: unknown;
 }): GmReadAnyValidationResultV2 {
-  const path = isRecord(input.candidate) && typeof input.candidate.path === "string"
-    ? input.candidate.path.trim()
+  const candidate = normalizeGmReadCandidateDiscriminatorV2(input.candidate);
+  const path = isRecord(candidate) && typeof candidate.path === "string"
+    ? candidate.path.trim()
     : "";
   if (path === "roll_oracle") {
-    return validateGmReadOracleV2(input);
+    return validateGmReadOracleV2({ ...input, candidate });
   }
   if (path === "tool_plan") {
-    return validateGmReadChecklistV2(input);
+    return validateGmReadChecklistV2({ ...input, candidate });
   }
-  return validateGmReadNoMutationV2(input);
+  return validateGmReadNoMutationV2({ ...input, candidate });
 }

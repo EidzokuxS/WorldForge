@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import {
   appendChatMessages,
   advanceCampaignTick,
@@ -31,7 +32,6 @@ import {
   gameplayToolRequestV2Schema,
   gmActionChecklistV2Schema,
   gmReadCandidateV2LooseSchema,
-  localConsequenceToolRequestCandidateV2Schema,
   type ApiResponseProjectionV2,
   type GameplayRuntimeReceiptLedgerV2,
   type GmActionChecklistStepV2,
@@ -52,8 +52,13 @@ import {
 } from "./projection.js";
 import { validateGmReadV2 } from "./gm-read.js";
 import { validateGmActionChecklistV2 } from "./action-checklist.js";
+import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
+import {
+  admitExplicitMovementV2,
+  completeGmReadWithExplicitMovementAdmissionV2,
+} from "./explicit-movement-admission.js";
 import { buildGameplayRefRegistryV2 } from "./ref-registry.js";
 import {
   buildOraclePayloadV2,
@@ -178,6 +183,12 @@ function currentBaseTick(campaignId: string): number {
   return Math.max(campaignTick, clock.currentTick, clock.worldTimeMinutes);
 }
 
+function currentFrameTick(campaignId: string): number {
+  const campaignTick = readCampaignConfig(campaignId).currentTick ?? 0;
+  const clock = readWorldClock(campaignId);
+  return Math.max(campaignTick, clock.currentTick, clock.worldTimeMinutes);
+}
+
 interface LiveSceneFrameContextV2 {
   frame: SceneFrame;
   envelope: SceneFrameEnvelopeV2;
@@ -187,10 +198,12 @@ interface LiveSceneFrameContextV2 {
 
 function attemptAtWorldVersion(input: {
   attempt: TurnAttemptContextV2;
+  baseTick?: number;
   worldVersion: number;
 }): TurnAttemptContextV2 {
   return assertTurnAttemptContextV2({
     ...input.attempt,
+    baseTick: input.baseTick ?? input.attempt.baseTick,
     baseWorldVersion: input.worldVersion,
   });
 }
@@ -244,6 +257,10 @@ function buildGmReadSystemPrompt(): string {
     "Do not use roll_oracle to reveal hidden memories, private intentions, secret knowledge, offscreen facts, or facts about actors who are not visible/cited.",
     "Use tool_plan when the turn needs an accepted backend action checklist for route checks, movement, or a scene-local beat receipt.",
     "For tool_plan, include checklistRequest with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal.",
+    "For explicit travel to a connected visible destination, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"movement\"].",
+    "For route availability checks without travel, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"route_check\"].",
+    "For local posture/scene beat without structural state change, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"scene_beat\"].",
+    "Valid checklistRequest.turnPath values are only: mutating, procedural, combat. Never use movement, route_check, or scene_beat as turnPath values.",
     "For this live slice, checklistRequest.requiredEffectKinds may use only route_check, movement, or scene_beat.",
     "Do not narrate. Do not mutate state. Do not include tool names, tool inputs, executable payloads, combat transitions, or future checklist steps.",
     "Cite only citableRefs from the model-facing packet.",
@@ -270,7 +287,7 @@ function buildChecklistSystemPrompt(): string {
     "Return only gm-action-checklist.v2 JSON.",
     "The checklist is intent-only. Do not include tool ids, tool inputs, executable payloads, state deltas, receipts, results, or narration.",
     "Use only refs from the current model-facing packet citableRefs and from the accepted GM Read checklistRequest.",
-    "For this live slice, allowed intendedEffect.kind values are route_check, movement, and scene_beat.",
+    "Use only the allowedEffectKinds supplied in the prompt. Do not add route checks, movement, or scene beats unless that exact effect kind is listed.",
     "Each step must have exactly one intended state/evidence effect and the matching requiredCapabilityId.",
     "Use step-1, step-2, ... in dependency order. Dependencies may only refer to earlier steps.",
     "Checklist intent is not settled truth; backend receipts decide truth.",
@@ -285,8 +302,40 @@ function buildChecklistPrompt(input: {
     task: "Produce an intent-only backend-owned action checklist for the accepted GM Read.",
     packet: formatModelFacingTurnPacketForPromptV2(input.packet),
     acceptedGmRead: input.gmRead,
-    allowedEffectKinds: ["route_check", "movement", "scene_beat"],
+    allowedEffectKinds: input.gmRead.checklistRequest.requiredEffectKinds,
+    allowedCapabilityIds: input.gmRead.checklistRequest.requiredEffectKinds
+      .map((effectKind) => capabilityForEffectKindV2(effectKind)),
   }, null, 2);
+}
+
+function actionChecklistGenerationSchemaFor(gmRead: GmReadChecklistV2) {
+  const requestedKinds = new Set(gmRead.checklistRequest.requiredEffectKinds);
+  const requestedCapabilities = new Set(
+    gmRead.checklistRequest.requiredEffectKinds.map((effectKind) =>
+      capabilityForEffectKindV2(effectKind)),
+  );
+  return gmActionChecklistV2Schema.superRefine((checklist, ctx) => {
+    checklist.steps.forEach((step, index) => {
+      if (!requestedKinds.has(step.intendedEffect.kind)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["steps", index, "intendedEffect", "kind"],
+          message: `Only these intendedEffect.kind values are allowed for this GM Read: ${
+            [...requestedKinds].join(", ")
+          }.`,
+        });
+      }
+      if (!requestedCapabilities.has(step.requiredCapabilityId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["steps", index, "requiredCapabilityId"],
+          message: `Only these requiredCapabilityId values are allowed for this GM Read: ${
+            [...requestedCapabilities].join(", ")
+          }.`,
+        });
+      }
+    });
+  }) satisfies z.ZodType<unknown>;
 }
 
 function buildToolRequestSystemPrompt(): string {
@@ -366,7 +415,7 @@ async function generateActionChecklistCandidateV2(input: {
 }): Promise<GmActionChecklistV2> {
   const rawChecklist = (await safeGenerateObject({
     model: createModel(input.options.judgeProvider, { role: "judge" }),
-    schema: gmActionChecklistV2Schema,
+    schema: actionChecklistGenerationSchemaFor(input.gmRead),
     system: buildChecklistSystemPrompt(),
     prompt: buildChecklistPrompt({
       packet: input.packet,
@@ -420,22 +469,25 @@ async function generateLocalConsequenceCandidateV2(input: {
   consequence: LocalConsequenceScheduleEntryV2;
   consequenceIndex: number;
 }): Promise<unknown> {
-  return (await safeGenerateObject({
-    model: createModel(input.options.judgeProvider, { role: "judge" }),
-    schema: localConsequenceToolRequestCandidateV2Schema,
-    system: buildLocalConsequenceSystemPrompt(),
-    prompt: buildLocalConsequencePrompt({
-      latestPacket: input.latestPacket,
-      ledger: input.ledger,
-      schedule: input.schedule,
-      consequence: input.consequence,
-      consequenceIndex: input.consequenceIndex,
-    }),
-    temperature: 0.1,
-    maxTokens: 1_400,
-    retries: 1,
-    strictSchema: false,
-  })).object;
+  return {
+    version: "local-consequence-tool-request-candidate.v2",
+    candidateId: `candidate-${input.consequence.consequenceId}`,
+    consequenceId: input.consequence.consequenceId,
+    triggerReceiptId: input.consequence.triggerReceiptId,
+    request: {
+      version: "gameplay-tool-request.v2",
+      requestId: `request-${input.consequence.consequenceId}`,
+      stepId: localConsequenceStepId(input.consequenceIndex),
+      capabilityId: "scene_beat_record",
+      toolId: "scene_beat.record.v2",
+      effectBinding: {
+        actorRef: input.consequence.actorRef,
+        summary: input.consequence.reason,
+        evidenceRefs: input.consequence.evidenceRefs,
+      },
+    },
+    rationale: "Backend schedule owns this required local scene beat after an accepted mutation.",
+  };
 }
 
 function buildNarratorSystemPrompt(): string {
@@ -558,6 +610,10 @@ export async function* processGameplayTurnCycleV2(
   });
   const frame = initialFrameContext.frame;
   const modelPacket = initialFrameContext.packet;
+  const explicitMovementAdmission = admitExplicitMovementV2({
+    packet: modelPacket,
+    refRegistry: initialFrameContext.refRegistry,
+  });
 
   yield {
     type: "scene-settling",
@@ -581,28 +637,28 @@ export async function* processGameplayTurnCycleV2(
       strictSchema: false,
     })).object;
   } catch (error) {
-    gmReadCandidate = {
-      version: "gm-read.v2",
-      path: "clarification",
-      situationSummary: "The GM Read layer could not produce a valid no-mutation interpretation.",
-      sceneQuestion: "What should be clarified before resolving this turn?",
-      focalActorRefs: ["Player"],
-      evidenceRefs: ["Player"],
-      actionInterpretation: {
-        intent: "Clarify the player action.",
-        method: null,
-        targetRefs: [],
-      },
-      turnNeed: "clarification_needed",
-      rationale: error instanceof Error ? error.message.slice(0, 700) : String(error).slice(0, 700),
-      noMutationReason: "No state mutation is accepted when the GM Read contract fails.",
-      clarificationPrompt: "Please clarify what you want to do next.",
-    };
+    throw runtimeContractError(
+      `GM Read generation failed before settlement: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
-  const gmRead = validateGmReadV2({
+  gmReadCandidate = completeGmReadWithExplicitMovementAdmissionV2({
+    candidate: gmReadCandidate,
+    admission: explicitMovementAdmission,
+  });
+  const gmReadValidation = validateGmReadV2({
     packet: modelPacket,
     candidate: gmReadCandidate,
-  }).read;
+  });
+  if (gmReadValidation.status !== "accepted") {
+    throw runtimeContractError(
+      `GM Read rejected before settlement: ${gmReadValidation.issues.map((issue) =>
+        `${issue.path}: ${issue.message}`
+      ).join("; ")}`,
+    );
+  }
+  const gmRead = gmReadValidation.read;
   let oracleResult: OracleResult | null = null;
   let settledPacket: SettledTurnPacketV2;
   if (gmRead.path === "roll_oracle") {
@@ -670,6 +726,7 @@ export async function* processGameplayTurnCycleV2(
         playerAction: options.playerAction,
         attempt: attemptAtWorldVersion({
           attempt,
+          baseTick: currentFrameTick(options.campaignId),
           worldVersion,
         }),
         forecast,

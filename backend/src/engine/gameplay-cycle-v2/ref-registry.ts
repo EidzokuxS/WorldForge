@@ -142,7 +142,7 @@ function actorEntries(frame: SceneFrame): GameplayRefRegistryEntryV2[] {
     ...frame.roster.support,
     ...frame.roster.background,
   ]
-    .filter((actor) => actor.awareness === "clear")
+    .filter((actor) => actor.awareness === "clear" && actor.type !== "player")
     .map((actor) => ({
       ref: actor.label,
       kind: "visible_actor" as const,
@@ -203,6 +203,34 @@ function targetEntry(
   };
 }
 
+function isPlayerTarget(frame: SceneFrame, target: SceneFrameTargetCandidate): boolean {
+  if (target.type !== "actor") {
+    return false;
+  }
+  const rosterActors = [
+    ...frame.roster.active,
+    ...frame.roster.support,
+    ...frame.roster.background,
+  ];
+  const playerActorIds = new Set(
+    [
+      frame.playerActorId,
+      ...rosterActors
+        .filter((actor) => actor.type === "player")
+        .flatMap((actor) => [actor.id, actor.actorId]),
+    ]
+      .filter((value): value is string => Boolean(value)),
+  );
+  const playerLabels = new Set(
+    rosterActors
+      .filter((actor) => actor.type === "player")
+      .map((actor) => actor.label.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return Boolean(target.actorId && playerActorIds.has(target.actorId))
+    || playerLabels.has(target.label.trim().toLowerCase());
+}
+
 function inventoryEntry(
   frame: SceneFrame,
   item: SceneFramePlayerInventoryItem,
@@ -238,7 +266,9 @@ export function buildGameplayRefRegistryV2(input: {
       ...actorEntries(input.frame),
       ...input.frame.movementCandidates.map((candidate) =>
         movementEntry(input.frame, candidate)),
-      ...input.frame.targetCandidates.map((target) =>
+      ...input.frame.targetCandidates
+        .filter((target) => !isPlayerTarget(input.frame, target))
+        .map((target) =>
         targetEntry(input.frame, target)),
       ...(input.frame.playerInventory ?? []).map((item) =>
         inventoryEntry(input.frame, item)),

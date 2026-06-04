@@ -379,6 +379,8 @@ describe("SceneFrame builder", () => {
     expect(frame.perception.forbiddenActorLabels).toEqual(["Veiled Scout", "Roof Archer"]);
     expect(frame.targetCandidates.map((candidate) => candidate.actorId)).toContain(clearNpcId);
     expect(frame.targetCandidates.map((candidate) => candidate.actorId)).toContain(hintNpcId);
+    expect(frame.targetCandidates.map((candidate) => candidate.actorId)).not.toContain(playerId);
+    expect(frame.targetCandidates.map((candidate) => candidate.label)).not.toContain("Player");
     expect(frame.targetCandidates.map((candidate) => candidate.actorId)).not.toContain(
       backgroundNpcId,
     );

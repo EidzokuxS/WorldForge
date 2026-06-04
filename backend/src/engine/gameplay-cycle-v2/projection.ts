@@ -20,13 +20,41 @@ function firstText(...values: Array<string | null | undefined>): string | null {
 
 function actorRows(role: "active" | "support" | "background", actors: readonly SceneActor[]) {
   return actors
-    .filter((actor) => actor.awareness === "clear")
+    .filter((actor) => actor.awareness === "clear" && actor.type !== "player")
     .map((actor) => ({
       ref: actor.label,
       label: actor.label,
       role,
       awarenessHint: actor.awarenessHint?.trim() || null,
     }));
+}
+
+function isPlayerTarget(target: SceneFrameTargetCandidate, frame: SceneFrameEnvelopeV2["frame"]): boolean {
+  if (target.type !== "actor") {
+    return false;
+  }
+  const rosterActors = [
+    ...frame.roster.active,
+    ...frame.roster.support,
+    ...frame.roster.background,
+  ];
+  const playerActorIds = new Set(
+    [
+      frame.playerActorId,
+      ...rosterActors
+        .filter((actor) => actor.type === "player")
+        .flatMap((actor) => [actor.id, actor.actorId]),
+    ]
+      .filter((value): value is string => Boolean(value)),
+  );
+  const playerLabels = new Set(
+    rosterActors
+      .filter((actor) => actor.type === "player")
+      .map((actor) => actor.label.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return Boolean(target.actorId && playerActorIds.has(target.actorId))
+    || playerLabels.has(target.label.trim().toLowerCase());
 }
 
 function targetKind(target: SceneFrameTargetCandidate): ModelFacingTurnPacketV2["scene"]["targets"][number]["kind"] {
@@ -66,11 +94,13 @@ export function buildModelFacingTurnPacketV2(
     connected: candidate.connected,
     travelCost: candidate.travelCost ?? null,
   }));
-  const targets = frame.targetCandidates.map((target) => ({
-    ref: target.label,
-    label: target.label,
-    kind: targetKind(target),
-  }));
+  const targets = frame.targetCandidates
+    .filter((target) => !isPlayerTarget(target, frame))
+    .map((target) => ({
+      ref: target.label,
+      label: target.label,
+      kind: targetKind(target),
+    }));
   const inventory = (frame.playerInventory ?? []).map((item) => ({
     ref: item.label,
     label: item.label,
