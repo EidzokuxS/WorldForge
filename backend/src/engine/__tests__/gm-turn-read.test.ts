@@ -342,6 +342,8 @@ describe("GM Read contract", () => {
     expect(contract).toContain("public/indicated/legal/visible/previously listed route");
     expect(contract).toContain("safest lawful destination is enough movement intent for tool_plan");
     expect(contract).toContain("list, check, move, or record blocked/no-current-route");
+    expect(contract).toContain("Oracle alone cannot change current location or prove arrival");
+    expect(contract).toContain("Do not use roll_oracle as the sole path for completed movement or arrival");
     expect(contract).toContain("Clarification is allowed only for materially different risk/cost");
     expect(contract).toContain("mechanically important target identity");
     expect(contract).toContain("no fair playable bridge");
@@ -3565,6 +3567,51 @@ describe("GM Read contract", () => {
     });
 
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects Oracle as the sole owner of explicit travel to a destination", async () => {
+    const rollRead = {
+      ...baseRead,
+      situationSummary: "The player returns from the parlor to Old Shrine Road under pressure.",
+      sceneQuestion: "Does the risky exit succeed?",
+      focalActorRefs: ["Player", "Road Warden"],
+      actionInterpretation: {
+        intent: "return to Old Shrine Road",
+        targetRefs: ["Old Shrine Road"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "roll_oracle",
+        topicKind: "route",
+        durability: "scene_local",
+      }),
+      path: "roll_oracle",
+      rollRequest: {
+        actorRef: "Player",
+        targetRef: "Road Warden",
+        question: "Does the player get out cleanly?",
+        stakes: "The player arrives or is blocked.",
+        evidenceRefs: ["Player", "Road Warden"],
+      },
+      runtimeRequirement: { kind: "none" },
+      rationale: "The exit is risky.",
+      evidenceRefs: ["Player", "Old Shrine Road"],
+      narrationGuardrails: ["Do not decide before Oracle."],
+    } satisfies GmRead;
+
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse(rollRead),
+        createFrame(),
+        "I return from the parlor to Old Shrine Road.",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        path: "path",
+        message: expect.stringContaining("explicit-travel-requires-movement-authority"),
+      }),
+    ]);
   });
 
   it("does not secretly promote invalid no-mutation reads in backend", async () => {

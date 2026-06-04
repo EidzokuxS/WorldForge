@@ -489,6 +489,8 @@ const DIALOGUE_SPEAKER_BINDING_ISSUE_CODE =
   "dialogue-outcome-requires-speaker-binding";
 const MIXED_TRAVEL_DIALOGUE_ISSUE_CODE =
   "mixed-travel-dialogue-requires-movement-first";
+const EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE =
+  "explicit-travel-requires-movement-authority";
 const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
 const GM_READ_VALIDATION_REPAIR_MAX_ATTEMPTS = 2;
 const DOCUMENT_STATE_TAG_KEYS = new Set([
@@ -623,6 +625,52 @@ function hasExplicitRouteFeasibilityCheck(playerAction: string | undefined): boo
   );
 }
 
+function hasExplicitCompletedTravelIntent(
+  playerAction: string | undefined,
+  frame: SceneFrame,
+): boolean {
+  const text = playerAction?.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!text) return false;
+
+  const hasTravelVerb =
+    /\b(?:follow|go|walk|head|proceed|travel|move|descend|climb|return|leave|exit|enter|make my way|make our way)\b/u.test(text)
+    || /(?:\bиду\b|\bпойду\b|перехож|перейд|направля|отправля|возвраща|вернусь|выхож|выйд|захож|зайд|добира|пешком)/u.test(text);
+  if (!hasTravelVerb) return false;
+
+  const namedMovementCandidate = frame.movementCandidates.some((candidate) => {
+    const label = candidate.label?.toLowerCase().trim();
+    return Boolean(label && text.includes(label));
+  });
+  const destinationSyntax =
+    /\b(?:to|toward|towards|into|through|back to|out to|there)\b/u.test(text)
+    || /(?:^|[\s,.;:])(?:в|во|к|ко|на|до|через)\s+[a-zа-яё0-9][^.!?;]{1,120}/u.test(text)
+    || /(?:туда|обратно)/u.test(text);
+
+  return namedMovementCandidate || destinationSyntax;
+}
+
+function validateExplicitTravelRequiresMovementAuthority(
+  read: GmRead,
+  frame: SceneFrame,
+  playerAction: string | undefined,
+): GmReadValidationIssue[] {
+  if (!hasExplicitCompletedTravelIntent(playerAction, frame)) return [];
+  const requirement = read.runtimeRequirement;
+  if (
+    read.path === "tool_plan"
+    && requirement?.kind === "state_mutation"
+    && requirement.effectKind === "movement"
+  ) {
+    return [];
+  }
+
+  return [{
+    path: "path",
+    message:
+      `${EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE}: explicit travel, exit, entry, or return to a destination must be owned by backend movement authority. Choose tool_plan with runtimeRequirement { kind: "state_mutation", effectKind: "movement" } so Stage 3 can check/list/move or ground a blocked route. roll_oracle may resolve risk, notice, or resistance, but it cannot by itself change current location or justify arrival narration.`,
+  }];
+}
+
 function validateDialogueOutcomeDoesNotAbsorbPlayerTravel(
   read: GmRead,
   playerAction: string | undefined,
@@ -702,6 +750,7 @@ export function validateGmReadForFrame(
   issues.push(...validateDialogueRuntimeRequirementSpeakerBinding(read, frame));
   issues.push(...validatePostedProofRuntimeRequirement(read));
   issues.push(...validateReusableDialogueDurability(read));
+  issues.push(...validateExplicitTravelRequiresMovementAuthority(read, frame, playerAction));
   issues.push(...validateDialogueOutcomeDoesNotAbsorbPlayerTravel(read, playerAction));
   issues.push(...validateDialogueOutcomeDoesNotAbsorbRouteFeasibility(read, playerAction));
 
@@ -1569,6 +1618,7 @@ function isRepairableGmReadValidationIssue(issue: GmReadValidationIssue): boolea
     || issue.message.includes(REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE)
     || issue.message.includes(STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE)
     || issue.message.includes(MIXED_TRAVEL_DIALOGUE_ISSUE_CODE)
+    || issue.message.includes(EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE)
     || issue.message.includes(NO_MUTATION_ADMISSIBILITY_ISSUE_CODE)
   );
 }

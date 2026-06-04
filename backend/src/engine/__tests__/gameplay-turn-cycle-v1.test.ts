@@ -1725,6 +1725,77 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("acceptedContext exposes a prior stateReceipts");
   });
 
+  it("keeps Oracle outcomes from becoming movement evidence by themselves", () => {
+    const read = directRead({
+      path: "roll_oracle",
+      rollRequest: {
+        actorRef: "Player",
+        question: "Does the risky exit work?",
+        stakes: "The player escapes or is blocked.",
+        evidenceRefs: ["Player"],
+      },
+      turnGrounding: {
+        intentKind: "combat_pressure",
+        requiresGrounding: true,
+        groundingKind: "roll_oracle",
+        topicKind: "safety",
+        durability: "scene_local",
+        reason: "The risk is uncertain.",
+      },
+    } as Partial<GmRead>);
+
+    expect(visibleFactsFromRead(read, {
+      chance: 80,
+      roll: 10,
+      outcome: "strong_hit",
+      reasoning: "The exit is clear.",
+    })).toEqual([
+      expect.stringContaining("Oracle outcome only: strong_hit"),
+    ]);
+    expect(visibleFactsFromRead(read, {
+      chance: 80,
+      roll: 10,
+      outcome: "strong_hit",
+      reasoning: "The exit is clear.",
+    })[0]).toContain("No location, inventory, condition, or other backend state changes");
+    expect(buildNarratorPromptFromSettledPacketV1({
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      campaignId: "campaign-1",
+      turnId: "turn-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 1,
+      playerAction: "Я выхожу в Shibuya Ward.",
+      gmRead: {
+        path: "roll_oracle",
+        situationSummary: "The player tries a risky exit.",
+        sceneQuestion: "Does the exit pressure resolve?",
+        actionInterpretation: { intent: "exit", targetRefs: ["Shibuya Ward"] },
+        rationale: "The risk is uncertain.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: {
+        chance: 80,
+        roll: 10,
+        outcome: "strong_hit",
+        reasoning: "The exit is clear.",
+      },
+      visibleFacts: ["Oracle outcome only: strong_hit. The exit is clear. No location, inventory, condition, or other backend state changes are accepted unless accepted tool evidence says so."],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      failedSteps: [],
+      skippedSteps: [],
+      privateGuardTerms: [],
+    }).system).toContain("Oracle result is not a movement");
+  });
+
   it("requires Stage 4 model-authored tool input prose to follow the turn language", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("responseLanguage/toolInputLanguageContract");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("model-authored prose input field");

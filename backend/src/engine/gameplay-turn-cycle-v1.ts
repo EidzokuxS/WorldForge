@@ -499,7 +499,7 @@ export function visibleFactsFromRead(read: GmRead, oracleResult: OracleResult | 
   if (read.path === "continue") facts.push(read.continuationGuidance);
   if (read.path === "clarification") facts.push(read.clarificationPrompt);
   if (read.path === "roll_oracle" && oracleResult) {
-    facts.push(`Oracle outcome: ${oracleResult.outcome}. ${oracleResult.reasoning}`);
+    facts.push(`Oracle outcome only: ${oracleResult.outcome}. ${oracleResult.reasoning} No location, inventory, condition, or other backend state changes are accepted unless accepted tool evidence says so.`);
   }
   return uniqueStrings(facts);
 }
@@ -925,6 +925,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Never narrate a non-player actor as present, visible, nearby, speaking, reacting, following, or acting from gmRead targetRefs, evidenceRefs, or guardrails alone; actor presence needs acceptedEvidence from list_visible_affordances, find_actor_candidates, or an accepted actor/local consequence.",
     "When acceptedEvidence says movement completed or names the current scene after movement, narrate the completed arrival; do not describe the choice as still pending.",
     "A route-check acceptedEvidence entry is route availability only; never narrate travel, arrival, or location change from check_route unless a separate move_actor/move_to acceptedEvidence entry says movement completed.",
+    "An Oracle result is not a movement, inventory, condition, or location state receipt; never narrate arrival, departure, current-scene change, gained/lost items, or changed condition from oracleResult alone.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
     narratorLanguageContractV1(language),
