@@ -197,6 +197,7 @@ function validateGmReadAlignment(input: {
 const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
   "route_check",
   "movement",
+  "entity_tag",
   "scene_beat",
   "dialogue_outcome",
 ]);
@@ -207,6 +208,8 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
       return "actor";
     case "route_check":
       return "location";
+    case "entity_tag":
+      return "item";
     case "scene_beat":
     case "dialogue_outcome":
       return "local_scene";
@@ -224,6 +227,8 @@ function purposeForSimpleEffect(input: {
       return "Settle the explicit movement through backend movement authority.";
     case "route_check":
       return "Settle route availability through backend route observation authority.";
+    case "entity_tag":
+      return "Settle the concrete entity tag change through backend tag authority.";
     case "scene_beat":
       return "Settle the local scene beat through backend terminal scene-beat authority.";
     case "dialogue_outcome":
@@ -243,6 +248,8 @@ function expectedVisibleEffectForSimpleEffect(input: {
       return `Accepted movement receipt for ${target}.`;
     case "route_check":
       return `Accepted route availability receipt for ${target}.`;
+    case "entity_tag":
+      return `Accepted entity tag mutation receipt for ${target}.`;
     case "scene_beat":
       return "Accepted terminal scene-beat receipt.";
     case "dialogue_outcome":

@@ -45,6 +45,34 @@ P17 dialogue terminal receipt checkpoint:
   - Turn 6 diagnostic follow-up reached `done` with accepted `dialogue.record.v2`, `evidenceAuthority=terminal_receipt`, `mutationApplied=false`, `baseWorldVersion=resultWorldVersion=2`, no failed/skipped steps, no legacy `settled_turn_packets`, `turn_sagas`, or `narrator_attempts`. Packet evidence stored Dorin's concrete quoted procedure/direction response.
   - Artifact files: `output/p17-dialogue-live/turn5.sse.txt`, `turn5.db.json`, `turn6.sse.txt`, `turn6.db.json`.
 
+P18 entity tag mutation checkpoint:
+- Oracle/GPT-5.5 Pro review `v2-entity-tag-boundary`:
+  - Dry-run: 10 files, one bundle, about 97.8k tokens.
+  - Real browser run completed with model selection verified as Extended Pro and one bundled attachment. Verdict: implement `entity.tag.v2` as a first-class DB-backed v2 handler, not a legacy `add_tag` adapter.
+  - Accepted decision: v2 handler resolves model-safe refs through `gameplay-ref-registry.v2`, writes canonical tag arrays directly on allowed DB rows, advances world version only for actual mutations, writes `authority_traces`, and emits mutation receipts.
+  - Deliberate deviation from Oracle: Oracle suggested accepted no-op final-state receipts. Current v2 executor invariant requires accepted mutation-capability receipts to actually mutate and advance worldVersion, so this slice rejects idempotent add/remove as no-op instead of broadening receipt semantics across all mutation tools.
+- Implemented `entity.tag.v2` contract slice:
+  - Added `entity_tag` to live v2 capabilities and simple checklist compiler.
+  - Tool request schema now requires `entityScope` plus `entityRef`, `operation`, `tag`, and evidence refs.
+  - Allowed scopes for this slice: `player_actor`, `visible_actor`, `current_location`, `current_scene`, `visible_item`, `visible_location`, and `inventory_item`.
+  - DB handler is direct v2 authority: no old executor/tool schema adapter, no old model-facing `add_tag` surface.
+  - Handler canonicalizes tag text syntactically only (`trim/lowercase`, whitespace to hyphen, `[a-z0-9_-]`), updates one row in one transaction, advances world clock, and writes `gameplay-cycle-v2.entity.tag.v2` authority trace.
+- Verification so far:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 109 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+  - Source scan: legacy names remain only denylist/test fixtures; runtime prompt no longer exposes concrete old tag tool names.
+- Live/manual diagnostic evidence:
+  - Used already diagnostic-invalid lane `f59ada43-e849-4c0c-880b-bf854ffff8c9` so this proof cannot be confused with final acceptance.
+  - Pre-inspected actual state: current scene `Transmission Basement`, inventory `Sealed lacquer message tube` and `Courier satchel`; v2 packets already 6, so diagnostic only.
+  - Started stable backend on `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3199/3001` clear.
+  - First `/api/chat/action` attempt omitted `campaignId` and returned transport-only HTTP 400 `"campaignId is required."`; DB was not used as gameplay evidence.
+  - Real action: `Я помечаю Sealed lacquer message tube короткой меткой suspicious для дальнейшей проверки.`
+  - Result: HTTP 200, SSE reached `narrative` and `done`; narration: `Вы помечаете Sealed lacquer message tube меткой suspicious.`
+  - Latest packet `v2packet-mq017zpo-436037d6ba94`: `gmRead.path="tool_plan"`, checklist required `entity_tag`, accepted receipt `receipt-step-1` with `toolId="entity.tag.v2"`, `evidenceAuthority="mutation_receipt"`, `mutationApplied=true`, `mutationAuthority="item"`, `baseWorldVersion=2`, `resultWorldVersion=3`, no skipped/failed steps.
+  - DB grounding: `Sealed lacquer message tube` tags became `["starting-loadout","equipped","suspicious"]`; `world_clocks.world_version=3`; latest authority trace operation `gameplay-cycle-v2.entity.tag.v2`, source entity type `item`, metadata `entityScope="inventory_item"`, `operation="add"`, `tag="suspicious"`.
+  - Artifacts: `output/p18-entity-tag-live/load.json`, `turn-entity-tag.sse.txt`, `turn-entity-tag.db.json`, `backend-3199.log`.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

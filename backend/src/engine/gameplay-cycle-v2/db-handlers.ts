@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../../db/index.js";
 import {
   authorityTraces,
+  items,
   locations,
   npcs,
   players,
@@ -62,8 +63,27 @@ type DestinationResolution =
     reason: string;
   };
 
+type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>["effectBinding"]["entityScope"];
+
+type EntityTagResolution =
+  | {
+    status: "resolved";
+    scope: EntityTagScope;
+    table: "players" | "npcs" | "items" | "locations";
+    entityId: string;
+    label: string;
+    mutationAuthority: "actor" | "item" | "location" | "local_scene";
+    stateDeltaRef: string;
+    sourceEntityType: string;
+  }
+  | {
+    status: "failed";
+    reason: string;
+  };
+
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
+  afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
 }
 
 export interface CreateDbBackedGameplayToolHandlersV2Options {
@@ -90,6 +110,27 @@ function stringifyStringArray(values: readonly string[]): string {
 
 function stringifyJson(value: unknown): string {
   return JSON.stringify(value ?? {});
+}
+
+function parseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function canonicalTag(raw: string): string | null {
+  const normalized = raw.trim().toLowerCase().replace(/\s+/gu, "-");
+  if (!normalized || normalized.length > 80) return null;
+  if (!/^[a-z0-9][a-z0-9_-]*$/u.test(normalized)) return null;
+  return normalized;
 }
 
 function authoritySourceKey(input: {
@@ -221,6 +262,143 @@ function resolveDestination(input: {
     travelCost: Math.max(0, entry.metadata.travelCost ?? 0),
     connected: entry.metadata.connected === true,
   };
+}
+
+function resolveEntityTagTarget(input: {
+  registry: GameplayRefRegistryV2;
+  scope: EntityTagScope;
+  entityRef: string;
+}): EntityTagResolution {
+  const allowedKindsByScope: Record<EntityTagScope, GameplayRefRegistryEntryV2["kind"][]> = {
+    player_actor: ["player_actor"],
+    visible_actor: ["visible_actor"],
+    current_location: ["current_location"],
+    current_scene: ["current_scene"],
+    visible_item: ["visible_target"],
+    visible_location: ["visible_target"],
+    inventory_item: ["inventory_item"],
+  };
+  const resolution = resolveGameplayRefV2({
+    registry: input.registry,
+    ref: input.entityRef,
+    allowedKinds: allowedKindsByScope[input.scope],
+  });
+  if (resolution.status !== "resolved") {
+    return { status: "failed", reason: resolution.reason };
+  }
+  const entry = resolution.entry;
+
+  switch (input.scope) {
+    case "player_actor": {
+      const entityId = entry.ids.playerActorId;
+      if (!entityId) return { status: "failed", reason: `Player ref "${input.entityRef}" lacks a player id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "players",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "actor",
+        stateDeltaRef: `player:${entityId}:tags`,
+        sourceEntityType: "player",
+      };
+    }
+    case "visible_actor": {
+      const entityId = entry.ids.actorId;
+      if (!entityId) return { status: "failed", reason: `Visible actor ref "${input.entityRef}" lacks an actor id.` };
+      if (entry.metadata.actorType !== "npc") {
+        return { status: "failed", reason: `Visible actor ref "${input.entityRef}" is not an NPC actor.` };
+      }
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "npcs",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "actor",
+        stateDeltaRef: `npc:${entityId}:tags`,
+        sourceEntityType: "npc",
+      };
+    }
+    case "current_location": {
+      const entityId = entry.ids.locationId ?? entry.ids.currentLocationId;
+      if (!entityId) return { status: "failed", reason: `Current location ref "${input.entityRef}" lacks a location id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "locations",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "location",
+        stateDeltaRef: `location:${entityId}:tags`,
+        sourceEntityType: "location",
+      };
+    }
+    case "current_scene": {
+      const entityId = entry.ids.sceneScopeId ?? entry.ids.locationId;
+      if (!entityId) return { status: "failed", reason: `Current scene ref "${input.entityRef}" lacks a scene location id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "locations",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "local_scene",
+        stateDeltaRef: `scene:${entityId}:tags`,
+        sourceEntityType: "location",
+      };
+    }
+    case "visible_item": {
+      if (entry.metadata.targetKind !== "item") {
+        return { status: "failed", reason: `Visible target ref "${input.entityRef}" is not an item target.` };
+      }
+      const entityId = entry.ids.itemId;
+      if (!entityId) return { status: "failed", reason: `Visible item ref "${input.entityRef}" lacks an item id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "items",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "item",
+        stateDeltaRef: `item:${entityId}:tags`,
+        sourceEntityType: "item",
+      };
+    }
+    case "visible_location": {
+      if (entry.metadata.targetKind !== "location") {
+        return { status: "failed", reason: `Visible target ref "${input.entityRef}" is not a location target.` };
+      }
+      const entityId = entry.ids.locationId;
+      if (!entityId) return { status: "failed", reason: `Visible location ref "${input.entityRef}" lacks a location id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "locations",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "location",
+        stateDeltaRef: `location:${entityId}:tags`,
+        sourceEntityType: "location",
+      };
+    }
+    case "inventory_item": {
+      const entityId = entry.ids.itemId;
+      if (!entityId) return { status: "failed", reason: `Inventory item ref "${input.entityRef}" lacks an item id.` };
+      return {
+        status: "resolved",
+        scope: input.scope,
+        table: "items",
+        entityId,
+        label: entry.label,
+        mutationAuthority: "item",
+        stateDeltaRef: `item:${entityId}:tags`,
+        sourceEntityType: "item",
+      };
+    }
+    default:
+      return { status: "failed", reason: `Unsupported entity tag scope "${input.scope}".` };
+  }
 }
 
 function locationNameById(campaignId: string): Map<string, string> {
@@ -473,6 +651,191 @@ function commitActorMoveV2(input: {
   });
 }
 
+function commitEntityTagV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>;
+  target: Extract<EntityTagResolution, { status: "resolved" }>;
+  tag: string;
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    let rawTags: string | null | undefined;
+    switch (input.target.table) {
+      case "players": {
+        const row = db.select().from(players).where(and(
+          eq(players.id, input.target.entityId),
+          eq(players.campaignId, input.packet.campaignId),
+        )).get();
+        if (!row) throw new Error(`Player tag target not found: ${input.target.entityId}.`);
+        rawTags = row.tags;
+        break;
+      }
+      case "npcs": {
+        const row = db.select().from(npcs).where(and(
+          eq(npcs.id, input.target.entityId),
+          eq(npcs.campaignId, input.packet.campaignId),
+        )).get();
+        if (!row) throw new Error(`NPC tag target not found: ${input.target.entityId}.`);
+        rawTags = row.tags;
+        break;
+      }
+      case "items": {
+        const row = db.select().from(items).where(and(
+          eq(items.id, input.target.entityId),
+          eq(items.campaignId, input.packet.campaignId),
+        )).get();
+        if (!row) throw new Error(`Item tag target not found: ${input.target.entityId}.`);
+        rawTags = row.tags;
+        break;
+      }
+      case "locations": {
+        const row = db.select().from(locations).where(and(
+          eq(locations.id, input.target.entityId),
+          eq(locations.campaignId, input.packet.campaignId),
+        )).get();
+        if (!row) throw new Error(`Location tag target not found: ${input.target.entityId}.`);
+        rawTags = row.tags;
+        break;
+      }
+    }
+
+    const currentTags = parseStringArray(rawTags);
+    const currentCanonicalTags = new Set(currentTags.map((tag) => tag.toLowerCase()));
+    const hasTag = currentCanonicalTags.has(input.tag);
+    const nextTags = input.request.effectBinding.operation === "add"
+      ? [...currentTags, input.tag]
+      : currentTags.filter((tag) => tag.toLowerCase() !== input.tag);
+    const changed = input.request.effectBinding.operation === "add" ? !hasTag : hasTag;
+    if (!changed) {
+      throw new Error(
+        input.request.effectBinding.operation === "add"
+          ? `${input.target.label} already has tag ${input.tag}.`
+          : `${input.target.label} already lacks tag ${input.tag}.`,
+      );
+    }
+
+    const serializedTags = stringifyStringArray([...new Set(nextTags)]);
+    let rowUpdate: { changes: number };
+    switch (input.target.table) {
+      case "players":
+        rowUpdate = db.update(players)
+          .set({ tags: serializedTags })
+          .where(and(
+            eq(players.id, input.target.entityId),
+            eq(players.campaignId, input.packet.campaignId),
+          ))
+          .run();
+        break;
+      case "npcs":
+        rowUpdate = db.update(npcs)
+          .set({ tags: serializedTags })
+          .where(and(
+            eq(npcs.id, input.target.entityId),
+            eq(npcs.campaignId, input.packet.campaignId),
+          ))
+          .run();
+        break;
+      case "items":
+        rowUpdate = db.update(items)
+          .set({ tags: serializedTags })
+          .where(and(
+            eq(items.id, input.target.entityId),
+            eq(items.campaignId, input.packet.campaignId),
+          ))
+          .run();
+        break;
+      case "locations":
+        rowUpdate = db.update(locations)
+          .set({ tags: serializedTags })
+          .where(and(
+            eq(locations.id, input.target.entityId),
+            eq(locations.campaignId, input.packet.campaignId),
+          ))
+          .run();
+        break;
+    }
+    if (rowUpdate.changes !== 1) {
+      throw new Error("Entity tag update did not affect exactly one row.");
+    }
+
+    input.testHooks?.afterEntityTagRowUpdateBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before entity.tag.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.entity.tag.v2",
+        sourceEntityType: input.target.sourceEntityType,
+        sourceEntityId: input.target.entityId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray([input.target.stateDeltaRef]),
+        witnesses: stringifyStringArray(input.request.effectBinding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          entityScope: input.request.effectBinding.entityScope,
+          entityRef: input.request.effectBinding.entityRef,
+          operation: input.request.effectBinding.operation,
+          tag: input.tag,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function routeCheckHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "route.check.v2" }>,
@@ -682,6 +1045,53 @@ function dialogueRecordHandler(
   };
 }
 
+function entityTagHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const tag = canonicalTag(request.effectBinding.tag);
+  if (!tag) {
+    return failedOutcome(packet, `Invalid entity tag "${request.effectBinding.tag}". Use lowercase letters, numbers, hyphen, or underscore only.`);
+  }
+  const target = resolveEntityTagTarget({
+    registry,
+    scope: request.effectBinding.entityScope,
+    entityRef: request.effectBinding.entityRef,
+  });
+  if (target.status !== "resolved") return failedOutcome(packet, target.reason);
+
+  try {
+    const commit = commitEntityTagV2({
+      packet,
+      request,
+      target,
+      tag,
+      testHooks,
+    });
+    const verb = request.effectBinding.operation === "add" ? "adds" : "removes";
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: target.mutationAuthority,
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${target.label} ${verb} tag ${tag}.`,
+      evidenceRefs: [
+        request.effectBinding.entityRef,
+        ...request.effectBinding.evidenceRefs,
+      ],
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "entity.tag.v2 failed before committing the tag mutation.";
+    const isNoOp = reason.includes("already has tag") || reason.includes("already lacks tag");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 export function createDbBackedGameplayToolHandlersV2(
   options: CreateDbBackedGameplayToolHandlersV2Options = {},
 ): GameplayToolHandlerRegistryV2 {
@@ -709,6 +1119,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "dialogue.record.v2 handler received the wrong request type.");
       }
       return dialogueRecordHandler(packet, request, refRegistry);
+    },
+    "entity.tag.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "entity.tag.v2") {
+        return failedOutcome(packet, "entity.tag.v2 handler received the wrong request type.");
+      }
+      return entityTagHandler(packet, request, refRegistry, options.testHooks);
     },
   };
 }

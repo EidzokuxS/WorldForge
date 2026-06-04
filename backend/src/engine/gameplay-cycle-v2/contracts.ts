@@ -793,6 +793,15 @@ const entityTagRequestV2Schema = z.object({
   capabilityId: z.literal("entity_tag"),
   toolId: z.literal("entity.tag.v2"),
   effectBinding: z.object({
+    entityScope: z.enum([
+      "player_actor",
+      "visible_actor",
+      "current_location",
+      "current_scene",
+      "visible_item",
+      "visible_location",
+      "inventory_item",
+    ]),
     entityRef: modelSafeRefSchema,
     operation: z.enum(["add", "remove"]),
     tag: shortText,

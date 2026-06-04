@@ -9,6 +9,7 @@ import { runMigrations } from "../../db/migrate.js";
 import {
   authorityTraces,
   campaigns,
+  items,
   locationEdges,
   locationRecentEvents,
   locations,
@@ -218,7 +219,7 @@ function scopedForecast(): ScopedForecastExcerpt {
 
 function movementToolPlanFixture(options: {
   privateGuardTerms?: string[];
-  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "quick_action_offer">;
+  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "entity_tag" | "quick_action_offer">;
 } = {}) {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -614,6 +615,85 @@ function dialogueToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function entityTagToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Player", "brass ledger"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "entity_tag"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player marks the visible brass ledger.",
+      sceneQuestion: "What tag mutation must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "brass ledger"],
+      actionInterpretation: {
+        intent: "Mark the brass ledger as suspicious.",
+        method: "write a visible mark",
+        targetRefs: ["brass ledger"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "A visible object tag needs backend mutation authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["entity_tag"],
+        actorRefs: ["Player"],
+        targetRefs: ["brass ledger"],
+        evidenceRefs: ["Player", "Atrium", "brass ledger"],
+        checklistGoal: "Apply one concrete tag to the visible ledger.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Entity-tag GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-entity-tag-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Mark the brass ledger.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Apply the suspicious tag to the visible brass ledger.",
+        actorRef: "Player",
+        targetRefs: ["brass ledger"],
+        evidenceRefs: ["Player", "Atrium", "brass ledger"],
+        requiredCapabilityId: "entity_tag",
+        intendedEffect: {
+          kind: "entity_tag",
+          summary: "The brass ledger is marked suspicious.",
+          stateScope: "item",
+        },
+        expectedVisibleEffect: "The brass ledger carries the suspicious tag.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Entity-tag checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function dbTempFixture(prefix: string): {
   tempDir: string;
   cleanup: () => void;
@@ -729,6 +809,27 @@ function seedP16World(options: {
     inactiveTicks: 0,
     createdAt: timestamp,
   }).run();
+  db.insert(items).values([{
+    id: "item-secret-id",
+    campaignId: "campaign-alpha",
+    name: "brass ledger",
+    tags: JSON.stringify(["document"]),
+    ownerId: null,
+    locationId: "scene-alpha",
+    equipState: "carried",
+    equippedSlot: null,
+    isSignature: false,
+  }, {
+    id: "item-player-1",
+    campaignId: "campaign-alpha",
+    name: "sealed note",
+    tags: JSON.stringify(["document"]),
+    ownerId: "player-alpha",
+    locationId: null,
+    equipState: "carried",
+    equippedSlot: null,
+    isSignature: false,
+  }]).run();
   db.insert(worldClocks).values({
     campaignId: "campaign-alpha",
     worldVersion: options.worldVersion ?? 7,
@@ -962,14 +1063,34 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         stateScope: "local_scene",
       },
     });
+
+    const entityTag = entityTagToolPlanFixture();
+    const compiledEntityTag = compileSimpleGmActionChecklistV2({
+      packet: entityTag.packet,
+      gmRead: entityTag.gmRead,
+    });
+    expect(compiledEntityTag?.status).toBe("accepted");
+    if (!compiledEntityTag || compiledEntityTag.status !== "accepted") {
+      throw new Error("Simple entity-tag checklist must compile.");
+    }
+    expect(compiledEntityTag.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "entity_tag",
+      targetRefs: ["brass ledger"],
+      intendedEffect: {
+        kind: "entity_tag",
+        stateScope: "item",
+      },
+    });
     const publicShape = JSON.stringify({
       movement: compiledMovement.checklist,
       dialogue: compiledDialogue.checklist,
       sceneBeat: compiledSceneBeat.checklist,
+      entityTag: compiledEntityTag.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
     expect(publicShape).not.toContain("dialogue.record.v2");
     expect(publicShape).not.toContain("scene_beat.record.v2");
+    expect(publicShape).not.toContain("entity.tag.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
 
@@ -2654,6 +2775,45 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("record_dialogue_outcome");
     expect(JSON.stringify(result.request)).not.toContain("stateEffects");
     expect(JSON.stringify(result.request)).not.toContain("worldFact");
+  });
+
+  it("accepts a clean entity.tag.v2 request with scoped entity authority", () => {
+    const { packet, checklist } = entityTagToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-entity-tag-1",
+        stepId: "step-1",
+        capabilityId: "entity_tag",
+        toolId: "entity.tag.v2",
+        effectBinding: {
+          entityScope: "visible_item",
+          entityRef: "brass ledger",
+          operation: "add",
+          tag: "suspicious",
+          evidenceRefs: ["Player", "Atrium", "brass ledger"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Entity tag tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("entity.tag.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      entityScope: "visible_item",
+      entityRef: "brass ledger",
+      operation: "add",
+      tag: "suspicious",
+    });
+    expect(JSON.stringify(result.request)).not.toContain("add_tag");
+    expect(JSON.stringify(result.request)).not.toContain("entityName");
+    expect(JSON.stringify(result.request)).not.toContain("entityType");
   });
 
   it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
@@ -5704,6 +5864,224 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes entity.tag.v2 as atomic visible-item tag mutation with authority trace", async () => {
+    const fixture = dbTempFixture("wf-v2-db-entity-tag-");
+    try {
+      seedP16World();
+      const { packet, checklist } = entityTagToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "entity-tag-db-1",
+          stepId: "step-1",
+          capabilityId: "entity_tag",
+          toolId: "entity.tag.v2",
+          effectBinding: {
+            entityScope: "visible_item",
+            entityRef: "brass ledger",
+            operation: "add",
+            tag: "Urgent Discrepancy",
+            evidenceRefs: ["Player", "Atrium", "brass ledger"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-entity-tag-db-1",
+        emittedAt: 26,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "item",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        durableEventIds: [],
+      });
+      expect(execution.receipt.visibleSummary).toContain("brass ledger adds tag urgent-discrepancy");
+
+      const item = getDb().select().from(items).where(eq(items.id, "item-secret-id")).get();
+      expect(JSON.parse(item?.tags ?? "[]")).toEqual(["document", "urgent-discrepancy"]);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.entity.tag.v2",
+        sourceEntityType: "item",
+        sourceEntityId: "item-secret-id",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:entity-tag-db-1",
+      });
+      expect(JSON.parse(traces[0]?.stateDeltaRefs ?? "[]")).toEqual(["item:item-secret-id:tags"]);
+      expect(JSON.parse(traces[0]?.metadata ?? "{}")).toMatchObject({
+        entityScope: "visible_item",
+        entityRef: "brass ledger",
+        operation: "add",
+        tag: "urgent-discrepancy",
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes entity.tag.v2 remove against an inventory item", async () => {
+    const fixture = dbTempFixture("wf-v2-db-entity-tag-remove-");
+    try {
+      seedP16World();
+      getDb().update(items)
+        .set({ tags: JSON.stringify(["document", "sealed"]) })
+        .where(eq(items.id, "item-player-1"))
+        .run();
+      const { packet, checklist } = entityTagToolPlanFixture();
+      const inventoryChecklist = {
+        ...checklist,
+        steps: [{
+          ...checklist.steps[0],
+          targetRefs: ["sealed note"],
+          evidenceRefs: ["Player", "Atrium", "sealed note"],
+        }],
+      };
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist: inventoryChecklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "entity-tag-remove-db-1",
+          stepId: "step-1",
+          capabilityId: "entity_tag",
+          toolId: "entity.tag.v2",
+          effectBinding: {
+            entityScope: "inventory_item",
+            entityRef: "sealed note",
+            operation: "remove",
+            tag: "sealed",
+            evidenceRefs: ["Player", "Atrium", "sealed note"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-entity-tag-remove-db-1",
+        emittedAt: 27,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: true,
+        mutationAuthority: "item",
+        resultWorldVersion: 8,
+      });
+      const item = getDb().select().from(items).where(eq(items.id, "item-player-1")).get();
+      expect(JSON.parse(item?.tags ?? "[]")).toEqual(["document"]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects entity.tag.v2 no-op without mutating DB state or advancing world version", async () => {
+    const fixture = dbTempFixture("wf-v2-db-entity-tag-noop-");
+    try {
+      seedP16World();
+      const { packet, checklist } = entityTagToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "entity-tag-noop-db-1",
+          stepId: "step-1",
+          capabilityId: "entity_tag",
+          toolId: "entity.tag.v2",
+          effectBinding: {
+            entityScope: "visible_item",
+            entityRef: "brass ledger",
+            operation: "add",
+            tag: "document",
+            evidenceRefs: ["Player", "Atrium", "brass ledger"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-entity-tag-noop-db-1",
+        emittedAt: 28,
+      });
+
+      expect(execution.status).toBe("rejected");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("already has tag document");
+      const item = getDb().select().from(items).where(eq(items.id, "item-secret-id")).get();
+      expect(JSON.parse(item?.tags ?? "[]")).toEqual(["document"]);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back entity.tag.v2 row changes when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-entity-tag-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = entityTagToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "entity-tag-rollback-db-1",
+          stepId: "step-1",
+          capabilityId: "entity_tag",
+          toolId: "entity.tag.v2",
+          effectBinding: {
+            entityScope: "visible_item",
+            entityRef: "brass ledger",
+            operation: "add",
+            tag: "suspicious",
+            evidenceRefs: ["Player", "Atrium", "brass ledger"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterEntityTagRowUpdateBeforeAuthorityTrace: () => {
+              throw new Error("forced entity tag authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-entity-tag-rollback-db-1",
+        emittedAt: 29,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced entity tag authority failure");
+      const item = getDb().select().from(items).where(eq(items.id, "item-secret-id")).get();
+      expect(JSON.parse(item?.tags ?? "[]")).toEqual(["document"]);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
     } finally {
       fixture.cleanup();
