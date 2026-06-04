@@ -77,6 +77,25 @@ const gmChecklistStepV1Schema = z
     evidenceRefs: z.array(z.string().trim().min(1).max(160)).max(10).default([]),
     dependsOnStepIds: z.array(z.string().trim().min(1).max(40)).max(4).default([]),
     expectedVisibleEffect: z.string().trim().min(1).max(500),
+    targetBinding: z.object({
+      targetText: z.string().trim().min(1).max(160).nullable().default(null),
+      targetKind: z.enum([
+        "connected_destination",
+        "unmodeled_poi_or_micro_location",
+        "current_scene_local_navigation",
+        "unknown",
+      ]),
+      sourceAuthority: z.enum([
+        "backend_scene_frame",
+        "accepted_same_target_receipt",
+        "speaker_asserted",
+        "player_prose_only",
+        "none",
+      ]),
+      movementAuthority: z.enum(["exact_connected_destination", "none"]),
+      allowedDestinationRefs: z.array(z.string().trim().min(1).max(160)).max(6).default([]),
+      authorityRefs: z.array(z.string().trim().min(1).max(160)).max(8).default([]),
+    }).strict().optional(),
     requiredAction: z.enum([
       "backend_tool",
       "oracle_already_resolved",
@@ -158,6 +177,7 @@ export const mutatingGmActionChecklistV1Schema = z
 
 export type GmActionChecklistV1 = z.infer<typeof gmActionChecklistV1Schema>;
 export type GmChecklistStepV1 = GmActionChecklistV1["steps"][number];
+export type GmChecklistStepTargetBindingV1 = NonNullable<GmChecklistStepV1["targetBinding"]>;
 
 const gmToolRequestV1Schema = z
   .object({
@@ -931,7 +951,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Write only prose for the player. Do not output JSON, markdown, bullet lists, tool names, ids, schemas, logs, or diagnostics.",
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
-    "The playerAction is the player's attempted/requested first-person action, not accepted evidence by itself. Use it for framing the turn/question, but narrate physical consequences, local stance changes, retained/transferred items, movement, injuries, discoveries, and NPC reactions only when acceptedEvidence or oracleResult settles them.",
+    "The playerAction is the player's attempted/requested first-person action, not accepted evidence by itself. Use it for framing the turn/question, but narrate physical consequences, local stance changes, retained/transferred items, movement, injuries, discoveries, and NPC reactions only when acceptedEvidence settles them.",
     "If a playerAction included dialogue plus an unsatisfied physical micro-action such as stepping back, keeping distance, taking cover, gripping/holding/readying an already-held item, or not handing something over, do not narrate that micro-action as completed unless acceptedEvidence includes a scene-local log_event, movement/condition/item receipt, or other explicit settlement for it.",
     "Never make a non-player gmRead targetRef or evidenceRef the grammatical subject of the player's action unless acceptedEvidence includes an accepted actor/local consequence for that character.",
     "Never narrate a non-player actor as present, visible, nearby, speaking, reacting, following, or acting from gmRead targetRefs, evidenceRefs, or guardrails alone; actor presence needs acceptedEvidence from list_visible_affordances, find_actor_candidates, or an accepted actor/local consequence.",
@@ -940,7 +960,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Movement acceptedEvidence is not device/status evidence. Never state that a carried item/device/phone signal, message, call, instruction, alert, or status appeared or did not appear from move_actor/move_to alone; that requires separate accepted observation, dialogue, world-fact, or Oracle evidence.",
     "For start_search acceptedEvidence, found=false means no concrete discovery/receipt was created; it is not evidence that the searched detail is absent. Never narrate an empty screen, no signal, stable signal bars, no message, no call, no notification, or no instruction from start_search unless acceptedEvidence explicitly states that exact observed status as confirmed truth.",
     "Accepted evidence that a phone/device is held, ready, carried, or at hand is not screen/status evidence. Do not narrate screen brightness/darkness, signal bars, battery state, messages, calls, notifications, or instructions unless acceptedEvidence explicitly confirms that exact device status.",
-    "An Oracle result is not a movement, inventory, condition, or location state receipt; never narrate arrival, departure, current-scene change, gained/lost items, or changed condition from oracleResult alone.",
+    "An Oracle result is not a movement, inventory, condition, local navigation, search, POI discovery, POI absence, visible-sign, or location state receipt; never narrate walking progress along directions, arrival, departure, current-scene change, gained/lost items, changed condition, storefronts, signs, landmarks, POI discovery, or POI absence from oracleResult alone.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
     narratorLanguageContractV1(language),
@@ -1600,7 +1620,7 @@ function allowedToolHints(frame: SceneFrame): Record<string, unknown>[] {
     .map((toolName) => toolContractHint(toolName));
 }
 
-function toolRequestExampleForStepV1(
+export function toolRequestExampleForStepV1(
   step: GmChecklistStepV1,
   read: GmRead,
   frame: SceneFrame,
@@ -1680,8 +1700,11 @@ function toolRequestExampleForStepV1(
     };
   }
   if (step.toolNeed !== "movement") return null;
-  const destination = frame.movementCandidates.find((candidate) => candidate.connected)
-    ?? frame.movementCandidates[0];
+  const eligibleDestinations = eligibleMovementDestinationLabelsForStepV1(step, frame);
+  const destinationLabel = eligibleDestinations[0];
+  const destination = destinationLabel
+    ? frame.movementCandidates.find((candidate) => candidate.label === destinationLabel)
+    : null;
   if (!destination) return null;
   if (allowedToolNames.includes("move_to")) {
     return {
@@ -1767,7 +1790,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "Return one JSON object only.",
     "Return exactly these top-level keys: version, turnPath, steps.",
     `Return between 1 and ${GM_ACTION_CHECKLIST_MAX_STEPS_V1} steps.`,
-    "Each step must use exactly these keys: stepId, purpose, evidenceRefs, dependsOnStepIds, expectedVisibleEffect, requiredAction, settlementPolicy, toolNeed.",
+    "Each step must use these keys: stepId, purpose, evidenceRefs, dependsOnStepIds, expectedVisibleEffect, requiredAction, settlementPolicy, toolNeed. Add targetBinding for travel, route checking, local navigation, following directions, searching for a named place, or changing player position.",
     "The checklist is NOT execution. Do not include toolName, input, args, payload, candidateToolRequest, plannedTools, state deltas, or narration.",
     "Do not wrap the object in a key named checklist. Do not use checklistVersion, stage, action, description, or requiredOutcome.",
     "Each backend_tool step says what needs to become true; a later backend stage will choose and validate the concrete tool.",
@@ -1777,7 +1800,8 @@ export function gmActionChecklistSystemPromptV1(): string {
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
     "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step with toolNeed=start_search; never fold that observation into toolNeed=movement or move_actor.",
     "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
-    "If the player follows speaker-provided street directions toward a named POI/micro-location that is not an exposed connected destination in the SceneFrame, do not use move_actor to a different nearby/known route. Use scene-local log_event for following directions plus start_search/find_location_candidates/create_minor_poi/reveal_location as appropriate to establish the target before any current-scene change.",
+    "For any travel, route, or local-navigation step, targetBinding must declare targetText, targetKind, sourceAuthority, movementAuthority, allowedDestinationRefs, and authorityRefs. Use movementAuthority=exact_connected_destination only when allowedDestinationRefs names the same exact connected destination requested by the player or proven by accepted same-target evidence. Use movementAuthority=none for speaker-asserted unmodeled POIs, player-prose-only targets, current-scene local positioning, and unresolved targets.",
+    "If the player follows speaker-provided street directions toward a named POI/micro-location that is not an exposed connected destination in the SceneFrame, set targetBinding.targetKind=unmodeled_poi_or_micro_location and movementAuthority=none; do not use move_actor to a different nearby/known route. Use scene-local log_event for following directions plus start_search/find_poi_candidates/find_location_candidates/create_minor_poi/reveal_location as appropriate to establish the target before any current-scene change.",
     "If a dialogue/social action also includes local stance or possession posture such as keeping distance, stepping back, taking cover, gripping/holding/readying an already-held item, or explicitly not handing an item over, create a separate scene-local log_event step before the dialogue step when that physical micro-action should be narrated as completed. Do not fold those physical micro-actions into record_dialogue_outcome.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
@@ -1846,6 +1870,14 @@ async function runGmActionChecklistV1(input: {
             evidenceRefs: input.read.evidenceRefs.slice(0, 3),
             dependsOnStepIds: [],
             expectedVisibleEffect: "One visible effect after backend validation, not narration.",
+            targetBinding: {
+              targetText: "Exact destination or unresolved named target when relevant.",
+              targetKind: "unknown",
+              sourceAuthority: "player_prose_only",
+              movementAuthority: "none",
+              allowedDestinationRefs: [],
+              authorityRefs: input.read.evidenceRefs.slice(0, 3),
+            },
             requiredAction: "backend_tool",
             settlementPolicy: "required",
             toolNeed: "movement",
@@ -1872,10 +1904,36 @@ async function runGmActionChecklistV1(input: {
 }
 
 export function selectAllowedToolNamesForStepV1(
-  step: Pick<GmChecklistStepV1, "toolNeed">,
-  frame: Pick<SceneFrame, "allowedTools">,
+  step: TargetBindingStepInputV1,
+  frame: Pick<SceneFrame, "allowedTools"> & Partial<Pick<SceneFrame, "playerAction" | "movementCandidates">>,
 ): RuntimeToolName[] {
   const toolNeed = step.toolNeed?.trim();
+  const playerAction = frame.playerAction;
+  const movementCandidates = frame.movementCandidates;
+  if (movementToolNeedV1(toolNeed) && typeof playerAction === "string" && Array.isArray(movementCandidates)) {
+    const bindingStep = {
+      toolNeed: step.toolNeed,
+      purpose: step.purpose ?? "",
+      expectedVisibleEffect: step.expectedVisibleEffect ?? "",
+    };
+    const binding = buildTurnTargetBindingV1(
+      {
+        playerAction,
+        movementCandidates,
+      },
+      bindingStep,
+    );
+    const eligible = eligibleMovementDestinationLabelsForStepV1(
+      bindingStep,
+      {
+        playerAction,
+        movementCandidates,
+      },
+    );
+    if (binding.requestedTargetKind === "unmodeled_poi_or_micro_location" && eligible.length === 0) {
+      return [];
+    }
+  }
   if (
     (
       toolNeed === "device_signal_observation"
@@ -1956,11 +2014,73 @@ export function selectAllowedToolNamesForStepV1(
   return compatibleTools.length > 0 ? compatibleTools : [...frame.allowedTools];
 }
 
+function deriveTargetBindingFromGmReadV1(
+  read: GmRead,
+  frame: SceneFrame,
+  step: GmChecklistStepV1,
+): GmChecklistStepTargetBindingV1 | null {
+  if (step.targetBinding) return step.targetBinding;
+  if (step.requiredAction !== "backend_tool") return null;
+  if (!movementToolNeedV1(step.toolNeed)) return null;
+
+  const targetRefs = uniqueStrings(read.actionInterpretation.targetRefs);
+  if (targetRefs.length === 0) return null;
+  const connectedRefs = frame.movementCandidates
+    .filter((candidate) =>
+      candidate.connected
+      && targetRefs.some((ref) => normalizeMovementMatchTextV1(ref) === normalizeMovementMatchTextV1(candidate.label)),
+    )
+    .map((candidate) => candidate.label);
+  if (connectedRefs.length > 0) {
+    return {
+      targetText: connectedRefs[0] ?? null,
+      targetKind: "connected_destination",
+      sourceAuthority: "backend_scene_frame",
+      movementAuthority: "exact_connected_destination",
+      allowedDestinationRefs: connectedRefs,
+      authorityRefs: connectedRefs,
+    };
+  }
+
+  const unmodeledTarget = targetRefs.find((ref) => !frame.movementCandidates.some((candidate) =>
+    normalizeMovementMatchTextV1(ref) === normalizeMovementMatchTextV1(candidate.label),
+  ));
+  if (!unmodeledTarget) return null;
+  const bindingText = textForTargetBindingV1(step, frame, read.actionInterpretation.intent);
+  if (!textLooksLikeFollowingDirectionsToNamedTargetV1(bindingText)) return null;
+  return {
+    targetText: unmodeledTarget,
+    targetKind: "unmodeled_poi_or_micro_location",
+    sourceAuthority: "speaker_asserted",
+    movementAuthority: "none",
+    allowedDestinationRefs: [],
+    authorityRefs: uniqueStrings([...read.evidenceRefs, ...targetRefs]).slice(0, 8),
+  };
+}
+
+function attachDerivedTargetBindingsV1(
+  checklist: GmActionChecklistV1,
+  read: GmRead,
+  frame: SceneFrame,
+): GmActionChecklistV1 {
+  let changed = false;
+  const steps = checklist.steps.map((step) => {
+    const targetBinding = deriveTargetBindingFromGmReadV1(read, frame, step);
+    if (!targetBinding || step.targetBinding) return step;
+    changed = true;
+    return { ...step, targetBinding };
+  });
+  return changed
+    ? gmActionChecklistV1Schema.parse({ ...checklist, steps })
+    : checklist;
+}
+
 export function normalizeChecklistForGmReadV1(
   checklist: GmActionChecklistV1,
   read: GmRead,
   frame: SceneFrame,
 ): GmActionChecklistV1 {
+  checklist = attachDerivedTargetBindingsV1(checklist, read, frame);
   const binding = read.runtimeRequirement?.kind === "dialogue_outcome"
     ? read.runtimeRequirement.speakerBinding
     : null;
@@ -2054,13 +2174,6 @@ export function validateAndNormalizeToolRequestV1(
       failure: `${request.toolName} is not exposed in this SceneFrame allowedTools.`,
     };
   }
-  const allowedForStep = selectAllowedToolNamesForStepV1(step, frame);
-  if (!allowedForStep.includes(request.toolName)) {
-    return {
-      input: request.input,
-      failure: `${request.toolName} does not satisfy checklist toolNeed=${step.toolNeed ?? "unspecified"}.`,
-    };
-  }
   const parsed = runtimeToolInputSchemas[request.toolName].safeParse(request.input);
   if (!parsed.success) {
     return {
@@ -2070,7 +2183,7 @@ export function validateAndNormalizeToolRequestV1(
         .join("; "),
     };
   }
-  const movementFailure = validateMovementRequestMatchesPlayerActionV1(
+  const movementFailure = validateMovementOrRouteRequestMatchesPlayerActionV1(
     request.toolName,
     parsed.data as Record<string, unknown>,
     frame,
@@ -2080,6 +2193,13 @@ export function validateAndNormalizeToolRequestV1(
     return {
       input: parsed.data as Record<string, unknown>,
       failure: movementFailure,
+    };
+  }
+  const allowedForStep = selectAllowedToolNamesForStepV1(step, frame);
+  if (!allowedForStep.includes(request.toolName)) {
+    return {
+      input: request.input,
+      failure: `${request.toolName} does not satisfy checklist toolNeed=${step.toolNeed ?? "unspecified"}.`,
     };
   }
   return { input: parsed.data as Record<string, unknown>, failure: null };
@@ -2092,6 +2212,21 @@ function normalizeMovementMatchTextV1(value: string | null | undefined): string 
     .replace(/\s+/gu, " ")
     .trim();
 }
+
+export type TurnTargetBindingV1 = {
+  requestedTargetText: string | null;
+  requestedTargetKind: "connected_destination" | "unmodeled_poi_or_micro_location" | "unknown";
+  sourceAuthority: "backend_scene_frame" | "speaker_asserted" | "player_prose_only";
+  movementAuthority: "exact_connected_destination" | "none" | "fallback_connected_candidates";
+  boundMovementRefs: string[];
+  authorityRefs: string[];
+  unresolvedTargetText?: string;
+};
+
+type TargetBindingStepInputV1 = Partial<Pick<
+  GmChecklistStepV1,
+  "toolNeed" | "purpose" | "expectedVisibleEffect" | "targetBinding"
+>>;
 
 function textLooksSceneLocalPositioningV1(value: string): boolean {
   return /(?:\b(?:stand|wait|cover|hide|beside|near|column|pillar|wall|bench|sign|poster)\b|вста[еёю]|становл|останавл|жд[уаеё]|пряч|укры|подхож|рядом|возле|колонн|скам|стен|указател|плакат|рекламн|ориентир|позици)/iu
@@ -2113,13 +2248,164 @@ function textLooksLikeFollowingDirectionsToNamedTargetV1(value: string): boolean
     .test(value);
 }
 
-function validateMovementRequestMatchesPlayerActionV1(
+const NON_TARGET_TITLE_WORDS_V1 = new Set([
+  "Player",
+  "Oracle",
+  "Stage",
+  "GM",
+  "Read",
+  "Tool",
+  "Route",
+  "Movement",
+  "Current",
+]);
+
+function textForTargetBindingV1(
+  step: Partial<Pick<GmChecklistStepV1, "purpose" | "expectedVisibleEffect">> | null,
+  frame: Pick<SceneFrame, "playerAction">,
+  intentSummary?: string,
+): string {
+  return [
+    frame.playerAction,
+    step?.purpose ?? "",
+    step?.expectedVisibleEffect ?? "",
+    intentSummary ?? "",
+  ].join(" ");
+}
+
+function structuredTargetBindingForStepV1(
+  frame: Partial<Pick<SceneFrame, "movementCandidates">>,
+  step: TargetBindingStepInputV1 | null,
+): TurnTargetBindingV1 | null {
+  const binding = step?.targetBinding;
+  if (!binding) return null;
+  const movementCandidates = frame.movementCandidates ?? [];
+  const allowedDestinationRefs = uniqueStrings([
+    ...(binding.allowedDestinationRefs ?? []),
+    binding.movementAuthority === "exact_connected_destination" ? binding.targetText ?? undefined : undefined,
+  ]);
+  const connectedAllowedRefs = movementCandidates
+    .filter((candidate) =>
+      candidate.connected
+      && allowedDestinationRefs.some((ref) =>
+        normalizeMovementMatchTextV1(ref) === normalizeMovementMatchTextV1(candidate.label),
+      ),
+    )
+    .map((candidate) => candidate.label);
+
+  if (binding.movementAuthority === "exact_connected_destination" && connectedAllowedRefs.length > 0) {
+    return {
+      requestedTargetText: binding.targetText ?? connectedAllowedRefs[0] ?? null,
+      requestedTargetKind: "connected_destination",
+      sourceAuthority: binding.sourceAuthority === "accepted_same_target_receipt"
+        ? "backend_scene_frame"
+        : binding.sourceAuthority === "backend_scene_frame"
+          ? "backend_scene_frame"
+          : "player_prose_only",
+      movementAuthority: "exact_connected_destination",
+      boundMovementRefs: connectedAllowedRefs,
+      authorityRefs: binding.authorityRefs ?? [],
+    };
+  }
+
+  if (binding.movementAuthority === "none") {
+    return {
+      requestedTargetText: binding.targetText,
+      requestedTargetKind: binding.targetKind === "unmodeled_poi_or_micro_location"
+        ? "unmodeled_poi_or_micro_location"
+        : "unknown",
+      sourceAuthority: binding.sourceAuthority === "speaker_asserted" ? "speaker_asserted" : "player_prose_only",
+      movementAuthority: "none",
+      boundMovementRefs: [],
+      authorityRefs: binding.authorityRefs ?? [],
+      ...(binding.targetText ? { unresolvedTargetText: binding.targetText } : {}),
+    };
+  }
+
+  return null;
+}
+
+export function buildTurnTargetBindingV1(
+  frame: Pick<SceneFrame, "playerAction"> & Partial<Pick<SceneFrame, "movementCandidates">>,
+  step: TargetBindingStepInputV1 | null = null,
+  intentSummary?: string,
+): TurnTargetBindingV1 {
+  const structured = structuredTargetBindingForStepV1(frame, step);
+  if (structured) return structured;
+
+  const rawText = textForTargetBindingV1(step, frame, intentSummary);
+  const normalizedText = normalizeMovementMatchTextV1(rawText);
+  const movementCandidates = frame.movementCandidates ?? [];
+  const boundMovementRefs = movementCandidates
+    .filter((candidate) => candidate.connected && normalizedText.includes(normalizeMovementMatchTextV1(candidate.label)))
+    .map((candidate) => candidate.label);
+  if (boundMovementRefs.length > 0) {
+    return {
+      requestedTargetText: boundMovementRefs[0],
+      requestedTargetKind: "connected_destination",
+      sourceAuthority: "backend_scene_frame",
+      movementAuthority: "fallback_connected_candidates",
+      boundMovementRefs,
+      authorityRefs: boundMovementRefs,
+    };
+  }
+
+  const namedTarget = extractNamedTargetCandidatesV1(rawText)
+    .filter((candidate) => !NON_TARGET_TITLE_WORDS_V1.has(candidate))
+    .find((candidate) => !movementCandidates.some((movement) =>
+      normalizeMovementMatchTextV1(movement.label) === normalizeMovementMatchTextV1(candidate),
+    ));
+  if (namedTarget && textLooksLikeFollowingDirectionsToNamedTargetV1(rawText)) {
+    return {
+      requestedTargetText: namedTarget,
+      requestedTargetKind: "unmodeled_poi_or_micro_location",
+      sourceAuthority: "speaker_asserted",
+      movementAuthority: "none",
+      boundMovementRefs: [],
+      authorityRefs: [],
+      unresolvedTargetText: namedTarget,
+    };
+  }
+
+  return {
+    requestedTargetText: namedTarget ?? null,
+    requestedTargetKind: "unknown",
+    sourceAuthority: namedTarget ? "player_prose_only" : "player_prose_only",
+    movementAuthority: "fallback_connected_candidates",
+    boundMovementRefs: [],
+    authorityRefs: [],
+    ...(namedTarget ? { unresolvedTargetText: namedTarget } : {}),
+  };
+}
+
+function movementToolNeedV1(toolNeed: string | null | undefined): boolean {
+  return toolNeed === "movement"
+    || toolNeed === "move_actor"
+    || toolNeed === "move_to"
+    || toolNeed === "route_check"
+    || toolNeed === "check_route";
+}
+
+function eligibleMovementDestinationLabelsForStepV1(
+  step: TargetBindingStepInputV1,
+  frame: Pick<SceneFrame, "playerAction"> & Partial<Pick<SceneFrame, "movementCandidates">>,
+  intentSummary?: string,
+): string[] {
+  const binding = buildTurnTargetBindingV1(frame, step, intentSummary);
+  if (binding.boundMovementRefs.length > 0) return binding.boundMovementRefs;
+  if (binding.movementAuthority === "none" || binding.requestedTargetKind === "unmodeled_poi_or_micro_location") {
+    return [];
+  }
+  return (frame.movementCandidates ?? []).filter((candidate) => candidate.connected).map((candidate) => candidate.label);
+}
+
+function validateMovementOrRouteRequestMatchesPlayerActionV1(
   toolName: RuntimeToolName,
   input: Record<string, unknown>,
   frame: SceneFrame,
   step: GmChecklistStepV1,
 ): string | null {
-  if (toolName !== "move_actor" && toolName !== "move_to") return null;
+  if (toolName !== "move_actor" && toolName !== "move_to" && toolName !== "check_route") return null;
   const destinationRef = typeof input.destinationRef === "string"
     ? input.destinationRef
     : typeof input.targetLocationName === "string"
@@ -2127,6 +2413,31 @@ function validateMovementRequestMatchesPlayerActionV1(
       : null;
   const destination = normalizeMovementMatchTextV1(destinationRef);
   if (!destination) return null;
+
+  const binding = buildTurnTargetBindingV1(
+    frame,
+    step,
+    typeof input.intentSummary === "string" ? input.intentSummary : "",
+  );
+  const eligibleDestinations = eligibleMovementDestinationLabelsForStepV1(
+    step,
+    frame,
+    typeof input.intentSummary === "string" ? input.intentSummary : "",
+  ).map((label) => normalizeMovementMatchTextV1(label));
+  if (eligibleDestinations.length > 0 && !eligibleDestinations.includes(destination)) {
+    return [
+      `${toolName} destinationRef=${destinationRef} is not an eligible same-target destination for requested target ${binding.requestedTargetText ?? "unknown"}.`,
+      "Movement and route tools may only use the exact connected destination requested by the player or proven by accepted same-target route/reveal/movement evidence.",
+      "Use scene-local log_event plus start_search/find_location_candidates/create_minor_poi/reveal_location to establish an unmodeled named target before changing current scene.",
+    ].join(" ");
+  }
+  if (eligibleDestinations.length === 0 && binding.requestedTargetKind === "unmodeled_poi_or_micro_location") {
+    return [
+      `${toolName} destinationRef=${destinationRef} is a connected route, but the player action/checklist is following directions or searching for a different named target (${binding.unresolvedTargetText ?? binding.requestedTargetText ?? "unmodeled target"}).`,
+      "Movement and route tools may not silently substitute an unrelated legal route for an unmodeled named POI or micro-location.",
+      "Use scene-local log_event plus start_search/find_location_candidates/create_minor_poi/reveal_location to establish the named target before changing current scene.",
+    ].join(" ");
+  }
 
   const requestedText = normalizeMovementMatchTextV1([
     frame.playerAction,
@@ -2209,6 +2520,8 @@ async function proposeToolRequestV1(input: {
   const model = createModel(input.provider, { role: "judge" });
   const allowedToolNames = selectAllowedToolNamesForStepV1(input.step, input.envelope.frame);
   const responseLanguage = responseLanguageForAction(input.envelope.frame.playerAction);
+  const targetBinding = buildTurnTargetBindingV1(input.envelope.frame, input.step);
+  const eligibleMovementDestinations = eligibleMovementDestinationLabelsForStepV1(input.step, input.envelope.frame);
   const { object } = await withRole("judge", () =>
     safeGenerateObject({
       model,
@@ -2222,6 +2535,9 @@ async function proposeToolRequestV1(input: {
         playerAction: input.envelope.frame.playerAction,
         gmRead: input.read,
         checklistStep: input.step,
+        targetBinding,
+        eligibleMovementDestinations,
+        movementContract: "move_actor/move_to/check_route destination refs must come from eligibleMovementDestinations. If empty, do not choose movement or route-check tools.",
         acceptedContext: acceptedStepContextV1(input.previousSettlements ?? []),
         scene: modelSafeSceneSummary(input.envelope.frame),
         toolContracts: allowedToolHints({

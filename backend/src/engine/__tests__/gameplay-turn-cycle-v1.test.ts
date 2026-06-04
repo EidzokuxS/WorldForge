@@ -10,6 +10,7 @@ import {
   buildLocalConsequenceResultFromActorPassV1,
   buildNarratorPromptFromSettledPacketV1,
   buildSceneFrameForecastRefsV1,
+  buildTurnTargetBindingV1,
   emptyLocalConsequenceResultV1,
   GM_TOOL_REQUEST_SYSTEM_PROMPT_V1,
   gmActionChecklistSystemPromptV1,
@@ -19,6 +20,7 @@ import {
   normalizeChecklistForGmReadV1,
   selectAllowedToolNamesForStepV1,
   toolContractHint,
+  toolRequestExampleForStepV1,
   toolInputLanguageContractV1,
   toolRequestSchemaForAllowedToolsV1,
   validateAndNormalizeToolRequestV1,
@@ -283,7 +285,7 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     expect(prompt).toContain("speaker-provided street directions toward a named POI/micro-location");
     expect(prompt).toContain("do not use move_actor to a different nearby/known route");
-    expect(prompt).toContain("Use scene-local log_event for following directions plus start_search/find_location_candidates/create_minor_poi/reveal_location");
+    expect(prompt).toContain("Use scene-local log_event for following directions plus start_search/find_poi_candidates/find_location_candidates/create_minor_poi/reveal_location");
   });
 
   it("tells Stage 4 not to substitute a legal connected route for an unmodeled target", () => {
@@ -714,6 +716,194 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(validation.failure).toContain("different named target");
     expect(validation.failure).toContain("Laundry King");
     expect(validation.failure).toContain("may not silently substitute an unrelated legal route");
+  });
+
+  it("binds speaker directions to an unresolved target instead of a connected substitute", () => {
+    const binding = buildTurnTargetBindingV1(
+      {
+        playerAction: "Я следую подсказке прохожего и ищу синюю вывеску Laundry King слева через квартал.",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+      } as SceneFrame,
+      {
+        purpose: "Follow the directions toward Laundry King.",
+        expectedVisibleEffect: "Laundry King sign may be found.",
+      },
+    );
+
+    expect(binding.requestedTargetText).toBe("Laundry King");
+    expect(binding.requestedTargetKind).toBe("unmodeled_poi_or_micro_location");
+    expect(binding.boundMovementRefs).toEqual([]);
+    expect(selectAllowedToolNamesForStepV1(
+      {
+        toolNeed: "movement",
+        purpose: "Follow the directions toward Laundry King.",
+        expectedVisibleEffect: "Laundry King sign may be found.",
+      },
+      {
+        playerAction: "Я следую подсказке прохожего и ищу синюю вывеску Laundry King слева через квартал.",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["move_actor", "check_route", "start_search"],
+      } as SceneFrame,
+    )).toEqual([]);
+  });
+
+  it("derives unresolved movement target binding from structured GM Read targetRefs", () => {
+    const checklist = normalizeChecklistForGmReadV1(
+      {
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Follow the directions toward the named shop.",
+          evidenceRefs: ["Player", "Прохожий", "Laundry King"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "The player follows the lead toward the shop.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "movement",
+        }],
+      },
+      directRead({
+        path: "tool_plan",
+        actionInterpretation: {
+          intent: "follow speaker directions toward Laundry King",
+          targetRefs: ["Laundry King"],
+        },
+        evidenceRefs: ["Player", "Прохожий"],
+      }) as Extract<GmRead, { path: "tool_plan" }>,
+      {
+        playerAction: "Я следую подсказке прохожего и ищу синюю вывеску Laundry King слева через квартал.",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["move_actor", "check_route", "start_search"],
+      } as SceneFrame,
+    );
+
+    expect(checklist.steps[0]?.targetBinding).toMatchObject({
+      targetText: "Laundry King",
+      targetKind: "unmodeled_poi_or_micro_location",
+      movementAuthority: "none",
+      allowedDestinationRefs: [],
+    });
+    expect(selectAllowedToolNamesForStepV1(
+      checklist.steps[0]!,
+      {
+        playerAction: "Я следую подсказке прохожего и ищу синюю вывеску Laundry King слева через квартал.",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["move_actor", "check_route", "start_search"],
+      } as SceneFrame,
+    )).toEqual([]);
+  });
+
+  it("does not seed a first-connected movement example when the named POI is unresolved", () => {
+    const example = toolRequestExampleForStepV1(
+      {
+        stepId: "step-1",
+        purpose: "Follow the directions toward Laundry King.",
+        evidenceRefs: ["Player", "Прохожий"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Laundry King sign may be found.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "movement",
+      },
+      directRead(),
+      {
+        playerAction: "Я следую подсказке прохожего и ищу синюю вывеску Laundry King слева через квартал.",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["move_actor", "start_search"],
+        roster: { active: [], support: [] },
+      } as unknown as SceneFrame,
+      ["move_actor"],
+    );
+
+    expect(example).toBeNull();
+  });
+
+  it("accepts movement when the requested named target is an exact connected destination", () => {
+    const validation = validateAndNormalizeToolRequestV1(
+      {
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "move_actor",
+        input: {
+          destinationRef: "Laundry King",
+          mode: "walk",
+          intentSummary: "Go to Laundry King.",
+          evidenceRefs: ["Laundry King"],
+        },
+        evidenceRefs: ["Laundry King"],
+      },
+      {
+        playerAction: "Я иду к Laundry King.",
+        currentLocationName: "Shibuya District",
+        currentSceneScopeName: "Shibuya District",
+        movementCandidates: [
+          { label: "Laundry King", connected: true },
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["move_actor"],
+      } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "Move to Laundry King.",
+        evidenceRefs: ["Laundry King"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Player arrives at Laundry King.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "movement",
+      },
+    );
+
+    expect(validation.failure).toBeNull();
+  });
+
+  it("rejects check_route when unmodeled POI directions are substituted with another route", () => {
+    const validation = validateAndNormalizeToolRequestV1(
+      {
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "check_route",
+        input: {
+          actorRef: "Player",
+          destinationRef: "Shibuya Back-Alley Meeting Point",
+          mode: "walk",
+        },
+        evidenceRefs: ["Shibuya Back-Alley Meeting Point"],
+      },
+      {
+        playerAction: "Я следую подсказке прохожего и ищу Laundry King.",
+        currentLocationName: "Shibuya District",
+        currentSceneScopeName: "Shibuya District",
+        movementCandidates: [
+          { label: "Shibuya Back-Alley Meeting Point", connected: true },
+        ],
+        allowedTools: ["check_route"],
+      } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "Check route while following directions toward Laundry King.",
+        evidenceRefs: ["Player", "Прохожий"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Laundry King route is clarified.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "route_check",
+      },
+    );
+
+    expect(validation.failure).toContain("may not silently substitute an unrelated legal route");
+    expect(validation.failure).toContain("Laundry King");
   });
 
   it("aborts before packet persistence when required mutating tool step has no receipt", () => {
@@ -2149,6 +2339,78 @@ describe("gameplay turn cycle v1 contracts", () => {
       skippedSteps: [],
       privateGuardTerms: [],
     }).system).toContain("Oracle result is not a movement");
+    expect(buildNarratorPromptFromSettledPacketV1({
+      version: "settled-turn-packet.v1",
+      packetId: "packet-2",
+      campaignId: "campaign-1",
+      turnId: "turn-2",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 2,
+      playerAction: "Я следую подсказке и ищу синюю вывеску Laundry King.",
+      gmRead: {
+        path: "roll_oracle",
+        situationSummary: "The player follows directions toward Laundry King.",
+        sceneQuestion: "Does the lead pan out?",
+        actionInterpretation: { intent: "find Laundry King", targetRefs: ["Laundry King"] },
+        rationale: "The lead is uncertain.",
+        evidenceRefs: ["Player", "Прохожий"],
+        narrationGuardrails: [],
+      },
+      oracleResult: {
+        chance: 45,
+        roll: 24,
+        outcome: "weak_hit",
+        reasoning: "The lead partly pans out.",
+      },
+      visibleFacts: ["Oracle outcome only: weak_hit. No location, inventory, condition, or other backend state changes are accepted unless accepted tool evidence says so."],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      failedSteps: [],
+      skippedSteps: [],
+      privateGuardTerms: [],
+    }).system).toContain("never narrate walking progress along directions");
+    expect(buildNarratorPromptFromSettledPacketV1({
+      version: "settled-turn-packet.v1",
+      packetId: "packet-3",
+      campaignId: "campaign-1",
+      turnId: "turn-3",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 3,
+      playerAction: "Я следую подсказке и ищу синюю вывеску Laundry King.",
+      gmRead: {
+        path: "roll_oracle",
+        situationSummary: "The player follows directions toward Laundry King.",
+        sceneQuestion: "Does the lead pan out?",
+        actionInterpretation: { intent: "find Laundry King", targetRefs: ["Laundry King"] },
+        rationale: "The lead is uncertain.",
+        evidenceRefs: ["Player", "Прохожий"],
+        narrationGuardrails: [],
+      },
+      oracleResult: {
+        chance: 45,
+        roll: 24,
+        outcome: "weak_hit",
+        reasoning: "The lead partly pans out.",
+      },
+      visibleFacts: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      failedSteps: [],
+      skippedSteps: [],
+      privateGuardTerms: [],
+    }).system).toContain("POI discovery");
   });
 
   it("requires Stage 4 model-authored tool input prose to follow the turn language", () => {
