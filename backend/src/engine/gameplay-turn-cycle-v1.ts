@@ -1744,7 +1744,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "Dependencies must refer only to earlier stepId values.",
     "toolNeed must be either a known state-effect kind or an exact runtime tool name.",
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
-    "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step; never fold that observation into toolNeed=movement or move_actor.",
+    "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step with toolNeed=start_search; never fold that observation into toolNeed=movement or move_actor.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
     "Do not create transfer_item or any item-state step when the player merely keeps, pockets, hides, carries, holds, readies, secures, or stows an item already in playerInventory/current possession; that is narration detail unless ownership, location, or equip state actually changes.",
@@ -1842,6 +1842,17 @@ export function selectAllowedToolNamesForStepV1(
   frame: Pick<SceneFrame, "allowedTools">,
 ): RuntimeToolName[] {
   const toolNeed = step.toolNeed?.trim();
+  if (
+    (
+      toolNeed === "device_signal_observation"
+      || toolNeed === "device_status_observation"
+      || toolNeed === "phone_signal_observation"
+      || toolNeed === "phone_status_observation"
+    )
+    && frame.allowedTools.includes("start_search")
+  ) {
+    return ["start_search"];
+  }
   if (toolNeed === "inspect_known_fact" && frame.allowedTools.includes("inspect_known_fact")) {
     const lookupTools: RuntimeToolName[] = [
       "inspect_known_fact",

@@ -266,7 +266,7 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     expect(prompt).toContain("Movement tools own only departure, route, travel cost, and arrival/current-scene change");
     expect(prompt).toContain("carried item/device/phone receives a signal, message, call, instruction");
-    expect(prompt).toContain("create a separate required observation step after the movement step");
+    expect(prompt).toContain("create a separate required observation step after the movement step with toolNeed=start_search");
     expect(prompt).toContain("never fold that observation into toolNeed=movement or move_actor");
   });
 
@@ -353,6 +353,10 @@ describe("gameplay turn cycle v1 contracts", () => {
       { toolNeed: "route_check" },
       { allowedTools: ["check_route", "move_actor"] },
     )).toEqual(["check_route"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "device_signal_observation" },
+      { allowedTools: ["inspect_known_fact", "start_search", "record_world_fact"] },
+    )).toEqual(["start_search"]);
     expect(selectAllowedToolNamesForStepV1(
       { toolNeed: "inspect_known_fact" },
       {
