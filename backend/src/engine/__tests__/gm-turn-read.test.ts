@@ -344,6 +344,10 @@ describe("GM Read contract", () => {
     expect(contract).toContain("list, check, move, or record blocked/no-current-route");
     expect(contract).toContain("Oracle alone cannot change current location or prove arrival");
     expect(contract).toContain("Do not use roll_oracle as the sole path for completed movement or arrival");
+    expect(contract).toContain("Use direct only for greetings, banter");
+    expect(contract).toContain("If a visible/current NPC answers, refuses, redirects, warns, bargains");
+    expect(contract).toContain("why something was given");
+    expect(contract).toContain("Do not use direct for reusable or contentful NPC answers");
     expect(contract).toContain("Clarification is allowed only for materially different risk/cost");
     expect(contract).toContain("mechanically important target identity");
     expect(contract).toContain("no fair playable bridge");
@@ -1162,6 +1166,72 @@ describe("GM Read contract", () => {
     ).toEqual([]);
   });
 
+  it("rejects direct visible NPC answers to substantive player questions", () => {
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse({
+          ...baseRead,
+          path: "direct",
+          focalActorRefs: ["Player", "Road Warden"],
+          actionInterpretation: {
+            intent: "ask the warden why the burner phone was issued",
+            targetRefs: ["Road Warden"],
+          },
+          evidenceRefs: ["Player", "Road Warden"],
+          sceneQuestion: "What does the warden answer about the burner phone?",
+          directResolutionNotes: "The warden explains the phone's purpose from his visible persona.",
+        }),
+        createFrame(),
+        "I keep my hands visible and ask Road Warden: why was I given this burner phone?",
+      ),
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "path",
+        message: expect.stringContaining("visible-npc-dialogue-requires-dialogue-outcome"),
+      }),
+    ]));
+  });
+
+  it("hardens direct visible NPC questions into a dialogue outcome before validation repair", async () => {
+    const misclassifiedRead = gmReadSchema.parse({
+      ...baseRead,
+      path: "direct",
+      focalActorRefs: ["Player", "Road Warden"],
+      actionInterpretation: {
+        intent: "ask the warden why the burner phone was issued",
+        targetRefs: ["Road Warden"],
+      },
+      evidenceRefs: ["Player", "Road Warden"],
+      sceneQuestion: "What does the warden answer about the burner phone?",
+      directResolutionNotes: "The warden explains the phone's purpose from his visible persona.",
+    });
+
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(misclassifiedRead));
+
+    await expect(
+      runGmRead({
+        provider,
+        playerAction: "I keep my hands visible and ask Road Warden: why was I given this burner phone?",
+        frame: createFrame(),
+      }),
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      turnGrounding: {
+        groundingKind: "dialogue_outcome",
+        topicKind: "other",
+      },
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "scene_local",
+        topicKind: "other",
+        requiresStructuralEffect: false,
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects no-mutation GM Read paths when structured turnGrounding requires backend grounding", () => {
     expect(
       validateGmReadForFrame(
@@ -1371,9 +1441,10 @@ describe("GM Read contract", () => {
     expect(firstCall?.prompt).toContain("The warden is likely to ask");
     expect(firstCall?.prompt).toContain("Do not include concrete tool payloads");
     expect(firstCall?.prompt).toContain("next playable beat");
-    expect(firstCall?.prompt).toContain("Use direct for normal conversation");
-    expect(firstCall?.prompt).toContain("Use tool_plan only when world state must actually change");
-    expect(firstCall?.prompt).toContain("Do not use direct for reusable procedural answers");
+    expect(firstCall?.prompt).toContain("Use direct only for greetings, banter");
+    expect(firstCall?.prompt).toContain("contentful NPC answers");
+    expect(firstCall?.prompt).toContain("Use tool_plan when world state must actually change");
+    expect(firstCall?.prompt).toContain("Do not use direct for reusable or contentful NPC answers");
     expect(firstCall?.prompt).toContain("turnGrounding");
     expect(firstCall?.prompt).toContain('"speakerBinding"');
     expect(firstCall?.prompt).toContain("The player asks a visible warden what proof is required");
@@ -1781,7 +1852,7 @@ describe("GM Read contract", () => {
             awareness: "clear",
           },
         ],
-        allowedTools: ["log_event", "spawn_npc"],
+        allowedTools: ["log_event", "spawn_npc", "record_dialogue_outcome"],
       }),
       recentConversation: [
         {

@@ -491,6 +491,8 @@ const MIXED_TRAVEL_DIALOGUE_ISSUE_CODE =
   "mixed-travel-dialogue-requires-movement-first";
 const EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE =
   "explicit-travel-requires-movement-authority";
+const VISIBLE_NPC_DIALOGUE_ISSUE_CODE =
+  "visible-npc-dialogue-requires-dialogue-outcome";
 const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
 const GM_READ_VALIDATION_REPAIR_MAX_ATTEMPTS = 2;
 const DOCUMENT_STATE_TAG_KEYS = new Set([
@@ -591,6 +593,50 @@ function validateRefs(
   });
 
   return issues;
+}
+
+function visibleNonPlayerActorRefSet(frame: SceneFrame): Set<string> {
+  const refs = new Set<string>();
+  for (const actor of [...frame.roster.active, ...frame.roster.support]) {
+    if (actor.type === "player" || actor.awareness !== "clear") continue;
+    addRef(refs, actor.id);
+    addTypedRef(refs, "actor", actor.id);
+    addRef(refs, actor.actorId);
+    addTypedRef(refs, "actor", actor.actorId);
+    addRef(refs, actor.label);
+  }
+  return refs;
+}
+
+function visibleNpcDialogueTargetRefs(read: GmRead, frame: SceneFrame): string[] {
+  const visibleActorRefs = visibleNonPlayerActorRefSet(frame);
+  return uniqueRefs(read.actionInterpretation.targetRefs).filter((ref) =>
+    visibleActorRefs.has(normalizeRef(ref)),
+  );
+}
+
+function normalizePlayerActionText(playerAction: string | undefined): string {
+  return playerAction?.toLowerCase().replace(/\s+/g, " ").trim() ?? "";
+}
+
+function hasSubstantiveDialogueRequest(playerAction: string | undefined): boolean {
+  const text = normalizePlayerActionText(playerAction);
+  if (!text) return false;
+  if (/[?？]/u.test(text)) return true;
+  return (
+    /\b(?:ask|question|interrogate|press|request|demand|tell me|explain|answer|warn|threaten|negotiate|bargain|offer|whether|which|who|what|where|when|why|how|do you know|can you|could you|would you)\b/u.test(text)
+    || /(?:спраш|вопрос|ответ|скажи|расскаж|объясн|знаешь|кто|что|где|когда|почему|зачем|как|какой|можешь|прошу|требу|предупрежда|угрож|договар|торг)/u.test(text)
+  );
+}
+
+function hasVisibleNpcDialogueRequest(
+  read: GmRead,
+  frame: SceneFrame,
+  playerAction: string | undefined,
+): boolean {
+  const text = normalizePlayerActionText(playerAction);
+  return visibleNpcDialogueTargetRefs(read, frame).some((ref) => text.includes(normalizeRef(ref)))
+    && hasSubstantiveDialogueRequest(playerAction);
 }
 
 function hasExplicitTravelThenInteraction(playerAction: string | undefined): boolean {
@@ -699,6 +745,20 @@ function validateDialogueOutcomeDoesNotAbsorbRouteFeasibility(
   }];
 }
 
+function validateVisibleNpcDialogueRequiresRuntime(
+  read: GmRead,
+  frame: SceneFrame,
+  playerAction: string | undefined,
+): GmReadValidationIssue[] {
+  if (read.path !== "direct" && read.path !== "continue") return [];
+  if (!hasVisibleNpcDialogueRequest(read, frame, playerAction)) return [];
+  return [{
+    path: "path",
+    message:
+      `${VISIBLE_NPC_DIALOGUE_ISSUE_CODE}: a visible/current NPC answer, refusal, warning, redirect, bargain, or meaningful response to a player question/request must be owned by dialogue authority. Choose tool_plan with runtimeRequirement { kind: "dialogue_outcome", speakerBinding: { kind: "visible_actor", speakerRef } } so record_dialogue_outcome supplies the settled truth before narration uses it. Use direct only for greetings, banter, sensory color, or local non-reusable response that creates no playable NPC claim.`,
+  }];
+}
+
 export function validateGmReadForFrame(
   read: GmRead,
   frame: SceneFrame,
@@ -753,6 +813,7 @@ export function validateGmReadForFrame(
   issues.push(...validateExplicitTravelRequiresMovementAuthority(read, frame, playerAction));
   issues.push(...validateDialogueOutcomeDoesNotAbsorbPlayerTravel(read, playerAction));
   issues.push(...validateDialogueOutcomeDoesNotAbsorbRouteFeasibility(read, playerAction));
+  issues.push(...validateVisibleNpcDialogueRequiresRuntime(read, frame, playerAction));
 
   return issues;
 }
@@ -1313,18 +1374,72 @@ function hardenExplicitTravelToMovementAuthority(
   };
 }
 
+function hardenVisibleNpcDialogueToDialogueOutcome(
+  read: GmRead,
+  playerAction: string,
+  frame: SceneFrame,
+): GmRead {
+  if (read.path !== "direct" && read.path !== "continue") return read;
+  const speakerRef = visibleNpcDialogueTargetRefs(read, frame)[0];
+  if (!speakerRef || !hasVisibleNpcDialogueRequest(read, frame, playerAction)) return read;
+  const dialogueRequirement = {
+    kind: "dialogue_outcome" as const,
+    durability: "scene_local" as const,
+    topicKind: "other" as const,
+    requiresStructuralEffect: false,
+    speakerBinding: { kind: "visible_actor" as const, speakerRef },
+  };
+  if (!frame.allowedTools.some((toolName) => canRuntimeToolSatisfyRequirement(toolName, dialogueRequirement))) {
+    return read;
+  }
+
+  return {
+    version: read.version,
+    situationSummary: read.situationSummary,
+    sceneQuestion:
+      "What answer, refusal, warning, redirect, or other dialogue outcome does the visible speaker give now?",
+    focalActorRefs: read.focalActorRefs,
+    backgroundActorRefs: read.backgroundActorRefs,
+    actionInterpretation: read.actionInterpretation,
+    turnGrounding: {
+      intentKind: "ordinary_local_response",
+      requiresGrounding: true,
+      groundingKind: "dialogue_outcome",
+      topicKind: "other",
+      durability: "scene_local",
+      reason:
+        "A visible NPC response to a player question or request is settled dialogue evidence, not direct narrator-owned truth.",
+    },
+    path: "tool_plan",
+    turnIntent:
+      "Resolve and record the visible speaker's answer, refusal, warning, redirect, silence, or other dialogue outcome before narration uses it.",
+    runtimeRequirement: dialogueRequirement,
+    rationale:
+      "The player addressed a visible NPC with a substantive question/request; dialogue authority must own the response even without structural state change.",
+    evidenceRefs: uniqueRefs([...read.evidenceRefs, speakerRef]).slice(0, GM_READ_EVIDENCE_MAX),
+    narrationGuardrails: [
+      "Narrate only the accepted dialogue outcome; do not invent extra NPC claims beyond the receipt.",
+      ...read.narrationGuardrails,
+    ].slice(0, GM_READ_GUARDRAIL_MAX),
+  };
+}
+
 function hardenGmReadForBackendContracts(
   read: GmRead,
   playerAction: string,
   frame: SceneFrame,
 ): GmRead {
   return hardenExplicitTravelToMovementAuthority(
-    hardenRouteFeasibilityDialogueToRouteAuthority(
-      hardenMixedTravelDialogueToMovementFirst(
-        hardenReusableDialogueRuntimeRequirement(read),
+    hardenVisibleNpcDialogueToDialogueOutcome(
+      hardenRouteFeasibilityDialogueToRouteAuthority(
+        hardenMixedTravelDialogueToMovementFirst(
+          hardenReusableDialogueRuntimeRequirement(read),
+          playerAction,
+        ),
         playerAction,
       ),
       playerAction,
+      frame,
     ),
     playerAction,
     frame,
@@ -1844,6 +1959,8 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     log.event("judge.gm-read.runtime-requirement-hardened", {
       reason: hasExplicitCompletedTravelIntent(args.playerAction, args.frame)
         ? EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE
+        : hasVisibleNpcDialogueRequest(result.object, args.frame, args.playerAction)
+        ? VISIBLE_NPC_DIALOGUE_ISSUE_CODE
         : hasExplicitRouteFeasibilityCheck(args.playerAction)
         ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
         : hasExplicitTravelThenInteraction(args.playerAction)
@@ -1920,6 +2037,8 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
         log.event("judge.gm-read.runtime-requirement-hardened", {
           reason: hasExplicitCompletedTravelIntent(args.playerAction, args.frame)
             ? EXPLICIT_TRAVEL_MOVEMENT_AUTHORITY_ISSUE_CODE
+            : hasVisibleNpcDialogueRequest(result.object, args.frame, args.playerAction)
+            ? VISIBLE_NPC_DIALOGUE_ISSUE_CODE
             : hasExplicitRouteFeasibilityCheck(args.playerAction)
             ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
             : hasExplicitTravelThenInteraction(args.playerAction)
