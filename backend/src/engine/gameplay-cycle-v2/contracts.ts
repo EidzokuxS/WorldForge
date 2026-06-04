@@ -909,8 +909,9 @@ const minorPoiCreateRequestV2Schema = z.object({
   capabilityId: z.literal("minor_poi_create"),
   toolId: z.literal("minor_poi.create.v2"),
   effectBinding: z.object({
-    poiLabel: shortText,
+    anchorScope: z.literal("current_scene"),
     anchorRef: modelSafeRefSchema,
+    poiLabel: shortText,
     purpose: z.string().trim().min(1).max(500),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),

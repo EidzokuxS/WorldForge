@@ -106,6 +106,32 @@ P19 support actor create checkpoint:
   - Backend ran on stable `PORT=3199` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3199/3001` clear.
   - Artifacts: `output/p19-support-actor-live/load-r5.json`, `turn-support-actor-r5.sse.txt`, `turn-support-actor-r5.db.json`.
 
+P20 minor POI create checkpoint:
+- User reminder still applies: this slice is diagnostic proof only; final acceptance remains several different fresh zero-turn campaigns/clones at about 60 clean turns each with zero failed/replayed/restored/invalid player-facing turns.
+- Oracle/GPT-5.5 Pro review `p20-minor-poi-boundary`:
+  - Dry-run: browser mode, forced one bundled attachment via `--browser-bundle-files`, 10 files, about 63.4k tokens, one `attachments-bundle.txt`.
+  - Real browser run completed on GPT-5.5 Pro / Extended Pro with model selection verified.
+  - Recommendation accepted: implement `minor_poi.create.v2` next, ahead of `world_fact.record.v2` and `item.transfer.v2`, because long manual play needs stable visible non-actor local handles without turning them into routes, hidden discoveries, items, or world facts.
+  - Accepted boundary: create exactly one visible current-scene target-only POI; advance worldVersion; write one v2 authority trace; expose after SceneFrame refresh as `scene.targets` / `visible_target` with `targetKind=location`; never create `location_edges`, movement options, `connectedTo`, items, NPCs, world facts, knowledge records, location events, or search/reveal authority.
+- Implemented `minor_poi.create.v2` live slice:
+  - Added `minor_poi_create` to live v2 capabilities, GM Read admission, simple checklist compiler, and clean tool-request prompt.
+  - Tightened tool request schema with `anchorScope="current_scene"`, `anchorRef`, `poiLabel`, `purpose`, and evidence refs.
+  - Added DB-backed handler transaction: resolves `anchorRef` only through current-scene registry authority, inserts one tagged `locations` row (`minor-poi`, `target-only`, `no-route`) with `kind="ephemeral_scene"`, advances world clock, writes `gameplay-cycle-v2.minor_poi.create.v2` authority trace, rejects duplicate/colliding labels as no-op, and rolls back on authority failure.
+  - Extended `SceneFrame` to expose tagged current-scene minor POI rows as target candidates only; they do not enter `movementCandidates`.
+- Verification:
+  - GitNexus impact before edits was LOW for `buildGmReadSystemPrompt`, `buildToolRequestSystemPrompt`, `compileSimpleGmActionChecklistV2`, `createDbBackedGameplayToolHandlersV2`, `buildSceneFrame`, and `buildGameplayRefRegistryV2`.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 118 tests.
+  - `npm --prefix backend run typecheck` passed.
+- Live/manual diagnostic evidence:
+  - Created clean diagnostic clone `196adac3-a900-4dfa-9ece-5aa4c0468014` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; preflight showed `chat=0`, `gameplay_cycle_v2_packets=0`, legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `simulation_proposals=0`, `authority_traces=0`, `worldVersion=0`, current scene `Lowwater Bazaar`, no existing minor POIs.
+  - Started stable backend on `PORT=3205` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, ports `3205/3001` clear.
+  - Real action sent with `campaignId`, `playerAction`, `intent`, and `method`: `Я оглядываюсь у входа в Lowwater Bazaar и ищу обычную видимую доску объявлений, где могли бы висеть текущие рыночные уведомления.`
+  - Result: HTTP 200, SSE reached `narrative` and `done`; narration: `У входа в Lowwater Bazaar вы замечаете Market notice board — обычную доску объявлений, где размещаются текущие рыночные уведомления.`
+  - DB/packet grounding: `gmRead.path="tool_plan"`, checklist effect `minor_poi_create`, accepted receipt `receipt-step-1` with `toolId="minor_poi.create.v2"`, `evidenceAuthority="mutation_receipt"`, `mutationApplied=true`, `mutationAuthority="local_scene"`, `baseWorldVersion=0`, `resultWorldVersion=1`, no failed/skipped steps.
+  - Inserted POI row `Market notice board` in `locations` with tags `["minor-poi","gameplay-v2-created","current-scene-poi","target-only","no-route"]`, `kind="ephemeral_scene"`, `connectedTo="[]"`; no location edge touched the POI; no `turn_clock_ledger` or `location_recent_events` rows were written.
+  - Authority trace operation `gameplay-cycle-v2.minor_poi.create.v2`, source entity type `location`, state deltas `minor_poi:<id>:created` and `scene:<sceneId>:minor_pois`, metadata `exposure="visible_target_only"`, `movementCandidate=false`, `routeEdgeCreated=false`, `worldFactCreated=false`, `itemCreated=false`.
+  - Artifacts: `output/p20-minor-poi-live/load.json`, `turn-minor-poi.sse.txt`, `turn-minor-poi.db.json`, backend logs.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,7 @@ import {
   turnStartEnvelopeSchema,
   type TurnAttemptContextV2,
 } from "../gameplay-cycle-v2/index.js";
-import type { SceneFrame } from "../scene-frame.js";
+import { buildSceneFrame, type SceneFrame } from "../scene-frame.js";
 import type { ScopedForecastExcerpt } from "../world-forecast.js";
 
 function startEnvelope() {
@@ -219,7 +219,7 @@ function scopedForecast(): ScopedForecastExcerpt {
 
 function movementToolPlanFixture(options: {
   privateGuardTerms?: string[];
-  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "entity_tag" | "quick_action_offer">;
+  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "minor_poi_create" | "entity_tag" | "quick_action_offer">;
 } = {}) {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -694,6 +694,85 @@ function supportActorToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function minorPoiToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "minor_poi_create"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player looks for an ordinary visible notice board in the current scene.",
+      sceneQuestion: "What minor point of interest must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+      actionInterpretation: {
+        intent: "Find a notice board near the atrium entrance.",
+        method: "look around the current scene",
+        targetRefs: ["Atrium Floor"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Creating a visible current-scene POI requires backend mutation authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["minor_poi_create"],
+        actorRefs: ["Player"],
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Create one visible current-scene minor POI if accepted by backend authority.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Minor POI GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-minor-poi-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Create a visible local notice board.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Create one visible notice board target in the current scene.",
+        actorRef: "Player",
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        requiredCapabilityId: "minor_poi_create",
+        intendedEffect: {
+          kind: "minor_poi_create",
+          summary: "A notice board becomes visible as a current-scene point of interest.",
+          stateScope: "local_scene",
+        },
+        expectedVisibleEffect: "A visible notice board POI is available in the current scene.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Minor POI checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function entityTagToolPlanFixture() {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -1158,6 +1237,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       intendedEffect: {
         kind: "support_actor_create",
         stateScope: "actor",
+      },
+    });
+
+    const minorPoi = minorPoiToolPlanFixture();
+    const compiledMinorPoi = compileSimpleGmActionChecklistV2({
+      packet: minorPoi.packet,
+      gmRead: minorPoi.gmRead,
+    });
+    expect(compiledMinorPoi?.status).toBe("accepted");
+    if (!compiledMinorPoi || compiledMinorPoi.status !== "accepted") {
+      throw new Error("Simple minor-POI checklist must compile.");
+    }
+    expect(compiledMinorPoi.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "minor_poi_create",
+      targetRefs: ["Atrium Floor"],
+      intendedEffect: {
+        kind: "minor_poi_create",
+        stateScope: "local_scene",
       },
     });
 
@@ -2993,6 +3090,44 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("create_scene_extra");
     expect(JSON.stringify(result.request)).not.toContain("spawn_npc");
     expect(JSON.stringify(result.request)).not.toContain("toolName");
+  });
+
+  it("accepts a clean minor_poi.create.v2 request with current-scene target-only authority", () => {
+    const { packet, checklist } = minorPoiToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-minor-poi-1",
+        stepId: "step-1",
+        capabilityId: "minor_poi_create",
+        toolId: "minor_poi.create.v2",
+        effectBinding: {
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          poiLabel: "Notice Board",
+          purpose: "The player needs an ordinary visible board for current-scene postings.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Minor POI tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("minor_poi.create.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      anchorScope: "current_scene",
+      anchorRef: "Atrium Floor",
+      poiLabel: "Notice Board",
+    });
+    expect(JSON.stringify(result.request)).not.toContain("create_minor_poi");
+    expect(JSON.stringify(result.request)).not.toContain("location.reveal");
+    expect(JSON.stringify(result.request)).not.toContain("move_actor");
   });
 
   it("accepts a clean entity.tag.v2 request with scoped entity authority", () => {
@@ -6184,6 +6319,299 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       });
       expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
       expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes minor_poi.create.v2 as atomic visible current-scene target mutation", async () => {
+    const fixture = dbTempFixture("wf-v2-db-minor-poi-");
+    const previousCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
+    try {
+      process.env.GSD_CAMPAIGNS_ROOT = fixture.tempDir;
+      const campaignDir = join(fixture.tempDir, "campaign-alpha");
+      mkdirSync(campaignDir, { recursive: true });
+      writeFileSync(join(campaignDir, "config.json"), JSON.stringify({
+        name: "P16 Fixture",
+        premise: "A test campaign for gameplay-cycle-v2 handlers.",
+        currentTick: 0,
+        createdAt: 1_000,
+        updatedAt: 1_000,
+      }));
+      seedP16World();
+      const { packet, checklist } = minorPoiToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "minor-poi-db-1",
+          stepId: "step-1",
+          capabilityId: "minor_poi_create",
+          toolId: "minor_poi.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            poiLabel: "Notice Board",
+            purpose: "The player needs an ordinary visible board for current-scene postings.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-minor-poi-db-1",
+        emittedAt: 25,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        toolId: "minor_poi.create.v2",
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "local_scene",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+      });
+      expect(execution.receipt.visibleSummary).toContain("Notice Board");
+      expect(execution.receipt.evidenceRefs).toContain("Atrium Floor");
+
+      const poiRows = getDb().select().from(locations).where(eq(locations.name, "Notice Board")).all();
+      expect(poiRows).toHaveLength(1);
+      expect(poiRows[0]).toMatchObject({
+        campaignId: "campaign-alpha",
+        kind: "ephemeral_scene",
+        parentLocationId: "scene-alpha",
+        anchorLocationId: "location-alpha",
+        persistence: "ephemeral",
+        connectedTo: "[]",
+      });
+      expect(JSON.parse(poiRows[0].tags)).toEqual(expect.arrayContaining([
+        "minor-poi",
+        "gameplay-v2-created",
+        "current-scene-poi",
+        "target-only",
+        "no-route",
+      ]));
+      const poiEdges = getDb().select().from(locationEdges).all()
+        .filter((edge) =>
+          edge.fromLocationId === poiRows[0].id || edge.toLocationId === poiRows[0].id);
+      expect(poiEdges).toHaveLength(0);
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 8,
+        worldTimeMinutes: 10,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.minor_poi.create.v2",
+        sourceEntityType: "location",
+        sourceEntityId: poiRows[0].id,
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:minor-poi-db-1",
+      });
+      const traceMetadata = JSON.parse(traces[0].metadata) as {
+        exposure?: string;
+        movementCandidate?: boolean;
+        routeEdgeCreated?: boolean;
+        worldFactCreated?: boolean;
+        itemCreated?: boolean;
+      };
+      expect(traceMetadata).toMatchObject({
+        exposure: "visible_target_only",
+        movementCandidate: false,
+        routeEdgeCreated: false,
+        worldFactCreated: false,
+        itemCreated: false,
+      });
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+
+      const refreshedFrame = await buildSceneFrame({
+        campaignId: "campaign-alpha",
+        tick: 0,
+        playerAction: "I inspect the notice board.",
+      });
+      expect(refreshedFrame.targetCandidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: `minor_poi:${poiRows[0].id}`,
+          type: "location",
+          label: "Notice Board",
+          locationId: poiRows[0].id,
+        }),
+      ]));
+      expect(refreshedFrame.movementCandidates.map((candidate) => candidate.label))
+        .not.toContain("Notice Board");
+
+      const refreshedPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext({
+          playerAction: "I inspect the notice board.",
+          baseTick: refreshedFrame.tick,
+          baseWorldVersion: 8,
+        }),
+        frame: refreshedFrame,
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "route_check", "movement", "minor_poi_create"],
+        },
+      }));
+      expect(refreshedPacket.scene.targets).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          ref: "Notice Board",
+          label: "Notice Board",
+          kind: "location",
+        }),
+      ]));
+      expect(refreshedPacket.citableRefs).toContain("Notice Board");
+      const refreshedRegistry = buildGameplayRefRegistryV2({
+        turnId: "turn-alpha",
+        frame: refreshedFrame,
+      });
+      const visibleTarget = resolveGameplayRefV2({
+        registry: refreshedRegistry,
+        ref: "Notice Board",
+        allowedKinds: ["visible_target"],
+      });
+      expect(visibleTarget.status).toBe("resolved");
+      if (visibleTarget.status !== "resolved") {
+        throw new Error("Notice Board must resolve as a visible target.");
+      }
+      expect(visibleTarget.entry).toMatchObject({
+        kind: "visible_target",
+        metadata: {
+          targetKind: "location",
+        },
+      });
+      const movementTarget = resolveGameplayRefV2({
+        registry: refreshedRegistry,
+        ref: "Notice Board",
+        allowedKinds: ["movement_option"],
+      });
+      expect(movementTarget.status).toBe("missing");
+    } finally {
+      if (previousCampaignRoot === undefined) {
+        delete process.env.GSD_CAMPAIGNS_ROOT;
+      } else {
+        process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
+      }
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects minor_poi.create.v2 duplicate no-op without mutating DB state or advancing world version", async () => {
+    const fixture = dbTempFixture("wf-v2-db-minor-poi-noop-");
+    try {
+      seedP16World();
+      getDb().insert(locations).values({
+        id: "poi-existing-notice-board",
+        campaignId: "campaign-alpha",
+        name: "Notice Board",
+        description: "An existing board.",
+        kind: "ephemeral_scene",
+        parentLocationId: "scene-alpha",
+        anchorLocationId: "location-alpha",
+        persistence: "ephemeral",
+        expiresAtTick: null,
+        archivedAtTick: null,
+        tags: JSON.stringify(["minor-poi", "target-only", "no-route"]),
+        isStarting: false,
+        connectedTo: "[]",
+      }).run();
+      const { packet, checklist } = minorPoiToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "minor-poi-noop-1",
+          stepId: "step-1",
+          capabilityId: "minor_poi_create",
+          toolId: "minor_poi.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            poiLabel: "Notice Board",
+            purpose: "The player needs an ordinary visible board for current-scene postings.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-minor-poi-noop-1",
+        emittedAt: 26,
+      });
+
+      expect(execution.status).toBe("rejected");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("already present in the current scene");
+      expect(getDb().select().from(locations).where(eq(locations.name, "Notice Board")).all()).toHaveLength(1);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      expect(getDb().select().from(locationEdges).all()).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back minor_poi.create.v2 row insert when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-minor-poi-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = minorPoiToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "minor-poi-rollback-1",
+          stepId: "step-1",
+          capabilityId: "minor_poi_create",
+          toolId: "minor_poi.create.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            poiLabel: "Notice Board",
+            purpose: "The player needs an ordinary visible board for current-scene postings.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterMinorPoiInsertBeforeAuthorityTrace: () => {
+              throw new Error("forced minor poi authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-minor-poi-rollback-1",
+        emittedAt: 27,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced minor poi authority failure");
+      expect(getDb().select().from(locations).where(eq(locations.name, "Notice Board")).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      expect(getDb().select().from(locationEdges).all()).toHaveLength(1);
     } finally {
       fixture.cleanup();
     }

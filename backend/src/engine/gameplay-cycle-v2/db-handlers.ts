@@ -96,6 +96,7 @@ type EntityTagResolution =
 
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
+  afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
   afterSupportActorInsertBeforeAuthorityTrace?: () => void;
   afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
 }
@@ -154,6 +155,10 @@ function canonicalSupportTag(raw: string): string | null {
 }
 
 function normalizeActorName(raw: string): string {
+  return raw.trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+function normalizePoiLabel(raw: string): string {
   return raw.trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
@@ -891,6 +896,156 @@ function commitSupportActorCreateV2(input: {
   });
 }
 
+function commitMinorPoiCreateV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: Extract<GameplayToolRequestV2, { toolId: "minor_poi.create.v2" }>;
+  anchor: Extract<CurrentSceneResolution, { status: "resolved" }>;
+  poiLabel: string;
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  poiLocationId: string;
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const poiLocationId = crypto.randomUUID();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const poiTags = [
+    "minor-poi",
+    "gameplay-v2-created",
+    "current-scene-poi",
+    "target-only",
+    "no-route",
+  ];
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const existing = db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        tags: locations.tags,
+        archivedAtTick: locations.archivedAtTick,
+        parentLocationId: locations.parentLocationId,
+      })
+      .from(locations)
+      .where(and(
+        eq(locations.campaignId, input.packet.campaignId),
+        eq(locations.parentLocationId, input.anchor.sceneLocationId),
+      ))
+      .all()
+      .find((row) =>
+        row.archivedAtTick == null
+        && parseStringArray(row.tags).includes("minor-poi")
+        && normalizePoiLabel(row.name) === normalizePoiLabel(input.poiLabel));
+    if (existing) {
+      throw new Error(`A matching minor POI "${existing.name}" is already present in the current scene.`);
+    }
+
+    const insert = db.insert(locations)
+      .values({
+        id: poiLocationId,
+        campaignId: input.packet.campaignId,
+        name: input.poiLabel,
+        description: input.request.effectBinding.purpose,
+        kind: "ephemeral_scene",
+        parentLocationId: input.anchor.sceneLocationId,
+        anchorLocationId: input.anchor.broadLocationId,
+        persistence: "ephemeral",
+        expiresAtTick: null,
+        archivedAtTick: null,
+        tags: stringifyStringArray(poiTags),
+        isStarting: false,
+        connectedTo: "[]",
+      })
+      .run();
+    if (insert.changes !== 1) {
+      throw new Error("Minor POI creation did not insert exactly one location row.");
+    }
+
+    input.testHooks?.afterMinorPoiInsertBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before minor_poi.create.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.minor_poi.create.v2",
+        sourceEntityType: "location",
+        sourceEntityId: poiLocationId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray([
+          `minor_poi:${poiLocationId}:created`,
+          `scene:${input.anchor.sceneLocationId}:minor_pois`,
+        ]),
+        witnesses: stringifyStringArray(input.request.effectBinding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          anchorRef: input.request.effectBinding.anchorRef,
+          anchorScope: input.request.effectBinding.anchorScope,
+          anchorSceneLocationId: input.anchor.sceneLocationId,
+          anchorBroadLocationId: input.anchor.broadLocationId,
+          poiLocationId,
+          poiLabel: input.poiLabel,
+          purpose: input.request.effectBinding.purpose,
+          exposure: "visible_target_only",
+          movementCandidate: false,
+          routeEdgeCreated: false,
+          worldFactCreated: false,
+          itemCreated: false,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      poiLocationId,
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function commitEntityTagV2(input: {
   packet: ModelFacingTurnPacketV2;
   request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>;
@@ -1333,6 +1488,57 @@ function supportActorCreateHandler(
   }
 }
 
+function minorPoiCreateHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: Extract<GameplayToolRequestV2, { toolId: "minor_poi.create.v2" }>,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const anchor = resolveCurrentScene({
+    registry,
+    anchorRef: request.effectBinding.anchorRef,
+  });
+  if (anchor.status !== "resolved") return failedOutcome(packet, anchor.reason);
+  const poiLabel = request.effectBinding.poiLabel.trim().replace(/\s+/gu, " ");
+  const labelCollision = registry.entries.find((entry) =>
+    normalizePoiLabel(entry.label) === normalizePoiLabel(poiLabel)
+    || normalizePoiLabel(entry.ref) === normalizePoiLabel(poiLabel));
+  if (labelCollision) {
+    return failedOutcome(
+      packet,
+      `Minor POI label "${poiLabel}" collides with existing visible ref "${labelCollision.ref}".`,
+    );
+  }
+
+  try {
+    const commit = commitMinorPoiCreateV2({
+      packet,
+      request,
+      anchor,
+      poiLabel,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "local_scene",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${poiLabel} is now a visible minor point of interest in ${anchor.label}.`,
+      evidenceRefs: [
+        request.effectBinding.anchorRef,
+        ...request.effectBinding.evidenceRefs,
+      ],
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "minor_poi.create.v2 failed before committing POI creation.";
+    const isNoOp = reason.includes("already present in the current scene");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 function entityTagHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>,
@@ -1413,6 +1619,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "support_actor.create.v2 handler received the wrong request type.");
       }
       return supportActorCreateHandler(packet, request, refRegistry, options.testHooks);
+    },
+    "minor_poi.create.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "minor_poi.create.v2") {
+        return failedOutcome(packet, "minor_poi.create.v2 handler received the wrong request type.");
+      }
+      return minorPoiCreateHandler(packet, request, refRegistry, options.testHooks);
     },
     "entity.tag.v2": ({ packet, request, refRegistry }) => {
       if (request.toolId !== "entity.tag.v2") {

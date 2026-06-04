@@ -906,12 +906,39 @@ function collectMovementCandidates(input: {
     .slice(0, SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT);
 }
 
+function collectMinorPoiCandidates(input: {
+  currentSceneScopeId: string | null;
+  currentTick: number;
+  locationRows: LocationRow[];
+}): SceneFrameTargetCandidate[] {
+  if (!input.currentSceneScopeId) {
+    return [];
+  }
+  return input.locationRows
+    .filter((location) => {
+      const tags = parseTags(location.tags);
+      return tags.includes("minor-poi")
+        && location.parentLocationId === input.currentSceneScopeId
+        && locationIsVisibleNow(location, input.currentTick);
+    })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((location): SceneFrameTargetCandidate => ({
+      id: `minor_poi:${location.id}`,
+      type: "location",
+      label: location.name,
+      locationId: location.id,
+      tags: parseTags(location.tags),
+    }));
+}
+
 function collectTargetCandidates(input: {
   roster: SceneFrameRoster;
   itemRows: ItemRow[];
+  locationRows: LocationRow[];
   movementCandidates: SceneFrameMovementCandidate[];
   currentLocationId: string | null;
   currentSceneScopeId: string | null;
+  currentTick: number;
 }): SceneFrameTargetCandidate[] {
   const sceneActorIds = new Set([
     ...input.roster.active.map((actor) => actor.id),
@@ -959,8 +986,13 @@ function collectTargetCandidates(input: {
     locationId: candidate.locationId,
     tags: [],
   }));
+  const minorPoiCandidates = collectMinorPoiCandidates({
+    currentSceneScopeId: input.currentSceneScopeId,
+    currentTick: input.currentTick,
+    locationRows: input.locationRows,
+  });
 
-  return [...actorCandidates, ...itemCandidates, ...locationCandidates].slice(
+  return [...actorCandidates, ...itemCandidates, ...minorPoiCandidates, ...locationCandidates].slice(
     0,
     SCENE_FRAME_TARGET_CANDIDATE_LIMIT,
   );
@@ -1150,9 +1182,11 @@ export async function buildSceneFrame(
   const targetCandidates = collectTargetCandidates({
     roster,
     itemRows,
+    locationRows,
     movementCandidates,
     currentLocationId,
     currentSceneScopeId,
+    currentTick: frameTick,
   });
   const playerInventory = collectPlayerInventoryItems({
     itemRows,
