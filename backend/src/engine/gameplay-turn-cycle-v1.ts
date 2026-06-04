@@ -191,6 +191,7 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
     "If gmRead.runtimeRequirement.speakerBinding.kind is visible_actor, record_dialogue_outcome speakerRef must copy that visible speakerRef; do not create or use a composed responder name for multiple already-visible actors.",
     "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
     "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
+    "For move_actor/move_to, destinationRef must be the exact connected destination the player requested or a destination proven by an accepted route/movement receipt. Never substitute another legal connected route just because the player's named target or speaker-provided directions are not modeled.",
     "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
 ].join(" ");
 
@@ -1776,6 +1777,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
     "Movement tools own only departure, route, travel cost, and arrival/current-scene change. If the player also watches, checks, waits for, or asks whether a carried item/device/phone receives a signal, message, call, instruction, status change, or other post-move observation, create a separate required observation step after the movement step with toolNeed=start_search; never fold that observation into toolNeed=movement or move_actor.",
     "If the player stands, waits, takes cover, counts columns, approaches a bench/wall/sign/column, or otherwise repositions within the current scene without entering a connected destination, use log_event with durability=scene_local or an observation/search step. Never use toolNeed=movement or move_actor for scene-local positioning.",
+    "If the player follows speaker-provided street directions toward a named POI/micro-location that is not an exposed connected destination in the SceneFrame, do not use move_actor to a different nearby/known route. Use scene-local log_event for following directions plus start_search/find_location_candidates/create_minor_poi/reveal_location as appropriate to establish the target before any current-scene change.",
     "If a dialogue/social action also includes local stance or possession posture such as keeping distance, stepping back, taking cover, gripping/holding/readying an already-held item, or explicitly not handing an item over, create a separate scene-local log_event step before the dialogue step when that physical micro-action should be narrated as completed. Do not fold those physical micro-actions into record_dialogue_outcome.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
@@ -2096,6 +2098,21 @@ function textLooksSceneLocalPositioningV1(value: string): boolean {
     .test(value);
 }
 
+function extractNamedTargetCandidatesV1(value: string): string[] {
+  const candidates = new Set<string>();
+  for (const match of value.matchAll(/\b[A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*)*\b/gu)) {
+    const candidate = match[0].trim();
+    if (candidate.length < 3) continue;
+    candidates.add(candidate);
+  }
+  return [...candidates];
+}
+
+function textLooksLikeFollowingDirectionsToNamedTargetV1(value: string): boolean {
+  return /(?:\b(?:follow|following|directions?|route|path|find|search|look for|sign|poi|landmark)\b|следу|подсказ|маршрут|путь|дорог|ищ|вывеск|ориентир|прачечн|двор|указан|направлен)/iu
+    .test(value);
+}
+
 function validateMovementRequestMatchesPlayerActionV1(
   toolName: RuntimeToolName,
   input: Record<string, unknown>,
@@ -2111,15 +2128,38 @@ function validateMovementRequestMatchesPlayerActionV1(
   const destination = normalizeMovementMatchTextV1(destinationRef);
   if (!destination) return null;
 
-  const actionText = normalizeMovementMatchTextV1(frame.playerAction);
-  if (!textLooksSceneLocalPositioningV1(actionText)) return null;
-
   const requestedText = normalizeMovementMatchTextV1([
     frame.playerAction,
     step.purpose,
     step.expectedVisibleEffect,
+    typeof input.intentSummary === "string" ? input.intentSummary : "",
   ].join(" "));
   if (requestedText.includes(destination)) return null;
+
+  const rawRequestedText = [
+    frame.playerAction,
+    step.purpose,
+    step.expectedVisibleEffect,
+    typeof input.intentSummary === "string" ? input.intentSummary : "",
+  ].join(" ");
+  if (textLooksLikeFollowingDirectionsToNamedTargetV1(rawRequestedText)) {
+    const namedTargets = extractNamedTargetCandidatesV1(rawRequestedText)
+      .map((candidate) => ({
+        raw: candidate,
+        normalized: normalizeMovementMatchTextV1(candidate),
+      }))
+      .filter((candidate) => candidate.normalized && candidate.normalized !== destination);
+    if (namedTargets.length > 0) {
+      return [
+        `${toolName} destinationRef=${destinationRef} is a connected route, but the player action/checklist is following directions or searching for a different named target (${namedTargets.map((candidate) => candidate.raw).join(", ")}).`,
+        "Movement tools may not silently substitute an unrelated legal route for an unmodeled named POI or micro-location.",
+        "Use scene-local log_event plus start_search/find_location_candidates/create_minor_poi/reveal_location to establish the named target before changing current scene.",
+      ].join(" ");
+    }
+  }
+
+  const actionText = normalizeMovementMatchTextV1(frame.playerAction);
+  if (!textLooksSceneLocalPositioningV1(actionText)) return null;
 
   return [
     `${toolName} destinationRef=${destinationRef} is a connected exit, but the player action describes scene-local positioning inside ${frame.currentSceneScopeName ?? frame.currentLocationName ?? "the current scene"}.`,

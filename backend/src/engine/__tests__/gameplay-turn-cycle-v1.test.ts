@@ -278,6 +278,20 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("Never use toolNeed=movement or move_actor for scene-local positioning");
   });
 
+  it("tells Stage 3 not to move to an unrelated route for unknown POI directions", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("speaker-provided street directions toward a named POI/micro-location");
+    expect(prompt).toContain("do not use move_actor to a different nearby/known route");
+    expect(prompt).toContain("Use scene-local log_event for following directions plus start_search/find_location_candidates/create_minor_poi/reveal_location");
+  });
+
+  it("tells Stage 4 not to substitute a legal connected route for an unmodeled target", () => {
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("destinationRef must be the exact connected destination the player requested");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never substitute another legal connected route");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("named target or speaker-provided directions are not modeled");
+  });
+
   it("tells Stage 3 to split dialogue from local stance and possession posture", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
@@ -662,6 +676,44 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     expect(validation.failure).toContain("scene-local positioning");
     expect(validation.failure).toContain("Use log_event with durability=scene_local");
+  });
+
+  it("rejects move_actor when directions to a named POI are substituted with another connected route", () => {
+    const validation = validateAndNormalizeToolRequestV1(
+      {
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "move_actor",
+        input: {
+          actorRef: "Hayashi Ren",
+          destinationRef: "Shibuya Back-Alley Meeting Point",
+          mode: "walk",
+          intentSummary: "Следовать указаниям прохожего: до конца улицы, направо за кофейней, искать синюю вывеску Laundry King слева через квартал.",
+          evidenceRefs: ["Shibuya Back-Alley Meeting Point"],
+        },
+        evidenceRefs: ["Shibuya Back-Alley Meeting Point"],
+      },
+      {
+        playerAction: "Я следую подсказке прохожего: иду по улице до конца, поворачиваю направо за кофейней и внимательно ищу синюю вывеску Laundry King слева через квартал.",
+        currentLocationName: "Shibuya District",
+        currentSceneScopeName: "Shibuya District",
+        allowedTools: ["move_actor", "start_search", "create_minor_poi", "log_event"],
+      } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "Process the described route to Laundry King: straight to end of street, turn right after the coffee shop, traverse one block.",
+        evidenceRefs: ["Player", "Прохожий"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Player finds the new street position near the blue Laundry King sign.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "move_actor",
+      },
+    );
+
+    expect(validation.failure).toContain("different named target");
+    expect(validation.failure).toContain("Laundry King");
+    expect(validation.failure).toContain("may not silently substitute an unrelated legal route");
   });
 
   it("aborts before packet persistence when required mutating tool step has no receipt", () => {
