@@ -30,17 +30,15 @@ import {
   buildNarratorViewV2,
   buildModelFacingTurnPacketV2,
   buildGameplayRefRegistryV2,
-  buildNoReceiptSettledTurnPacketV2,
-  buildCompatGmJudgeFromLegacyGmReadV2,
+  buildNoReceiptSettledTurnPacketV2 as buildNoReceiptSettledTurnPacketCoreV2,
   buildGmJudgePromptV2,
   buildGmJudgeSystemPromptV2,
-  buildOraclePayloadV2,
-  buildOracleSettlementV2,
-  buildOracleSettledTurnPacketV2,
+  buildOraclePayloadV2 as buildOraclePayloadCoreV2,
+  buildOracleSettlementV2 as buildOracleSettlementCoreV2,
+  buildOracleSettledTurnPacketV2 as buildOracleSettledTurnPacketCoreV2,
   buildSettledPacketPersistencePendingV2,
   capabilityForEffectKindV2,
-  completeGmReadWithExplicitMovementAdmissionV2,
-  composeGameplayCycleMutatingTurnV2,
+  composeGameplayCycleMutatingTurnV2 as composeGameplayCycleMutatingTurnCoreV2,
   formatModelFacingTurnPacketForPromptV2,
   GAMEPLAY_CYCLE_V2_FORBIDDEN_CORE_IMPORTS,
   getRuntimeCapabilityDefinitionV2,
@@ -48,7 +46,7 @@ import {
   executeGameplayToolRequestV2,
   gameplayRuntimeReceiptV2Schema,
   buildRuntimeReceiptLedgerV2,
-  buildRuntimeSettledTurnPacketV2,
+  buildRuntimeSettledTurnPacketV2 as buildRuntimeSettledTurnPacketCoreV2,
   gmReadCandidateV2LooseSchema,
   createDbBackedGameplayToolHandlersV2,
   refreshFrameAfterAcceptedMutationV2,
@@ -58,14 +56,14 @@ import {
   markGameplayCycleV2PacketNarratorFailedPendingRetry,
   persistSettledTurnPacketV2,
   readGameplayCycleV2Packet,
-  compileSimpleGmActionChecklistV2,
-  validateGmActionChecklistV2,
+  compileSimpleGmActionChecklistV2 as compileSimpleGmActionChecklistCoreV2,
+  validateGmActionChecklistV2 as validateGmActionChecklistCoreV2,
   validateGameplayToolRequestV2,
   normalizeRuntimeReceiptEvidenceV2,
   resolveGameplayRefV2,
-  validateGmReadChecklistV2,
+  validateGmReadChecklistV2 as validateGmReadChecklistCoreV2,
   validateGmJudgeV2,
-  validateGmReadOracleV2,
+  validateGmReadOracleV2 as validateGmReadOracleCoreV2,
   validateGmReadNoMutationV2,
   validateGmReadV2,
   modelFacingTurnPacketSchema,
@@ -78,9 +76,188 @@ import {
   turnStartEnvelopeSchema,
   type TurnAttemptContextV2,
   type RuntimeCapabilityIdV2,
+  type ExplicitMovementAdmissionV2,
+  type GmJudgeChecklistV2,
+  type GmJudgeOracleV2,
 } from "../gameplay-cycle-v2/index.js";
 import { buildSceneFrame, type SceneFrame } from "../scene-frame.js";
 import type { ScopedForecastExcerpt } from "../world-forecast.js";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected object fixture.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function withoutFixtureSidecars(candidate: unknown): unknown {
+  const record = asRecord(candidate);
+  const {
+    checklistRequest: _checklistRequest,
+    oracleRequest: _oracleRequest,
+    ...rest
+  } = record;
+  return rest;
+}
+
+function buildCompatGmJudgeFromLegacyGmReadV2(input: {
+  gmRead: any;
+}): any {
+  const read = input.gmRead;
+  if (read.path === "tool_plan") {
+    return {
+      version: "gm-judge.v2",
+      lane: "action_checklist",
+      physicalPossibility: "possible",
+      checkNeed: "backend_action_checklist",
+      actorRefs: read.checklistRequest.actorRefs,
+      targetRefs: read.checklistRequest.targetRefs,
+      evidenceRefs: read.checklistRequest.evidenceRefs,
+      rationale: read.rationale,
+      checklistAdmission: read.checklistRequest,
+    } satisfies GmJudgeChecklistV2;
+  }
+  if (read.path === "roll_oracle") {
+    return {
+      version: "gm-judge.v2",
+      lane: "roll_oracle",
+      physicalPossibility: "uncertain",
+      checkNeed: "oracle_uncertainty",
+      actorRefs: [read.oracleRequest.actorRef],
+      targetRefs: read.oracleRequest.targetRefs,
+      evidenceRefs: read.oracleRequest.evidenceRefs,
+      rationale: read.rationale,
+      oracleAdmission: {
+        ...read.oracleRequest,
+        postOracleRoute: "settle_visible_outcome_only",
+      },
+    } satisfies GmJudgeOracleV2;
+  }
+  if (read.path === "clarification") {
+    return {
+      version: "gm-judge.v2",
+      lane: "clarification",
+      physicalPossibility: "underspecified",
+      checkNeed: "clarification_needed",
+      actorRefs: read.focalActorRefs,
+      targetRefs: read.actionInterpretation.targetRefs,
+      evidenceRefs: read.evidenceRefs,
+      rationale: read.rationale,
+      clarificationPrompt: read.clarificationPrompt ?? "Please clarify the action.",
+    };
+  }
+  return {
+    version: "gm-judge.v2",
+    lane: read.path,
+    physicalPossibility: "possible",
+    checkNeed: "no_check",
+    actorRefs: read.focalActorRefs,
+    targetRefs: read.actionInterpretation.targetRefs,
+    evidenceRefs: read.evidenceRefs,
+    rationale: read.rationale,
+    noMutationReason: read.noMutationReason,
+  };
+}
+
+function validateGmReadChecklistV2(input: Parameters<typeof validateGmReadChecklistCoreV2>[0]): any {
+  const admission = asRecord(input.candidate).checklistRequest;
+  const result = validateGmReadChecklistCoreV2({
+    ...input,
+    candidate: withoutFixtureSidecars(input.candidate),
+  });
+  if (result.status === "accepted") {
+    return {
+      ...result,
+      read: {
+        ...result.read,
+        checklistRequest: admission,
+      },
+    };
+  }
+  return result;
+}
+
+function validateGmReadOracleV2(input: Parameters<typeof validateGmReadOracleCoreV2>[0]): any {
+  const admission = asRecord(input.candidate).oracleRequest;
+  const result = validateGmReadOracleCoreV2({
+    ...input,
+    candidate: withoutFixtureSidecars(input.candidate),
+  });
+  if (result.status === "accepted") {
+    return {
+      ...result,
+      read: {
+        ...result.read,
+        oracleRequest: admission,
+      },
+    };
+  }
+  return result;
+}
+
+function checklistJudgeFor(input: { gmRead: any; gmJudge?: GmJudgeChecklistV2 }): GmJudgeChecklistV2 {
+  return input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead });
+}
+
+function validateGmActionChecklistV2(input: any): ReturnType<typeof validateGmActionChecklistCoreV2> {
+  return validateGmActionChecklistCoreV2({
+    ...input,
+    gmJudge: checklistJudgeFor(input),
+  });
+}
+
+function compileSimpleGmActionChecklistV2(input: any): ReturnType<typeof compileSimpleGmActionChecklistCoreV2> {
+  return compileSimpleGmActionChecklistCoreV2({
+    ...input,
+    gmJudge: checklistJudgeFor(input),
+  });
+}
+
+function buildRuntimeSettledTurnPacketV2(input: any): ReturnType<typeof buildRuntimeSettledTurnPacketCoreV2> {
+  return buildRuntimeSettledTurnPacketCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
+
+function composeGameplayCycleMutatingTurnV2(
+  input: Omit<Parameters<typeof composeGameplayCycleMutatingTurnCoreV2>[0], "gmJudge"> & {
+    gmJudge?: GmJudgeChecklistV2;
+  },
+): ReturnType<typeof composeGameplayCycleMutatingTurnCoreV2> {
+  return composeGameplayCycleMutatingTurnCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
+
+function buildNoReceiptSettledTurnPacketV2(input: any): ReturnType<typeof buildNoReceiptSettledTurnPacketCoreV2> {
+  return buildNoReceiptSettledTurnPacketCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
+
+function buildOraclePayloadV2(input: any): ReturnType<typeof buildOraclePayloadCoreV2> {
+  return buildOraclePayloadCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
+
+function buildOracleSettlementV2(input: any): ReturnType<typeof buildOracleSettlementCoreV2> {
+  return buildOracleSettlementCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
+
+function buildOracleSettledTurnPacketV2(input: any): ReturnType<typeof buildOracleSettledTurnPacketCoreV2> {
+  return buildOracleSettledTurnPacketCoreV2({
+    ...input,
+    gmJudge: input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: input.gmRead }),
+  });
+}
 
 function startEnvelope() {
   return {
@@ -2074,7 +2251,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(admission.status).toBe("admitted");
     if (admission.status !== "admitted") throw new Error("Expected movement admission.");
     expect(admission.destinationRef).toBe("North Hall");
-    expect(admission.checklistRequest).toEqual({
+    expect(admission.checklistAdmission).toEqual({
       turnPath: "mutating",
       requiredEffectKinds: ["movement"],
       actorRefs: ["Player"],
@@ -2147,7 +2324,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
   });
 
-  it("completes only backend-owned explicit movement GM Reads", () => {
+  it("keeps explicit movement admission outside GM Read sidecars", () => {
     const { packet, registry } = movementAdmissionFixture({
       playerAction: "I choose North Hall and walk there.",
     });
@@ -2157,15 +2334,15 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     expect(admission.status).toBe("admitted");
 
-    const completed = completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
+    const readResult = validateGmReadV2({
+      packet,
       candidate: {
         version: "gm-read.v2",
-        path: "direct",
+        path: "tool_plan",
         situationSummary: "The player is leaving for North Hall.",
         sceneQuestion: "What backend-owned effect must settle the travel?",
         focalActorRefs: ["Player"],
-        evidenceRefs: ["Atrium Floor", "North Hall"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
         actionInterpretation: {
           intent: "Move to North Hall.",
           method: "walk",
@@ -2173,70 +2350,16 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
         turnNeed: "backend_action_checklist",
         rationale: "Movement requires backend settlement.",
-        checklistRequest: {
-          requiredEffectKinds: ["movement"],
-        },
-        noMutationReason: "",
-        clarificationPrompt: "",
       },
     });
-    const validation = validateGmReadV2({
-      packet,
-      candidate: completed,
-    });
-    expect(validation.status).toBe("accepted");
-    if (validation.status !== "accepted") throw new Error("Expected completed GM Read.");
-    expect(validation.read.path).toBe("tool_plan");
-    if (validation.read.path === "tool_plan") {
-      expect(validation.read.evidenceRefs).toContain("Player");
-      expect(validation.read.checklistRequest.requiredEffectKinds).toEqual(["movement"]);
-      expect(validation.read.checklistRequest.targetRefs).toEqual(["North Hall"]);
-    }
-
-    const ordinaryDirect = {
-      version: "gm-read.v2",
-      path: "direct",
-      situationSummary: "The player looks toward North Hall.",
-      sceneQuestion: "What is visible?",
-      focalActorRefs: ["Player"],
-      evidenceRefs: ["Player", "North Hall"],
-      actionInterpretation: {
-        intent: "Look at North Hall.",
-        method: null,
-        targetRefs: ["North Hall"],
-      },
-      turnNeed: "none",
-      rationale: "No state change requested.",
-      noMutationReason: "Visible scene evidence is enough.",
-      clarificationPrompt: "",
-    };
-    expect(completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
-      candidate: ordinaryDirect,
-    })).toBe(ordinaryDirect);
-
-    const missingEffectKind = {
-      version: "gm-read.v2",
-      path: "tool_plan",
-      situationSummary: "The player mentions North Hall.",
-      sceneQuestion: "What backend-owned effect must settle this?",
-      focalActorRefs: ["Player"],
-      evidenceRefs: ["Player", "North Hall"],
-      actionInterpretation: {
-        intent: "Mentions North Hall without a structured movement effect.",
-        method: null,
-        targetRefs: ["North Hall"],
-      },
-      turnNeed: "backend_action_checklist",
-      rationale: "No structured effect kind was emitted.",
-    };
-    expect(completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
-      candidate: missingEffectKind,
-    })).toBe(missingEffectKind);
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") throw new Error("Expected interpretation-only GM Read.");
+    expect(admission.status === "admitted" ? admission.checklistAdmission.requiredEffectKinds : [])
+      .toEqual(["movement"]);
+    expect(JSON.stringify(readResult.read)).not.toContain("checklistRequest");
   });
 
-  it("does not rewrite a route-check GM Read into movement admission", () => {
+  it("keeps route-check GM Reads interpretation-only even when exact movement is separately admissible", () => {
     const { packet, registry } = movementAdmissionFixture({
       playerAction: "I do not move; I check whether North Hall is reachable.",
     });
@@ -2246,7 +2369,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     expect(admission.status).toBe("admitted");
 
-    const routeCheck = {
+    const routeCheckResult = validateGmReadV2({
+      packet,
+      candidate: {
       version: "gm-read.v2",
       path: "tool_plan",
       situationSummary: "The player wants route availability without travel.",
@@ -2260,23 +2385,16 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
       turnNeed: "backend_action_checklist",
       rationale: "Route availability is observation-only.",
-      checklistRequest: {
-        turnPath: "procedural",
-        requiredEffectKinds: ["route_check"],
-        actorRefs: ["Player"],
-        targetRefs: ["North Hall"],
-        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
-        checklistGoal: "Check whether the visible route is available without moving.",
       },
-    };
-
-    expect(completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
-      candidate: routeCheck,
-    })).toBe(routeCheck);
+    });
+    expect(routeCheckResult.status).toBe("accepted");
+    if (routeCheckResult.status !== "accepted") throw new Error("Expected route check GM Read.");
+    expect(JSON.stringify(routeCheckResult.read)).not.toContain("checklistRequest");
+    expect(admission.status === "admitted" ? admission.checklistAdmission.requiredEffectKinds : [])
+      .toEqual(["movement"]);
   });
 
-  it("does not rescue executable payloads through explicit movement completion", () => {
+  it("rejects sidecars and executable payloads in explicit movement GM Read candidates", () => {
     const { packet, registry } = movementAdmissionFixture({
       playerAction: "I choose North Hall and walk there.",
     });
@@ -2286,73 +2404,27 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     expect(admission.status).toBe("admitted");
 
-    expect(() => completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
-      candidate: {
-        version: "gm-read.v2",
-        path: "direct",
-        situationSummary: "The player is leaving for North Hall.",
-        sceneQuestion: "What backend-owned effect must settle the travel?",
-        focalActorRefs: ["Player"],
-        evidenceRefs: ["Player", "North Hall"],
-        actionInterpretation: {
-          intent: "Move to North Hall.",
-          method: "walk",
-          targetRefs: ["North Hall"],
-        },
-        turnNeed: "backend_action_checklist",
-        rationale: "Movement requires backend settlement.",
-        checklistRequest: {
-          requiredEffectKinds: ["movement"],
-        },
-        toolName: "move_actor",
-      },
-    })).toThrow();
-  });
-
-  it("does not rewrite Oracle-shaped GM Reads through explicit movement admission", () => {
-    const { packet, registry } = movementAdmissionFixture({
-      playerAction: "Can I reach North Hall without being noticed?",
-    });
-    const admission = admitExplicitMovementV2({
+    const invalid = validateGmReadV2({
       packet,
-      refRegistry: registry,
-    });
-    expect(admission.status).toBe("admitted");
-
-    const mixedOracle = {
+      candidate: {
       version: "gm-read.v2",
-      path: "roll_oracle",
-      situationSummary: "The player wants to move under uncertain observation.",
-      sceneQuestion: "Can the player reach North Hall without being noticed?",
+      path: "tool_plan",
+      situationSummary: "The player is leaving for North Hall.",
+      sceneQuestion: "What backend-owned effect must settle the travel?",
       focalActorRefs: ["Player"],
       evidenceRefs: ["Player", "North Hall"],
       actionInterpretation: {
-        intent: "Reach North Hall unnoticed.",
-        method: "careful movement",
+        intent: "Move to North Hall.",
+        method: "walk",
         targetRefs: ["North Hall"],
       },
       turnNeed: "backend_action_checklist",
-      rationale: "Mixed malformed candidate.",
-      oracleRequest: {
-        question: "Can the player reach North Hall without being noticed?",
-        stakes: "Detection changes the scene pressure.",
-        uncertaintyKind: "perception",
-        actorRef: "Player",
-        targetRefs: ["North Hall"],
-        evidenceRefs: ["Player", "North Hall"],
-        outcomeMeanings: {
-          strong_hit: "The player reaches it unnoticed.",
-          weak_hit: "The player reaches it with a trace.",
-          miss: "The movement draws attention.",
-        },
+      rationale: "Movement requires backend settlement.",
+      checklistRequest: admission.status === "admitted" ? admission.checklistAdmission : null,
+      toolName: "move_actor",
       },
-    };
-
-    expect(completeGmReadWithExplicitMovementAdmissionV2({
-      admission,
-      candidate: mixedOracle,
-    })).toBe(mixedOracle);
+    });
+    expect(invalid.status).toBe("fallback_clarification");
   });
 
   it("fails closed when a model-safe ref is ambiguous for a handler-owned kind", () => {
@@ -2620,14 +2692,6 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
         turnNeed: "backend_action_checklist",
         rationale: "Movement requires backend-owned mutation authority.",
-        checklistRequest: {
-          turnPath: "mutating",
-          requiredEffectKinds: ["movement"],
-          actorRefs: ["Player"],
-          targetRefs: ["North Hall"],
-          evidenceRefs: ["Player", "Atrium", "North Hall"],
-          checklistGoal: "Move the player only if the accepted movement tool receipt applies.",
-        },
       },
     });
 
@@ -2711,12 +2775,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
     });
 
-    expect(result.status).toBe("accepted");
-    expect(result.read.path).toBe("tool_plan");
-    if (result.read.path === "tool_plan") {
-      expect(result.read.turnNeed).toBe("backend_action_checklist");
-      expect(result.read.checklistRequest.requiredEffectKinds).toEqual(["movement"]);
-    }
+    expect(result.status).toBe("fallback_clarification");
+    expect(result.issues.some((issue: any) => issue.code === "schema_invalid")).toBe(true);
 
     const smuggledSidecar = validateGmReadV2({
       packet,
@@ -2766,14 +2826,6 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
       turnNeed: "backend_action_checklist",
       rationale: "Movement requires backend-owned mutation authority.",
-      checklistRequest: {
-        turnPath: "mutating",
-        requiredEffectKinds: ["movement"],
-        actorRefs: ["Player"],
-        targetRefs: ["North Hall"],
-        evidenceRefs: ["Player", "Atrium", "North Hall"],
-        checklistGoal: "Move the player after an accepted movement receipt.",
-      },
     };
 
     expect(gmReadCandidateV2LooseSchema.safeParse(baseToolPlan).success).toBe(true);
@@ -2781,7 +2833,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       ...baseToolPlan,
       noMutationReason: "",
       clarificationPrompt: "",
-    }).success).toBe(true);
+    }).success).toBe(false);
     const emptySidecarValidation = validateGmReadV2({
       packet: movementAdmissionFixture().packet,
       candidate: {
@@ -2790,17 +2842,12 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         clarificationPrompt: "",
       },
     });
-    expect(emptySidecarValidation.status).toBe("accepted");
-    if (emptySidecarValidation.status !== "accepted") {
-      throw new Error("Empty non-executable sidecars must strip before final validation.");
-    }
-    expect("noMutationReason" in emptySidecarValidation.read).toBe(false);
-    expect("clarificationPrompt" in emptySidecarValidation.read).toBe(false);
+    expect(emptySidecarValidation.status).toBe("fallback_clarification");
     expect(gmReadCandidateV2LooseSchema.safeParse({
       ...baseToolPlan,
       noMutationReason: "Sidecar from model repair, not tool-plan truth.",
       clarificationPrompt: "Sidecar from model repair, not a clarification path.",
-    }).success).toBe(true);
+    }).success).toBe(false);
     const sidecarValidation = validateGmReadV2({
       packet: movementAdmissionFixture().packet,
       candidate: {
@@ -2809,12 +2856,18 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         clarificationPrompt: "Sidecar from model repair, not a clarification path.",
       },
     });
-    expect(sidecarValidation.status).toBe("accepted");
-    if (sidecarValidation.status !== "accepted") {
-      throw new Error("Sidecar tool_plan candidate must validate after stripping.");
-    }
-    expect("noMutationReason" in sidecarValidation.read).toBe(false);
-    expect("clarificationPrompt" in sidecarValidation.read).toBe(false);
+    expect(sidecarValidation.status).toBe("fallback_clarification");
+    expect(gmReadCandidateV2LooseSchema.safeParse({
+      ...baseToolPlan,
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["movement"],
+        actorRefs: ["Player"],
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        checklistGoal: "Move the player after an accepted movement receipt.",
+      },
+    }).success).toBe(false);
     expect(gmReadCandidateV2LooseSchema.safeParse({
       ...baseToolPlan,
       oracleRequest: {
@@ -2867,7 +2920,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
 
     expect(result.status).toBe("fallback_clarification");
-    expect(result.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+    expect(result.issues.some((issue: any) => issue.code === "executable_payload")).toBe(true);
     expect(result.read.path).toBe("clarification");
   });
 
@@ -2905,7 +2958,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
 
     expect(result.status).toBe("fallback_clarification");
-    expect(result.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
+    expect(result.issues.some((issue: any) => issue.code === "uncited_ref")).toBe(true);
     expect(result.read.evidenceRefs).toContain("Player");
   });
 
@@ -3043,7 +3096,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
 
     expect(result.status).toBe("fallback_clarification");
-    expect(result.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+    expect(result.issues.some((issue: any) => issue.code === "executable_payload")).toBe(true);
   });
 
   it("rejects roll_oracle GM Read when it cites refs outside the model packet", () => {
@@ -3092,7 +3145,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
 
     expect(result.status).toBe("fallback_clarification");
-    expect(result.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
+    expect(result.issues.some((issue: any) => issue.code === "uncited_ref")).toBe(true);
   });
 
   it("maps Oracle v2 requests to label-only probability adapter payloads", () => {
@@ -3293,36 +3346,25 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
         turnNeed: "backend_action_checklist",
         rationale: "Movement changes current scene/location authority and needs backend settlement.",
-        checklistRequest: {
-          turnPath: "mutating",
-          requiredEffectKinds: ["movement"],
-          actorRefs: ["Player"],
-          targetRefs: ["North Hall"],
-          evidenceRefs: ["Player", "Atrium", "North Hall"],
-          checklistGoal: "Admit the movement consequence without executable tool input.",
-        },
       },
     });
     expect(readResult.status).toBe("accepted");
     if (readResult.status !== "accepted") {
       throw new Error("Checklist GM Read fixture must be accepted.");
     }
-    const compatibilityAdmission = buildCompatGmJudgeFromLegacyGmReadV2({
-      gmRead: readResult.read,
-    });
-
     const systemPrompt = buildGmJudgeSystemPromptV2();
     const prompt = buildGmJudgePromptV2({
       packet,
       gmRead: readResult.read,
-      compatibilityAdmission,
+      deterministicAdmission: null,
     });
 
     expect(systemPrompt).toContain("Judge is an admission record only");
     expect(systemPrompt).toContain("Do not narrate, mutate, emit tool names");
+    expect(systemPrompt).toContain("For action_checklist, create checklistAdmission");
     expect(prompt).toContain('"acceptedGmRead"');
-    expect(prompt).toContain('"compatibilityAdmission"');
-    expect(prompt).toContain('"lane": "action_checklist"');
+    expect(prompt).not.toContain('"compatibilityAdmission"');
+    expect(prompt).not.toContain('"checklistRequest"');
     expect(prompt).not.toContain("toolName");
     expect(prompt).not.toContain("toolInput");
   });
@@ -5083,7 +5125,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(narratorView)).not.toContain("Litha Corsen");
     expect(leakingInternalGmRead.rationale).toContain("Sigil Boss Torvin Kask");
     expect(settledPacket.gmReadPublic.path).toBe("tool_plan");
-    expect(settledPacket.gmReadPublic.requiredEffectKinds).toContain("movement");
+    expect(settledPacket.gmReadPublic.requiredEffectKinds).toEqual([]);
+    expect(settledPacket.gmJudgePublic.requiredEffectKinds).toContain("movement");
   });
 
   it("keeps rejected runtime receipts out of settled truth while recording failed step audit", async () => {
@@ -10427,22 +10470,34 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
   });
 
   it("does not route the live v2 runtime through legacy post-turn simulation hooks", () => {
-    const source = readFileSync(
+    const runtimeSource = readFileSync(
       join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
       "utf-8",
     );
+    const judgeSource = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/gm-judge.ts"),
+      "utf-8",
+    );
 
-    expect(source).toContain('type: "finalizing_turn"');
-    expect(source).toContain("narratorView.languageContract");
-    expect(source).toContain("same language as narratorView.playerAction");
-    expect(source).toContain("visible actor notices");
-    expect(source).toContain("eligible for roll_oracle");
-    expect(source).toContain("Use tool_plan when the turn needs an accepted backend action checklist");
-    expect(source).toContain("checklistRequest.turnPath=mutating");
-    expect(source).toContain("Valid checklistRequest.turnPath values are only: mutating, procedural, combat");
-    expect(source).not.toContain("gameplay-cycle-v2-no-mutation");
-    expect(source).not.toContain("options.onPostTurn");
-    expect(source).not.toContain("buildNoMutationSummary");
+    expect(runtimeSource).toContain('type: "finalizing_turn"');
+    expect(runtimeSource).toContain("narratorView.languageContract");
+    expect(runtimeSource).toContain("same language as narratorView.playerAction");
+    expect(runtimeSource).toContain("GM Read is interpretation only");
+    expect(runtimeSource).toContain("do not name required effects");
+    expect(runtimeSource).toContain("Always include path exactly as one allowed path string");
+    expect(runtimeSource).toContain("Explicit elapsed-time actions such as waiting");
+    expect(runtimeSource).toContain('classifyAs: "tool_plan"');
+    expect(runtimeSource).toContain('stage: "gm-judge"');
+    expect(runtimeSource).toContain("buildGmJudgeSystemPromptV2()");
+    expect(runtimeSource).toContain("buildGmJudgePromptV2({");
+    expect(judgeSource).toContain("For action_checklist, create checklistAdmission");
+    expect(judgeSource).toContain("checkNeed must be exactly backend_action_checklist");
+    expect(judgeSource).toContain("laneToCheckNeed");
+    expect(runtimeSource).not.toContain("gameplay-cycle-v2-no-mutation");
+    expect(runtimeSource).not.toContain("options.onPostTurn");
+    expect(runtimeSource).not.toContain("buildNoMutationSummary");
+    expect(runtimeSource).not.toContain("checklistRequest.turnPath=mutating");
+    expect(runtimeSource).not.toContain("Valid checklistRequest.turnPath values are only: mutating, procedural, combat");
   });
 
   it("does not synthesize a player-facing clarification when GM Read generation fails", () => {
@@ -10460,16 +10515,22 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
   });
 
   it("keeps location_reveal place-handle labels owned by the tool request layer, not GM Read refs", () => {
-    const source = readFileSync(
+    const runtimeSource = readFileSync(
       join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
       "utf-8",
     );
-
-    expect(source).toContain(
-      "For location_reveal, checklistRequest.targetRefs and evidenceRefs must cite only refs that already exist in citableRefs",
+    const judgeSource = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/gm-judge.ts"),
+      "utf-8",
     );
-    expect(source).toContain("Do not cite the new place-handle label in GM Read");
-    expect(source).toContain("the new label belongs only in the later location.reveal.v2 tool request locationLabel");
+
+    expect(judgeSource).toContain(
+      'For source-bounded visible current-scene place handles, use requiredEffectKinds=[\\"location_reveal\\"]',
+    );
+    expect(runtimeSource).toContain("For location.reveal.v2, bind anchorScope to current_scene");
+    expect(runtimeSource).toContain("locationLabel to the visible handle label");
+    expect(runtimeSource).not.toContain("Do not cite the new place-handle label in GM Read");
+    expect(runtimeSource).not.toContain("checklistRequest.targetRefs and evidenceRefs");
   });
 
   it("constructs local consequence scene-beat requests from backend schedule ownership", () => {

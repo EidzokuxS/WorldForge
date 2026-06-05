@@ -432,24 +432,13 @@ export const gmReadOracleRequestV2Schema = z.object({
 export const gmReadOracleV2Schema = gmReadV2BaseSchema.extend({
   path: z.literal("roll_oracle"),
   turnNeed: z.literal("oracle_uncertainty"),
-  oracleRequest: gmReadOracleRequestV2Schema,
 }).strict().superRefine((read, ctx) => {
-  if (read.oracleRequest.actorRef && !read.focalActorRefs.includes(read.oracleRequest.actorRef)) {
+  if (read.evidenceRefs.length === 0) {
     ctx.addIssue({
       code: "custom",
-      path: ["oracleRequest", "actorRef"],
-      message: "Oracle actorRef must be one of the GM Read focalActorRefs.",
+      path: ["evidenceRefs"],
+      message: "Oracle-intent GM Read must cite interpretation evidence refs.",
     });
-  }
-  const evidenceRefs = new Set(read.evidenceRefs.map((ref) => ref.toLowerCase()));
-  for (const ref of read.oracleRequest.evidenceRefs) {
-    if (!evidenceRefs.has(ref.toLowerCase())) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["oracleRequest", "evidenceRefs"],
-        message: `Oracle evidence ref "${ref}" must also be cited in GM Read evidenceRefs.`,
-      });
-    }
   }
 });
 
@@ -481,27 +470,13 @@ export const gmReadChecklistRequestV2Schema = z.object({
 export const gmReadChecklistV2Schema = gmReadV2BaseSchema.extend({
   path: z.literal("tool_plan"),
   turnNeed: z.literal("backend_action_checklist"),
-  checklistRequest: gmReadChecklistRequestV2Schema,
 }).strict().superRefine((read, ctx) => {
-  const focalRefs = new Set(read.focalActorRefs.map((ref) => ref.toLowerCase()));
-  for (const ref of read.checklistRequest.actorRefs) {
-    if (!focalRefs.has(ref.toLowerCase())) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["checklistRequest", "actorRefs"],
-        message: `Checklist actor ref "${ref}" must be one of the GM Read focalActorRefs.`,
-      });
-    }
-  }
-  const evidenceRefs = new Set(read.evidenceRefs.map((ref) => ref.toLowerCase()));
-  for (const ref of read.checklistRequest.evidenceRefs) {
-    if (!evidenceRefs.has(ref.toLowerCase())) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["checklistRequest", "evidenceRefs"],
-        message: `Checklist evidence ref "${ref}" must also be cited in GM Read evidenceRefs.`,
-      });
-    }
+  if (read.evidenceRefs.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["evidenceRefs"],
+      message: "Checklist-intent GM Read must cite interpretation evidence refs.",
+    });
   }
 });
 
@@ -538,13 +513,9 @@ export const gmReadCandidateV2LooseSchema: z.ZodType<unknown> = z.discriminatedU
   }).strict(),
   gmReadCandidateV2LooseBaseSchema.extend({
     path: z.literal("roll_oracle"),
-    ...gmReadCandidateV2LooseSidecars,
-    oracleRequest: gmReadOracleRequestV2Schema.partial().passthrough().optional(),
   }).strict(),
   gmReadCandidateV2LooseBaseSchema.extend({
     path: z.literal("tool_plan"),
-    ...gmReadCandidateV2LooseSidecars,
-    checklistRequest: gmReadChecklistRequestV2Schema.partial().passthrough().optional(),
   }).strict(),
 ]);
 

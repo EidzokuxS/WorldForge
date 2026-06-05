@@ -2,7 +2,7 @@ import type { OraclePayload, OracleResult } from "../oracle.js";
 import {
   assertOracleSettlementV2,
   type GmJudgeOracleV2,
-  type GmReadOracleV2,
+  type GmReadV2,
   type ModelFacingTurnPacketV2,
   type OracleSettlementV2,
   type SettledEvidenceV2,
@@ -33,21 +33,16 @@ function sceneTags(packet: ModelFacingTurnPacketV2): string[] {
 }
 
 function oracleAdmission(input: {
-  gmJudge?: GmJudgeOracleV2;
-  gmRead?: GmReadOracleV2;
-}): GmReadOracleV2["oracleRequest"] {
-  if (input.gmJudge) {
-    const { postOracleRoute: _postOracleRoute, ...request } = input.gmJudge.oracleAdmission;
-    return request;
-  }
-  if (input.gmRead) return input.gmRead.oracleRequest;
-  throw new Error("Oracle v2 settlement requires a GM Judge oracle admission.");
+  gmJudge: GmJudgeOracleV2;
+}): Omit<GmJudgeOracleV2["oracleAdmission"], "postOracleRoute"> {
+  const { postOracleRoute: _postOracleRoute, ...request } = input.gmJudge.oracleAdmission;
+  return request;
 }
 
 export function buildOraclePayloadV2(input: {
   modelPacket: ModelFacingTurnPacketV2;
-  gmJudge?: GmJudgeOracleV2;
-  gmRead?: GmReadOracleV2;
+  gmJudge: GmJudgeOracleV2;
+  gmRead?: GmReadV2;
 }): OraclePayload {
   const request = oracleAdmission(input);
   const targetLabels = labelsForRefs(input.modelPacket, request.targetRefs);
@@ -73,8 +68,8 @@ export function buildOraclePayloadV2(input: {
 export function buildOracleSettlementV2(input: {
   settlementId: string;
   modelPacket: ModelFacingTurnPacketV2;
-  gmJudge?: GmJudgeOracleV2;
-  gmRead?: GmReadOracleV2;
+  gmJudge: GmJudgeOracleV2;
+  gmRead?: GmReadV2;
   result: OracleResult;
 }): OracleSettlementV2 {
   const request = oracleAdmission(input);

@@ -57,40 +57,24 @@ function executablePayloadPaths(value: unknown): string[] {
   return offenders;
 }
 
-function removeNonExecutableSidecar(candidate: Record<string, unknown>, key: string): void {
-  if (!(key in candidate)) return;
-  if (executablePayloadPaths(candidate[key]).length > 0) return;
-  delete candidate[key];
-}
-
 function normalizeGmReadCandidateDiscriminatorV2(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const normalized: Record<string, unknown> = { ...candidate };
   const path = typeof normalized.path === "string" ? normalized.path.trim() : "";
   const turnNeed = typeof normalized.turnNeed === "string" ? normalized.turnNeed.trim() : "";
-  const hasChecklistRequest = isRecord(normalized.checklistRequest);
-  const hasOracleRequest = isRecord(normalized.oracleRequest);
 
-  if (path === "tool_plan" || turnNeed === "backend_action_checklist" || hasChecklistRequest) {
+  if (path === "tool_plan" || turnNeed === "backend_action_checklist") {
     normalized.path = "tool_plan";
     normalized.turnNeed = "backend_action_checklist";
-    removeNonExecutableSidecar(normalized, "noMutationReason");
-    removeNonExecutableSidecar(normalized, "clarificationPrompt");
-    removeNonExecutableSidecar(normalized, "oracleRequest");
     return normalized;
   }
 
-  if (path === "roll_oracle" || turnNeed === "oracle_uncertainty" || hasOracleRequest) {
+  if (path === "roll_oracle" || turnNeed === "oracle_uncertainty") {
     normalized.path = "roll_oracle";
     normalized.turnNeed = "oracle_uncertainty";
-    removeNonExecutableSidecar(normalized, "noMutationReason");
-    removeNonExecutableSidecar(normalized, "clarificationPrompt");
-    removeNonExecutableSidecar(normalized, "checklistRequest");
     return normalized;
   }
 
-  removeNonExecutableSidecar(normalized, "oracleRequest");
-  removeNonExecutableSidecar(normalized, "checklistRequest");
   return normalized;
 }
 
@@ -117,9 +101,6 @@ function unsupportedOracleRefs(read: GmReadOracleV2, packet: ModelFacingTurnPack
     ...read.focalActorRefs,
     ...read.evidenceRefs,
     ...read.actionInterpretation.targetRefs,
-    read.oracleRequest.actorRef,
-    ...read.oracleRequest.targetRefs,
-    ...read.oracleRequest.evidenceRefs,
   ]).filter((ref) => !legalRefs.has(ref.toLowerCase()));
 }
 
@@ -129,9 +110,6 @@ function unsupportedChecklistRefs(read: GmReadChecklistV2, packet: ModelFacingTu
     ...read.focalActorRefs,
     ...read.evidenceRefs,
     ...read.actionInterpretation.targetRefs,
-    ...read.checklistRequest.actorRefs,
-    ...read.checklistRequest.targetRefs,
-    ...read.checklistRequest.evidenceRefs,
   ]).filter((ref) => !legalRefs.has(ref.toLowerCase()));
 }
 

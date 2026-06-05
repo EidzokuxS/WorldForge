@@ -90,17 +90,6 @@ function unsupportedRefs(judge: GmJudgeV2, packet: ModelFacingTurnPacketV2): str
   return refs.filter((ref) => !legalRefs.has(ref.toLowerCase()));
 }
 
-function stripOraclePostRoute(
-  admission: GmJudgeOracleV2["oracleAdmission"],
-): Omit<GmJudgeOracleV2["oracleAdmission"], "postOracleRoute"> {
-  const { postOracleRoute: _postOracleRoute, ...request } = admission;
-  return request;
-}
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value);
-}
-
 function refsAreSubset(input: {
   role: string;
   values: readonly string[];
@@ -122,7 +111,7 @@ function alignmentIssues(input: {
 }): GmJudgeValidationIssueV2[] {
   const issues: GmJudgeValidationIssueV2[] = [];
   const expectedLane = legacyLaneForGmRead(input.gmRead);
-  if (input.judge.lane !== expectedLane) {
+  if (input.judge.lane !== expectedLane && input.judge.lane !== "clarification") {
     issues.push({
       code: "gm_read_mismatch",
       path: "lane",
@@ -139,6 +128,14 @@ function alignmentIssues(input: {
     values: input.judge.evidenceRefs,
     allowed: input.gmRead.evidenceRefs,
   }));
+  issues.push(...refsAreSubset({
+    role: "targetRefs",
+    values: input.judge.targetRefs,
+    allowed: [
+      ...input.gmRead.actionInterpretation.targetRefs,
+      ...input.gmRead.evidenceRefs,
+    ],
+  }));
 
   if (input.judge.lane === "roll_oracle") {
     if (input.gmRead.path !== "roll_oracle") {
@@ -147,13 +144,22 @@ function alignmentIssues(input: {
         path: "oracleAdmission",
         message: "Oracle admission requires an accepted roll_oracle GM Read source.",
       });
-    } else if (canonicalJson(stripOraclePostRoute(input.judge.oracleAdmission)) !== canonicalJson(input.gmRead.oracleRequest)) {
-      issues.push({
-        code: "gm_read_mismatch",
-        path: "oracleAdmission",
-        message: "Oracle admission must match the accepted GM Read oracleRequest during compatibility migration.",
-      });
     }
+    issues.push(...refsAreSubset({
+      role: "oracleAdmission.actorRef",
+      values: [input.judge.oracleAdmission.actorRef],
+      allowed: input.judge.actorRefs,
+    }));
+    issues.push(...refsAreSubset({
+      role: "oracleAdmission.targetRefs",
+      values: input.judge.oracleAdmission.targetRefs,
+      allowed: input.judge.targetRefs,
+    }));
+    issues.push(...refsAreSubset({
+      role: "oracleAdmission.evidenceRefs",
+      values: input.judge.oracleAdmission.evidenceRefs,
+      allowed: input.judge.evidenceRefs,
+    }));
   }
 
   if (input.judge.lane === "action_checklist") {
@@ -163,13 +169,22 @@ function alignmentIssues(input: {
         path: "checklistAdmission",
         message: "Checklist admission requires an accepted tool_plan GM Read source.",
       });
-    } else if (canonicalJson(input.judge.checklistAdmission) !== canonicalJson(input.gmRead.checklistRequest)) {
-      issues.push({
-        code: "gm_read_mismatch",
-        path: "checklistAdmission",
-        message: "Checklist admission must match the accepted GM Read checklistRequest during compatibility migration.",
-      });
     }
+    issues.push(...refsAreSubset({
+      role: "checklistAdmission.actorRefs",
+      values: input.judge.checklistAdmission.actorRefs,
+      allowed: input.judge.actorRefs,
+    }));
+    issues.push(...refsAreSubset({
+      role: "checklistAdmission.targetRefs",
+      values: input.judge.checklistAdmission.targetRefs,
+      allowed: input.judge.targetRefs,
+    }));
+    issues.push(...refsAreSubset({
+      role: "checklistAdmission.evidenceRefs",
+      values: input.judge.checklistAdmission.evidenceRefs,
+      allowed: input.judge.evidenceRefs,
+    }));
   }
 
   return issues;
@@ -251,78 +266,30 @@ export function validateGmJudgeV2(input: {
   };
 }
 
-export function buildCompatGmJudgeFromLegacyGmReadV2(input: {
-  gmRead: GmReadV2;
-}): GmJudgeV2 {
-  const read = input.gmRead;
-  if (read.path === "roll_oracle") {
-    return assertGmJudgeV2({
-      version: "gm-judge.v2",
-      lane: "roll_oracle",
-      physicalPossibility: "uncertain",
-      checkNeed: "oracle_uncertainty",
-      actorRefs: [read.oracleRequest.actorRef],
-      targetRefs: read.oracleRequest.targetRefs,
-      evidenceRefs: read.oracleRequest.evidenceRefs,
-      rationale: read.rationale,
-      oracleAdmission: {
-        ...read.oracleRequest,
-        postOracleRoute: "settle_visible_outcome_only",
-      },
-    });
-  }
-
-  if (read.path === "tool_plan") {
-    return assertGmJudgeV2({
-      version: "gm-judge.v2",
-      lane: "action_checklist",
-      physicalPossibility: "possible",
-      checkNeed: "backend_action_checklist",
-      actorRefs: read.checklistRequest.actorRefs,
-      targetRefs: read.checklistRequest.targetRefs,
-      evidenceRefs: read.checklistRequest.evidenceRefs,
-      rationale: read.rationale,
-      checklistAdmission: read.checklistRequest,
-    });
-  }
-
-  if (read.path === "clarification") {
-    return assertGmJudgeV2({
-      version: "gm-judge.v2",
-      lane: "clarification",
-      physicalPossibility: "underspecified",
-      checkNeed: "clarification_needed",
-      actorRefs: read.focalActorRefs,
-      targetRefs: read.actionInterpretation.targetRefs,
-      evidenceRefs: read.evidenceRefs,
-      rationale: read.rationale,
-      clarificationPrompt: read.clarificationPrompt ?? "Please clarify the action.",
-    });
-  }
-
-  return assertGmJudgeV2({
-    version: "gm-judge.v2",
-    lane: read.path,
-    physicalPossibility: "possible",
-    checkNeed: "no_check",
-    actorRefs: read.focalActorRefs,
-    targetRefs: read.actionInterpretation.targetRefs,
-    evidenceRefs: read.evidenceRefs,
-    rationale: read.rationale,
-    noMutationReason: read.noMutationReason,
-  });
-}
-
 export function buildGmJudgeSystemPromptV2(): string {
   return [
     "You are the WorldForge GM Judge layer for gameplay-cycle-v2.",
     "Return only gm-judge.v2 JSON.",
     "Judge is an admission record only. Do not narrate, mutate, emit tool names, emit tool inputs, create checklist steps, create receipts, or decide final consequences.",
     "Use the accepted GM Read only as interpretation/source context. Judge owns the next runtime lane, physical possibility, check need, and bounded Oracle/checklist admission.",
-    "For this migration slice, your admission must preserve the accepted GM Read runtime sidecar exactly: roll_oracle mirrors oracleRequest; action_checklist mirrors checklistRequest. Later slices will remove these sidecars from GM Read.",
     "Allowed lanes are direct, continue, clarification, roll_oracle, action_checklist, and combat_transition.",
     "Use roll_oracle only for true uncertainty requiring a roll. Oracle settles uncertainty only; it is not movement, discovery, item state, NPC private knowledge, world fact, or mutation authority.",
     "Use action_checklist only when backend runtime receipts must settle route checks, movement, dialogue outcomes, support actors, minor POIs, location reveal, entity tags, item transfer, conditions, time advance, world facts, or scene beats.",
+    "For action_checklist, checkNeed must be exactly backend_action_checklist.",
+    "For roll_oracle, checkNeed must be exactly oracle_uncertainty. For direct/continue, checkNeed must be exactly no_check. For clarification, checkNeed must be exactly clarification_needed.",
+    "For action_checklist, create checklistAdmission with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal. This is admission only, not checklist steps or tool payload.",
+    "For explicit travel to a connected visible destination, use action_checklist with turnPath=mutating and requiredEffectKinds=[\"movement\"].",
+    "For route availability checks without travel, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"route_check\"].",
+    "For visible dialogue outcomes, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"dialogue_outcome\"].",
+    "For temporary current-scene service/witness/helper/vendor/guard/attendant/crowd support actors, use requiredEffectKinds=[\"support_actor_create\"].",
+    "For ordinary visible current-scene POIs, use requiredEffectKinds=[\"minor_poi_create\"].",
+    "For source-bounded visible current-scene place handles, use requiredEffectKinds=[\"location_reveal\"].",
+    "For concrete tags/marks/labels on visible/current/inventory entities, use requiredEffectKinds=[\"entity_tag\"].",
+    "For modeled item custody/location/equip changes, use requiredEffectKinds=[\"item_transfer\"].",
+    "For visible actor conditions or Player HP changes, use requiredEffectKinds=[\"condition\"].",
+    "For explicit elapsed in-world time in the current scene, use requiredEffectKinds=[\"time_advance\"].",
+    "For source-bounded player-known knowledge from accepted same-turn sources, use requiredEffectKinds=[\"world_fact\"].",
+    "For local posture or scene beat without structural state change, use requiredEffectKinds=[\"scene_beat\"].",
     "Use direct or continue only for no-check/no-mutation turns that can be answered from current settled truth.",
     "Use clarification when the action is underspecified or asks for unsupported hidden/offscreen/private/combat behavior.",
     "Cite only citableRefs from the model-facing packet and refs already cited by the accepted GM Read.",
@@ -333,16 +300,31 @@ export function buildGmJudgeSystemPromptV2(): string {
 export function buildGmJudgePromptV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadV2;
-  compatibilityAdmission: GmJudgeV2;
+  deterministicAdmission?: GmJudgeV2 | null;
 }): string {
   return JSON.stringify({
     task: "Admit the next gameplay-cycle-v2 lane from the accepted GM Read. Return exactly one bounded gm-judge.v2 admission.",
+    outputContract: {
+      laneToCheckNeed: {
+        action_checklist: "backend_action_checklist",
+        roll_oracle: "oracle_uncertainty",
+        direct: "no_check",
+        continue: "no_check",
+        clarification: "clarification_needed",
+      },
+      actionChecklist: {
+        requiredTopLevel: ["lane", "physicalPossibility", "checkNeed", "checklistAdmission"],
+        exactCheckNeed: "backend_action_checklist",
+      },
+    },
     packet: formatModelFacingTurnPacketForPromptV2(input.packet),
     acceptedGmRead: input.gmRead,
-    migrationContract: {
-      rule: "For P27, mirror the compatibilityAdmission admission fields exactly while owning the lane/check/possibility decision as gm-judge.v2.",
-      compatibilityAdmission: input.compatibilityAdmission,
-    },
+    backendDeterministicAdmission: input.deterministicAdmission
+      ? {
+        rule: "If and only if this matches the accepted GM Read interpretation, emit this exact Judge admission.",
+        admission: input.deterministicAdmission,
+      }
+      : null,
     forbidden: [
       "narration",
       "mutation",

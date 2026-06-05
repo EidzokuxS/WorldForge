@@ -1625,3 +1625,48 @@ Session: `gm-v1-consequenc-slice`.
     - Backend was stopped after verification; ports 3001/3208 clear.
   - Remaining next step:
     - Shrink GM Read to interpretation-only/no admission sidecars and move lane/checklist/oracle request authorship fully into Judge. P27 deliberately did not complete this; it only made Judge an actual model-executed runtime decision layer.
+- P28 GM Read interpretation-only / Judge admission ownership checkpoint:
+  - Scope: remove GM Read ownership of `oracleRequest` and `checklistRequest`; keep GM Read as interpretation/classification only; move lane, physical possibility, check need, Oracle admission, and checklist admission to `gm-judge.v2`.
+  - Oracle/GPT-5.5 Pro gate status:
+    - Dry-run completed with one bundled text attachment: 11 relevant files, about 137.5k tokens, one `attachments-bundle.txt` of about 584 KB.
+    - Built-in Browser attempt reached ChatGPT but the in-app profile required login again; automation stopped before account login because the UI showed `Continue with Google`/email login.
+    - Oracle CLI browser attempt `p28-gmread-judge-ownership` used one bundled attachment but failed before context delivery: Oracle Chrome profile had no cookies and could not locate the ChatGPT model selector. This review is not valid evidence and must not be relied on.
+    - Decision gate remains pending until ChatGPT/Oracle browser auth is restored or the user explicitly authorizes an API Oracle run.
+  - Local current-state map, inspected:
+    - `contracts.ts`: `gmReadOracleV2Schema` requires `oracleRequest`; `gmReadChecklistV2Schema` requires `checklistRequest`; `gmReadCandidateV2LooseSchema` permits both sidecars.
+    - `gm-read.ts`: validation still accepts `roll_oracle`/`tool_plan` only when sidecars parse and cites sidecar refs; this must become interpretation-only ref validation.
+    - `runtime.ts`: `buildGmReadSystemPrompt` tells GM Read to emit checklist/oracle requests; `buildGmReadPrompt` exposes deterministic explicit movement as a GM Read checklistRequest; runtime builds `compatibilityAdmission` from GM Read sidecars.
+    - `explicit-movement-admission.ts`: `completeGmReadWithExplicitMovementAdmissionV2` mutates the GM Read candidate by inserting `checklistRequest`; P28 should replace this with a deterministic Judge admission candidate/source, not a GM Read repair.
+    - `gm-judge.ts`: validator currently enforces lane equals GM Read path and mirrors `oracleRequest`/`checklistRequest`; P28 must remove mirror checks while keeping citable refs and interpretation alignment.
+    - `action-checklist.ts`: simple compiler and validation can already use `gmJudge.checklistAdmission`, but still fall back to `gmRead.checklistRequest` and use `gmRead.checklistRequest.turnPath` in compiled candidates.
+    - `oracle-settlement.ts`: can consume `gmJudge.oracleAdmission`, but still supports `gmRead.oracleRequest` fallback; P28 should require Judge admission.
+    - `settled-packet.ts` and `receipt-ledger.ts`: public GM Read projection and fallback compat builder still read GM Read sidecars; P28 should project target/effect kinds from Judge for admission truth and keep GM Read public as interpretation only.
+  - Proposed implementation after Oracle approval:
+    - Replace GM Read schemas with one interpretation-only discriminated contract: path/turnNeed may signal candidate lane, but no `oracleRequest`, no `checklistRequest`, no backend-owned required effects.
+    - Add Judge prompt responsibilities for all current effect admissions that currently live in GM Read prompt, including `time_advance`, `movement`, `route_check`, `dialogue_outcome`, `world_fact`, local scene/POI/location/item/tag/condition support.
+    - Replace `compatibilityAdmission` with either deterministic explicit movement Judge admission when exact movement is backend-admitted, or model Judge admission built directly from interpretation-only GM Read and SceneFrame.
+    - Make Oracle payload/settlement require `GmJudgeOracleV2`; make checklist generation require `GmJudgeChecklistV2`; remove GM Read sidecar fallbacks from public projections.
+    - Focused tests: GM Read rejects sidecars; Judge can admit checklist/oracle from interpretation-only GM Read; explicit movement admission lands in Judge not GM Read; checklist uses Judge admission only; settled packet public projections expose Judge required effects while GM Read remains interpretation only; runtime source hygiene has no `gmRead.checklistRequest`/`gmRead.oracleRequest` outside deleted compatibility tests.
+  - Live diagnostic target after tests: zero-turn v2 clone, action `Я остаюсь в Lowwater Bazaar и спокойно жду ровно 5 минут, ничего не трогая и никуда не двигаясь.`, prove stages include `gm-read` and `gm-judge`, accepted `time.advance.v2`, and persisted packet has interpretation-only `gmReadPublic` plus Judge-owned `requiredEffectKinds=["time_advance"]`.
+  - P28 implementation completed:
+    - GM Read schemas no longer carry `oracleRequest` or `checklistRequest`; `roll_oracle` and `tool_plan` GM Reads are interpretation/classification only.
+    - GM Read live prompt now requires `path`, classifies explicit elapsed-time actions as `tool_plan` interpretation, and forbids no-mutation sidecars on `tool_plan`/`roll_oracle`.
+    - `gm-judge.v2` now owns Oracle/checklist admission without mirroring GM Read sidecars; Judge prompt maps exact `lane -> checkNeed` literals and owns effect admission guidance.
+    - Runtime always calls model `gm-judge.v2` after accepted GM Read; no deterministic compatibility admission is used as runtime result.
+    - Oracle payload/settlement require `GmJudgeOracleV2`; action checklist validation/compilation require `GmJudgeChecklistV2`; settled packet and receipt ledger require Judge projection.
+    - Public settled packets keep `gmReadPublic.requiredEffectKinds=[]`; Judge public projection exposes admitted required effects.
+  - P28 invalid diagnostics, not acceptance:
+    - Clone `p28-gmread-judge-10481a8f`: failed before GM Judge because GLM omitted GM Read `path` and emitted no-mutation sidecars for explicit wait; route restored and v2/legacy packet counts stayed 0. Fixed by strengthening GM Read output contract, not by adding a fallback.
+    - Clone `p28-gmread-judge-ebd12439`: reached GM Judge but failed because GLM emitted `checkNeed="action_checklist"` instead of exact enum `backend_action_checklist`; route restored and v2/legacy packet counts stayed 0. Fixed by strengthening Judge output contract, not by adding a fallback.
+  - P28 verification:
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 150 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts --bail=1` passed with 61 tests.
+    - Valid live v2 diagnostic clone `p28-gmread-judge-6c5958d2` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Backend started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port 3101 and was stopped after inspection; port 3101 was clear afterward.
+    - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и спокойно жду ровно 5 минут, ничего не трогая и никуда не двигаясь.`
+    - SSE stages: `scene-frame`, `gm-read`, `gm-judge`, `action-checklist`, `tool-execution`, `narrator`, then `narrative`, `finalizing_turn`, `done`.
+    - Done: `runtime=gameplay-cycle-v2`, `tick=5`, `worldVersion=1`, `worldTimeMinutes=5`, `packetId=v2packet-mq1ks05n-537e6b4318d5`.
+    - DB after live turn: `gameplay_cycle_v2_packets=1`; legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts` stayed 0; `simulation_proposals=0`; `turn_clock_ledger=1`.
+    - Persisted packet: `status=finalized`, narrator status `succeeded_projected`, `gmReadPublic.requiredEffectKinds=[]`, `gmJudgePublic.requiredEffectKinds=["time_advance"]`, failed/skipped counts 0.
+    - Accepted receipt ledger: one accepted `time.advance.v2` receipt, `capabilityId=time_advance`, `mutationAuthority=world`, `mutationApplied=true`, `visibleSummary="5 minutes pass in Lowwater Bazaar."`, evidence refs `Player` and `Lowwater Bazaar`.

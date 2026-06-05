@@ -122,7 +122,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
   scheduleId: string;
   initialPacket: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
-  gmJudge?: GmJudgeChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
   checklist: GmActionChecklistV2;
   requestsByStepId?: Partial<Record<string, unknown>>;
   requestCandidateProvider?: GameplayToolRequestCandidateProviderV2;

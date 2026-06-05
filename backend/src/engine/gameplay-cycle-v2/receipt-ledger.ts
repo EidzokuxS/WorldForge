@@ -17,7 +17,6 @@ import {
   currentSceneEvidence,
 } from "./settled-packet.js";
 import {
-  buildCompatGmJudgeFromLegacyGmReadV2,
   buildPublicGmJudgeProjectionV2,
 } from "./gm-judge.js";
 
@@ -179,7 +178,7 @@ export function buildRuntimeSettledTurnPacketV2(input: {
   latestModelPacket?: ModelFacingTurnPacketV2;
   receiptModelPackets?: Partial<Record<string, ModelFacingTurnPacketV2>>;
   gmRead: GmReadChecklistV2;
-  gmJudge?: GmJudgeV2;
+  gmJudge: GmJudgeV2;
   checklist: GmActionChecklistV2;
   ledger: GameplayRuntimeReceiptLedgerV2;
 }): SettledTurnPacketV2 {
@@ -239,9 +238,6 @@ export function buildRuntimeSettledTurnPacketV2(input: {
     }));
 
   const privateGuardTerms = uniqueStrings(latestModelPacket.runtimePrivateGuardTerms);
-  const gmJudge = input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({
-    gmRead: input.gmRead,
-  });
   const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
@@ -256,7 +252,7 @@ export function buildRuntimeSettledTurnPacketV2(input: {
       settlementBasis: "runtime_receipts",
     }),
     gmJudgePublic: buildPublicGmJudgeProjectionV2({
-      gmJudge,
+      gmJudge: input.gmJudge,
       settlementBasis: "runtime_receipts",
     }),
     oracleVisibleOutcome: null,

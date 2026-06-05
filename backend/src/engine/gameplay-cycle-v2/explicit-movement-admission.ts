@@ -1,6 +1,5 @@
 import {
-  assertGmReadChecklistV2,
-  type GmReadChecklistV2,
+  type GmJudgeChecklistAdmissionV2,
   type ModelFacingTurnPacketV2,
 } from "./contracts.js";
 import type { GameplayRefRegistryV2 } from "./ref-registry.js";
@@ -10,7 +9,7 @@ export type ExplicitMovementAdmissionV2 =
     status: "admitted";
     destinationRef: string;
     evidenceRefs: string[];
-    checklistRequest: GmReadChecklistV2["checklistRequest"];
+    checklistAdmission: GmJudgeChecklistAdmissionV2;
   }
   | {
     status: "not_admitted";
@@ -20,7 +19,6 @@ export type ExplicitMovementAdmissionV2 =
 function normalized(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
-
 function hasMovementCapability(packet: ModelFacingTurnPacketV2): boolean {
   return packet.capabilities.some((capability) => capability.capabilityId === "movement");
 }
@@ -84,7 +82,7 @@ export function admitExplicitMovementV2(input: {
     status: "admitted",
     destinationRef: destination.ref,
     evidenceRefs,
-    checklistRequest: {
+    checklistAdmission: {
       turnPath: "mutating",
       requiredEffectKinds: ["movement"],
       actorRefs: ["Player"],
@@ -93,95 +91,4 @@ export function admitExplicitMovementV2(input: {
       checklistGoal: "Settle the explicit movement only through an accepted movement receipt.",
     },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function mergeStringArrays(...arrays: string[][]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of arrays.flat()) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    const key = normalized(trimmed);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(trimmed);
-  }
-  return result;
-}
-
-function candidateWantsBackendChecklist(candidate: Record<string, unknown>): boolean {
-  if (candidate.path === "roll_oracle" || isRecord(candidate.oracleRequest)) {
-    return false;
-  }
-  return candidate.path === "tool_plan"
-    || candidate.turnNeed === "backend_action_checklist"
-    || isRecord(candidate.checklistRequest);
-}
-
-function candidateAllowsMovementCompletion(candidate: Record<string, unknown>): boolean {
-  const checklistRequest = isRecord(candidate.checklistRequest)
-    ? candidate.checklistRequest
-    : null;
-  if (!checklistRequest) {
-    return false;
-  }
-  const requiredEffectKinds = stringArray(checklistRequest.requiredEffectKinds);
-  return requiredEffectKinds.includes("movement");
-}
-
-function candidateTargetsAdmission(input: {
-  candidate: Record<string, unknown>;
-  admission: Extract<ExplicitMovementAdmissionV2, { status: "admitted" }>;
-}): boolean {
-  const actionInterpretation = isRecord(input.candidate.actionInterpretation)
-    ? input.candidate.actionInterpretation
-    : {};
-  const targetRefs = [
-    ...stringArray(actionInterpretation.targetRefs),
-    ...stringArray(input.candidate.evidenceRefs),
-  ];
-  return targetRefs.some((ref) => normalized(ref) === normalized(input.admission.destinationRef));
-}
-
-export function completeGmReadWithExplicitMovementAdmissionV2(input: {
-  candidate: unknown;
-  admission: ExplicitMovementAdmissionV2;
-}): unknown {
-  if (input.admission.status !== "admitted") return input.candidate;
-  if (!isRecord(input.candidate)) return input.candidate;
-  if (!candidateWantsBackendChecklist(input.candidate)) return input.candidate;
-  if (!candidateAllowsMovementCompletion(input.candidate)) return input.candidate;
-  if (!candidateTargetsAdmission({
-    candidate: input.candidate,
-    admission: input.admission,
-  })) {
-    return input.candidate;
-  }
-
-  const completed = { ...input.candidate };
-  completed.path = "tool_plan";
-  completed.turnNeed = "backend_action_checklist";
-  completed.focalActorRefs = mergeStringArrays(
-    stringArray(input.candidate.focalActorRefs),
-    input.admission.checklistRequest.actorRefs,
-  );
-  completed.evidenceRefs = mergeStringArrays(
-    stringArray(input.candidate.evidenceRefs),
-    input.admission.evidenceRefs,
-  );
-  completed.checklistRequest = input.admission.checklistRequest;
-  delete completed.noMutationReason;
-  delete completed.clarificationPrompt;
-  delete completed.oracleRequest;
-  return assertGmReadChecklistV2(completed);
 }

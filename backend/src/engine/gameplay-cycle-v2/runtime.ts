@@ -60,7 +60,6 @@ import {
 import {
   assertChecklistGmJudgeV2,
   assertOracleGmJudgeV2,
-  buildCompatGmJudgeFromLegacyGmReadV2,
   buildGmJudgePromptV2,
   buildGmJudgeSystemPromptV2,
   validateGmJudgeV2,
@@ -70,7 +69,6 @@ import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
 import {
   admitExplicitMovementV2,
-  completeGmReadWithExplicitMovementAdmissionV2,
   type ExplicitMovementAdmissionV2,
 } from "./explicit-movement-admission.js";
 import { buildGameplayRefRegistryV2 } from "./ref-registry.js";
@@ -274,58 +272,20 @@ function buildGmReadSystemPrompt(): string {
   return [
     "You are the WorldForge GM Read layer.",
     "Return only the interpretation object for gameplay-cycle-v2.",
-    "This slice accepts direct, continue, clarification, roll_oracle, or tool_plan.",
-    "Use roll_oracle only when the player action contains true uncertainty/risk that cannot be settled from the current SceneFrame alone.",
-    "Immediate uncertainty about whether a visible actor notices, resists, is distracted by, or reacts to the player's current risky attempt is eligible for roll_oracle.",
-    "Do not use roll_oracle to reveal hidden memories, private intentions, secret knowledge, offscreen facts, or facts about actors who are not visible/cited.",
-    "Use tool_plan when the turn needs an accepted backend action checklist for route checks, movement, visible dialogue outcomes, temporary current-scene support actor creation, visible current-scene minor POI creation, concrete entity tag changes, concrete item custody/equip/location changes, concrete actor condition or Player HP changes, explicit elapsed in-world time, source-bounded player-known knowledge recording, or a scene-local beat receipt.",
-    "For tool_plan, include checklistRequest with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal.",
-    "For explicit travel to a connected visible destination, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"movement\"].",
-    "For route availability checks without travel, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"route_check\"].",
-    "For a visible speaker's answer, refusal, warning, redirect, silence, or other concrete dialogue outcome, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"dialogue_outcome\"].",
-    "For dialogue_outcome, checklistRequest.actorRefs must name the visible speaker who owns the response; targetRefs may include the player or addressed visible actors; evidenceRefs must include the visible speaker and scene refs.",
-    "For creating an ordinary temporary local service/witness/helper/vendor/guard/attendant/crowd support actor in the current scene, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"support_actor_create\"].",
-    "For support_actor_create, checklistRequest.actorRefs must include Player, targetRefs must include the current scene ref, and evidenceRefs must include Player plus current scene/location refs. This capability creates only temporary current-scene reactive support NPCs.",
-    "For creating an ordinary visible non-actor local affordance/point of interest in the current scene (notice board, counter, table, alcove, mark, pillar, stall surface), choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"minor_poi_create\"].",
-    "minor_poi_create creates only one visible current-scene target. It must not reveal hidden places, create routes, create items, prove search success or absence, record world facts, or change the player's current scene.",
-    "For exposing a source-bounded visible current-scene place handle from already accepted local evidence (entrance, service window, alcove, stall, counter, doorway, local area, landmark), choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"location_reveal\"].",
-    "For location_reveal, checklistRequest.targetRefs and evidenceRefs must cite only refs that already exist in citableRefs, usually Player plus current scene/location refs. Do not cite the new place-handle label in GM Read; the new label belongs only in the later location.reveal.v2 tool request locationLabel.",
-    "location_reveal creates or exposes only one visible current-scene location target/handle. It must not create routes, movement options, current-scene changes, hidden discoveries, absence proof, items, actors, or world facts.",
-    "For a concrete mark, label, status tag, annotation, stamp, flag, or tag applied to or removed from a visible/current/inventory entity, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"entity_tag\"].",
-    "For entity_tag, checklistRequest.targetRefs must include exactly the visible/current/inventory entity being changed, and evidenceRefs must include Player plus that entity and the current scene/location refs.",
-    "For giving, dropping, placing, taking, equipping, or unequipping a modeled visible/current/inventory item, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"item_transfer\"].",
-    "For item_transfer, checklistRequest.targetRefs must include the item and the concrete target owner/location when one exists; evidenceRefs must include Player, the item, and the current scene/location refs.",
-    "Do not use item_transfer for already-held restow with no equip-state change, unmodeled currency/fees/tips/bribes/prices, item creation, partial stacks, containers, hidden/offscreen items, NPC inventory handoff, barter resolution, world facts, memories, relationships, or search/discovery.",
-    "For setting or clearing a concrete visible actor physical/status condition such as prone, exhausted, injured, wounded, bleeding, burned, poisoned, sick, or starving, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"condition\"].",
-    "For condition, checklistRequest.actorRefs and targetRefs must include exactly the actor whose condition or Player HP changes; evidenceRefs must include Player, that actor, and current scene/location refs. Use Player for player actor refs.",
-    "condition can set/clear one visible actor condition or adjust Player HP by one point only. It must not implement combat resolution, NPC HP, offscreen/private conditions, relationship/faction/reputation, item/location/world-fact changes, or narrator-inferred injuries.",
-    "For explicit player intent to wait, watch, rest, work, or otherwise let 1-240 minutes pass in the current scene without movement or other state changes, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"time_advance\"].",
-    "For time_advance, checklistRequest.actorRefs must be [\"Player\"], targetRefs must include the current scene ref, and evidenceRefs must include Player plus current scene/location refs.",
-    "time_advance proves only elapsed in-world clock time. It never proves movement, route availability, rest benefits, healing, fatigue, search results, hidden/offscreen events, discovery, absence, NPC knowledge, item state, location state, or world facts.",
-    "For recording a future-usable player-known procedure, route hint, evidence note, or memory from an accepted source in the same checklist, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=mutating, and checklistRequest.requiredEffectKinds=[\"dialogue_outcome\",\"world_fact\"] when the source must first be spoken or [\"world_fact\"] only when the source is already an accepted runtime receipt in this turn.",
-    "For world_fact, checklistRequest.actorRefs must include Player, targetRefs must include only player-visible/source-bounded subjects, and evidenceRefs must include Player plus the visible source refs. world_fact records what the player knows or was told; it is not objective canon.",
-    "Do not use world_fact for absence, hidden discovery, movement/arrival, route legality, item custody/equip/container state, NPC private knowledge, relationship/faction/reputation, condition, combat, time advancement, or any fact sourced only from raw player action, GM Read text, checklist intent, failed/skipped receipts, or narrator prose.",
-    "For local posture/scene beat without structural state change, choose path=tool_plan, turnNeed=backend_action_checklist, checklistRequest.turnPath=procedural, and checklistRequest.requiredEffectKinds=[\"scene_beat\"].",
-    "Valid checklistRequest.turnPath values are only: mutating, procedural, combat. Never use movement, route_check, or scene_beat as turnPath values.",
-    "For this live slice, checklistRequest.requiredEffectKinds may use only route_check, movement, dialogue_outcome, support_actor_create, minor_poi_create, location_reveal, entity_tag, item_transfer, condition, time_advance, world_fact, or scene_beat.",
-    "dialogue_outcome is terminal and non-mutating in this slice: it records the visible response for narration only and does not create NPC memory, world facts, item state, relationship state, or durable social state.",
-    "support_actor_create is a structural mutation in this slice: it can create one temporary current-scene reactive support NPC only. It must not create key/persistent actors, hidden identity, memories, faction state, schedules, relationships, inventory, world facts, dialogue content, or actor lifecycle state.",
-    "minor_poi_create is a local-scene structural mutation in this slice: it can create one visible target-only current-scene POI. It must not create movement options, routes, hidden discoveries, items, actors, world facts, or current-scene changes.",
-    "location_reveal is a local-scene structural mutation in this slice: it can create or expose one source-bounded visible current-scene place handle. It must not create movement options, routes, hidden discoveries, absence proof, items, actors, world facts, or current-scene changes.",
-    "entity_tag is a structural mutation in this slice: it can only add or remove one tag on one resolved player_actor, visible_actor, current_location, current_scene, visible_item, visible_location, or inventory_item.",
-    "item_transfer is a structural mutation in this slice: it can only transfer a modeled item between player inventory, a visible current-scene actor, the current scene, or a visible current-scene local location/POI, or change a player-owned item's equip state.",
-    "condition is a structural actor mutation in this slice: it can only set/clear one canonical visible condition on Player or a visible actor, or adjust Player HP by exactly one point.",
-    "time_advance is a world-clock mutation in this slice: it can only advance elapsed in-world time for explicit player elapsed-time intent in the current scene.",
-    "world_fact is a player-known knowledge mutation in this slice: it can only record source-bounded knowledge owned by Player from accepted same-turn runtime receipts. It must preserve source/truth framing and must not become objective world canon.",
-    "Do not narrate. Do not mutate state. Do not include tool names, tool inputs, executable payloads, combat transitions, or future checklist steps.",
+    "GM Read is interpretation only: classify the requested turn and cite what visible packet refs make that interpretation legal.",
+    "Allowed paths are direct, continue, clarification, roll_oracle, tool_plan, and combat_transition.",
+    "Always include path exactly as one allowed path string.",
+    "Use roll_oracle only when the player action appears to need true uncertainty resolution; do not create the Oracle question, stakes, or outcome meanings.",
+    "Use tool_plan only when backend receipts appear needed for route checks, movement, dialogue outcomes, support actors, POIs, location reveal, entity tags, item transfer, conditions, time advance, player-known facts, or scene beats; do not name required effects.",
+    "Explicit elapsed-time actions such as waiting, watching, resting, or working for a stated duration in the current scene are tool_plan interpretations with turnNeed backend_action_checklist.",
+    "Use direct or continue only when no check, runtime admission, or mutation is needed.",
+    "Use clarification when the action is underspecified or asks for unsupported hidden/offscreen/private/combat behavior.",
+    "Do not narrate. Do not mutate state. Do not include tool names, tool inputs, executable payloads, Oracle requests, checklist requests, admitted effect kinds, combat transitions, or future checklist steps.",
     "Cite only citableRefs from the model-facing packet.",
     "For direct/continue, omit clarificationPrompt entirely. For clarification, include a non-empty clarificationPrompt. Never emit empty strings or null for optional fields.",
-    "For roll_oracle, include oracleRequest with question, stakes, outcomeMeanings for strong_hit/weak_hit/miss, uncertaintyKind, actorRef, targetRefs, and evidenceRefs.",
-    "For roll_oracle, turnNeed must be exactly oracle_uncertainty. Do not include noMutationReason or clarificationPrompt on roll_oracle.",
-    "For roll_oracle, uncertaintyKind must be one of: physical_risk, perception, social_pressure, opposition, chance.",
-    "The three outcomeMeanings must define what each tier means before the roll; narrator will use the selected meaning as settled truth.",
-    "Oracle settles uncertainty only; it is not a movement, discovery, item-state, NPC-knowledge, or world-mutation receipt.",
-    "If the player action needs unimplemented mutation, combat, hidden knowledge, durable NPC memory, or a backend capability outside route_check/movement/dialogue_outcome/support_actor_create/minor_poi_create/location_reveal/entity_tag/item_transfer/condition/time_advance/world_fact/scene_beat, choose clarification.",
+    "For tool_plan and roll_oracle, omit noMutationReason and clarificationPrompt entirely.",
+    "For roll_oracle, turnNeed must be exactly oracle_uncertainty. For tool_plan, turnNeed must be exactly backend_action_checklist.",
+    "If the player action needs unimplemented mutation, combat, hidden knowledge, durable NPC memory, or a backend capability outside the current gameplay-cycle-v2 surface, choose clarification.",
   ].join("\n");
 }
 
@@ -334,13 +294,36 @@ function buildGmReadPrompt(
   explicitMovementAdmission: ExplicitMovementAdmissionV2,
 ): string {
   return JSON.stringify({
-    task: "Interpret this player turn. Select no-mutation, Oracle uncertainty, or backend checklist admission.",
+    task: "Interpret this player turn only. Select no-mutation, Oracle-intent, or backend-checklist-intent without creating admission payloads.",
+    outputContract: {
+      requiredTopLevelKeys: [
+        "version",
+        "path",
+        "situationSummary",
+        "sceneQuestion",
+        "focalActorRefs",
+        "evidenceRefs",
+        "actionInterpretation",
+        "turnNeed",
+        "rationale",
+      ],
+      toolPlan: {
+        path: "tool_plan",
+        turnNeed: "backend_action_checklist",
+        omit: ["noMutationReason", "clarificationPrompt", "oracleRequest", "checklistRequest"],
+      },
+      explicitElapsedTime: {
+        classifyAs: "tool_plan",
+        evidenceRefs: ["Player", "current scene/location ref from citableRefs"],
+        note: "Do not decide elapsed-time effect kind here; Judge owns admission.",
+      },
+    },
     packet: formatModelFacingTurnPacketForPromptV2(packet),
     backendAdmissibleExactMovement: explicitMovementAdmission.status === "admitted"
       ? {
         destinationRef: explicitMovementAdmission.destinationRef,
-        checklistRequest: explicitMovementAdmission.checklistRequest,
-        rule: "Use this only when your GM Read interpretation is actual travel/movement. For route checks without travel, use route_check instead.",
+        evidenceRefs: explicitMovementAdmission.evidenceRefs,
+        rule: "If the player's action is actual travel to this destination, GM Read may classify the turn as tool_plan and cite this destination. Do not emit a checklistRequest.",
       }
       : null,
   }, null, 2);
@@ -351,7 +334,7 @@ function buildChecklistSystemPrompt(): string {
     "You are the WorldForge GM Action Checklist layer for gameplay-cycle-v2.",
     "Return only gm-action-checklist.v2 JSON.",
     "The checklist is intent-only. Do not include tool ids, tool inputs, executable payloads, state deltas, receipts, results, or narration.",
-    "Use only refs from the current model-facing packet citableRefs and from the accepted GM Read checklistRequest.",
+    "Use only refs from the current model-facing packet citableRefs and from the accepted GM Judge checklistAdmission.",
     "Use only the allowedEffectKinds supplied in the prompt. Do not add route checks, movement, or scene beats unless that exact effect kind is listed.",
     "Each step must have exactly one intended state/evidence effect and the matching requiredCapabilityId.",
     "Use step-1, step-2, ... in dependency order. Dependencies may only refer to earlier steps.",
@@ -773,10 +756,6 @@ export async function* processGameplayTurnCycleV2(
       }`,
     );
   }
-  gmReadCandidate = completeGmReadWithExplicitMovementAdmissionV2({
-    candidate: gmReadCandidate,
-    admission: explicitMovementAdmission,
-  });
   const gmReadValidation = validateGmReadV2({
     packet: modelPacket,
     candidate: gmReadCandidate,
@@ -789,7 +768,6 @@ export async function* processGameplayTurnCycleV2(
     );
   }
   const gmRead = gmReadValidation.read;
-  const compatibilityAdmission = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead });
   yield {
     type: "scene-settling",
     data: {
@@ -807,7 +785,7 @@ export async function* processGameplayTurnCycleV2(
       prompt: buildGmJudgePromptV2({
         packet: modelPacket,
         gmRead,
-        compatibilityAdmission,
+        deterministicAdmission: null,
       }),
       temperature: 0.1,
       maxTokens: 1_600,
@@ -838,8 +816,9 @@ export async function* processGameplayTurnCycleV2(
   let settledPacket: SettledTurnPacketV2;
   if (gmJudge.lane === "roll_oracle") {
     if (gmRead.path !== "roll_oracle") {
-      throw runtimeContractError("roll_oracle GM Judge requires a roll_oracle GM Read compatibility source.");
+      throw runtimeContractError("roll_oracle GM Judge requires a roll_oracle GM Read interpretation.");
     }
+    const oracleGmRead = gmRead;
     const oracleJudge = assertOracleGmJudgeV2(gmJudge);
     yield {
       type: "scene-settling",
@@ -851,7 +830,7 @@ export async function* processGameplayTurnCycleV2(
     };
     oracleResult = await callOracle(buildOraclePayloadV2({
       modelPacket,
-      gmRead,
+      gmRead: oracleGmRead,
       gmJudge: oracleJudge,
     }), options.judgeProvider);
     yield {
@@ -863,21 +842,22 @@ export async function* processGameplayTurnCycleV2(
     const oracleSettlement = buildOracleSettlementV2({
       settlementId: publicRuntimeId("v2oracle"),
       modelPacket,
-      gmRead,
+      gmRead: oracleGmRead,
       gmJudge: oracleJudge,
       result: oracleResult,
     });
     settledPacket = buildOracleSettledTurnPacketV2({
       packetId: publicRuntimeId("v2packet"),
       modelPacket,
-      gmRead,
+      gmRead: oracleGmRead,
       gmJudge: oracleJudge,
       oracleSettlement,
     });
   } else if (gmJudge.lane === "action_checklist") {
     if (gmRead.path !== "tool_plan") {
-      throw runtimeContractError("Action-checklist GM Judge requires a tool_plan GM Read compatibility source.");
+      throw runtimeContractError("action_checklist GM Judge requires a tool_plan GM Read interpretation.");
     }
+    const checklistGmRead = gmRead;
     const checklistJudge = assertChecklistGmJudgeV2(gmJudge);
     yield {
       type: "scene-settling",
@@ -890,7 +870,7 @@ export async function* processGameplayTurnCycleV2(
     const checklist = await generateActionChecklistCandidateV2({
       options,
       packet: modelPacket,
-      gmRead,
+      gmRead: checklistGmRead,
       gmJudge: checklistJudge,
     });
     yield {
@@ -926,7 +906,7 @@ export async function* processGameplayTurnCycleV2(
       ledgerId: `ledger-${turnId}`,
       scheduleId: `schedule-${turnId}`,
       initialPacket: modelPacket,
-      gmRead,
+      gmRead: checklistGmRead,
       gmJudge: checklistJudge,
       checklist,
       handlers,

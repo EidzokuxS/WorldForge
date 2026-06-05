@@ -166,7 +166,7 @@ function validatePrivateTerms(input: {
 function validateGmReadAlignment(input: {
   checklist: GmActionChecklistV2;
   gmRead: GmReadChecklistV2;
-  gmJudge?: GmJudgeChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
 }): ActionChecklistValidationIssueV2[] {
   const issues: ActionChecklistValidationIssueV2[] = [];
   if (input.checklist.sourceGmReadPath !== input.gmRead.path) {
@@ -176,8 +176,8 @@ function validateGmReadAlignment(input: {
       message: "Checklist sourceGmReadPath must match the accepted GM Read path.",
     });
   }
-  const admission = input.gmJudge?.checklistAdmission ?? input.gmRead.checklistRequest;
-  if (input.gmJudge && input.gmJudge.lane !== "action_checklist") {
+  const admission = input.gmJudge.checklistAdmission;
+  if (input.gmJudge.lane !== "action_checklist") {
     issues.push({
       code: "gm_read_mismatch",
       path: "gmJudge.lane",
@@ -252,6 +252,7 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
 function purposeForSimpleEffect(input: {
   kind: GmActionChecklistEffectKindV2;
   gmRead: GmReadChecklistV2;
+  admission: GmJudgeChecklistV2["checklistAdmission"];
 }): string {
   switch (input.kind) {
     case "movement":
@@ -279,7 +280,7 @@ function purposeForSimpleEffect(input: {
     case "dialogue_outcome":
       return "Settle the visible dialogue outcome through backend terminal dialogue authority.";
     default:
-      return input.gmRead.checklistRequest.checklistGoal;
+      return input.admission.checklistGoal;
   }
 }
 
@@ -321,9 +322,9 @@ function expectedVisibleEffectForSimpleEffect(input: {
 export function compileSimpleGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
-  gmJudge?: GmJudgeChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
 }): ActionChecklistValidationResultV2 | null {
-  const admission = input.gmJudge?.checklistAdmission ?? input.gmRead.checklistRequest;
+  const admission = input.gmJudge.checklistAdmission;
   const requestedKinds = admission.requiredEffectKinds;
   if (requestedKinds.length !== 1) return null;
   const kind = requestedKinds[0];
@@ -340,12 +341,12 @@ export function compileSimpleGmActionChecklistV2(input: {
     turnId: input.packet.turnId,
     baseWorldVersion: input.packet.baseWorldVersion,
     sourceGmReadPath: input.gmRead.path,
-    turnPath: input.gmRead.checklistRequest.turnPath,
+    turnPath: admission.turnPath,
     turnIntent: input.gmRead.actionInterpretation.intent,
     steps: [
       {
         stepId: "step-1",
-        purpose: purposeForSimpleEffect({ kind, gmRead: input.gmRead }),
+        purpose: purposeForSimpleEffect({ kind, gmRead: input.gmRead, admission }),
         actorRef,
         targetRefs,
         evidenceRefs,
@@ -372,7 +373,7 @@ export function compileSimpleGmActionChecklistV2(input: {
 export function validateGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
-  gmJudge?: GmJudgeChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
   candidate: unknown;
 }): ActionChecklistValidationResultV2 {
   const issues: ActionChecklistValidationIssueV2[] = [];
