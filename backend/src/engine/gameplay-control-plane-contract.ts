@@ -1251,6 +1251,10 @@ export function assertPublicProjectionPayload(input: {
 export const CLOCK_LEDGER_REASON_VALUES = [
   "zero_time_status",
   "wait",
+  "watch",
+  "rest",
+  "work",
+  "other_elapsed_time",
   "travel",
   "tool_time_effect",
   "due_world_elapsed",

@@ -48,7 +48,7 @@ function receiptEvidenceText(receipt: GameplayRuntimeReceiptV2): string {
     case "actor.condition_set.v2":
       return `Actor condition receipt accepted: ${receipt.visibleSummary} This proves only the listed actor condition or Player HP change. It does not prove combat resolution, NPC private condition, offscreen harm, relationship/faction/reputation change, item/location/world-fact state, or additional injuries.`;
     case "time.advance.v2":
-      return `Time advance receipt accepted: ${receipt.visibleSummary}`;
+      return `Time advance receipt accepted: ${receipt.visibleSummary} This proves only elapsed in-world time and the updated world clock. It does not prove movement, route availability, rest benefits, healing, fatigue, condition changes, hidden/offscreen events, discovery, search results, absence, NPC knowledge, item state, location state, or world facts.`;
     case "scene_beat.record.v2":
       return `Scene beat receipt accepted: ${receipt.visibleSummary}`;
     case "location.reveal.v2":

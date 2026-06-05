@@ -82,6 +82,8 @@ type WorldFactRequestV2 = Extract<GameplayToolRequestV2, { toolId: "world_fact.r
 type ItemTransferRequestV2 = Extract<GameplayToolRequestV2, { toolId: "item.transfer.v2" }>;
 type LocationRevealRequestV2 = Extract<GameplayToolRequestV2, { toolId: "location.reveal.v2" }>;
 type ActorConditionRequestV2 = Extract<GameplayToolRequestV2, { toolId: "actor.condition_set.v2" }>;
+type TimeAdvanceRequestV2 = Extract<GameplayToolRequestV2, { toolId: "time.advance.v2" }>;
+type TimeAdvanceReasonKindV2 = TimeAdvanceRequestV2["effectBinding"]["reasonKind"];
 type ItemTransferBindingV2 = ItemTransferRequestV2["effectBinding"];
 type ItemRow = typeof items.$inferSelect;
 type PlayerRow = typeof players.$inferSelect;
@@ -130,6 +132,7 @@ export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
   afterActorConditionRowUpdateBeforeAuthorityTrace?: () => void;
   afterItemTransferRowUpdateBeforeAuthorityTrace?: () => void;
+  afterTimeAdvanceClockUpdateBeforeAuthorityTrace?: () => void;
   afterLocationRevealInsertBeforeAuthorityTrace?: () => void;
   afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
   afterSupportActorInsertBeforeAuthorityTrace?: () => void;
@@ -233,13 +236,11 @@ function clockReceiptId(input: {
   turnId: string;
   resultWorldVersion: number;
   deltaMinutes: number;
+  reasonKind: TimeAdvanceReasonKindV2 | "travel";
 }): string {
   const digest = crypto
     .createHash("sha256")
-    .update(stableJson({
-      ...input,
-      reasonKind: "travel",
-    }))
+    .update(stableJson(input))
     .digest("hex")
     .slice(0, 32);
   return `clock_${digest}`;
@@ -1242,6 +1243,7 @@ function commitActorMoveV2(input: {
           turnId: input.packet.turnId,
           resultWorldVersion,
           deltaMinutes: elapsedWorldTimeMinutes,
+          reasonKind: "travel",
         }),
         campaignId: input.packet.campaignId,
         turnId: input.packet.turnId,
@@ -2576,6 +2578,132 @@ function commitWorldFactRecordV2(input: {
   });
 }
 
+function commitTimeAdvanceV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: TimeAdvanceRequestV2;
+  actor: Extract<ActorResolution, { status: "resolved"; actorKind: "player" }>;
+  anchor: Extract<CurrentSceneResolution, { status: "resolved" }>;
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  elapsedWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const binding = input.request.effectBinding;
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const sourceReceiptRef = `authority:${sourceKey}`;
+  const elapsedWorldTimeMinutes = binding.elapsedMinutes;
+  const stateDeltaRefs = [`world_clock:${input.packet.campaignId}:time`];
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const resultWorldTimeMinutes = clock.worldTimeMinutes + elapsedWorldTimeMinutes;
+    const resultTick = Math.max(
+      clock.currentTick,
+      input.packet.baseTick,
+      resultWorldTimeMinutes,
+    );
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: resultWorldTimeMinutes,
+        currentTick: resultTick,
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before time.advance.v2 could commit.");
+    }
+
+    input.testHooks?.afterTimeAdvanceClockUpdateBeforeAuthorityTrace?.();
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.time.advance.v2",
+        sourceEntityType: "world_clock",
+        sourceEntityId: input.packet.campaignId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: resultWorldTimeMinutes,
+        elapsedWorldTimeMinutes,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray(stateDeltaRefs),
+        witnesses: stringifyStringArray(binding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          actorRef: binding.actorRef,
+          actorId: input.actor.actorId,
+          anchorScope: binding.anchorScope,
+          anchorRef: binding.anchorRef,
+          anchorSceneLocationId: input.anchor.sceneLocationId,
+          anchorBroadLocationId: input.anchor.broadLocationId,
+          reasonKind: binding.reasonKind,
+          elapsedMinutes: binding.elapsedMinutes,
+          sourceAuthority: binding.sourceAuthority,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    db.insert(turnClockLedger)
+      .values({
+        clockReceiptId: clockReceiptId({
+          campaignId: input.packet.campaignId,
+          sourceReceiptRef,
+          turnId: input.packet.turnId,
+          resultWorldVersion,
+          deltaMinutes: elapsedWorldTimeMinutes,
+          reasonKind: binding.reasonKind,
+        }),
+        campaignId: input.packet.campaignId,
+        turnId: input.packet.turnId,
+        uiTurnOrdinal: input.packet.baseTick,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        deltaMinutes: elapsedWorldTimeMinutes,
+        reasonKind: binding.reasonKind,
+        sourceReceiptRef,
+        resultWorldTimeMinutes,
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      resultWorldVersion,
+      resultWorldTimeMinutes,
+      elapsedWorldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function routeCheckHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "route.check.v2" }>,
@@ -2710,6 +2838,65 @@ function actorMoveHandler(
       error instanceof Error ? error.message : "actor.move.v2 failed before committing movement.",
       "failed",
     );
+  }
+}
+
+function timeAdvanceHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: TimeAdvanceRequestV2,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const actor = resolveActor({
+    packet,
+    registry,
+    actorRef: request.effectBinding.actorRef,
+  });
+  if (actor.status !== "resolved") return failedOutcome(packet, actor.reason);
+  if (actor.actorKind !== "player") {
+    return failedOutcome(packet, "time.advance.v2 requires actorRef=Player.");
+  }
+  const anchor = resolveCurrentScene({
+    registry,
+    anchorRef: request.effectBinding.anchorRef,
+  });
+  if (anchor.status !== "resolved") return failedOutcome(packet, anchor.reason);
+  if (actor.currentLocationId !== anchor.broadLocationId) {
+    return failedOutcome(packet, "time.advance.v2 anchor must match Player current scene.");
+  }
+  if (request.effectBinding.sourceAuthority.actorRef !== request.effectBinding.actorRef) {
+    return failedOutcome(packet, "time.advance.v2 sourceAuthority.actorRef must match actorRef.");
+  }
+  if (request.effectBinding.sourceAuthority.anchorRef !== request.effectBinding.anchorRef) {
+    return failedOutcome(packet, "time.advance.v2 sourceAuthority.anchorRef must match anchorRef.");
+  }
+
+  try {
+    const commit = commitTimeAdvanceV2({
+      packet,
+      request,
+      actor,
+      anchor,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "world",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${commit.elapsedWorldTimeMinutes} minutes pass in ${anchor.label}.`,
+      evidenceRefs: uniqueStrings([
+        request.effectBinding.actorRef,
+        request.effectBinding.anchorRef,
+        ...request.effectBinding.evidenceRefs,
+      ]),
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "time.advance.v2 failed before committing world clock.";
+    return failedOutcome(packet, reason, "failed");
   }
 }
 
@@ -3212,6 +3399,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "actor.condition_set.v2 handler received the wrong request type.");
       }
       return actorConditionSetHandler(packet, request, refRegistry, priorReceipts, options.testHooks);
+    },
+    "time.advance.v2": ({ packet, request, refRegistry }) => {
+      if (request.toolId !== "time.advance.v2") {
+        return failedOutcome(packet, "time.advance.v2 handler received the wrong request type.");
+      }
+      return timeAdvanceHandler(packet, request, refRegistry, options.testHooks);
     },
     "world_fact.record.v2": ({ packet, request, refRegistry, priorReceipts }) => {
       if (request.toolId !== "world_fact.record.v2") {

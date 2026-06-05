@@ -16,6 +16,7 @@ import {
   locations,
   npcs,
   players,
+  simulationProposals,
   turnClockLedger,
   worldClocks,
 } from "../../db/schema.js";
@@ -1187,6 +1188,90 @@ function actorConditionToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function timeAdvanceToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: assertTurnAttemptContextV2({
+      ...attemptContext(),
+      playerAction: "I stay in the atrium and wait exactly fifteen minutes.",
+    }),
+    frame: sceneFrame({
+      playerAction: "I stay in the atrium and wait exactly fifteen minutes.",
+    }),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "time_advance"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player explicitly waits in the current scene.",
+      sceneQuestion: "What elapsed-time authority must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+      actionInterpretation: {
+        intent: "Wait exactly fifteen minutes in the current scene.",
+        method: "wait",
+        targetRefs: ["Atrium Floor"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "Explicit elapsed time requires backend clock authority.",
+      checklistRequest: {
+        turnPath: "procedural",
+        requiredEffectKinds: ["time_advance"],
+        actorRefs: ["Player"],
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Advance only the world clock for the player's explicit wait.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Time-advance GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-time-advance-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "procedural",
+      turnIntent: "Wait exactly fifteen minutes.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Advance the world clock for the explicit wait only.",
+        actorRef: "Player",
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        requiredCapabilityId: "time_advance",
+        intendedEffect: {
+          kind: "time_advance",
+          summary: "Fifteen in-world minutes pass in the current scene.",
+          stateScope: "world",
+        },
+        expectedVisibleEffect: "Accepted elapsed-time receipt for the current scene clock.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Time-advance checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function dbTempFixture(prefix: string): {
   tempDir: string;
   cleanup: () => void;
@@ -1473,7 +1558,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("toolName");
   });
 
-  it("compiles simple movement, dialogue, support actor, entity tag, item transfer, condition, and scene-beat GM Reads without executable payloads", () => {
+  it("compiles simple movement, dialogue, support actor, entity tag, item transfer, condition, time advance, and scene-beat GM Reads without executable payloads", () => {
     const movement = movementAdmissionFixture();
     const acceptedMovement = validateGmReadChecklistV2({
       packet: movement.packet,
@@ -1647,6 +1732,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       },
     });
 
+    const timeAdvance = timeAdvanceToolPlanFixture();
+    const compiledTimeAdvance = compileSimpleGmActionChecklistV2({
+      packet: timeAdvance.packet,
+      gmRead: timeAdvance.gmRead,
+    });
+    expect(compiledTimeAdvance?.status).toBe("accepted");
+    if (!compiledTimeAdvance || compiledTimeAdvance.status !== "accepted") {
+      throw new Error("Simple time-advance checklist must compile.");
+    }
+    expect(compiledTimeAdvance.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "time_advance",
+      targetRefs: ["Atrium Floor"],
+      intendedEffect: {
+        kind: "time_advance",
+        stateScope: "world",
+      },
+    });
+
     const publicShape = JSON.stringify({
       movement: compiledMovement.checklist,
       dialogue: compiledDialogue.checklist,
@@ -1655,6 +1758,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       entityTag: compiledEntityTag.checklist,
       itemTransfer: compiledItemTransfer.checklist,
       actorCondition: compiledActorCondition.checklist,
+      timeAdvance: compiledTimeAdvance.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
     expect(publicShape).not.toContain("dialogue.record.v2");
@@ -1663,6 +1767,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("entity.tag.v2");
     expect(publicShape).not.toContain("item.transfer.v2");
     expect(publicShape).not.toContain("actor.condition_set.v2");
+    expect(publicShape).not.toContain("time.advance.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
 
@@ -3879,6 +3984,171 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(badHp.issues.some((issue) => issue.path.includes("hpDelta"))).toBe(true);
   });
 
+  it("accepts a clean time.advance.v2 request with explicit elapsed-time authority", () => {
+    const { packet, checklist } = timeAdvanceToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-advance-1",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "wait",
+          elapsedMinutes: 15,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium Floor",
+            sourceSummary: "The player explicitly waits exactly fifteen minutes in the current scene.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Time advance tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("time.advance.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      actorRef: "Player",
+      anchorScope: "current_scene",
+      anchorRef: "Atrium Floor",
+      reasonKind: "wait",
+      elapsedMinutes: 15,
+      sourceAuthority: {
+        kind: "explicit_player_elapsed_time_intent",
+        actorRef: "Player",
+        anchorRef: "Atrium Floor",
+      },
+    });
+    expect(JSON.stringify(result.request)).not.toContain("advance_time");
+    expect(JSON.stringify(result.request)).not.toContain('"minutes"');
+    expect(JSON.stringify(result.request)).not.toContain('"reason"');
+  });
+
+  it("rejects old placeholder and invalid time.advance.v2 request shapes", () => {
+    const { packet, checklist } = timeAdvanceToolPlanFixture();
+
+    const legacy = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-advance-legacy",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          minutes: 15,
+          reason: "The player waits.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(legacy.status).toBe("rejected");
+    expect(legacy.issues.some((issue) => issue.path.includes("actorRef"))).toBe(true);
+    expect(legacy.issues.some((issue) => issue.path.includes("elapsedMinutes"))).toBe(true);
+    expect(legacy.issues.some((issue) => issue.path.includes("sourceAuthority"))).toBe(true);
+
+    const excessive = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-advance-excessive",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "wait",
+          elapsedMinutes: 241,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium Floor",
+            sourceSummary: "The player asks to wait too long for this primitive.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(excessive.status).toBe("rejected");
+    expect(excessive.issues.some((issue) => issue.path.includes("elapsedMinutes"))).toBe(true);
+
+    const mismatchedSource = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-advance-mismatched-source",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "watch",
+          elapsedMinutes: 15,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium",
+            sourceSummary: "The player watches from a mismatched anchor.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(mismatchedSource.status).toBe("rejected");
+    expect(mismatchedSource.issues.some((issue) => issue.path.includes("sourceAuthority.anchorRef"))).toBe(true);
+
+    const missingEvidence = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-advance-missing-evidence",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "rest",
+          elapsedMinutes: 15,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium Floor",
+            sourceSummary: "The player rests in the current scene.",
+          },
+          evidenceRefs: ["Player"],
+        },
+      },
+    });
+    expect(missingEvidence.status).toBe("rejected");
+    expect(missingEvidence.issues.some((issue) => issue.path.includes("evidenceRefs"))).toBe(true);
+  });
+
   it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
     const { packet, checklist } = dialogueToolPlanFixture();
 
@@ -4298,6 +4568,65 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(normalized.evidence.kind).toBe("runtime_receipt");
     expect(normalized.evidence.text).toContain("route availability only");
     expect(normalized.evidence.text).toContain("not movement or arrival");
+  });
+
+  it("normalizes time.advance.v2 receipts as elapsed-time-only evidence", async () => {
+    const { packet, checklist } = timeAdvanceToolPlanFixture();
+    const execution = await executeGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      request: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-normalize",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "wait",
+          elapsedMinutes: 15,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium Floor",
+            sourceSummary: "The player explicitly waits exactly fifteen minutes.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+      handlers: {
+        "time.advance.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "world",
+          resultWorldVersion: 8,
+          visibleSummary: "15 minutes pass in Atrium Floor.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          durableEventIds: [],
+        }),
+      },
+      receiptId: "receipt-time-normalize",
+      emittedAt: 15,
+    });
+
+    const normalized = normalizeRuntimeReceiptEvidenceV2({
+      modelPacket: packet,
+      receipt: execution.receipt,
+    });
+
+    expect(normalized.status).toBe("accepted");
+    if (normalized.status !== "accepted") {
+      throw new Error("Time evidence normalization must be accepted.");
+    }
+    expect(normalized.evidence.text).toContain("elapsed in-world time");
+    expect(normalized.evidence.text).toContain("updated world clock");
+    expect(normalized.evidence.text).toContain("does not prove movement");
+    expect(normalized.evidence.text).toContain("rest benefits");
+    expect(normalized.evidence.text).toContain("hidden/offscreen events");
+    expect(normalized.evidence.text).toContain("absence");
   });
 
   it("builds a runtime settled packet from accepted mutation receipts only", async () => {
@@ -6910,6 +7239,183 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
       expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes time.advance.v2 as atomic world clock and ledger authority only", async () => {
+    const fixture = dbTempFixture("wf-v2-db-time-advance-");
+    try {
+      seedP16World();
+      const { packet, checklist } = timeAdvanceToolPlanFixture();
+      const beforeCounts = {
+        players: getDb().select().from(players).all().length,
+        npcs: getDb().select().from(npcs).all().length,
+        items: getDb().select().from(items).all().length,
+        locations: getDb().select().from(locations).all().length,
+      };
+
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "time-advance-db-1",
+          stepId: "step-1",
+          capabilityId: "time_advance",
+          toolId: "time.advance.v2",
+          effectBinding: {
+            actorRef: "Player",
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            reasonKind: "wait",
+            elapsedMinutes: 15,
+            sourceAuthority: {
+              kind: "explicit_player_elapsed_time_intent",
+              actorRef: "Player",
+              anchorRef: "Atrium Floor",
+              sourceSummary: "The player explicitly waits exactly fifteen minutes.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-time-advance-db-1",
+        emittedAt: 24,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "world",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        durableEventIds: [],
+      });
+      expect(execution.receipt.visibleSummary).toBe("15 minutes pass in Atrium Floor.");
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 8,
+        worldTimeMinutes: 25,
+        currentTick: 25,
+      });
+      const ledgerRows = getDb().select().from(turnClockLedger).all();
+      expect(ledgerRows).toHaveLength(1);
+      expect(ledgerRows[0]).toMatchObject({
+        campaignId: "campaign-alpha",
+        turnId: "turn-alpha",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        deltaMinutes: 15,
+        reasonKind: "wait",
+        sourceReceiptRef: "authority:gameplay-v2:turn-alpha:time-advance-db-1",
+        resultWorldTimeMinutes: 25,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.time.advance.v2",
+        sourceEntityType: "world_clock",
+        sourceEntityId: "campaign-alpha",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        worldTimeMinutes: 25,
+        elapsedWorldTimeMinutes: 15,
+        toolResultId: "gameplay-v2:turn-alpha:time-advance-db-1",
+        eventIds: "[]",
+      });
+      expect(JSON.parse(traces[0].stateDeltaRefs)).toEqual(["world_clock:campaign-alpha:time"]);
+      expect(JSON.parse(traces[0].metadata)).toMatchObject({
+        toolId: "time.advance.v2",
+        actorRef: "Player",
+        anchorRef: "Atrium Floor",
+        reasonKind: "wait",
+        elapsedMinutes: 15,
+        sourceAuthority: {
+          kind: "explicit_player_elapsed_time_intent",
+          actorRef: "Player",
+          anchorRef: "Atrium Floor",
+        },
+      });
+
+      const player = getDb().select().from(players).where(eq(players.id, "player-alpha")).get();
+      expect(player?.currentLocationId).toBe("location-alpha");
+      expect(player?.currentSceneLocationId).toBe("scene-alpha");
+      expect(getDb().select().from(players).all()).toHaveLength(beforeCounts.players);
+      expect(getDb().select().from(npcs).all()).toHaveLength(beforeCounts.npcs);
+      expect(getDb().select().from(items).all()).toHaveLength(beforeCounts.items);
+      expect(getDb().select().from(locations).all()).toHaveLength(beforeCounts.locations);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+      expect(getDb().select().from(actorKnowledgeRecords).all()).toHaveLength(0);
+      expect(getDb().select().from(simulationProposals).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back time.advance.v2 clock changes when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-time-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = timeAdvanceToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "time-advance-rollback-1",
+          stepId: "step-1",
+          capabilityId: "time_advance",
+          toolId: "time.advance.v2",
+          effectBinding: {
+            actorRef: "Player",
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            reasonKind: "watch",
+            elapsedMinutes: 15,
+            sourceAuthority: {
+              kind: "explicit_player_elapsed_time_intent",
+              actorRef: "Player",
+              anchorRef: "Atrium Floor",
+              sourceSummary: "The player explicitly watches for fifteen minutes.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterTimeAdvanceClockUpdateBeforeAuthorityTrace: () => {
+              throw new Error("forced time authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-time-advance-rollback-1",
+        emittedAt: 25,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced time authority failure");
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 7,
+        worldTimeMinutes: 10,
+        currentTick: 0,
+      });
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(simulationProposals).all()).toHaveLength(0);
     } finally {
       fixture.cleanup();
     }

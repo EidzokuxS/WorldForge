@@ -1021,15 +1021,59 @@ const actorConditionSetRequestV2Schema = z.object({
   }).strict(),
 }).strict();
 
+const timeAdvanceReasonKindV2Schema = z.enum([
+  "wait",
+  "watch",
+  "rest",
+  "work",
+  "other_elapsed_time",
+]);
+
+const timeAdvanceSourceAuthorityV2Schema = z.object({
+  kind: z.literal("explicit_player_elapsed_time_intent"),
+  actorRef: z.literal("Player"),
+  anchorRef: modelSafeRefSchema,
+  sourceSummary: shortText,
+}).strict();
+
+const timeAdvanceEffectBindingV2Schema = z.object({
+  actorRef: z.literal("Player"),
+  anchorScope: z.literal("current_scene"),
+  anchorRef: modelSafeRefSchema,
+  reasonKind: timeAdvanceReasonKindV2Schema,
+  elapsedMinutes: z.number().int().min(1).max(240),
+  sourceAuthority: timeAdvanceSourceAuthorityV2Schema,
+  evidenceRefs: toolEvidenceRefsSchema,
+}).strict().superRefine((binding, ctx) => {
+  if (binding.sourceAuthority.anchorRef !== binding.anchorRef) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sourceAuthority", "anchorRef"],
+      message: "time.advance.v2 sourceAuthority.anchorRef must match anchorRef.",
+    });
+  }
+  const evidenceRefs = new Set(binding.evidenceRefs.map((ref) => ref.toLowerCase()));
+  if (!evidenceRefs.has("player")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["evidenceRefs"],
+      message: "time.advance.v2 evidenceRefs must cite Player.",
+    });
+  }
+  if (!evidenceRefs.has(binding.anchorRef.toLowerCase())) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["evidenceRefs"],
+      message: "time.advance.v2 evidenceRefs must cite anchorRef.",
+    });
+  }
+});
+
 const timeAdvanceRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,
   capabilityId: z.literal("time_advance"),
   toolId: z.literal("time.advance.v2"),
-  effectBinding: z.object({
-    minutes: z.number().int().positive().max(24 * 60),
-    reason: z.string().trim().min(1).max(500),
-    evidenceRefs: toolEvidenceRefsSchema,
-  }).strict(),
+  effectBinding: timeAdvanceEffectBindingV2Schema,
 }).strict();
 
 const sceneBeatRecordRequestV2Schema = z.object({

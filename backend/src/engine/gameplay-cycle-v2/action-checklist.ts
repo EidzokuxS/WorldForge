@@ -201,6 +201,7 @@ const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
   "entity_tag",
   "item_transfer",
   "condition",
+  "time_advance",
   "world_fact",
   "location_reveal",
   "minor_poi_create",
@@ -216,6 +217,8 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
       return "actor";
     case "condition":
       return "actor";
+    case "time_advance":
+      return "world";
     case "route_check":
       return "location";
     case "minor_poi_create":
@@ -257,6 +260,8 @@ function purposeForSimpleEffect(input: {
       return "Settle the concrete item custody, location, or equip-state change through backend item authority.";
     case "condition":
       return "Settle the concrete actor condition or Player HP change through backend condition authority.";
+    case "time_advance":
+      return "Settle explicit elapsed in-world time through backend clock authority.";
     case "world_fact":
       return "Settle source-bounded player-known knowledge through backend knowledge authority.";
     case "scene_beat":
@@ -290,6 +295,8 @@ function expectedVisibleEffectForSimpleEffect(input: {
       return `Accepted item transfer mutation receipt for ${target}.`;
     case "condition":
       return `Accepted actor condition mutation receipt for ${target}.`;
+    case "time_advance":
+      return "Accepted elapsed-time receipt for the current scene clock.";
     case "world_fact":
       return "Accepted player-known knowledge mutation receipt.";
     case "scene_beat":
