@@ -906,7 +906,7 @@ function collectMovementCandidates(input: {
     .slice(0, SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT);
 }
 
-function collectMinorPoiCandidates(input: {
+function collectCurrentScenePlaceTargets(input: {
   currentSceneScopeId: string | null;
   currentTick: number;
   locationRows: LocationRow[];
@@ -915,20 +915,28 @@ function collectMinorPoiCandidates(input: {
     return [];
   }
   return input.locationRows
-    .filter((location) => {
+    .map((location): SceneFrameTargetCandidate | null => {
       const tags = parseTags(location.tags);
-      return tags.includes("minor-poi")
+      const isTargetOnlyCurrentScenePlace =
+        tags.includes("target-only")
+        && tags.includes("no-route")
+        && (tags.includes("minor-poi") || tags.includes("location-reveal"))
         && location.parentLocationId === input.currentSceneScopeId
         && locationIsVisibleNow(location, input.currentTick);
+      if (!isTargetOnlyCurrentScenePlace) {
+        return null;
+      }
+      const prefix = tags.includes("location-reveal") ? "location_reveal" : "minor_poi";
+      return {
+        id: `${prefix}:${location.id}`,
+        type: "location",
+        label: location.name,
+        locationId: location.id,
+        tags,
+      };
     })
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((location): SceneFrameTargetCandidate => ({
-      id: `minor_poi:${location.id}`,
-      type: "location",
-      label: location.name,
-      locationId: location.id,
-      tags: parseTags(location.tags),
-    }));
+    .filter((candidate): candidate is SceneFrameTargetCandidate => candidate !== null)
+    .sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function collectTargetCandidates(input: {
@@ -986,13 +994,13 @@ function collectTargetCandidates(input: {
     locationId: candidate.locationId,
     tags: [],
   }));
-  const minorPoiCandidates = collectMinorPoiCandidates({
+  const currentScenePlaceTargets = collectCurrentScenePlaceTargets({
     currentSceneScopeId: input.currentSceneScopeId,
     currentTick: input.currentTick,
     locationRows: input.locationRows,
   });
 
-  return [...actorCandidates, ...itemCandidates, ...minorPoiCandidates, ...locationCandidates].slice(
+  return [...actorCandidates, ...itemCandidates, ...currentScenePlaceTargets, ...locationCandidates].slice(
     0,
     SCENE_FRAME_TARGET_CANDIDATE_LIMIT,
   );

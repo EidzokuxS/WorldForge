@@ -52,7 +52,7 @@ function receiptEvidenceText(receipt: GameplayRuntimeReceiptV2): string {
     case "scene_beat.record.v2":
       return `Scene beat receipt accepted: ${receipt.visibleSummary}`;
     case "location.reveal.v2":
-      return `Location reveal receipt accepted: ${receipt.visibleSummary}`;
+      return `Location reveal receipt accepted: ${receipt.visibleSummary} This proves only that the place handle is visible and citable in the current scene; it does not prove movement, route availability, search progress, hidden discovery, or absence.`;
     case "minor_poi.create.v2":
       return `Minor POI receipt accepted: ${receipt.visibleSummary}`;
     default:

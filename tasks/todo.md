@@ -12,12 +12,46 @@ User reminder accepted: final acceptance counts only as several different zero-t
 
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
-- A2 Current-State Map — Status: in_progress. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `854371c6`. Output: [inspected] v2 runtime already has live `tool_plan` adapter, DB-backed handlers, pending narration packet store, explicit movement admission, and simple checklist compiler; next work must harden the remaining runtime primitive instead of adding prompt guards.
-- A3 Reference/Oracle — Status: pending. Scope: use Oracle/GPT-5.5 Pro only for new ownership/schema/persistence decisions. Output: [inspected] accepted P17 ordering already covers simple live movement/checklist ownership; no new Oracle call is needed for continuing that already accepted slice unless the next primitive changes authority.
-- A4 Architecture/Protocol — Status: pending. Scope: name the next primitive's authoritative input/output/downstream consumer/failure contract before edits.
+- A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `799c0208`. Output: [inspected] current HEAD already has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/item-transfer/player-knowledge slices, and no legacy packet/saga/proposal writes in v2 diagnostics.
+- A3 Reference/Oracle — Status: in_progress. Scope: use Oracle/GPT-5.5 Pro only for new ownership/schema/persistence decisions. Output: [inferred] P23 changes ownership between local place discovery, minor POI, route/movement, search/absence, and narrator evidence, so it needs Oracle before implementation.
+- A4 Architecture/Protocol — Status: in_progress. Scope: name the next primitive's authoritative input/output/downstream consumer/failure contract before edits. Output: [proposed] next candidate is `location.reveal.v2`, a narrow current-scene place-handle reveal/creation boundary, not route creation and not movement/discovery/absence narration.
 - A5 Verification/Proof — Status: pending. Scope: contract tests first, then `/api/chat/action` diagnostic turns if the primitive reaches live runtime.
 - A6 Cleanup/Migration/Risk — Status: pending. Scope: avoid legacy `turn_sagas`, old runtime tool schemas, old `ToolResult`, semantic regex patches, and v1 narrator guard piles.
-- +1 Integration — Status: in_progress. Decision: continue P17 live v2 burn-in/gap closure until it can support 10-15 clean diagnostic turns, then move to the next missing primitive; do not start final 60-turn acceptance until diagnostics stop discovering contract failures.
+- +1 Integration — Status: in_progress. Decision: request Oracle review for P23 `location.reveal.v2` boundary, then implement only if the boundary remains narrow and backend-owned; do not start final 60-turn acceptance until diagnostics stop discovering contract failures.
+
+P23 candidate location reveal checkpoint:
+- User reminder still applies: final acceptance counts only as several different zero-turn campaigns/clones that each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+- Candidate boundary before Oracle:
+  - Authoritative input: accepted GM Read `tool_plan` requesting `location_reveal`; current `ModelFacingTurnPacketV2`; selected checklist step; model-safe current-scene anchor/source/evidence refs; backend ref registry.
+  - Backend-owned output: one accepted/rejected `location.reveal.v2` receipt. If accepted, it creates or exposes exactly one visible current-scene location target/handle that can be cited later; it advances worldVersion and writes a v2 authority trace.
+  - Downstream consumers: refreshed SceneFrame/ModelFacingTurnPacket, receipt ledger, settled packet evidence, narrator view, and later route/movement only if a separate movement authority exists.
+  - Forbidden responsibilities: no movement/arrival/current-scene change, no route or edge creation, no hidden/absence proof, no item/NPC/world fact creation, no objective canon beyond the visible local place handle, no narration from raw search text.
+  - Failure behavior: reject/fail closed before packet if refs/anchor/collision/hidden scope are invalid; failed/rejected step must not become player-facing truth.
+- Oracle/GPT-5.5 Pro review `p23-location-reveal-boundary`:
+  - Dry-run and real run used one bundled attachment with 19 relevant files, about 191.6k tokens, Extended Pro verified.
+  - Verdict accepted as MODIFY: implement `location.reveal.v2`, but replace the placeholder schema with a source-bounded current-scene visible place-handle contract.
+  - Accepted boundary: source-bounded visible current-scene place handle only. It is not route/movement, search progress, hidden discovery, absence proof, item/NPC/world-fact creation, or local POI invention without visible source authority.
+- Implemented `location.reveal.v2` live slice:
+  - Added `location_reveal` to live v2 capabilities, GM Read admission, simple checklist compiler, and clean tool-request prompt.
+  - Replaced placeholder request schema with strict `anchorScope="current_scene"`, `anchorRef`, `revealMode`, `placeHandleKind`, `locationLabel`, optional visible description, `sourceAuthority`, literal non-authority exposure flags, `reason`, and evidence refs.
+  - Added DB-backed handler transaction: resolves current-scene anchor and source refs through the v2 registry/packet, inserts one `locations` row tagged `location-reveal`, `gameplay-v2-created`, `current-scene-place-handle`, `target-only`, `no-route`, advances worldVersion, writes `gameplay-cycle-v2.location.reveal.v2` authority trace, and rejects duplicate/colliding labels without mutation.
+  - Extended SceneFrame/ref-registry to expose location-reveal rows as current-scene visible targets only; they do not become movement candidates or route edges.
+  - Fix after first live attempt: GM Read prompt now states that `location_reveal` `targetRefs`/`evidenceRefs` must cite only existing `citableRefs`; the new place-handle label belongs only in the later `location.reveal.v2` `locationLabel`.
+- Verification:
+  - GitNexus impact before edits was LOW for `buildGmReadSystemPrompt`, `buildToolRequestSystemPrompt`, `compileSimpleGmActionChecklistV2`, `createDbBackedGameplayToolHandlersV2`, `buildGameplayRefRegistryV2`, `collectMinorPoiCandidates`/target collection, evidence normalizer/model packet helpers, and tool-id mapping; `gameplayToolRequestV2Schema` was not indexed as a symbol.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 136 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+- Live/manual diagnostic evidence:
+  - First clean clone `fd5ba758-440c-44de-82f5-8bd411299250` failed before settlement because GM Read cited the new label `Service Window` before backend authority created it. Rollback kept DB clean; this clone is diagnostic-invalid and does not count.
+  - After prompt fix, fresh clone `ce7ba249-2e91-47f3-b007-4f1d6d257629` reached `done` with a grounded clarification when the action tried to reveal `Service Window` without current-scene visible source evidence. This is correct behavior but not mutation proof.
+  - Accepted mutation proof used fresh zero-turn clone `d3073abd-7693-4e19-ad11-770a22b7a950` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; preflight showed `chatHistory=0`, no v2 packet table yet, legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `simulation_proposals=0`, `authority_traces=0`, clock `0/0/0`, scene `Lowwater Bazaar`.
+  - Real action sent with `campaignId`, `playerAction`, `intent`, and `method`: `Я не ищу ничего нового и не двигаюсь: из уже видимых в Lowwater Bazaar деревянных платформ, walkways and stalls я выделяю один локальный ориентир с названием Stall Walkway, чтобы потом ссылаться на него.`
+  - Result: HTTP 200, SSE reached `action-checklist`, `tool-execution`, `narrative`, `finalizing_turn`, and `done`; done event `runtime=gameplay-cycle-v2`, `tick=1`, `worldVersion=1`.
+  - Packet/ledger grounding: `gmReadPublic.path="tool_plan"`, `requiredEffectKinds=["location_reveal"]`, accepted receipt `receipt-step-1` with `toolId="location.reveal.v2"`, `evidenceAuthority="mutation_receipt"`, `mutationAuthority="local_scene"`, `mutationApplied=true`, `baseWorldVersion=0`, `resultWorldVersion=1`; no failed/skipped steps.
+  - DB grounding: inserted `Stall Walkway` in `locations` with `kind="ephemeral_scene"`, parent/anchor `Lowwater Bazaar`, tags `["location-reveal","gameplay-v2-created","current-scene-place-handle","target-only","no-route"]`, `connectedTo="[]"`; no location edges touched it, no `turn_clock_ledger` or `location_recent_events` rows were written, legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts`, and `simulation_proposals` remained 0.
+  - Authority trace operation `gameplay-cycle-v2.location.reveal.v2`, source entity type `location`, state deltas `location_reveal:<id>:created` and `scene:<sceneId>:place_handles`, metadata exposure flags all deny movement/route/current-scene change/absence/hidden/item/actor/world-fact authority.
+  - Backend ran on stable `PORT=3208` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward, port `3208` clear.
 
 P17 dialogue terminal receipt checkpoint:
 - Oracle/GPT-5.5 Pro attempt `p17-dialogue-record-terminal`:

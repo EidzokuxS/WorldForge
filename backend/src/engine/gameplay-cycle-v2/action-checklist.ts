@@ -201,6 +201,7 @@ const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
   "entity_tag",
   "item_transfer",
   "world_fact",
+  "location_reveal",
   "minor_poi_create",
   "scene_beat",
   "dialogue_outcome",
@@ -215,6 +216,8 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
     case "route_check":
       return "location";
     case "minor_poi_create":
+      return "local_scene";
+    case "location_reveal":
       return "local_scene";
     case "entity_tag":
       return "item";
@@ -243,6 +246,8 @@ function purposeForSimpleEffect(input: {
       return "Settle temporary current-scene support actor creation through backend actor authority.";
     case "minor_poi_create":
       return "Settle a visible current-scene minor point of interest through backend local-scene authority.";
+    case "location_reveal":
+      return "Settle a source-bounded visible current-scene place handle through backend local-scene authority.";
     case "entity_tag":
       return "Settle the concrete entity tag change through backend tag authority.";
     case "item_transfer":
@@ -272,6 +277,8 @@ function expectedVisibleEffectForSimpleEffect(input: {
       return "Accepted temporary support actor creation receipt.";
     case "minor_poi_create":
       return "Accepted visible current-scene minor point of interest creation receipt.";
+    case "location_reveal":
+      return "Accepted visible current-scene place-handle reveal receipt.";
     case "entity_tag":
       return `Accepted entity tag mutation receipt for ${target}.`;
     case "item_transfer":

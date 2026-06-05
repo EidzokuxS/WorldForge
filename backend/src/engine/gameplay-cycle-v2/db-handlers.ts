@@ -80,6 +80,7 @@ type CurrentSceneResolution =
 type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>["effectBinding"]["entityScope"];
 type WorldFactRequestV2 = Extract<GameplayToolRequestV2, { toolId: "world_fact.record.v2" }>;
 type ItemTransferRequestV2 = Extract<GameplayToolRequestV2, { toolId: "item.transfer.v2" }>;
+type LocationRevealRequestV2 = Extract<GameplayToolRequestV2, { toolId: "location.reveal.v2" }>;
 type ItemTransferBindingV2 = ItemTransferRequestV2["effectBinding"];
 type ItemRow = typeof items.$inferSelect;
 
@@ -125,6 +126,7 @@ type ItemTransferResolution =
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
   afterItemTransferRowUpdateBeforeAuthorityTrace?: () => void;
+  afterLocationRevealInsertBeforeAuthorityTrace?: () => void;
   afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
   afterSupportActorInsertBeforeAuthorityTrace?: () => void;
   afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
@@ -612,6 +614,46 @@ function resolveWorldFactSource(input: {
     }
   }
 
+  return { status: "resolved", receipts };
+}
+
+function resolveLocationRevealSource(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: LocationRevealRequestV2;
+  priorReceipts: readonly GameplayRuntimeReceiptV2[];
+}): {
+  status: "resolved";
+  receipts: GameplayRuntimeReceiptV2[];
+} | {
+  status: "failed";
+  reason: string;
+} {
+  const source = input.request.effectBinding.sourceAuthority;
+  if (source.kind === "current_scene_visible_evidence") {
+    const citableRefs = new Set(input.packet.citableRefs.map((ref) => ref.trim().toLowerCase()));
+    for (const ref of source.sourceRefs) {
+      if (!citableRefs.has(ref.trim().toLowerCase())) {
+        return { status: "failed", reason: `Location reveal source ref "${ref}" is not citable in the current scene packet.` };
+      }
+    }
+    return { status: "resolved", receipts: [] };
+  }
+
+  const priorById = new Map(input.priorReceipts.map((receipt) => [receipt.receiptId, receipt]));
+  const receipts: GameplayRuntimeReceiptV2[] = [];
+  for (const receiptId of source.sourceReceiptIds) {
+    const receipt = priorById.get(receiptId);
+    if (!receipt) {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not an accepted prior receipt in this turn.` };
+    }
+    if (receipt.status !== "accepted") {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not accepted.` };
+    }
+    if (receipt.toolId === "location.reveal.v2") {
+      return { status: "failed", reason: "location.reveal.v2 cannot source another location.reveal.v2 receipt in the same turn." };
+    }
+    receipts.push(receipt);
+  }
   return { status: "resolved", receipts };
 }
 
@@ -1486,6 +1528,163 @@ function commitMinorPoiCreateV2(input: {
   });
 }
 
+function commitLocationRevealV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: LocationRevealRequestV2;
+  anchor: Extract<CurrentSceneResolution, { status: "resolved" }>;
+  locationLabel: string;
+  sourceReceipts: readonly GameplayRuntimeReceiptV2[];
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  locationId: string;
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const locationId = crypto.randomUUID();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const binding = input.request.effectBinding;
+  const revealTags = [
+    "location-reveal",
+    "gameplay-v2-created",
+    "current-scene-place-handle",
+    "target-only",
+    "no-route",
+  ];
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const labelCollision = db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        archivedAtTick: locations.archivedAtTick,
+        parentLocationId: locations.parentLocationId,
+      })
+      .from(locations)
+      .where(and(
+        eq(locations.campaignId, input.packet.campaignId),
+        eq(locations.parentLocationId, input.anchor.sceneLocationId),
+      ))
+      .all()
+      .find((row) =>
+        row.archivedAtTick == null
+        && normalizePoiLabel(row.name) === normalizePoiLabel(input.locationLabel));
+    if (labelCollision) {
+      throw new Error(`A matching place handle "${labelCollision.name}" is already present in the current scene.`);
+    }
+
+    const insert = db.insert(locations)
+      .values({
+        id: locationId,
+        campaignId: input.packet.campaignId,
+        name: input.locationLabel,
+        description: binding.visibleDescription ?? binding.reason,
+        kind: "ephemeral_scene",
+        parentLocationId: input.anchor.sceneLocationId,
+        anchorLocationId: input.anchor.broadLocationId,
+        persistence: "ephemeral",
+        expiresAtTick: null,
+        archivedAtTick: null,
+        tags: stringifyStringArray(revealTags),
+        isStarting: false,
+        connectedTo: "[]",
+      })
+      .run();
+    if (insert.changes !== 1) {
+      throw new Error("location.reveal.v2 did not insert exactly one location row.");
+    }
+
+    input.testHooks?.afterLocationRevealInsertBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before location.reveal.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.location.reveal.v2",
+        sourceEntityType: "location",
+        sourceEntityId: locationId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray([
+          `location_reveal:${locationId}:created`,
+          `scene:${input.anchor.sceneLocationId}:place_handles`,
+        ]),
+        witnesses: stringifyStringArray(binding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          anchorRef: binding.anchorRef,
+          anchorScope: binding.anchorScope,
+          anchorSceneLocationId: input.anchor.sceneLocationId,
+          anchorBroadLocationId: input.anchor.broadLocationId,
+          revealMode: binding.revealMode,
+          placeHandleKind: binding.placeHandleKind,
+          locationId,
+          locationLabel: input.locationLabel,
+          sourceAuthority: binding.sourceAuthority,
+          sourceReceiptSummaries: sourceReceiptSummary(input.sourceReceipts),
+          exposure: binding.exposure,
+          movementCandidate: false,
+          routeEdgeCreated: false,
+          currentSceneChanged: false,
+          absenceProof: false,
+          hiddenDiscovery: false,
+          itemCreated: false,
+          actorCreated: false,
+          worldFactCreated: false,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      locationId,
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function commitEntityTagV2(input: {
   packet: ModelFacingTurnPacketV2;
   request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>;
@@ -2317,6 +2516,65 @@ function minorPoiCreateHandler(
   }
 }
 
+function locationRevealHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: LocationRevealRequestV2,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  priorReceipts: readonly GameplayRuntimeReceiptV2[],
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const anchor = resolveCurrentScene({
+    registry,
+    anchorRef: request.effectBinding.anchorRef,
+  });
+  if (anchor.status !== "resolved") return failedOutcome(packet, anchor.reason);
+  const locationLabel = request.effectBinding.locationLabel.trim().replace(/\s+/gu, " ");
+  const registryCollision = registry.entries.find((entry) =>
+    normalizePoiLabel(entry.label) === normalizePoiLabel(locationLabel)
+    || normalizePoiLabel(entry.ref) === normalizePoiLabel(locationLabel));
+  if (registryCollision) {
+    return failedOutcome(
+      packet,
+      `Location reveal label "${locationLabel}" collides with existing visible ref "${registryCollision.ref}".`,
+    );
+  }
+  const source = resolveLocationRevealSource({
+    packet,
+    request,
+    priorReceipts,
+  });
+  if (source.status !== "resolved") return failedOutcome(packet, source.reason);
+
+  try {
+    const commit = commitLocationRevealV2({
+      packet,
+      request,
+      anchor,
+      locationLabel,
+      sourceReceipts: source.receipts,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "local_scene",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `${locationLabel} is now a visible current-scene place handle in ${anchor.label}.`,
+      evidenceRefs: [
+        request.effectBinding.anchorRef,
+        ...request.effectBinding.evidenceRefs,
+      ],
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "location.reveal.v2 failed before committing place-handle reveal.";
+    const isNoOp = reason.includes("already present in the current scene");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 function entityTagHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>,
@@ -2499,6 +2757,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "minor_poi.create.v2 handler received the wrong request type.");
       }
       return minorPoiCreateHandler(packet, request, refRegistry, options.testHooks);
+    },
+    "location.reveal.v2": ({ packet, request, refRegistry, priorReceipts }) => {
+      if (request.toolId !== "location.reveal.v2") {
+        return failedOutcome(packet, "location.reveal.v2 handler received the wrong request type.");
+      }
+      return locationRevealHandler(packet, request, refRegistry, priorReceipts, options.testHooks);
     },
     "entity.tag.v2": ({ packet, request, refRegistry }) => {
       if (request.toolId !== "entity.tag.v2") {

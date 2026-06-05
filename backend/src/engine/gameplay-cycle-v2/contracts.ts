@@ -1003,14 +1003,54 @@ const sceneBeatRecordRequestV2Schema = z.object({
   }).strict(),
 }).strict();
 
+const locationRevealSourceAuthorityV2Schema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("current_scene_visible_evidence"),
+    sourceRefs: z.array(modelSafeRefSchema).min(1).max(8),
+    sourceSummary: shortText,
+  }).strict(),
+  z.object({
+    kind: z.literal("accepted_runtime_receipt"),
+    sourceReceiptIds: z.array(idText).min(1).max(4),
+    sourceSummary: shortText,
+  }).strict(),
+]);
+
 const locationRevealRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,
   capabilityId: z.literal("location_reveal"),
   toolId: z.literal("location.reveal.v2"),
   effectBinding: z.object({
-    locationLabel: shortText,
+    anchorScope: z.literal("current_scene"),
     anchorRef: modelSafeRefSchema,
-    revealReason: z.string().trim().min(1).max(500),
+    revealMode: z.enum(["create_visible_place_handle", "expose_existing_place_handle"]),
+    placeHandleKind: z.enum([
+      "entrance",
+      "service_window",
+      "alcove",
+      "stall",
+      "counter",
+      "doorway",
+      "local_area",
+      "landmark",
+      "other_visible_place",
+    ]),
+    locationLabel: shortText,
+    visibleDescription: optionalNonEmptyString(320),
+    sourceAuthority: locationRevealSourceAuthorityV2Schema,
+    exposure: z.object({
+      targetKind: z.literal("location"),
+      visibleCurrentSceneTarget: z.literal(true),
+      movementCandidate: z.literal(false),
+      routeEdgeCreated: z.literal(false),
+      currentSceneChanged: z.literal(false),
+      absenceProof: z.literal(false),
+      hiddenDiscovery: z.literal(false),
+      itemCreated: z.literal(false),
+      actorCreated: z.literal(false),
+      worldFactCreated: z.literal(false),
+    }).strict(),
+    reason: z.string().trim().min(1).max(500),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
 }).strict();

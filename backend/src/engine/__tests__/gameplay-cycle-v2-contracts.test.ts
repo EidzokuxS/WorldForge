@@ -871,6 +871,85 @@ function minorPoiToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function locationRevealToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "location_reveal"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player identifies a visible service window as a local place handle.",
+      sceneQuestion: "What place-handle reveal must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+      actionInterpretation: {
+        intent: "Make the service window a citable current-scene place handle.",
+        method: "use visible current-scene evidence",
+        targetRefs: ["Atrium Floor"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "A visible place handle requires backend local-scene mutation authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["location_reveal"],
+        actorRefs: ["Player"],
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Reveal one source-bounded visible current-scene place handle if accepted by backend authority.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Location reveal GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-location-reveal-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Reveal a visible local service window handle.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Reveal one visible current-scene service window handle.",
+        actorRef: "Player",
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        requiredCapabilityId: "location_reveal",
+        intendedEffect: {
+          kind: "location_reveal",
+          summary: "A service window becomes visible as a current-scene place handle.",
+          stateScope: "local_scene",
+        },
+        expectedVisibleEffect: "A visible service window place handle is available in the current scene.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Location reveal checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function entityTagToolPlanFixture() {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -3325,6 +3404,99 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("create_minor_poi");
     expect(JSON.stringify(result.request)).not.toContain("location.reveal");
     expect(JSON.stringify(result.request)).not.toContain("move_actor");
+  });
+
+  it("accepts a clean location.reveal.v2 request with source-bounded place-handle authority", () => {
+    const { packet, checklist } = locationRevealToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-location-reveal-1",
+        stepId: "step-1",
+        capabilityId: "location_reveal",
+        toolId: "location.reveal.v2",
+        effectBinding: {
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          revealMode: "create_visible_place_handle",
+          placeHandleKind: "service_window",
+          locationLabel: "Service Window",
+          visibleDescription: "A small service window set into the atrium wall.",
+          sourceAuthority: {
+            kind: "current_scene_visible_evidence",
+            sourceRefs: ["Player", "Atrium Floor"],
+            sourceSummary: "The handle is bounded to visible current-scene evidence.",
+          },
+          exposure: {
+            targetKind: "location",
+            visibleCurrentSceneTarget: true,
+            movementCandidate: false,
+            routeEdgeCreated: false,
+            currentSceneChanged: false,
+            absenceProof: false,
+            hiddenDiscovery: false,
+            itemCreated: false,
+            actorCreated: false,
+            worldFactCreated: false,
+          },
+          reason: "The player needs this visible service window as a citable local place handle.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Location reveal tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("location.reveal.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      anchorScope: "current_scene",
+      anchorRef: "Atrium Floor",
+      locationLabel: "Service Window",
+      exposure: {
+        movementCandidate: false,
+        routeEdgeCreated: false,
+        currentSceneChanged: false,
+        absenceProof: false,
+        hiddenDiscovery: false,
+      },
+    });
+    expect(JSON.stringify(result.request)).not.toContain("reveal_location");
+    expect(JSON.stringify(result.request)).not.toContain("move_actor");
+  });
+
+  it("rejects the old bare location.reveal.v2 placeholder schema", () => {
+    const { packet, checklist } = locationRevealToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-location-reveal-placeholder",
+        stepId: "step-1",
+        capabilityId: "location_reveal",
+        toolId: "location.reveal.v2",
+        effectBinding: {
+          locationLabel: "Service Window",
+          anchorRef: "Atrium Floor",
+          revealReason: "The player found it.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") {
+      throw new Error("Bare placeholder location reveal request must be rejected.");
+    }
+    expect(result.issues.some((issue) => issue.code === "schema_invalid")).toBe(true);
   });
 
   it("accepts a clean entity.tag.v2 request with scoped entity authority", () => {
@@ -7303,6 +7475,376 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     }
   });
 
+  it("executes location.reveal.v2 as atomic visible current-scene place-handle mutation", async () => {
+    const fixture = dbTempFixture("wf-v2-db-location-reveal-");
+    const previousCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
+    try {
+      process.env.GSD_CAMPAIGNS_ROOT = fixture.tempDir;
+      const campaignDir = join(fixture.tempDir, "campaign-alpha");
+      mkdirSync(campaignDir, { recursive: true });
+      writeFileSync(join(campaignDir, "config.json"), JSON.stringify({
+        name: "P16 Fixture",
+        premise: "A test campaign for gameplay-cycle-v2 handlers.",
+        currentTick: 0,
+        createdAt: 1_000,
+        updatedAt: 1_000,
+      }));
+      seedP16World();
+      const { packet, checklist } = locationRevealToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "location-reveal-db-1",
+          stepId: "step-1",
+          capabilityId: "location_reveal",
+          toolId: "location.reveal.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            revealMode: "create_visible_place_handle",
+            placeHandleKind: "service_window",
+            locationLabel: "Service Window",
+            visibleDescription: "A small service window set into the atrium wall.",
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The service window is bounded to visible current-scene evidence.",
+            },
+            exposure: {
+              targetKind: "location",
+              visibleCurrentSceneTarget: true,
+              movementCandidate: false,
+              routeEdgeCreated: false,
+              currentSceneChanged: false,
+              absenceProof: false,
+              hiddenDiscovery: false,
+              itemCreated: false,
+              actorCreated: false,
+              worldFactCreated: false,
+            },
+            reason: "The player needs this visible service window as a citable local place handle.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-location-reveal-db-1",
+        emittedAt: 28,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        toolId: "location.reveal.v2",
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "local_scene",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+      });
+      expect(execution.receipt.visibleSummary).toContain("Service Window");
+
+      const handleRows = getDb().select().from(locations).where(eq(locations.name, "Service Window")).all();
+      expect(handleRows).toHaveLength(1);
+      expect(handleRows[0]).toMatchObject({
+        campaignId: "campaign-alpha",
+        kind: "ephemeral_scene",
+        parentLocationId: "scene-alpha",
+        anchorLocationId: "location-alpha",
+        persistence: "ephemeral",
+        connectedTo: "[]",
+      });
+      expect(JSON.parse(handleRows[0].tags)).toEqual(expect.arrayContaining([
+        "location-reveal",
+        "gameplay-v2-created",
+        "current-scene-place-handle",
+        "target-only",
+        "no-route",
+      ]));
+      const handleEdges = getDb().select().from(locationEdges).all()
+        .filter((edge) =>
+          edge.fromLocationId === handleRows[0].id || edge.toLocationId === handleRows[0].id);
+      expect(handleEdges).toHaveLength(0);
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 8,
+        worldTimeMinutes: 10,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.location.reveal.v2",
+        sourceEntityType: "location",
+        sourceEntityId: handleRows[0].id,
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:location-reveal-db-1",
+      });
+      const traceMetadata = JSON.parse(traces[0].metadata) as {
+        exposure?: {
+          movementCandidate?: boolean;
+          routeEdgeCreated?: boolean;
+          currentSceneChanged?: boolean;
+          absenceProof?: boolean;
+          hiddenDiscovery?: boolean;
+        };
+        movementCandidate?: boolean;
+        routeEdgeCreated?: boolean;
+        currentSceneChanged?: boolean;
+        absenceProof?: boolean;
+        hiddenDiscovery?: boolean;
+        itemCreated?: boolean;
+        actorCreated?: boolean;
+        worldFactCreated?: boolean;
+      };
+      expect(traceMetadata.exposure).toMatchObject({
+        movementCandidate: false,
+        routeEdgeCreated: false,
+        currentSceneChanged: false,
+        absenceProof: false,
+        hiddenDiscovery: false,
+      });
+      expect(traceMetadata).toMatchObject({
+        movementCandidate: false,
+        routeEdgeCreated: false,
+        currentSceneChanged: false,
+        absenceProof: false,
+        hiddenDiscovery: false,
+        itemCreated: false,
+        actorCreated: false,
+        worldFactCreated: false,
+      });
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+
+      const refreshedFrame = await buildSceneFrame({
+        campaignId: "campaign-alpha",
+        tick: 0,
+        playerAction: "I inspect the service window.",
+      });
+      expect(refreshedFrame.targetCandidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: `location_reveal:${handleRows[0].id}`,
+          type: "location",
+          label: "Service Window",
+          locationId: handleRows[0].id,
+        }),
+      ]));
+      expect(refreshedFrame.movementCandidates.map((candidate) => candidate.label))
+        .not.toContain("Service Window");
+
+      const refreshedPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext({
+          playerAction: "I inspect the service window.",
+          baseTick: refreshedFrame.tick,
+          baseWorldVersion: 8,
+        }),
+        frame: refreshedFrame,
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "route_check", "movement", "location_reveal"],
+        },
+      }));
+      expect(refreshedPacket.scene.targets).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          ref: "Service Window",
+          label: "Service Window",
+          kind: "location",
+        }),
+      ]));
+      expect(refreshedPacket.citableRefs).toContain("Service Window");
+      const refreshedRegistry = buildGameplayRefRegistryV2({
+        turnId: "turn-alpha",
+        frame: refreshedFrame,
+      });
+      const visibleTarget = resolveGameplayRefV2({
+        registry: refreshedRegistry,
+        ref: "Service Window",
+        allowedKinds: ["visible_target"],
+      });
+      expect(visibleTarget.status).toBe("resolved");
+      if (visibleTarget.status !== "resolved") {
+        throw new Error("Service Window must resolve as a visible target.");
+      }
+      expect(visibleTarget.entry).toMatchObject({
+        kind: "visible_target",
+        metadata: {
+          targetKind: "location",
+        },
+      });
+      const movementTarget = resolveGameplayRefV2({
+        registry: refreshedRegistry,
+        ref: "Service Window",
+        allowedKinds: ["movement_option"],
+      });
+      expect(movementTarget.status).toBe("missing");
+    } finally {
+      if (previousCampaignRoot === undefined) {
+        delete process.env.GSD_CAMPAIGNS_ROOT;
+      } else {
+        process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
+      }
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects location.reveal.v2 duplicate no-op without mutating DB state or advancing world version", async () => {
+    const fixture = dbTempFixture("wf-v2-db-location-reveal-noop-");
+    try {
+      seedP16World();
+      getDb().insert(locations).values({
+        id: "place-existing-service-window",
+        campaignId: "campaign-alpha",
+        name: "Service Window",
+        description: "An existing place handle.",
+        kind: "ephemeral_scene",
+        parentLocationId: "scene-alpha",
+        anchorLocationId: "location-alpha",
+        persistence: "ephemeral",
+        expiresAtTick: null,
+        archivedAtTick: null,
+        tags: JSON.stringify(["location-reveal", "target-only", "no-route"]),
+        isStarting: false,
+        connectedTo: "[]",
+      }).run();
+      const { packet, checklist } = locationRevealToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "location-reveal-noop-1",
+          stepId: "step-1",
+          capabilityId: "location_reveal",
+          toolId: "location.reveal.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            revealMode: "create_visible_place_handle",
+            placeHandleKind: "service_window",
+            locationLabel: "Service Window",
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The service window is bounded to visible current-scene evidence.",
+            },
+            exposure: {
+              targetKind: "location",
+              visibleCurrentSceneTarget: true,
+              movementCandidate: false,
+              routeEdgeCreated: false,
+              currentSceneChanged: false,
+              absenceProof: false,
+              hiddenDiscovery: false,
+              itemCreated: false,
+              actorCreated: false,
+              worldFactCreated: false,
+            },
+            reason: "The player needs this visible service window as a citable local place handle.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-location-reveal-noop-1",
+        emittedAt: 29,
+      });
+
+      expect(execution.status).toBe("rejected");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("already present in the current scene");
+      expect(getDb().select().from(locations).where(eq(locations.name, "Service Window")).all()).toHaveLength(1);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      expect(getDb().select().from(locationEdges).all()).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back location.reveal.v2 row insert when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-location-reveal-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = locationRevealToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "location-reveal-rollback-1",
+          stepId: "step-1",
+          capabilityId: "location_reveal",
+          toolId: "location.reveal.v2",
+          effectBinding: {
+            anchorScope: "current_scene",
+            anchorRef: "Atrium Floor",
+            revealMode: "create_visible_place_handle",
+            placeHandleKind: "service_window",
+            locationLabel: "Service Window",
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The service window is bounded to visible current-scene evidence.",
+            },
+            exposure: {
+              targetKind: "location",
+              visibleCurrentSceneTarget: true,
+              movementCandidate: false,
+              routeEdgeCreated: false,
+              currentSceneChanged: false,
+              absenceProof: false,
+              hiddenDiscovery: false,
+              itemCreated: false,
+              actorCreated: false,
+              worldFactCreated: false,
+            },
+            reason: "The player needs this visible service window as a citable local place handle.",
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterLocationRevealInsertBeforeAuthorityTrace: () => {
+              throw new Error("forced location reveal authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-location-reveal-rollback-1",
+        emittedAt: 30,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced location reveal authority failure");
+      expect(getDb().select().from(locations).where(eq(locations.name, "Service Window")).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      expect(getDb().select().from(locationEdges).all()).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("rolls back minor_poi.create.v2 row insert when authority commit fails inside the v2 transaction", async () => {
     const fixture = dbTempFixture("wf-v2-db-minor-poi-rollback-");
     try {
@@ -8364,6 +8906,19 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("throw runtimeContractError");
     expect(source).not.toContain("The GM Read layer could not produce a valid no-mutation interpretation.");
     expect(source).not.toContain("Please clarify what you want to do next.");
+  });
+
+  it("keeps location_reveal place-handle labels owned by the tool request layer, not GM Read refs", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain(
+      "For location_reveal, checklistRequest.targetRefs and evidenceRefs must cite only refs that already exist in citableRefs",
+    );
+    expect(source).toContain("Do not cite the new place-handle label in GM Read");
+    expect(source).toContain("the new label belongs only in the later location.reveal.v2 tool request locationLabel");
   });
 
   it("constructs local consequence scene-beat requests from backend schedule ownership", () => {
