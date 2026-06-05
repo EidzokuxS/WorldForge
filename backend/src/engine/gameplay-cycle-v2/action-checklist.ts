@@ -4,6 +4,7 @@ import {
   gmActionChecklistV2Schema,
   type GmActionChecklistEffectKindV2,
   type GmActionChecklistV2,
+  type GmJudgeChecklistV2,
   type GmReadChecklistV2,
   type ModelFacingTurnPacketV2,
   type RuntimeCapabilityIdV2,
@@ -165,6 +166,7 @@ function validatePrivateTerms(input: {
 function validateGmReadAlignment(input: {
   checklist: GmActionChecklistV2;
   gmRead: GmReadChecklistV2;
+  gmJudge?: GmJudgeChecklistV2;
 }): ActionChecklistValidationIssueV2[] {
   const issues: ActionChecklistValidationIssueV2[] = [];
   if (input.checklist.sourceGmReadPath !== input.gmRead.path) {
@@ -174,20 +176,28 @@ function validateGmReadAlignment(input: {
       message: "Checklist sourceGmReadPath must match the accepted GM Read path.",
     });
   }
-  if (input.checklist.turnPath !== input.gmRead.checklistRequest.turnPath) {
+  const admission = input.gmJudge?.checklistAdmission ?? input.gmRead.checklistRequest;
+  if (input.gmJudge && input.gmJudge.lane !== "action_checklist") {
+    issues.push({
+      code: "gm_read_mismatch",
+      path: "gmJudge.lane",
+      message: "Checklist validation requires an action_checklist GM Judge admission.",
+    });
+  }
+  if (input.checklist.turnPath !== admission.turnPath) {
     issues.push({
       code: "gm_read_mismatch",
       path: "turnPath",
-      message: "Checklist turnPath must match GM Read checklistRequest.turnPath.",
+      message: "Checklist turnPath must match GM Judge checklistAdmission.turnPath.",
     });
   }
-  const requestedKinds = new Set(input.gmRead.checklistRequest.requiredEffectKinds);
+  const requestedKinds = new Set(admission.requiredEffectKinds);
   input.checklist.steps.forEach((step, index) => {
     if (!requestedKinds.has(step.intendedEffect.kind)) {
       issues.push({
         code: "gm_read_mismatch",
         path: `steps.${index}.intendedEffect.kind`,
-        message: `Checklist effect "${step.intendedEffect.kind}" was not requested by GM Read.`,
+        message: `Checklist effect "${step.intendedEffect.kind}" was not admitted by GM Judge.`,
       });
     }
   });
@@ -311,15 +321,17 @@ function expectedVisibleEffectForSimpleEffect(input: {
 export function compileSimpleGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
+  gmJudge?: GmJudgeChecklistV2;
 }): ActionChecklistValidationResultV2 | null {
-  const requestedKinds = input.gmRead.checklistRequest.requiredEffectKinds;
+  const admission = input.gmJudge?.checklistAdmission ?? input.gmRead.checklistRequest;
+  const requestedKinds = admission.requiredEffectKinds;
   if (requestedKinds.length !== 1) return null;
   const kind = requestedKinds[0];
   if (!BACKEND_COMPILED_SIMPLE_EFFECTS.has(kind)) return null;
 
-  const actorRef = input.gmRead.checklistRequest.actorRefs[0];
-  const targetRefs = uniqueStrings(input.gmRead.checklistRequest.targetRefs);
-  const evidenceRefs = uniqueStrings(input.gmRead.checklistRequest.evidenceRefs);
+  const actorRef = admission.actorRefs[0];
+  const targetRefs = uniqueStrings(admission.targetRefs);
+  const evidenceRefs = uniqueStrings(admission.evidenceRefs);
   const requiredCapabilityId = capabilityForEffectKindV2(kind) as RuntimeCapabilityIdV2;
   const candidate: GmActionChecklistV2 = {
     version: "gm-action-checklist.v2",
@@ -340,7 +352,7 @@ export function compileSimpleGmActionChecklistV2(input: {
         requiredCapabilityId,
         intendedEffect: {
           kind,
-          summary: input.gmRead.checklistRequest.checklistGoal,
+          summary: admission.checklistGoal,
           stateScope: stateScopeForSimpleEffect(kind),
         },
         expectedVisibleEffect: expectedVisibleEffectForSimpleEffect({ kind, targetRefs }),
@@ -352,6 +364,7 @@ export function compileSimpleGmActionChecklistV2(input: {
   return validateGmActionChecklistV2({
     packet: input.packet,
     gmRead: input.gmRead,
+    gmJudge: input.gmJudge,
     candidate,
   });
 }
@@ -359,6 +372,7 @@ export function compileSimpleGmActionChecklistV2(input: {
 export function validateGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
+  gmJudge?: GmJudgeChecklistV2;
   candidate: unknown;
 }): ActionChecklistValidationResultV2 {
   const issues: ActionChecklistValidationIssueV2[] = [];
@@ -394,7 +408,11 @@ export function validateGmActionChecklistV2(input: {
         message: "Checklist baseWorldVersion must match the model-facing packet.",
       });
     }
-    issues.push(...validateGmReadAlignment({ checklist, gmRead: input.gmRead }));
+    issues.push(...validateGmReadAlignment({
+      checklist,
+      gmRead: input.gmRead,
+      gmJudge: input.gmJudge,
+    }));
     issues.push(...validateRefs({ checklist, packet: input.packet }));
     issues.push(...validateCapabilities({ checklist, packet: input.packet }));
     issues.push(...validatePrivateTerms({ checklist, packet: input.packet }));

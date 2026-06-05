@@ -631,6 +631,137 @@ export const gmActionChecklistEffectKindV2Schema = z.enum([
 
 export type GmActionChecklistEffectKindV2 = z.infer<typeof gmActionChecklistEffectKindV2Schema>;
 
+export const gmJudgeLaneV2Schema = z.enum([
+  "direct",
+  "continue",
+  "clarification",
+  "roll_oracle",
+  "action_checklist",
+  "combat_transition",
+]);
+
+export type GmJudgeLaneV2 = z.infer<typeof gmJudgeLaneV2Schema>;
+
+export const gmJudgePhysicalPossibilityV2Schema = z.enum([
+  "possible",
+  "impossible",
+  "underspecified",
+  "unsupported",
+  "uncertain",
+]);
+
+export type GmJudgePhysicalPossibilityV2 =
+  z.infer<typeof gmJudgePhysicalPossibilityV2Schema>;
+
+export const gmJudgeCheckNeedV2Schema = z.enum([
+  "no_check",
+  "clarification_needed",
+  "oracle_uncertainty",
+  "backend_action_checklist",
+  "combat_judge",
+]);
+
+export type GmJudgeCheckNeedV2 = z.infer<typeof gmJudgeCheckNeedV2Schema>;
+
+export const gmJudgeChecklistAdmissionV2Schema = gmReadChecklistRequestV2Schema;
+
+export type GmJudgeChecklistAdmissionV2 =
+  z.infer<typeof gmJudgeChecklistAdmissionV2Schema>;
+
+export const gmJudgeOracleAdmissionV2Schema = gmReadOracleRequestV2Schema.extend({
+  postOracleRoute: z.enum([
+    "settle_visible_outcome_only",
+    "may_require_followup_checklist",
+  ]).default("settle_visible_outcome_only"),
+}).strict();
+
+export type GmJudgeOracleAdmissionV2 =
+  z.infer<typeof gmJudgeOracleAdmissionV2Schema>;
+
+export const gmJudgeV2BaseSchema = z.object({
+  version: z.literal("gm-judge.v2"),
+  lane: gmJudgeLaneV2Schema,
+  physicalPossibility: gmJudgePhysicalPossibilityV2Schema,
+  checkNeed: gmJudgeCheckNeedV2Schema,
+  actorRefs: z.array(modelSafeRefSchema).min(1).max(4),
+  targetRefs: z.array(modelSafeRefSchema).max(8).default([]),
+  evidenceRefs: z.array(modelSafeRefSchema).min(1).max(12),
+  rationale: z.string().trim().min(1).max(800),
+}).strict();
+
+export const gmJudgeNoMutationV2Schema = gmJudgeV2BaseSchema.extend({
+  lane: z.enum(["direct", "continue"]),
+  physicalPossibility: z.literal("possible"),
+  checkNeed: z.literal("no_check"),
+  noMutationReason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const gmJudgeClarificationV2Schema = gmJudgeV2BaseSchema.extend({
+  lane: z.literal("clarification"),
+  physicalPossibility: z.literal("underspecified"),
+  checkNeed: z.literal("clarification_needed"),
+  clarificationPrompt: z.string().trim().min(1).max(500),
+}).strict();
+
+export const gmJudgeOracleV2Schema = gmJudgeV2BaseSchema.extend({
+  lane: z.literal("roll_oracle"),
+  physicalPossibility: z.enum(["possible", "uncertain"]),
+  checkNeed: z.literal("oracle_uncertainty"),
+  oracleAdmission: gmJudgeOracleAdmissionV2Schema,
+}).strict();
+
+export const gmJudgeChecklistV2Schema = gmJudgeV2BaseSchema.extend({
+  lane: z.literal("action_checklist"),
+  physicalPossibility: z.literal("possible"),
+  checkNeed: z.literal("backend_action_checklist"),
+  checklistAdmission: gmJudgeChecklistAdmissionV2Schema,
+}).strict();
+
+export const gmJudgeCombatTransitionV2Schema = gmJudgeV2BaseSchema.extend({
+  lane: z.literal("combat_transition"),
+  physicalPossibility: z.literal("possible"),
+  checkNeed: z.literal("combat_judge"),
+  combatReason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const gmJudgeV2Schema = z.discriminatedUnion("lane", [
+  gmJudgeNoMutationV2Schema,
+  gmJudgeClarificationV2Schema,
+  gmJudgeOracleV2Schema,
+  gmJudgeChecklistV2Schema,
+  gmJudgeCombatTransitionV2Schema,
+]);
+
+export type GmJudgeV2 = z.infer<typeof gmJudgeV2Schema>;
+
+export type GmJudgeNoMutationV2 = z.infer<typeof gmJudgeNoMutationV2Schema>;
+export type GmJudgeClarificationV2 = z.infer<typeof gmJudgeClarificationV2Schema>;
+export type GmJudgeOracleV2 = z.infer<typeof gmJudgeOracleV2Schema>;
+export type GmJudgeChecklistV2 = z.infer<typeof gmJudgeChecklistV2Schema>;
+
+export const publicGmJudgeProjectionV2Schema = z.object({
+  version: z.literal("public-gm-judge-projection.v2"),
+  lane: gmJudgeLaneV2Schema,
+  physicalPossibility: gmJudgePhysicalPossibilityV2Schema,
+  checkNeed: gmJudgeCheckNeedV2Schema,
+  actorRefs: z.array(modelSafeRefSchema).min(1).max(4),
+  evidenceRefs: z.array(modelSafeRefSchema).min(1).max(12),
+  targetRefs: z.array(modelSafeRefSchema).max(8).default([]),
+  requiredEffectKinds: z.array(gmActionChecklistEffectKindV2Schema).max(6).default([]),
+  settlementBasis: z.enum([
+    "scene_frame",
+    "gm_judge_direct",
+    "gm_judge_continue",
+    "gm_judge_clarification",
+    "oracle_settlement",
+    "runtime_receipts",
+    "combat_transition",
+  ]),
+}).strict();
+
+export type PublicGmJudgeProjectionV2 =
+  z.infer<typeof publicGmJudgeProjectionV2Schema>;
+
 export const publicGmReadProjectionV2Schema = z.object({
   version: z.literal("public-gm-read-projection.v2"),
   path: gmReadPathV2Schema,
@@ -1579,6 +1710,7 @@ export const settledTurnPacketV2Schema = z.object({
   baseWorldVersion: worldVersion,
   resultWorldVersion: worldVersion,
   gmReadPublic: publicGmReadProjectionV2Schema,
+  gmJudgePublic: publicGmJudgeProjectionV2Schema,
   oracleVisibleOutcome: oracleVisibleOutcomeV2Schema.nullable().default(null),
   acceptedEvidence: z.array(settledEvidenceV2Schema).max(80),
   acceptedRuntimeReceiptIds: z.array(idText).max(80).default([]),
@@ -1608,11 +1740,11 @@ export const settledTurnPacketV2Schema = z.object({
     }
   }
   if (packet.oracleVisibleOutcome) {
-    if (packet.gmReadPublic.path !== "roll_oracle") {
+    if (packet.gmJudgePublic.lane !== "roll_oracle") {
       ctx.addIssue({
         code: "custom",
         path: ["oracleVisibleOutcome"],
-        message: "Oracle visible outcome requires a roll_oracle GM Read.",
+        message: "Oracle visible outcome requires a roll_oracle GM Judge admission.",
       });
     }
     const hasOracleEvidence = packet.acceptedEvidence.some((evidence) =>
@@ -1625,11 +1757,11 @@ export const settledTurnPacketV2Schema = z.object({
       });
     }
   }
-  if (!packet.oracleVisibleOutcome && packet.gmReadPublic.path === "roll_oracle") {
+  if (!packet.oracleVisibleOutcome && packet.gmJudgePublic.lane === "roll_oracle") {
     ctx.addIssue({
       code: "custom",
       path: ["oracleVisibleOutcome"],
-      message: "roll_oracle GM Read requires an Oracle visible outcome.",
+      message: "roll_oracle GM Judge admission requires an Oracle visible outcome.",
     });
   }
 });
@@ -1750,8 +1882,16 @@ export function assertGmReadV2(value: unknown): GmReadV2 {
   return gmReadV2Schema.parse(value);
 }
 
+export function assertGmJudgeV2(value: unknown): GmJudgeV2 {
+  return gmJudgeV2Schema.parse(value);
+}
+
 export function assertPublicGmReadProjectionV2(value: unknown): PublicGmReadProjectionV2 {
   return publicGmReadProjectionV2Schema.parse(value);
+}
+
+export function assertPublicGmJudgeProjectionV2(value: unknown): PublicGmJudgeProjectionV2 {
+  return publicGmJudgeProjectionV2Schema.parse(value);
 }
 
 export function assertOracleSettlementV2(value: unknown): OracleSettlementV2 {

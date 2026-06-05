@@ -6,6 +6,7 @@ export * from "./db-handlers.js";
 export * from "./evidence-normalizer.js";
 export * from "./explicit-movement-admission.js";
 export * from "./frame-refresh.js";
+export * from "./gm-judge.js";
 export * from "./gm-read.js";
 export * from "./local-consequence-executor.js";
 export * from "./local-consequence-scheduler.js";

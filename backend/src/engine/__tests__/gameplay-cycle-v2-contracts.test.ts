@@ -31,6 +31,7 @@ import {
   buildModelFacingTurnPacketV2,
   buildGameplayRefRegistryV2,
   buildNoReceiptSettledTurnPacketV2,
+  buildCompatGmJudgeFromLegacyGmReadV2,
   buildOraclePayloadV2,
   buildOracleSettlementV2,
   buildOracleSettledTurnPacketV2,
@@ -61,6 +62,7 @@ import {
   normalizeRuntimeReceiptEvidenceV2,
   resolveGameplayRefV2,
   validateGmReadChecklistV2,
+  validateGmJudgeV2,
   validateGmReadOracleV2,
   validateGmReadNoMutationV2,
   validateGmReadV2,
@@ -3196,6 +3198,264 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     }
     expect(result.read.path).toBe("tool_plan");
     expect(result.read.checklistRequest.requiredEffectKinds).toEqual(["movement"]);
+  });
+
+  it("builds and validates a bounded gm-judge.v2 admission from legacy GM Read", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "movement"],
+      },
+    }));
+    const readResult = validateGmReadChecklistV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player wants to move from the atrium to North Hall.",
+        sceneQuestion: "What backend-owned consequence must be admitted?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement changes current scene/location authority and needs backend settlement.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          checklistGoal: "Admit the movement consequence without executable tool input.",
+        },
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Checklist GM Read fixture must be accepted.");
+    }
+
+    const judge = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: readResult.read });
+    const validation = validateGmJudgeV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: judge,
+    });
+
+    expect(validation.status).toBe("accepted");
+    if (validation.status !== "accepted") {
+      throw new Error("GM Judge fixture must be accepted.");
+    }
+    expect(validation.judge.lane).toBe("action_checklist");
+    if (validation.judge.lane === "action_checklist") {
+      expect(validation.judge.checklistAdmission.requiredEffectKinds).toEqual(["movement"]);
+      expect(validation.judge.checklistAdmission.checklistGoal).toContain("movement consequence");
+    }
+    expect(JSON.stringify(validation.judge)).not.toContain("toolName");
+    expect(JSON.stringify(validation.judge)).not.toContain("toolInput");
+  });
+
+  it("rejects gm-judge.v2 executable payloads, uncited refs, and lane drift", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "movement"],
+      },
+    }));
+    const readResult = validateGmReadChecklistV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player wants to move from the atrium to North Hall.",
+        sceneQuestion: "What backend-owned consequence must be admitted?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement changes current scene/location authority and needs backend settlement.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          checklistGoal: "Admit the movement consequence without executable tool input.",
+        },
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Checklist GM Read fixture must be accepted.");
+    }
+
+    const executableRejected = validateGmJudgeV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: {
+        version: "gm-judge.v2",
+        lane: "roll_oracle",
+        physicalPossibility: "uncertain",
+        checkNeed: "oracle_uncertainty",
+        actorRefs: ["Player"],
+        targetRefs: ["Hidden Hall"],
+        evidenceRefs: ["Player", "Atrium"],
+        rationale: "Drifts from the accepted checklist GM Read.",
+        oracleAdmission: {
+          question: "Can the player move?",
+          stakes: "A miss blocks the move.",
+          outcomeMeanings: {
+            strong_hit: "The movement works.",
+            weak_hit: "The movement works with pressure.",
+            miss: "The movement fails.",
+          },
+          uncertaintyKind: "physical_risk",
+          actorRef: "Player",
+          targetRefs: ["Hidden Hall"],
+          evidenceRefs: ["Player", "Atrium"],
+          postOracleRoute: "settle_visible_outcome_only",
+          toolInput: { destinationRef: "Hidden Hall" },
+        },
+      },
+    });
+
+    expect(executableRejected.status).toBe("rejected");
+    expect(executableRejected.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+
+    const driftRejected = validateGmJudgeV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: {
+        version: "gm-judge.v2",
+        lane: "roll_oracle",
+        physicalPossibility: "uncertain",
+        checkNeed: "oracle_uncertainty",
+        actorRefs: ["Player"],
+        targetRefs: ["Hidden Hall"],
+        evidenceRefs: ["Player", "Atrium"],
+        rationale: "Drifts from the accepted checklist GM Read.",
+        oracleAdmission: {
+          question: "Can the player move?",
+          stakes: "A miss blocks the move.",
+          outcomeMeanings: {
+            strong_hit: "The movement works.",
+            weak_hit: "The movement works with pressure.",
+            miss: "The movement fails.",
+          },
+          uncertaintyKind: "physical_risk",
+          actorRef: "Player",
+          targetRefs: ["Hidden Hall"],
+          evidenceRefs: ["Player", "Atrium"],
+          postOracleRoute: "settle_visible_outcome_only",
+        },
+      },
+    });
+
+    expect(driftRejected.status).toBe("rejected");
+    expect(driftRejected.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
+    expect(driftRejected.issues.some((issue) => issue.code === "gm_read_mismatch")).toBe(true);
+  });
+
+  it("rejects action checklist effects not admitted by gm-judge.v2", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "movement", "world_fact_record"],
+      },
+    }));
+    const readResult = validateGmReadChecklistV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player wants to move from the atrium to North Hall.",
+        sceneQuestion: "What backend-owned consequence must be admitted?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement changes current scene/location authority and needs backend settlement.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          checklistGoal: "Admit only the movement consequence.",
+        },
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Checklist GM Read fixture must be accepted.");
+    }
+    const judge = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: readResult.read });
+    if (judge.lane !== "action_checklist") {
+      throw new Error("Expected action_checklist GM Judge.");
+    }
+
+    const rejected = validateGmActionChecklistV2({
+      packet,
+      gmRead: readResult.read,
+      gmJudge: judge,
+      candidate: {
+        version: "gm-action-checklist.v2",
+        checklistId: "checklist-judge-drift",
+        campaignId: "campaign-alpha",
+        turnId: "turn-alpha",
+        baseWorldVersion: 7,
+        sourceGmReadPath: "tool_plan",
+        turnPath: "mutating",
+        turnIntent: "Move to North Hall.",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Record an unadmitted world fact instead of movement.",
+          actorRef: "Player",
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          requiredCapabilityId: "world_fact_record",
+          intendedEffect: {
+            kind: "world_fact",
+            summary: "The destination is considered reached.",
+            stateScope: "knowledge",
+          },
+          expectedVisibleEffect: "A world fact is recorded.",
+          dependsOnStepIds: [],
+        }],
+      },
+    });
+
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues.some((issue) =>
+      issue.code === "gm_read_mismatch"
+      && issue.message.includes("not admitted by GM Judge")
+    )).toBe(true);
   });
 
   it("accepts an action checklist with one intended backend-owned effect per step", () => {
@@ -6674,6 +6934,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(packet.resultWorldVersion).toBe(7);
     expect(packet.acceptedEvidence.some((evidence) => evidence.kind === "scene_status")).toBe(true);
     expect(packet.acceptedEvidence.some((evidence) => evidence.kind === "direct_resolution")).toBe(true);
+    expect(packet.gmJudgePublic.lane).toBe("direct");
+    expect(packet.gmJudgePublic.checkNeed).toBe("no_check");
     expect(JSON.stringify(packet.acceptedEvidence)).not.toContain("private faction timer");
     expect(JSON.stringify(packet.acceptedEvidence)).not.toContain("hidden courier");
   });
@@ -6725,10 +6987,15 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     if (readResult.status !== "accepted") {
       throw new Error("Oracle GM Read fixture must be accepted.");
     }
+    const judge = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead: readResult.read });
+    if (judge.lane !== "roll_oracle") {
+      throw new Error("Expected roll_oracle GM Judge.");
+    }
     const settlement = buildOracleSettlementV2({
       settlementId: "oracle-settlement-1",
       modelPacket,
       gmRead: readResult.read,
+      gmJudge: judge,
       result: {
         chance: 47,
         roll: 41,
@@ -6741,12 +7008,15 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       packetId: "packet-oracle-1",
       modelPacket,
       gmRead: readResult.read,
+      gmJudge: judge,
       oracleSettlement: settlement,
     });
     const narratorView = buildNarratorViewV2(packet);
 
     expect(packet.oracleVisibleOutcome?.selectedMeaning)
       .toBe("The player checks the ledger, but the moment stays tense.");
+    expect(packet.gmJudgePublic.lane).toBe("roll_oracle");
+    expect(packet.gmJudgePublic.checkNeed).toBe("oracle_uncertainty");
     expect(packet.acceptedRuntimeReceiptIds).toEqual([]);
     expect(packet.acceptedDurableEventIds).toEqual([]);
     expect(packet.acceptedEvidence.some((evidence) =>
@@ -6825,6 +7095,17 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         path: "roll_oracle",
         turnNeed: "oracle_uncertainty",
         focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "brass ledger"],
+        targetRefs: ["brass ledger"],
+        requiredEffectKinds: [],
+        settlementBasis: "oracle_settlement",
+      },
+      gmJudgePublic: {
+        version: "public-gm-judge-projection.v2",
+        lane: "roll_oracle",
+        physicalPossibility: "uncertain",
+        checkNeed: "oracle_uncertainty",
+        actorRefs: ["Player"],
         evidenceRefs: ["Player", "Atrium", "brass ledger"],
         targetRefs: ["brass ledger"],
         requiredEffectKinds: [],

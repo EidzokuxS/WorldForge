@@ -1,6 +1,7 @@
 import type { OraclePayload, OracleResult } from "../oracle.js";
 import {
   assertOracleSettlementV2,
+  type GmJudgeOracleV2,
   type GmReadOracleV2,
   type ModelFacingTurnPacketV2,
   type OracleSettlementV2,
@@ -31,26 +32,40 @@ function sceneTags(packet: ModelFacingTurnPacketV2): string[] {
   ]).slice(0, 8);
 }
 
+function oracleAdmission(input: {
+  gmJudge?: GmJudgeOracleV2;
+  gmRead?: GmReadOracleV2;
+}): GmReadOracleV2["oracleRequest"] {
+  if (input.gmJudge) {
+    const { postOracleRoute: _postOracleRoute, ...request } = input.gmJudge.oracleAdmission;
+    return request;
+  }
+  if (input.gmRead) return input.gmRead.oracleRequest;
+  throw new Error("Oracle v2 settlement requires a GM Judge oracle admission.");
+}
+
 export function buildOraclePayloadV2(input: {
   modelPacket: ModelFacingTurnPacketV2;
-  gmRead: GmReadOracleV2;
+  gmJudge?: GmJudgeOracleV2;
+  gmRead?: GmReadOracleV2;
 }): OraclePayload {
-  const targetLabels = labelsForRefs(input.modelPacket, input.gmRead.oracleRequest.targetRefs);
+  const request = oracleAdmission(input);
+  const targetLabels = labelsForRefs(input.modelPacket, request.targetRefs);
   return {
-    intent: input.gmRead.actionInterpretation.intent,
-    method: input.gmRead.actionInterpretation.method ?? input.gmRead.oracleRequest.uncertaintyKind,
-    actorTags: labelsForRefs(input.modelPacket, [input.gmRead.oracleRequest.actorRef]),
+    intent: input.gmRead?.actionInterpretation.intent ?? request.question,
+    method: input.gmRead?.actionInterpretation.method ?? request.uncertaintyKind,
+    actorTags: labelsForRefs(input.modelPacket, [request.actorRef]),
     targetTags: targetLabels,
     environmentTags: sceneTags(input.modelPacket),
     sceneContext: [
-      `Question: ${input.gmRead.oracleRequest.question}`,
-      `Stakes: ${input.gmRead.oracleRequest.stakes}`,
-      `Strong hit means: ${input.gmRead.oracleRequest.outcomeMeanings.strong_hit}`,
-      `Weak hit means: ${input.gmRead.oracleRequest.outcomeMeanings.weak_hit}`,
-      `Miss means: ${input.gmRead.oracleRequest.outcomeMeanings.miss}`,
-      `Uncertainty kind: ${input.gmRead.oracleRequest.uncertaintyKind}`,
+      `Question: ${request.question}`,
+      `Stakes: ${request.stakes}`,
+      `Strong hit means: ${request.outcomeMeanings.strong_hit}`,
+      `Weak hit means: ${request.outcomeMeanings.weak_hit}`,
+      `Miss means: ${request.outcomeMeanings.miss}`,
+      `Uncertainty kind: ${request.uncertaintyKind}`,
       `Scene: ${input.modelPacket.scene.currentScene.label ?? input.modelPacket.scene.currentLocation.label ?? "unknown"}`,
-      `Evidence refs: ${input.gmRead.oracleRequest.evidenceRefs.join(", ")}`,
+      `Evidence refs: ${request.evidenceRefs.join(", ")}`,
     ].join("\n"),
   };
 }
@@ -58,15 +73,17 @@ export function buildOraclePayloadV2(input: {
 export function buildOracleSettlementV2(input: {
   settlementId: string;
   modelPacket: ModelFacingTurnPacketV2;
-  gmRead: GmReadOracleV2;
+  gmJudge?: GmJudgeOracleV2;
+  gmRead?: GmReadOracleV2;
   result: OracleResult;
 }): OracleSettlementV2 {
-  const selectedMeaning = input.gmRead.oracleRequest.outcomeMeanings[input.result.outcome];
+  const request = oracleAdmission(input);
+  const selectedMeaning = request.outcomeMeanings[input.result.outcome];
   const narratorSummary = [
     `Oracle outcome: ${input.result.outcome}.`,
     `Selected meaning: ${selectedMeaning}`,
-    `Question: ${input.gmRead.oracleRequest.question}`,
-    `Stakes: ${input.gmRead.oracleRequest.stakes}`,
+    `Question: ${request.question}`,
+    `Stakes: ${request.stakes}`,
   ].join(" ");
 
   return assertOracleSettlementV2({
@@ -74,15 +91,15 @@ export function buildOracleSettlementV2(input: {
     settlementId: input.settlementId,
     campaignId: input.modelPacket.campaignId,
     turnId: input.modelPacket.turnId,
-    request: input.gmRead.oracleRequest,
+    request,
     result: input.result,
     evidenceAuthority: "oracle_settlement",
     mutationAuthority: "none",
     narratorSummary,
     visibleOutcome: {
       outcome: input.result.outcome,
-      question: input.gmRead.oracleRequest.question,
-      stakes: input.gmRead.oracleRequest.stakes,
+      question: request.question,
+      stakes: request.stakes,
       selectedMeaning,
     },
   });

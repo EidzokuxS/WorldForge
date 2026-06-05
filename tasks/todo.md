@@ -1556,3 +1556,48 @@ Session: `gm-v1-consequenc-slice`.
   - DB after live turn: world clock `worldVersion=1`, `worldTimeMinutes=15`, `currentTick=15`; one ledger row `deltaMinutes=15`, `reasonKind=wait`; one authority trace with state delta `world_clock:<campaignId>:time`; player remains in `Lowwater Bazaar`; simulation proposals, actor knowledge records, recent events all 0.
   - Artifacts: `output/p25-time-advance/live-action.sse`, `output/p25-time-advance/live-action-events.json`, `output/p25-time-advance/db-inspection.json`, backend logs `output/p25-time-advance-backend.stdout.log` / `.stderr.log`.
   - Backend started only for the diagnostic on port 3208 and was stopped after inspection; ports 3001/3208 were clear afterward.
+- P26 candidate Judge/Uncertainty admission checkpoint:
+  - User reminder still applies: final acceptance counts only as several different zero-turn campaigns/clones that each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+  - Current gap: v2 GM Read directly chooses `roll_oracle` vs `tool_plan` and carries `oracleRequest`; this still conflates interpretation with feasibility/check-needed/stakes even though the architecture calls for a Judge layer.
+  - Candidate boundary before Oracle review:
+    - Authoritative input: accepted GM Read, `ModelFacingTurnPacketV2`, optional explicit movement admission, and no mutation state.
+    - Backend-owned output: typed `gm-judge.v2` admission packet stating physical possibility, whether a check is needed, uncertainty kind, difficulty/stakes/outcome meanings when applicable, and downstream route: no-check/direct/tool-plan, oracle, clarification, or impossible.
+    - Downstream consumer: Oracle may run only from a Judge decision that says a check is needed; tool checklist may run only when Judge says the action is feasible and needs backend consequences; narrator may see only settled Judge facts such as impossible/clarification reasons, not hidden speculation.
+    - Failure behavior: invalid Judge fails closed before mutation and packet persistence; impossible/clarification outcomes must not become mutation receipts; no Oracle on deterministic/impossible/no-check turns.
+    - Forbidden responsibilities: Judge must not emit tool payloads, mutate world, narrate, decide hidden facts, or replace runtime receipts for movement/search/item/NPC/location/world-fact state.
+  - Oracle question to ask: should P26 introduce a separate typed Judge packet now, or a narrower Oracle-admission wrapper, and what exact contract/tests avoid adding another muddy planning layer?
+  - Oracle/GPT-5.5 Pro browser review:
+    - Context delivery verified through the built-in ChatGPT browser conversation `https://chatgpt.com/c/6a223bf8-8ac8-8392-a416-c2d51136c42d`; the UI accepted one compact bundled file chip `WorldForge review ga..`, then produced a complete answer.
+    - Recommendation: introduce a separate typed `gm-judge.v2`, not a narrow Oracle-admission wrapper.
+    - Rationale: Oracle-only admission would move `gmRead.oracleRequest` but leave `gmRead.path`, `turnNeed`, `checklistRequest.requiredEffectKinds`, and `checklistGoal` inside GM Read, preserving the same mixed interpretation/admission/checklist-routing problem for tool-plan turns.
+    - Accepted boundary: `gm-judge.v2` is an admission record only. It may choose lane, physical possibility, check need, uncertainty kind, difficulty/stakes, and bounded Oracle/checklist admission fields. It must not create checklist steps, tool names, tool payloads, narration, mutation, hidden facts, or final consequences.
+    - Migration sequence accepted:
+      1. Add `gm-judge.v2` contracts/validators/public projection and tests.
+      2. Add a compatibility builder from current accepted GM Read so downstream runtime can move to Judge without changing live model behavior.
+      3. Move Oracle payload/settlement to consume Judge Oracle admission.
+      4. Move action-checklist generation/alignment to consume Judge checklist admission.
+      5. Add the actual Judge model call.
+      6. Shrink GM Read to interpretation-only and then remove legacy GM Read branches.
+    - Focused contract tests to add: GM Read rejects admission sidecars; Judge admits only one bounded lane; Oracle runs only on Judge `roll_oracle`; checklist runs only on Judge `action_checklist`; settled packet exposes public Judge projection and excludes failed/skipped checklist evidence from narrator truth.
+  - v2 acceptance reminder from operator: slice diagnostics, primitive live proofs, and diagnostic lanes count as 0% final acceptance. The rebuild is accepted only after several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+  - P26 implementation slice:
+    - Added strict `gm-judge.v2` contracts, public `gmJudgePublic` projection, validator, and compatibility builder from accepted legacy GM Read.
+    - Runtime now builds/validates a compat Judge after GM Read and branches downstream on `gmJudge.lane` for Oracle/action-checklist/no-receipt settlement.
+    - Oracle payload/settlement and action-checklist validation can consume Judge admission; checklist steps cannot include effect kinds outside `gmJudge.checklistAdmission.requiredEffectKinds`.
+    - Settled packets now persist `gmJudgePublic`; Oracle visible outcome invariants key off `gmJudgePublic.lane`, not `gmReadPublic.path`.
+    - GM Read remains legacy/source adapter for this migration slice; next Judge slice should add the model Judge call and then shrink GM Read schema/prompt.
+  - P26 verification:
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 150 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts --bail=1` passed with 61 tests.
+    - First live attempt on clone `09413992-a0e8-4b4a-ab32-0e279e09192a` was invalid diagnostic: backend was started without `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`, so the action went through legacy v1 (`settled_turn_packets=1`, v2 packets 0). Do not count this lane.
+    - Valid live v2 diagnostic clone `e8d65390-300f-47ad-9fe7-bcbc447c8687` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`: zero-turn precheck had v2/legacy/ledger/trace counts 0 and clock `0/0/0`.
+    - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и спокойно жду ровно 5 минут, ничего не трогая и никуда не двигаясь.`
+    - SSE reached `narrative`, `finalizing_turn`, `done`; `done.runtime=gameplay-cycle-v2`, `done.tick=5`, `worldVersion=1`, `worldTimeMinutes=5`, packet `v2packet-mq0dgmnf-ac98cea0ba48`.
+    - DB after live turn: `gameplay_cycle_v2_packets=1`, legacy `settled_turn_packets/turn_sagas/narrator_attempts=0`, `turn_clock_ledger=1`, `authority_traces=1`, no simulation proposals/knowledge/recent events.
+    - Persisted packet includes `gmJudgePublic`: lane `action_checklist`, `checkNeed=backend_action_checklist`, `requiredEffectKinds=["time_advance"]`, `settlementBasis=runtime_receipts`.
+    - Accepted receipt: `time.advance.v2`, `mutationAuthority=world`, `mutationApplied=true`, visible summary `5 minutes pass in Lowwater Bazaar.`, no failed/skipped receipts.
+    - Artifacts: `output/p26-judge-boundary/p26-live-v2-action.sse`, `p26-live-v2-action-events.json`, `p26-live-v2-db-inspection.json`.
+    - Backend was stopped after verification; ports 3001/3208 clear.
+  - Newly observed acceptance blocker:
+    - Clean-start clone from v2-played source `abed6606-c78f-42f0-b7ce-0b72483eb1c6` to `e53fe030-7df1-4750-9341-328892d5a749` copied `gameplay_cycle_v2_packets=1`, `turn_clock_ledger=1`, `authority_traces=1`, and clock `worldVersion=1/worldTimeMinutes=15`. The current clone manifest does not cover the v2 packet store. This does not block the P26 Judge slice but must be fixed before final multi-campaign 60-turn clone acceptance.

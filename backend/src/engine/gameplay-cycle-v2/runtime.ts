@@ -36,6 +36,7 @@ import {
   type GameplayRuntimeReceiptLedgerV2,
   type GmActionChecklistStepV2,
   type GmActionChecklistV2,
+  type GmJudgeChecklistV2,
   type GmReadChecklistV2,
   type LocalConsequenceScheduleEntryV2,
   type LocalConsequenceScheduleV2,
@@ -55,6 +56,12 @@ import {
   compileSimpleGmActionChecklistV2,
   validateGmActionChecklistV2,
 } from "./action-checklist.js";
+import {
+  assertChecklistGmJudgeV2,
+  assertOracleGmJudgeV2,
+  buildCompatGmJudgeFromLegacyGmReadV2,
+  validateGmJudgeV2,
+} from "./gm-judge.js";
 import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
@@ -504,10 +511,12 @@ async function generateActionChecklistCandidateV2(input: {
   options: TurnOptions;
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
 }): Promise<GmActionChecklistV2> {
   const compiledChecklist = compileSimpleGmActionChecklistV2({
     packet: input.packet,
     gmRead: input.gmRead,
+    gmJudge: input.gmJudge,
   });
   if (compiledChecklist) {
     if (compiledChecklist.status !== "accepted") {
@@ -536,6 +545,7 @@ async function generateActionChecklistCandidateV2(input: {
   const validation = validateGmActionChecklistV2({
     packet: input.packet,
     gmRead: input.gmRead,
+    gmJudge: input.gmJudge,
     candidate: rawChecklist,
   });
   if (validation.status !== "accepted") {
@@ -773,9 +783,27 @@ export async function* processGameplayTurnCycleV2(
     );
   }
   const gmRead = gmReadValidation.read;
+  const gmJudgeCandidate = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead });
+  const gmJudgeValidation = validateGmJudgeV2({
+    packet: modelPacket,
+    gmRead,
+    candidate: gmJudgeCandidate,
+  });
+  if (gmJudgeValidation.status !== "accepted") {
+    throw runtimeContractError(
+      `GM Judge rejected before settlement: ${gmJudgeValidation.issues.map((issue) =>
+        `${issue.path}: ${issue.message}`
+      ).join("; ")}`,
+    );
+  }
+  const gmJudge = gmJudgeValidation.judge;
   let oracleResult: OracleResult | null = null;
   let settledPacket: SettledTurnPacketV2;
-  if (gmRead.path === "roll_oracle") {
+  if (gmJudge.lane === "roll_oracle") {
+    if (gmRead.path !== "roll_oracle") {
+      throw runtimeContractError("roll_oracle GM Judge requires a roll_oracle GM Read compatibility source.");
+    }
+    const oracleJudge = assertOracleGmJudgeV2(gmJudge);
     yield {
       type: "scene-settling",
       data: {
@@ -787,6 +815,7 @@ export async function* processGameplayTurnCycleV2(
     oracleResult = await callOracle(buildOraclePayloadV2({
       modelPacket,
       gmRead,
+      gmJudge: oracleJudge,
     }), options.judgeProvider);
     yield {
       type: "oracle_result",
@@ -798,15 +827,21 @@ export async function* processGameplayTurnCycleV2(
       settlementId: publicRuntimeId("v2oracle"),
       modelPacket,
       gmRead,
+      gmJudge: oracleJudge,
       result: oracleResult,
     });
     settledPacket = buildOracleSettledTurnPacketV2({
       packetId: publicRuntimeId("v2packet"),
       modelPacket,
       gmRead,
+      gmJudge: oracleJudge,
       oracleSettlement,
     });
-  } else if (gmRead.path === "tool_plan") {
+  } else if (gmJudge.lane === "action_checklist") {
+    if (gmRead.path !== "tool_plan") {
+      throw runtimeContractError("Action-checklist GM Judge requires a tool_plan GM Read compatibility source.");
+    }
+    const checklistJudge = assertChecklistGmJudgeV2(gmJudge);
     yield {
       type: "scene-settling",
       data: {
@@ -819,6 +854,7 @@ export async function* processGameplayTurnCycleV2(
       options,
       packet: modelPacket,
       gmRead,
+      gmJudge: checklistJudge,
     });
     yield {
       type: "scene-settling",
@@ -854,6 +890,7 @@ export async function* processGameplayTurnCycleV2(
       scheduleId: `schedule-${turnId}`,
       initialPacket: modelPacket,
       gmRead,
+      gmJudge: checklistJudge,
       checklist,
       handlers,
       refRegistryProvider: async ({ packet }) =>
@@ -908,14 +945,18 @@ export async function* processGameplayTurnCycleV2(
       narratorView,
     });
   } else {
+    if (gmRead.path === "roll_oracle" || gmRead.path === "tool_plan") {
+      throw runtimeContractError("GM Judge lane did not match the accepted GM Read settlement path.");
+    }
     settledPacket = buildNoReceiptSettledTurnPacketV2({
       packetId: publicRuntimeId("v2packet"),
       modelPacket,
       gmRead,
+      gmJudge,
     });
   }
   const existingNarratorView = buildNarratorViewV2(settledPacket);
-  if (gmRead.path !== "tool_plan") {
+  if (gmJudge.lane !== "action_checklist") {
     const packetPersistence = buildSettledPacketPersistencePendingV2(settledPacket);
     persistSettledTurnPacketV2({
       packet: settledPacket,

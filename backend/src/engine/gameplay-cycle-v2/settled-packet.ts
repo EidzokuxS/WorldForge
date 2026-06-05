@@ -6,6 +6,7 @@ import {
   assertSettledTurnPacketV2,
   type GmReadV2,
   type GmReadNoMutationV2,
+  type GmJudgeV2,
   type ModelFacingTurnPacketV2,
   type NarratorViewV2,
   type OracleSettlementV2,
@@ -14,6 +15,10 @@ import {
   type SettledPacketPersistenceV2,
   type SettledTurnPacketV2,
 } from "./contracts.js";
+import {
+  buildCompatGmJudgeFromLegacyGmReadV2,
+  buildPublicGmJudgeProjectionV2,
+} from "./gm-judge.js";
 import { oracleSettlementEvidenceV2 } from "./oracle-settlement.js";
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
@@ -152,7 +157,11 @@ export function buildNoReceiptSettledTurnPacketV2(input: {
   packetId: string;
   modelPacket: ModelFacingTurnPacketV2;
   gmRead: GmReadNoMutationV2;
+  gmJudge?: GmJudgeV2;
 }): SettledTurnPacketV2 {
+  const gmJudge = input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({
+    gmRead: input.gmRead,
+  });
   const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
@@ -169,6 +178,14 @@ export function buildNoReceiptSettledTurnPacketV2(input: {
         : input.gmRead.path === "continue"
           ? "gm_read_continue"
           : "gm_read_direct",
+    }),
+    gmJudgePublic: buildPublicGmJudgeProjectionV2({
+      gmJudge,
+      settlementBasis: gmJudge.lane === "clarification"
+        ? "gm_judge_clarification"
+        : gmJudge.lane === "continue"
+          ? "gm_judge_continue"
+          : "gm_judge_direct",
     }),
     oracleVisibleOutcome: null,
     acceptedEvidence: [
@@ -193,8 +210,12 @@ export function buildOracleSettledTurnPacketV2(input: {
   packetId: string;
   modelPacket: ModelFacingTurnPacketV2;
   gmRead: Extract<GmReadV2, { path: "roll_oracle" }>;
+  gmJudge?: GmJudgeV2;
   oracleSettlement: OracleSettlementV2;
 }): SettledTurnPacketV2 {
+  const gmJudge = input.gmJudge ?? buildCompatGmJudgeFromLegacyGmReadV2({
+    gmRead: input.gmRead,
+  });
   const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
@@ -206,6 +227,10 @@ export function buildOracleSettledTurnPacketV2(input: {
     resultWorldVersion: input.modelPacket.baseWorldVersion,
     gmReadPublic: buildPublicGmReadProjectionV2({
       gmRead: input.gmRead,
+      settlementBasis: "oracle_settlement",
+    }),
+    gmJudgePublic: buildPublicGmJudgeProjectionV2({
+      gmJudge,
       settlementBasis: "oracle_settlement",
     }),
     oracleVisibleOutcome: input.oracleSettlement.visibleOutcome,

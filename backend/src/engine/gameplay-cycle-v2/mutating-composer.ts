@@ -2,6 +2,7 @@ import {
   type GameplayRuntimeReceiptLedgerV2,
   type GameplayRuntimeReceiptV2,
   type GmActionChecklistV2,
+  type GmJudgeChecklistV2,
   type GmReadChecklistV2,
   type LocalConsequenceScheduleV2,
   type ModelFacingTurnPacketV2,
@@ -121,6 +122,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
   scheduleId: string;
   initialPacket: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
+  gmJudge?: GmJudgeChecklistV2;
   checklist: GmActionChecklistV2;
   requestsByStepId?: Partial<Record<string, unknown>>;
   requestCandidateProvider?: GameplayToolRequestCandidateProviderV2;
@@ -319,6 +321,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
         latestModelPacket: latestPacket,
         receiptModelPackets,
         gmRead: input.gmRead,
+        gmJudge: input.gmJudge,
         checklist: input.checklist,
         ledger: localExecution.ledger,
       });
@@ -354,6 +357,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
       latestModelPacket: latestPacket,
       receiptModelPackets,
       gmRead: input.gmRead,
+      gmJudge: input.gmJudge,
       checklist: input.checklist,
       ledger,
     });
