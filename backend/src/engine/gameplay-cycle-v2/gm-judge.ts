@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   assertGmJudgeV2,
   assertPublicGmJudgeProjectionV2,
+  gmJudgeV2Schema,
   type GmJudgeChecklistV2,
   type GmJudgeOracleV2,
   type GmJudgeV2,
@@ -9,7 +10,7 @@ import {
   type ModelFacingTurnPacketV2,
   type PublicGmJudgeProjectionV2,
 } from "./contracts.js";
-import { gmJudgeV2Schema } from "./contracts.js";
+import { formatModelFacingTurnPacketForPromptV2 } from "./projection.js";
 
 const EXECUTABLE_PAYLOAD_KEYS = new Set([
   "args",
@@ -310,6 +311,50 @@ export function buildCompatGmJudgeFromLegacyGmReadV2(input: {
     rationale: read.rationale,
     noMutationReason: read.noMutationReason,
   });
+}
+
+export function buildGmJudgeSystemPromptV2(): string {
+  return [
+    "You are the WorldForge GM Judge layer for gameplay-cycle-v2.",
+    "Return only gm-judge.v2 JSON.",
+    "Judge is an admission record only. Do not narrate, mutate, emit tool names, emit tool inputs, create checklist steps, create receipts, or decide final consequences.",
+    "Use the accepted GM Read only as interpretation/source context. Judge owns the next runtime lane, physical possibility, check need, and bounded Oracle/checklist admission.",
+    "For this migration slice, your admission must preserve the accepted GM Read runtime sidecar exactly: roll_oracle mirrors oracleRequest; action_checklist mirrors checklistRequest. Later slices will remove these sidecars from GM Read.",
+    "Allowed lanes are direct, continue, clarification, roll_oracle, action_checklist, and combat_transition.",
+    "Use roll_oracle only for true uncertainty requiring a roll. Oracle settles uncertainty only; it is not movement, discovery, item state, NPC private knowledge, world fact, or mutation authority.",
+    "Use action_checklist only when backend runtime receipts must settle route checks, movement, dialogue outcomes, support actors, minor POIs, location reveal, entity tags, item transfer, conditions, time advance, world facts, or scene beats.",
+    "Use direct or continue only for no-check/no-mutation turns that can be answered from current settled truth.",
+    "Use clarification when the action is underspecified or asks for unsupported hidden/offscreen/private/combat behavior.",
+    "Cite only citableRefs from the model-facing packet and refs already cited by the accepted GM Read.",
+    "Never include executable payload keys such as toolName, toolId, toolInput, input, payload, args, toolCall, plannedTools, or candidateToolRequest.",
+  ].join("\n");
+}
+
+export function buildGmJudgePromptV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  gmRead: GmReadV2;
+  compatibilityAdmission: GmJudgeV2;
+}): string {
+  return JSON.stringify({
+    task: "Admit the next gameplay-cycle-v2 lane from the accepted GM Read. Return exactly one bounded gm-judge.v2 admission.",
+    packet: formatModelFacingTurnPacketForPromptV2(input.packet),
+    acceptedGmRead: input.gmRead,
+    migrationContract: {
+      rule: "For P27, mirror the compatibilityAdmission admission fields exactly while owning the lane/check/possibility decision as gm-judge.v2.",
+      compatibilityAdmission: input.compatibilityAdmission,
+    },
+    forbidden: [
+      "narration",
+      "mutation",
+      "tool names",
+      "tool inputs",
+      "checklist steps",
+      "receipts",
+      "hidden facts",
+      "private/offscreen knowledge",
+      "final consequences",
+    ],
+  }, null, 2);
 }
 
 export function buildPublicGmJudgeProjectionV2(input: {

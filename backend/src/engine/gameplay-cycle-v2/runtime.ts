@@ -30,6 +30,7 @@ import {
   assertTurnAttemptContextV2,
   assertTurnStartEnvelopeV2,
   gameplayToolRequestV2Schema,
+  gmJudgeV2Schema,
   gmActionChecklistV2Schema,
   gmReadCandidateV2LooseSchema,
   type ApiResponseProjectionV2,
@@ -60,6 +61,8 @@ import {
   assertChecklistGmJudgeV2,
   assertOracleGmJudgeV2,
   buildCompatGmJudgeFromLegacyGmReadV2,
+  buildGmJudgePromptV2,
+  buildGmJudgeSystemPromptV2,
   validateGmJudgeV2,
 } from "./gm-judge.js";
 import { capabilityForEffectKindV2 } from "./capability-catalog.js";
@@ -359,21 +362,23 @@ function buildChecklistSystemPrompt(): string {
 function buildChecklistPrompt(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
+  gmJudge: GmJudgeChecklistV2;
 }): string {
   return JSON.stringify({
-    task: "Produce an intent-only backend-owned action checklist for the accepted GM Read.",
+    task: "Produce an intent-only backend-owned action checklist for the accepted GM Judge admission.",
     packet: formatModelFacingTurnPacketForPromptV2(input.packet),
     acceptedGmRead: input.gmRead,
-    allowedEffectKinds: input.gmRead.checklistRequest.requiredEffectKinds,
-    allowedCapabilityIds: input.gmRead.checklistRequest.requiredEffectKinds
+    acceptedGmJudge: input.gmJudge,
+    allowedEffectKinds: input.gmJudge.checklistAdmission.requiredEffectKinds,
+    allowedCapabilityIds: input.gmJudge.checklistAdmission.requiredEffectKinds
       .map((effectKind) => capabilityForEffectKindV2(effectKind)),
   }, null, 2);
 }
 
-function actionChecklistGenerationSchemaFor(gmRead: GmReadChecklistV2) {
-  const requestedKinds = new Set(gmRead.checklistRequest.requiredEffectKinds);
+function actionChecklistGenerationSchemaFor(gmJudge: GmJudgeChecklistV2) {
+  const requestedKinds = new Set(gmJudge.checklistAdmission.requiredEffectKinds);
   const requestedCapabilities = new Set(
-    gmRead.checklistRequest.requiredEffectKinds.map((effectKind) =>
+    gmJudge.checklistAdmission.requiredEffectKinds.map((effectKind) =>
       capabilityForEffectKindV2(effectKind)),
   );
   return gmActionChecklistV2Schema.superRefine((checklist, ctx) => {
@@ -531,11 +536,12 @@ async function generateActionChecklistCandidateV2(input: {
 
   const rawChecklist = (await safeGenerateObject({
     model: createModel(input.options.judgeProvider, { role: "judge" }),
-    schema: actionChecklistGenerationSchemaFor(input.gmRead),
+    schema: actionChecklistGenerationSchemaFor(input.gmJudge),
     system: buildChecklistSystemPrompt(),
     prompt: buildChecklistPrompt({
       packet: input.packet,
       gmRead: input.gmRead,
+      gmJudge: input.gmJudge,
     }),
     temperature: 0.1,
     maxTokens: 2_000,
@@ -783,7 +789,38 @@ export async function* processGameplayTurnCycleV2(
     );
   }
   const gmRead = gmReadValidation.read;
-  const gmJudgeCandidate = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead });
+  const compatibilityAdmission = buildCompatGmJudgeFromLegacyGmReadV2({ gmRead });
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "gm-judge",
+      phase: "gameplay-cycle-v2",
+      tick: baseTick,
+    },
+  };
+  let gmJudgeCandidate: unknown;
+  try {
+    gmJudgeCandidate = (await safeGenerateObject({
+      model: createModel(options.judgeProvider, { role: "judge" }),
+      schema: gmJudgeV2Schema,
+      system: buildGmJudgeSystemPromptV2(),
+      prompt: buildGmJudgePromptV2({
+        packet: modelPacket,
+        gmRead,
+        compatibilityAdmission,
+      }),
+      temperature: 0.1,
+      maxTokens: 1_600,
+      retries: 1,
+      strictSchema: false,
+    })).object;
+  } catch (error) {
+    throw runtimeContractError(
+      `GM Judge generation failed before settlement: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const gmJudgeValidation = validateGmJudgeV2({
     packet: modelPacket,
     gmRead,

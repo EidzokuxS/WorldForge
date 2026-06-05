@@ -1601,3 +1601,27 @@ Session: `gm-v1-consequenc-slice`.
     - Backend was stopped after verification; ports 3001/3208 clear.
   - Newly observed acceptance blocker:
     - Clean-start clone from v2-played source `abed6606-c78f-42f0-b7ce-0b72483eb1c6` to `e53fe030-7df1-4750-9341-328892d5a749` copied `gameplay_cycle_v2_packets=1`, `turn_clock_ledger=1`, `authority_traces=1`, and clock `worldVersion=1/worldTimeMinutes=15`. The current clone manifest does not cover the v2 packet store. This does not block the P26 Judge slice but must be fixed before final multi-campaign 60-turn clone acceptance.
+- P27 Judge model-call slice:
+  - Implemented the next accepted Oracle migration step: runtime now calls a real `gm-judge.v2` model generation after accepted GM Read and before Oracle/action-checklist/no-receipt settlement.
+  - `buildCompatGmJudgeFromLegacyGmReadV2` remains only a migration target shape/source adapter for the Judge prompt and packet-builder compatibility; runtime no longer assigns it directly as `gmJudgeCandidate`.
+  - Added `buildGmJudgeSystemPromptV2` and `buildGmJudgePromptV2`; the prompt states Judge is admission-only and forbids narration, mutation, tool names, tool inputs, checklist steps, receipts, hidden facts, private/offscreen knowledge, and final consequences.
+  - Runtime emits a `scene-settling` stage `gm-judge`; invalid Judge generation or validation still fails before settlement.
+  - Action checklist generation now uses `gmJudge.checklistAdmission` for allowed effect kinds/capabilities and includes `acceptedGmJudge` in the prompt. GM Read remains present only as source context for this migration slice.
+  - Focused tests added:
+    - Judge prompt includes `acceptedGmRead` and `compatibilityAdmission`, keeps admission-only text, and does not expose executable tool payload strings.
+    - Runtime source hygiene confirms `gm-judge` stage, `buildGmJudgeSystemPromptV2`, `buildGmJudgePromptV2`, `schema: gmJudgeV2Schema`, and no direct `const gmJudgeCandidate = buildCompatGmJudgeFromLegacyGmReadV2`.
+  - Verification:
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 151 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts --bail=1` passed with 61 tests.
+    - Valid live v2 diagnostic clone `98a1abcd-f5c1-40f6-aaaa-9addb7a73c9e` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`: zero-turn precheck had v2/legacy/ledger/trace counts 0 and clock `0/0/0`.
+    - Backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port 3208.
+    - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и спокойно жду ровно 5 минут, ничего не трогая и никуда не двигаясь.`
+    - SSE stages included `scene-frame`, `gm-read`, `gm-judge`, `action-checklist`, `tool-execution`, `narrator`; `done.runtime=gameplay-cycle-v2`, `done.tick=5`, `worldVersion=1`, `worldTimeMinutes=5`, packet `v2packet-mq0dttuw-0c5bf147f7e7`.
+    - DB after live turn: `gameplay_cycle_v2_packets=1`, legacy `settled_turn_packets/turn_sagas/narrator_attempts=0`, `turn_clock_ledger=1`, `authority_traces=1`, no simulation proposals/knowledge/recent events.
+    - Persisted packet includes `gmJudgePublic`: lane `action_checklist`, `physicalPossibility=possible`, `checkNeed=backend_action_checklist`, `requiredEffectKinds=["time_advance"]`, `settlementBasis=runtime_receipts`.
+    - Accepted receipt: `time.advance.v2`, `mutationAuthority=world`, `mutationApplied=true`, visible summary `5 minutes pass in Lowwater Bazaar.`, no failed/skipped receipts.
+    - Artifacts: `output/p27-judge-model/live-action.sse`, `live-action-events.json`, `db-inspection.json`.
+    - Backend was stopped after verification; ports 3001/3208 clear.
+  - Remaining next step:
+    - Shrink GM Read to interpretation-only/no admission sidecars and move lane/checklist/oracle request authorship fully into Judge. P27 deliberately did not complete this; it only made Judge an actual model-executed runtime decision layer.

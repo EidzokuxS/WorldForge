@@ -32,6 +32,8 @@ import {
   buildGameplayRefRegistryV2,
   buildNoReceiptSettledTurnPacketV2,
   buildCompatGmJudgeFromLegacyGmReadV2,
+  buildGmJudgePromptV2,
+  buildGmJudgeSystemPromptV2,
   buildOraclePayloadV2,
   buildOracleSettlementV2,
   buildOracleSettledTurnPacketV2,
@@ -3261,6 +3263,68 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     }
     expect(JSON.stringify(validation.judge)).not.toContain("toolName");
     expect(JSON.stringify(validation.judge)).not.toContain("toolInput");
+  });
+
+  it("builds a model-facing Judge prompt without making compat admission the runtime result", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "North Hall"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "movement"],
+      },
+    }));
+    const readResult = validateGmReadChecklistV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player wants to move from the atrium to North Hall.",
+        sceneQuestion: "What backend-owned consequence must be admitted?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "North Hall"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement changes current scene/location authority and needs backend settlement.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player"],
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          checklistGoal: "Admit the movement consequence without executable tool input.",
+        },
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Checklist GM Read fixture must be accepted.");
+    }
+    const compatibilityAdmission = buildCompatGmJudgeFromLegacyGmReadV2({
+      gmRead: readResult.read,
+    });
+
+    const systemPrompt = buildGmJudgeSystemPromptV2();
+    const prompt = buildGmJudgePromptV2({
+      packet,
+      gmRead: readResult.read,
+      compatibilityAdmission,
+    });
+
+    expect(systemPrompt).toContain("Judge is an admission record only");
+    expect(systemPrompt).toContain("Do not narrate, mutate, emit tool names");
+    expect(prompt).toContain('"acceptedGmRead"');
+    expect(prompt).toContain('"compatibilityAdmission"');
+    expect(prompt).toContain('"lane": "action_checklist"');
+    expect(prompt).not.toContain("toolName");
+    expect(prompt).not.toContain("toolInput");
   });
 
   it("rejects gm-judge.v2 executable payloads, uncited refs, and lane drift", () => {
@@ -10274,6 +10338,11 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("composeGameplayCycleMutatingTurnV2");
     expect(source).toContain("createDbBackedGameplayToolHandlersV2");
     expect(source).toContain("buildGameplayRefRegistryV2");
+    expect(source).toContain("stage: \"gm-judge\"");
+    expect(source).toContain("buildGmJudgeSystemPromptV2()");
+    expect(source).toContain("buildGmJudgePromptV2({");
+    expect(source).toContain("schema: gmJudgeV2Schema");
+    expect(source).not.toContain("const gmJudgeCandidate = buildCompatGmJudgeFromLegacyGmReadV2");
     expect(source).toContain("requestCandidateProvider");
     expect(source).toContain("localConsequenceCandidateProvider");
     expect(source).toContain("failed or skipped required steps before packet persistence");
