@@ -1,5 +1,7 @@
 import {
+  assertNoPrivateTermsInPublicPayloadV2,
   assertNarratorViewV2,
+  assertPublicGmReadProjectionV2,
   assertSettledPacketPersistenceV2,
   assertSettledTurnPacketV2,
   type GmReadV2,
@@ -7,6 +9,7 @@ import {
   type ModelFacingTurnPacketV2,
   type NarratorViewV2,
   type OracleSettlementV2,
+  type PublicGmReadProjectionV2,
   type SettledEvidenceV2,
   type SettledPacketPersistenceV2,
   type SettledTurnPacketV2,
@@ -106,12 +109,51 @@ function gmReadEvidence(read: GmReadV2): SettledEvidenceV2 | null {
   };
 }
 
+export function buildPublicGmReadProjectionV2(input: {
+  gmRead: GmReadV2;
+  settlementBasis: PublicGmReadProjectionV2["settlementBasis"];
+}): PublicGmReadProjectionV2 {
+  const targetRefs =
+    input.gmRead.path === "tool_plan"
+      ? input.gmRead.checklistRequest.targetRefs
+      : input.gmRead.path === "roll_oracle"
+        ? input.gmRead.oracleRequest.targetRefs
+        : input.gmRead.actionInterpretation.targetRefs;
+  const requiredEffectKinds =
+    input.gmRead.path === "tool_plan"
+      ? input.gmRead.checklistRequest.requiredEffectKinds
+      : [];
+
+  return assertPublicGmReadProjectionV2({
+    version: "public-gm-read-projection.v2",
+    path: input.gmRead.path,
+    turnNeed: input.gmRead.turnNeed,
+    focalActorRefs: input.gmRead.focalActorRefs,
+    evidenceRefs: input.gmRead.evidenceRefs,
+    targetRefs,
+    requiredEffectKinds,
+    settlementBasis: input.settlementBasis,
+  });
+}
+
+function assertPublicSettledPacketCandidate(input: {
+  packet: SettledTurnPacketV2;
+  privateGuardTerms: readonly string[];
+}): SettledTurnPacketV2 {
+  assertNoPrivateTermsInPublicPayloadV2({
+    payloadName: "settled-turn-packet.v2",
+    payload: input.packet,
+    privateGuardTerms: input.privateGuardTerms,
+  });
+  return input.packet;
+}
+
 export function buildNoReceiptSettledTurnPacketV2(input: {
   packetId: string;
   modelPacket: ModelFacingTurnPacketV2;
   gmRead: GmReadNoMutationV2;
 }): SettledTurnPacketV2 {
-  return assertSettledTurnPacketV2({
+  const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
     campaignId: input.modelPacket.campaignId,
@@ -120,16 +162,29 @@ export function buildNoReceiptSettledTurnPacketV2(input: {
     baseTick: input.modelPacket.baseTick,
     baseWorldVersion: input.modelPacket.baseWorldVersion,
     resultWorldVersion: input.modelPacket.baseWorldVersion,
-    gmRead: input.gmRead,
-    oracleSettlement: null,
+    gmReadPublic: buildPublicGmReadProjectionV2({
+      gmRead: input.gmRead,
+      settlementBasis: input.gmRead.path === "clarification"
+        ? "gm_read_clarification"
+        : input.gmRead.path === "continue"
+          ? "gm_read_continue"
+          : "gm_read_direct",
+    }),
+    oracleVisibleOutcome: null,
     acceptedEvidence: [
       ...currentSceneEvidence(input.modelPacket),
       gmReadEvidence(input.gmRead),
     ].filter((evidence): evidence is SettledEvidenceV2 => Boolean(evidence)),
     acceptedRuntimeReceiptIds: [],
     acceptedDurableEventIds: [],
-    skippedSteps: [],
-    failedSteps: [],
+    stepAudit: {
+      skippedCount: 0,
+      failedCount: 0,
+    },
+    auditRef: `audit-${input.packetId}`,
+  });
+  return assertPublicSettledPacketCandidate({
+    packet,
     privateGuardTerms: input.modelPacket.runtimePrivateGuardTerms,
   });
 }
@@ -140,7 +195,7 @@ export function buildOracleSettledTurnPacketV2(input: {
   gmRead: Extract<GmReadV2, { path: "roll_oracle" }>;
   oracleSettlement: OracleSettlementV2;
 }): SettledTurnPacketV2 {
-  return assertSettledTurnPacketV2({
+  const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
     campaignId: input.modelPacket.campaignId,
@@ -149,16 +204,25 @@ export function buildOracleSettledTurnPacketV2(input: {
     baseTick: input.modelPacket.baseTick,
     baseWorldVersion: input.modelPacket.baseWorldVersion,
     resultWorldVersion: input.modelPacket.baseWorldVersion,
-    gmRead: input.gmRead,
-    oracleSettlement: input.oracleSettlement,
+    gmReadPublic: buildPublicGmReadProjectionV2({
+      gmRead: input.gmRead,
+      settlementBasis: "oracle_settlement",
+    }),
+    oracleVisibleOutcome: input.oracleSettlement.visibleOutcome,
     acceptedEvidence: [
       ...currentSceneEvidence(input.modelPacket),
       oracleSettlementEvidenceV2(input.oracleSettlement),
     ],
     acceptedRuntimeReceiptIds: [],
     acceptedDurableEventIds: [],
-    skippedSteps: [],
-    failedSteps: [],
+    stepAudit: {
+      skippedCount: 0,
+      failedCount: 0,
+    },
+    auditRef: `audit-${input.packetId}`,
+  });
+  return assertPublicSettledPacketCandidate({
+    packet,
     privateGuardTerms: input.modelPacket.runtimePrivateGuardTerms,
   });
 }
@@ -183,7 +247,7 @@ export function buildNarratorViewV2(packet: SettledTurnPacketV2): NarratorViewV2
     campaignId: packet.campaignId,
     turnId: packet.turnId,
     playerAction: packet.playerAction,
-    gmReadPath: packet.gmRead.path,
+    gmReadPath: packet.gmReadPublic.path,
     acceptedEvidence: packet.acceptedEvidence,
     languageContract: {
       responseLanguage: "match_player_action",

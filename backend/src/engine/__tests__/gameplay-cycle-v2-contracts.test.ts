@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import {
+  actorKnowledgeRecords,
   authorityTraces,
   campaigns,
   items,
@@ -71,6 +72,7 @@ import {
   turnAttemptContextSchema,
   turnStartEnvelopeSchema,
   type TurnAttemptContextV2,
+  type RuntimeCapabilityIdV2,
 } from "../gameplay-cycle-v2/index.js";
 import { buildSceneFrame, type SceneFrame } from "../scene-frame.js";
 import type { ScopedForecastExcerpt } from "../world-forecast.js";
@@ -219,7 +221,7 @@ function scopedForecast(): ScopedForecastExcerpt {
 
 function movementToolPlanFixture(options: {
   privateGuardTerms?: string[];
-  allowedCapabilityIds?: Array<"observe_visible" | "movement" | "route_check" | "dialogue_record" | "support_actor_create" | "minor_poi_create" | "entity_tag" | "item_transfer" | "quick_action_offer">;
+  allowedCapabilityIds?: RuntimeCapabilityIdV2[];
 } = {}) {
   const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
     version: "scene-frame-envelope.v2",
@@ -610,6 +612,102 @@ function dialogueToolPlanFixture() {
   expect(checklistResult.status).toBe("accepted");
   if (checklistResult.status !== "accepted") {
     throw new Error("Dialogue checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
+function dialogueToWorldFactToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Player", "Clerk Mara"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "dialogue_record", "world_fact_record"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player asks for a procedure and wants to remember it.",
+      sceneQuestion: "What dialogue and player-known knowledge effects must be settled?",
+      focalActorRefs: ["Player", "Clerk Mara"],
+      evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+      actionInterpretation: {
+        intent: "Ask Clerk Mara and record the answer as a future-usable procedure.",
+        method: "spoken question and note-taking",
+        targetRefs: ["Clerk Mara"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "The answer must be recorded first; durable player-known knowledge is a separate mutation.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["dialogue_outcome", "world_fact"],
+        actorRefs: ["Player"],
+        targetRefs: ["Clerk Mara"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        checklistGoal: "Record Clerk Mara's answer, then record the player-known procedure sourced to that receipt.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Dialogue-to-world-fact GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-dialogue-world-fact-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Record visible answer and player-known procedure.",
+      steps: [
+        {
+          stepId: "step-1",
+          purpose: "Record Clerk Mara's visible answer.",
+          actorRef: "Clerk Mara",
+          targetRefs: ["Player"],
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          requiredCapabilityId: "dialogue_record",
+          intendedEffect: {
+            kind: "dialogue_outcome",
+            summary: "Clerk Mara gives the desk procedure.",
+            stateScope: "local_scene",
+          },
+          expectedVisibleEffect: "Clerk Mara's quoted answer is settled.",
+          dependsOnStepIds: [],
+        },
+        {
+          stepId: "step-2",
+          purpose: "Record the quoted procedure as player-known knowledge.",
+          actorRef: "Player",
+          targetRefs: ["Clerk Mara"],
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          requiredCapabilityId: "world_fact_record",
+          intendedEffect: {
+            kind: "world_fact",
+            summary: "Player records Clerk Mara's procedure as future-usable knowledge.",
+            stateScope: "knowledge",
+          },
+          expectedVisibleEffect: "Accepted player-known knowledge mutation receipt.",
+          dependsOnStepIds: ["step-1"],
+        },
+      ],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Dialogue-to-world-fact checklist fixture must be accepted.");
   }
 
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
@@ -3845,8 +3943,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(settledPacket.resultWorldVersion).toBe(8);
     expect(settledPacket.acceptedRuntimeReceiptIds).toEqual(["receipt-move-packet"]);
     expect(settledPacket.acceptedDurableEventIds).toEqual(["event-move-packet"]);
-    expect(settledPacket.failedSteps).toEqual([]);
-    expect(settledPacket.skippedSteps).toEqual([]);
+    expect(settledPacket.stepAudit).toEqual({ failedCount: 0, skippedCount: 0 });
     expect(settledPacket.acceptedEvidence.some((evidence) =>
       evidence.authority === "runtime_receipt"
       && evidence.sourceReceiptId === "receipt-move-packet"
@@ -3855,6 +3952,73 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     )).toBe(true);
     expect(narratorView.acceptedEvidence.some((evidence) =>
       evidence.authority === "runtime_receipt")).toBe(true);
+  });
+
+  it("keeps private GM Read labels out of public settled packets and narrator views", async () => {
+    const { packet, gmRead, checklist } = movementToolPlanFixture({
+      privateGuardTerms: ["Sigil Boss Torvin Kask", "Litha Corsen"],
+    });
+    const leakingInternalGmRead = {
+      ...gmRead,
+      rationale:
+        "Internal-only note: Sigil Boss Torvin Kask and Litha Corsen are background pressure.",
+    };
+    const execution = await executeGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      request: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-private-gm-read-public-packet",
+        stepId: "step-1",
+        capabilityId: "movement",
+        toolId: "actor.move.v2",
+        effectBinding: {
+          actorRef: "Player",
+          destinationRef: "North Hall",
+          travelMode: "walk",
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+        },
+      },
+      handlers: {
+        "actor.move.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "local_scene",
+          resultWorldVersion: 8,
+          visibleSummary: "Player arrives at North Hall.",
+          evidenceRefs: ["Player", "North Hall"],
+        }),
+      },
+      receiptId: "receipt-private-gm-read-public-packet",
+      emittedAt: 115,
+    });
+    const ledger = buildRuntimeReceiptLedgerV2({
+      ledgerId: "ledger-private-gm-read-public-packet",
+      modelPacket: packet,
+      checklist,
+      receipts: [execution.receipt],
+    });
+
+    const settledPacket = buildRuntimeSettledTurnPacketV2({
+      packetId: "packet-private-gm-read-public-packet",
+      modelPacket: packet,
+      gmRead: leakingInternalGmRead,
+      checklist,
+      ledger,
+      receiptModelPackets: {
+        [execution.receipt.receiptId]: packet,
+      },
+    });
+    const narratorView = buildNarratorViewV2(settledPacket);
+
+    expect(JSON.stringify(settledPacket)).not.toContain("Sigil Boss Torvin Kask");
+    expect(JSON.stringify(settledPacket)).not.toContain("Litha Corsen");
+    expect(JSON.stringify(narratorView)).not.toContain("Sigil Boss Torvin Kask");
+    expect(JSON.stringify(narratorView)).not.toContain("Litha Corsen");
+    expect(leakingInternalGmRead.rationale).toContain("Sigil Boss Torvin Kask");
+    expect(settledPacket.gmReadPublic.path).toBe("tool_plan");
+    expect(settledPacket.gmReadPublic.requiredEffectKinds).toContain("movement");
   });
 
   it("keeps rejected runtime receipts out of settled truth while recording failed step audit", async () => {
@@ -3905,8 +4069,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(settledPacket.acceptedDurableEventIds).toEqual([]);
     expect(settledPacket.acceptedEvidence.some((evidence) =>
       evidence.authority === "runtime_receipt")).toBe(false);
-    expect(settledPacket.failedSteps).toHaveLength(1);
-    expect(settledPacket.failedSteps[0]?.reason).toContain("outside the selected checklist step refs");
+    expect(settledPacket.stepAudit.failedCount).toBe(1);
+    expect(JSON.stringify(settledPacket)).not.toContain("outside the selected checklist step refs");
+    expect(ledger.receipts[0]?.failureReason).toContain("outside the selected checklist step refs");
   });
 
   it("rejects accepted receipt evidence when it leaks private terms", async () => {
@@ -4037,8 +4202,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
 
     expect(settledPacket.acceptedRuntimeReceiptIds).toEqual(["receipt-manual-move"]);
-    expect(settledPacket.skippedSteps).toHaveLength(1);
-    expect(settledPacket.skippedSteps[0]?.reason).toContain("step-2");
+    expect(settledPacket.stepAudit.skippedCount).toBe(1);
+    expect(JSON.stringify(settledPacket)).not.toContain("step-2");
     expect(JSON.stringify(settledPacket.acceptedEvidence)).not.toContain("steadies after arriving");
   });
 
@@ -5543,8 +5708,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(result.settledPacket.acceptedRuntimeReceiptIds).toEqual([]);
     expect(result.settledPacket.acceptedEvidence.some((evidence) =>
       evidence.authority === "runtime_receipt")).toBe(false);
-    expect(result.settledPacket.failedSteps).toHaveLength(1);
-    expect(result.settledPacket.failedSteps[0]?.reason).toContain("outside the selected checklist step refs");
+    expect(result.settledPacket.stepAudit.failedCount).toBe(1);
+    expect(JSON.stringify(result.settledPacket)).not.toContain("outside the selected checklist step refs");
+    expect(result.ledger.receipts[0]?.failureReason).toContain("outside the selected checklist step refs");
     expect(result.localConsequenceSchedule.route).toBe("none");
   });
 
@@ -5716,9 +5882,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       resultWorldVersion: 8,
     });
     expect(result.settledPacket.acceptedRuntimeReceiptIds).toEqual(["receipt-compose-step-1"]);
-    expect(result.settledPacket.failedSteps.some((step) =>
-      step.reason.includes("outside the selected checklist step refs")),
-    ).toBe(true);
+    expect(result.settledPacket.stepAudit.failedCount).toBe(1);
+    expect(JSON.stringify(result.settledPacket)).not.toContain("outside the selected checklist step refs");
+    expect(result.ledger.receipts[1]?.failureReason).toContain("outside the selected checklist step refs");
     expect(JSON.stringify(result.settledPacket.acceptedEvidence)).not.toContain("Atrium remains available");
   });
 
@@ -5838,8 +6004,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     });
     const narratorView = buildNarratorViewV2(packet);
 
-    expect(packet.oracleSettlement?.mutationAuthority).toBe("none");
-    expect(packet.oracleSettlement?.visibleOutcome.selectedMeaning)
+    expect(packet.oracleVisibleOutcome?.selectedMeaning)
       .toBe("The player checks the ledger, but the moment stays tense.");
     expect(packet.acceptedRuntimeReceiptIds).toEqual([]);
     expect(packet.acceptedDurableEventIds).toEqual([]);
@@ -5914,14 +6079,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       baseTick: modelPacket.baseTick,
       baseWorldVersion: modelPacket.baseWorldVersion,
       resultWorldVersion: modelPacket.baseWorldVersion,
-      gmRead: readResult.read,
-      oracleSettlement: null,
+      gmReadPublic: {
+        version: "public-gm-read-projection.v2",
+        path: "roll_oracle",
+        turnNeed: "oracle_uncertainty",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "brass ledger"],
+        targetRefs: ["brass ledger"],
+        requiredEffectKinds: [],
+        settlementBasis: "oracle_settlement",
+      },
+      oracleVisibleOutcome: null,
       acceptedEvidence: [],
       acceptedRuntimeReceiptIds: [],
       acceptedDurableEventIds: [],
-      skippedSteps: [],
-      failedSteps: [],
-      privateGuardTerms: [],
+      stepAudit: {
+        skippedCount: 0,
+        failedCount: 0,
+      },
     }).success).toBe(false);
   });
 
@@ -5988,7 +6163,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(narratorView)).not.toContain("hidden courier");
   });
 
-  it("rejects settled packets that leak private terms or claim receipts without evidence", () => {
+  it("rejects public settled builders that leak private terms and schema packets that claim receipts without evidence", () => {
     const modelPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
       attempt: attemptContext(),
@@ -6025,16 +6200,14 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       gmRead: read,
     });
 
-    expect(settledTurnPacketV2Schema.safeParse({
-      ...packet,
-      acceptedEvidence: [{
-        evidenceId: "bad-1",
-        kind: "direct_resolution",
-        authority: "gm_read_direct",
-        text: "The secret pressure leaked.",
-        sourceRefs: ["Player"],
-      }],
-    }).success).toBe(false);
+    expect(() => buildNoReceiptSettledTurnPacketV2({
+      packetId: "packet-invalid-private-leak",
+      modelPacket,
+      gmRead: {
+        ...read,
+        noMutationReason: "The secret pressure leaked.",
+      },
+    })).toThrow("leaked private guard term");
 
     expect(settledTurnPacketV2Schema.safeParse({
       ...packet,
@@ -6421,6 +6594,371 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     } finally {
       fixture.cleanup();
     }
+  });
+
+  it("requires source-bounded world_fact.record.v2 shape and rejects legacy summary-only payloads", () => {
+    const { packet, checklist } = dialogueToWorldFactToolPlanFixture();
+    const valid = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-2",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "world-fact-valid-1",
+        stepId: "step-2",
+        capabilityId: "world_fact_record",
+        toolId: "world_fact.record.v2",
+        effectBinding: {
+          knowledgeOwnerRef: "Player",
+          subjectRefs: ["Clerk Mara"],
+          statement: "Clerk Mara reported that the ledger must stay on the desk until she stamps it.",
+          summary: "Clerk Mara's desk procedure is recorded as a reported note.",
+          truthStatus: "reported",
+          futureUseKind: "procedure",
+          source: {
+            sourceKind: "accepted_dialogue_receipt",
+            sourceReceiptIds: ["receipt-dialogue-source-1"],
+            sourceQuote: "Keep the ledger here until I stamp it.",
+            sourceSummary: "Clerk Mara gave the desk procedure.",
+          },
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        },
+      },
+    });
+    expect(valid.status).toBe("accepted");
+
+    const legacy = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-2",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "world-fact-legacy-1",
+        stepId: "step-2",
+        capabilityId: "world_fact_record",
+        toolId: "world_fact.record.v2",
+        effectBinding: {
+          subjectRefs: ["Clerk Mara"],
+          summary: "The ledger must stay on the desk.",
+          futureUseKind: "procedure",
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        },
+      },
+    });
+    expect(legacy.status).toBe("rejected");
+    expect(legacy.issues.map((issue) => issue.message).join(" ")).toContain("expected \"Player\"");
+  });
+
+  it("executes world_fact.record.v2 as atomic player-known knowledge mutation sourced to accepted dialogue", async () => {
+    const fixture = dbTempFixture("wf-v2-db-world-fact-");
+    try {
+      seedP16World();
+      const { packet, checklist } = dialogueToWorldFactToolPlanFixture();
+      const dialogueExecution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "dialogue-source-db-1",
+          stepId: "step-1",
+          capabilityId: "dialogue_record",
+          toolId: "dialogue.record.v2",
+          effectBinding: {
+            speakerRef: "Clerk Mara",
+            addresseeRefs: ["Player"],
+            outcomeKind: "answer",
+            summary: "Clerk Mara says the ledger must stay on the desk.",
+            quotedSpeech: "Keep the ledger here until I stamp it.",
+            evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-dialogue-source-db-1",
+        emittedAt: 26,
+      });
+      expect(dialogueExecution.status).toBe("accepted");
+
+      const knowledgeExecution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-2",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "world-fact-db-1",
+          stepId: "step-2",
+          capabilityId: "world_fact_record",
+          toolId: "world_fact.record.v2",
+          effectBinding: {
+            knowledgeOwnerRef: "Player",
+            subjectRefs: ["Clerk Mara"],
+            statement: "Clerk Mara reported that the ledger must stay on the desk until she stamps it.",
+            summary: "Clerk Mara's desk procedure is recorded as a reported note.",
+            truthStatus: "reported",
+            futureUseKind: "procedure",
+            source: {
+              sourceKind: "accepted_dialogue_receipt",
+              sourceReceiptIds: ["receipt-dialogue-source-db-1"],
+              sourceQuote: "Keep the ledger here until I stamp it.",
+              sourceSummary: "Clerk Mara gave the desk procedure.",
+            },
+            evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        priorReceipts: [dialogueExecution.receipt],
+        receiptId: "receipt-world-fact-db-1",
+        emittedAt: 27,
+      });
+
+      expect(knowledgeExecution.status).toBe("accepted");
+      expect(knowledgeExecution.receipt).toMatchObject({
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "knowledge",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        durableEventIds: [],
+      });
+      expect(knowledgeExecution.receipt.visibleSummary).toContain("Player-known knowledge recorded");
+
+      const records = getDb().select().from(actorKnowledgeRecords).all();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        campaignId: "campaign-alpha",
+        actorId: "player-alpha",
+        route: "report_message",
+        truthStatus: "reported",
+        statement: "Clerk Mara reported that the ledger must stay on the desk until she stamps it.",
+        baseWorldVersion: 7,
+        validFromWorldVersion: 8,
+        observedAtWorldVersion: 7,
+        privacy: "private",
+      });
+      expect(JSON.parse(records[0].subjectRefs)).toEqual(["Clerk Mara"]);
+      const metadata = JSON.parse(records[0].metadata) as {
+        objectiveCanon?: boolean;
+        sourceReceiptIds?: string[];
+        sourceQuote?: string;
+      };
+      expect(metadata.objectiveCanon).toBe(false);
+      expect(metadata.sourceReceiptIds).toEqual(["receipt-dialogue-source-db-1"]);
+      expect(metadata.sourceQuote).toBe("Keep the ledger here until I stamp it.");
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.player_knowledge.record.v2",
+        sourceEntityType: "actor_knowledge",
+        sourceEntityId: records[0].id,
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:world-fact-db-1",
+      });
+      expect(JSON.parse(traces[0].stateDeltaRefs)).toEqual([
+        `actor_knowledge:${records[0].id}:created`,
+        "actor:player-alpha:knowledge",
+      ]);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects world_fact.record.v2 when the claimed source receipt is not an accepted prior receipt", async () => {
+    const fixture = dbTempFixture("wf-v2-db-world-fact-source-");
+    try {
+      seedP16World();
+      const { packet, checklist } = dialogueToWorldFactToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-2",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "world-fact-missing-source-1",
+          stepId: "step-2",
+          capabilityId: "world_fact_record",
+          toolId: "world_fact.record.v2",
+          effectBinding: {
+            knowledgeOwnerRef: "Player",
+            subjectRefs: ["Clerk Mara"],
+            statement: "Clerk Mara reported that the ledger must stay on the desk until she stamps it.",
+            summary: "Clerk Mara's desk procedure is recorded as a reported note.",
+            truthStatus: "reported",
+            futureUseKind: "procedure",
+            source: {
+              sourceKind: "accepted_dialogue_receipt",
+              sourceReceiptIds: ["receipt-not-present"],
+              sourceQuote: "Keep the ledger here until I stamp it.",
+              sourceSummary: "Clerk Mara gave the desk procedure.",
+            },
+            evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        priorReceipts: [],
+        receiptId: "receipt-world-fact-missing-source-1",
+        emittedAt: 28,
+      });
+
+      expect(execution.status).toBe("rejected");
+      expect(execution.receipt.failureReason).toContain("not an accepted prior receipt");
+      expect(getDb().select().from(actorKnowledgeRecords).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back world_fact.record.v2 knowledge insert when authority commit fails", async () => {
+    const fixture = dbTempFixture("wf-v2-db-world-fact-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = dialogueToWorldFactToolPlanFixture();
+      const sourceReceipt = gameplayRuntimeReceiptV2Schema.parse({
+        version: "gameplay-runtime-receipt.v2",
+        receiptId: "receipt-dialogue-source-rollback-1",
+        requestId: "dialogue-source-rollback-1",
+        stepId: "step-1",
+        source: {
+          kind: "gm_action_checklist",
+          checklistId: checklist.checklistId,
+          stepId: "step-1",
+        },
+        capabilityId: "dialogue_record",
+        toolId: "dialogue.record.v2",
+        status: "accepted",
+        evidenceAuthority: "terminal_receipt",
+        mutationAuthority: "none",
+        mutationApplied: false,
+        baseWorldVersion: 7,
+        resultWorldVersion: 7,
+        visibleSummary: "Clerk Mara dialogue outcome (answer): Clerk Mara says the ledger must stay on the desk. Quote: Keep the ledger here until I stamp it.",
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        durableEventIds: [],
+        emittedAt: 29,
+      });
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-2",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "world-fact-rollback-1",
+          stepId: "step-2",
+          capabilityId: "world_fact_record",
+          toolId: "world_fact.record.v2",
+          effectBinding: {
+            knowledgeOwnerRef: "Player",
+            subjectRefs: ["Clerk Mara"],
+            statement: "Clerk Mara reported that the ledger must stay on the desk until she stamps it.",
+            summary: "Clerk Mara's desk procedure is recorded as a reported note.",
+            truthStatus: "reported",
+            futureUseKind: "procedure",
+            source: {
+              sourceKind: "accepted_dialogue_receipt",
+              sourceReceiptIds: ["receipt-dialogue-source-rollback-1"],
+              sourceQuote: "Keep the ledger here until I stamp it.",
+              sourceSummary: "Clerk Mara gave the desk procedure.",
+            },
+            evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterWorldFactKnowledgeInsertBeforeAuthorityTrace: () => {
+              throw new Error("forced knowledge authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        priorReceipts: [sourceReceipt],
+        receiptId: "receipt-world-fact-rollback-1",
+        emittedAt: 30,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt.failureReason).toContain("forced knowledge authority failure");
+      expect(getDb().select().from(actorKnowledgeRecords).all()).toHaveLength(0);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("does not schedule local consequences for private player-known knowledge mutation", () => {
+    const { packet, checklist } = dialogueToWorldFactToolPlanFixture();
+    const dialogueReceipt = gameplayRuntimeReceiptV2Schema.parse({
+      version: "gameplay-runtime-receipt.v2",
+      receiptId: "receipt-dialogue-private-source-1",
+      requestId: "dialogue-private-source-1",
+      stepId: "step-1",
+      source: {
+        kind: "gm_action_checklist",
+        checklistId: checklist.checklistId,
+        stepId: "step-1",
+      },
+      capabilityId: "dialogue_record",
+      toolId: "dialogue.record.v2",
+      status: "accepted",
+      evidenceAuthority: "terminal_receipt",
+      mutationAuthority: "none",
+      mutationApplied: false,
+      baseWorldVersion: 7,
+      resultWorldVersion: 7,
+      visibleSummary: "Clerk Mara dialogue outcome (answer): Clerk Mara gives the desk procedure. Quote: Keep the ledger here until I stamp it.",
+      evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+      durableEventIds: [],
+      emittedAt: 30,
+    });
+    const receipt = gameplayRuntimeReceiptV2Schema.parse({
+      version: "gameplay-runtime-receipt.v2",
+      receiptId: "receipt-world-fact-private-1",
+      requestId: "world-fact-private-1",
+      stepId: "step-2",
+      source: {
+        kind: "gm_action_checklist",
+        checklistId: checklist.checklistId,
+        stepId: "step-2",
+      },
+      capabilityId: "world_fact_record",
+      toolId: "world_fact.record.v2",
+      status: "accepted",
+      evidenceAuthority: "mutation_receipt",
+      mutationAuthority: "knowledge",
+      mutationApplied: true,
+      baseWorldVersion: 7,
+      resultWorldVersion: 8,
+      visibleSummary: "Player-known knowledge recorded from accepted_dialogue_receipt: Clerk Mara's desk procedure is recorded.",
+      evidenceRefs: ["Player", "Clerk Mara", "Atrium"],
+      durableEventIds: [],
+      emittedAt: 31,
+    });
+    const ledger = buildRuntimeReceiptLedgerV2({
+      ledgerId: "ledger-world-fact-private-1",
+      modelPacket: packet,
+      checklist,
+      receipts: [dialogueReceipt, receipt],
+    });
+
+    const schedule = scheduleLocalConsequencesV2({
+      scheduleId: "schedule-world-fact-private-1",
+      modelPacket: { ...packet, baseWorldVersion: 8 },
+      ledger,
+    });
+    expect(schedule.route).toBe("none");
+    expect(schedule.triggerReceiptIds).toEqual([]);
   });
 
   it("executes support_actor.create.v2 as atomic temporary current-scene actor mutation", async () => {

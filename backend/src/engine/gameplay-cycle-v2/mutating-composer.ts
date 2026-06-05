@@ -187,6 +187,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
       request,
       handlers: input.handlers,
       refRegistry: refRegistry ?? undefined,
+      priorReceipts: [...receipts],
       receiptId: input.receiptIdForStep?.(step.stepId, index) ?? defaultReceiptId(step.stepId),
       emittedAt: input.emittedAtForStep?.(step.stepId, index) ?? defaultEmittedAt(index),
     });

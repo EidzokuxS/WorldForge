@@ -78,6 +78,7 @@ function acceptedLocalMutationTrigger(receipt: GameplayRuntimeReceiptV2 | null):
     && receipt?.status === "accepted"
     && receipt.mutationApplied
     && receipt.mutationAuthority !== "none"
+    && receipt.mutationAuthority !== "knowledge"
     && receipt.mutationAuthority !== "world"
     && receipt.mutationAuthority !== "ui";
 }
@@ -359,6 +360,7 @@ export async function executeRequiredLocalConsequencesV2(input: {
       request: candidate.request,
       handlers: input.handlers,
       refRegistry: refRegistry ?? undefined,
+      priorReceipts: [...allReceipts],
       source: {
         kind: "local_consequence_schedule",
         scheduleId: input.schedule.scheduleId,

@@ -3,12 +3,14 @@ import {
   assertApiResponseProjectionV2,
   assertGameplayRuntimeReceiptLedgerV2,
   assertGmActionChecklistV2,
+  assertGmReadV2,
   assertNarratorViewV2,
   assertSettledPacketPersistenceV2,
   assertSettledTurnPacketV2,
   type ApiResponseProjectionV2,
   type GameplayRuntimeReceiptLedgerV2,
   type GmActionChecklistV2,
+  type GmReadV2,
   type NarratorViewV2,
   type SettledPacketPersistenceV2,
   type SettledTurnPacketV2,
@@ -25,6 +27,7 @@ export interface PersistedGameplayCycleV2Packet {
   packet: SettledTurnPacketV2;
   persistence: SettledPacketPersistenceV2;
   checklist: GmActionChecklistV2 | null;
+  gmRead: GmReadV2 | null;
   receiptLedger: GameplayRuntimeReceiptLedgerV2 | null;
   narratorView: NarratorViewV2 | null;
   apiProjection: ApiResponseProjectionV2 | null;
@@ -71,6 +74,7 @@ export function ensureGameplayCycleV2PacketStore(): void {
       packet_json TEXT NOT NULL,
       persistence_json TEXT NOT NULL,
       checklist_json TEXT,
+      gm_read_json TEXT,
       receipt_ledger_json TEXT,
       narrator_view_json TEXT,
       api_projection_json TEXT,
@@ -85,6 +89,7 @@ export function ensureGameplayCycleV2PacketStore(): void {
       ON ${TABLE_NAME} (campaign_id, status, narrator_attempt_status);
   `);
   ensureColumn(TABLE_NAME, "checklist_json", "TEXT");
+  ensureColumn(TABLE_NAME, "gm_read_json", "TEXT");
   ensureColumn(TABLE_NAME, "receipt_ledger_json", "TEXT");
 }
 
@@ -92,6 +97,7 @@ export function persistSettledTurnPacketV2(input: {
   packet: SettledTurnPacketV2;
   persistence: SettledPacketPersistenceV2;
   checklist?: GmActionChecklistV2 | null;
+  gmRead?: GmReadV2 | null;
   receiptLedger?: GameplayRuntimeReceiptLedgerV2 | null;
   narratorView?: NarratorViewV2 | null;
 }): PersistedGameplayCycleV2Packet {
@@ -104,6 +110,11 @@ export function persistSettledTurnPacketV2(input: {
       ? assertGmActionChecklistV2(input.checklist)
       : null
     : existing?.checklist ?? null;
+  const gmRead = input.gmRead !== undefined
+    ? input.gmRead
+      ? assertGmReadV2(input.gmRead)
+      : null
+    : existing?.gmRead ?? null;
   const receiptLedger = input.receiptLedger !== undefined
     ? input.receiptLedger
       ? assertGameplayRuntimeReceiptLedgerV2(input.receiptLedger)
@@ -154,6 +165,7 @@ export function persistSettledTurnPacketV2(input: {
         packet_json,
         persistence_json,
         checklist_json,
+        gm_read_json,
         receipt_ledger_json,
         narrator_view_json,
         api_projection_json,
@@ -170,6 +182,7 @@ export function persistSettledTurnPacketV2(input: {
         @packetJson,
         @persistenceJson,
         @checklistJson,
+        @gmReadJson,
         @receiptLedgerJson,
         @narratorViewJson,
         NULL,
@@ -184,6 +197,7 @@ export function persistSettledTurnPacketV2(input: {
         packet_json = excluded.packet_json,
         persistence_json = excluded.persistence_json,
         checklist_json = excluded.checklist_json,
+        gm_read_json = excluded.gm_read_json,
         receipt_ledger_json = excluded.receipt_ledger_json,
         narrator_view_json = excluded.narrator_view_json,
         base_world_version = excluded.base_world_version,
@@ -199,6 +213,7 @@ export function persistSettledTurnPacketV2(input: {
       packetJson: stringifyJson(packet),
       persistenceJson: stringifyJson(persistence),
       checklistJson: checklist ? stringifyJson(checklist) : null,
+      gmReadJson: gmRead ? stringifyJson(gmRead) : null,
       receiptLedgerJson: receiptLedger ? stringifyJson(receiptLedger) : null,
       narratorViewJson: narratorView ? stringifyJson(narratorView) : null,
       baseWorldVersion: packet.baseWorldVersion,
@@ -224,6 +239,7 @@ export function markGameplayCycleV2PacketNarratorRendering(
       narratorAttemptStatus: "started",
     }),
     checklist: persisted.checklist,
+    gmRead: persisted.gmRead,
     receiptLedger: persisted.receiptLedger,
     narratorView: persisted.narratorView,
   });
@@ -244,6 +260,7 @@ export function markGameplayCycleV2PacketNarratorFailedPendingRetry(
       narratorAttemptStatus: "failed_pending_retry",
     }),
     checklist: persisted.checklist,
+    gmRead: persisted.gmRead,
     receiptLedger: persisted.receiptLedger,
     narratorView: persisted.narratorView,
   });
@@ -303,6 +320,7 @@ export function readGameplayCycleV2Packet(
         packet_json AS packetJson,
         persistence_json AS persistenceJson,
         checklist_json AS checklistJson,
+        gm_read_json AS gmReadJson,
         receipt_ledger_json AS receiptLedgerJson,
         narrator_view_json AS narratorViewJson,
         api_projection_json AS apiProjectionJson,
@@ -321,6 +339,9 @@ export function readGameplayCycleV2Packet(
   );
   const checklist = typeof row.checklistJson === "string"
     ? assertGmActionChecklistV2(parseJsonObject(row.checklistJson, {}))
+    : null;
+  const gmRead = typeof row.gmReadJson === "string"
+    ? assertGmReadV2(parseJsonObject(row.gmReadJson, {}))
     : null;
   const receiptLedger = typeof row.receiptLedgerJson === "string"
     ? assertGameplayRuntimeReceiptLedgerV2(parseJsonObject(row.receiptLedgerJson, {}))
@@ -341,6 +362,7 @@ export function readGameplayCycleV2Packet(
     packet,
     persistence,
     checklist,
+    gmRead,
     receiptLedger,
     narratorView,
     apiProjection,

@@ -1,4 +1,5 @@
 import {
+  assertNoPrivateTermsInPublicPayloadV2,
   assertGameplayRuntimeReceiptLedgerV2,
   assertSettledTurnPacketV2,
   type GameplayRuntimeReceiptLedgerV2,
@@ -10,7 +11,10 @@ import {
   type SettledTurnPacketV2,
 } from "./contracts.js";
 import { normalizeRuntimeReceiptEvidenceV2 } from "./evidence-normalizer.js";
-import { currentSceneEvidence } from "./settled-packet.js";
+import {
+  buildPublicGmReadProjectionV2,
+  currentSceneEvidence,
+} from "./settled-packet.js";
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
@@ -228,7 +232,8 @@ export function buildRuntimeSettledTurnPacketV2(input: {
       evidenceIds: [],
     }));
 
-  return assertSettledTurnPacketV2({
+  const privateGuardTerms = uniqueStrings(latestModelPacket.runtimePrivateGuardTerms);
+  const packet = assertSettledTurnPacketV2({
     version: "settled-turn-packet.v2",
     packetId: input.packetId,
     campaignId: input.modelPacket.campaignId,
@@ -237,18 +242,24 @@ export function buildRuntimeSettledTurnPacketV2(input: {
     baseTick: input.modelPacket.baseTick,
     baseWorldVersion: input.modelPacket.baseWorldVersion,
     resultWorldVersion: maxWorldVersion(input.ledger.receipts, input.modelPacket.baseWorldVersion),
-    gmRead: input.gmRead,
-    oracleSettlement: null,
+    gmReadPublic: buildPublicGmReadProjectionV2({
+      gmRead: input.gmRead,
+      settlementBasis: "runtime_receipts",
+    }),
+    oracleVisibleOutcome: null,
     acceptedEvidence,
     acceptedRuntimeReceiptIds: uniqueStrings(acceptedRuntimeReceiptIds),
     acceptedDurableEventIds: uniqueStrings(acceptedDurableEventIds),
-    skippedSteps,
-    failedSteps,
-    privateGuardTerms: uniqueStrings([
-      ...input.modelPacket.runtimePrivateGuardTerms,
-      ...latestModelPacket.runtimePrivateGuardTerms,
-      ...Object.values(input.receiptModelPackets ?? {}).flatMap((packet) =>
-        packet?.runtimePrivateGuardTerms ?? []),
-    ]),
+    stepAudit: {
+      skippedCount: skippedSteps.length,
+      failedCount: failedSteps.length,
+    },
+    auditRef: `audit-${input.packetId}`,
   });
+  assertNoPrivateTermsInPublicPayloadV2({
+    payloadName: "settled-turn-packet.v2",
+    payload: packet,
+    privateGuardTerms,
+  });
+  return packet;
 }

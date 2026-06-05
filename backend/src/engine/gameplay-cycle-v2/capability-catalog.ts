@@ -60,8 +60,8 @@ const CAPABILITY_CATALOG: Record<RuntimeCapabilityIdV2, RuntimeCapabilityDefinit
   },
   world_fact_record: {
     capabilityId: "world_fact_record",
-    purpose: "Record future-usable player-known facts with explicit source evidence.",
-    evidenceAuthority: "terminal_receipt_required",
+    purpose: "Record source-bounded player-known knowledge for future use.",
+    evidenceAuthority: "mutation_receipt_required",
     plannerSurface: "tool_request",
     ownsEffectKinds: ["world_fact"],
   },

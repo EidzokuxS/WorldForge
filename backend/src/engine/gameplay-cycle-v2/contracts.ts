@@ -627,6 +627,27 @@ export const gmActionChecklistEffectKindV2Schema = z.enum([
 
 export type GmActionChecklistEffectKindV2 = z.infer<typeof gmActionChecklistEffectKindV2Schema>;
 
+export const publicGmReadProjectionV2Schema = z.object({
+  version: z.literal("public-gm-read-projection.v2"),
+  path: gmReadPathV2Schema,
+  turnNeed: gmReadTurnNeedV2Schema,
+  focalActorRefs: z.array(modelSafeRefSchema).min(1).max(4),
+  evidenceRefs: z.array(modelSafeRefSchema).min(1).max(12),
+  targetRefs: z.array(modelSafeRefSchema).max(8).default([]),
+  requiredEffectKinds: z.array(gmActionChecklistEffectKindV2Schema).max(6).default([]),
+  settlementBasis: z.enum([
+    "scene_frame",
+    "gm_read_direct",
+    "gm_read_continue",
+    "gm_read_clarification",
+    "oracle_settlement",
+    "runtime_receipts",
+  ]),
+}).strict();
+
+export type PublicGmReadProjectionV2 =
+  z.infer<typeof publicGmReadProjectionV2Schema>;
+
 export const gmActionChecklistStepIdV2Schema = z.string().regex(/^step-[1-9][0-9]*$/u);
 
 export const gmActionChecklistStepV2Schema = z.object({
@@ -639,7 +660,7 @@ export const gmActionChecklistStepV2Schema = z.object({
   intendedEffect: z.object({
     kind: gmActionChecklistEffectKindV2Schema,
     summary: z.string().trim().min(1).max(500),
-    stateScope: z.enum(["local_scene", "actor", "item", "location", "world", "ui"]),
+    stateScope: z.enum(["local_scene", "actor", "item", "location", "knowledge", "world", "ui"]),
   }).strict(),
   expectedVisibleEffect: z.string().trim().min(1).max(500),
   dependsOnStepIds: z.array(gmActionChecklistStepIdV2Schema).max(5).default([]),
@@ -769,12 +790,30 @@ const worldFactRecordRequestV2Schema = z.object({
   capabilityId: z.literal("world_fact_record"),
   toolId: z.literal("world_fact.record.v2"),
   effectBinding: z.object({
+    knowledgeOwnerRef: z.literal("Player"),
     subjectRefs: z.array(modelSafeRefSchema).min(1).max(8),
+    statement: z.string().trim().min(1).max(900),
     summary: z.string().trim().min(1).max(700),
-    futureUseKind: z.enum(["memory", "evidence", "procedure", "other"]),
+    truthStatus: z.enum(["observed", "reported", "claimed", "verified", "disputed"]),
+    futureUseKind: z.enum(["memory", "evidence", "procedure", "route_hint", "other"]),
+    source: z.object({
+      sourceKind: z.enum(["accepted_dialogue_receipt", "accepted_runtime_receipt"]),
+      sourceReceiptIds: z.array(idText).min(1).max(4),
+      sourceQuote: optionalNonEmptyString(700),
+      sourceSummary: z.string().trim().min(1).max(700),
+    }).strict(),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
-}).strict();
+}).strict().superRefine((request, ctx) => {
+  const source = request.effectBinding.source;
+  if (source.sourceKind === "accepted_dialogue_receipt" && !source.sourceQuote?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["effectBinding", "source", "sourceQuote"],
+      message: "Dialogue-sourced player-known knowledge requires the accepted dialogue quote.",
+    });
+  }
+});
 
 const supportActorTagV2Schema = z.string()
   .trim()
@@ -1023,6 +1062,7 @@ export const gameplayRuntimeMutationAuthorityV2Schema = z.enum([
   "local_scene",
   "actor",
   "item",
+  "knowledge",
   "location",
   "world",
   "ui",
@@ -1388,6 +1428,23 @@ export const localConsequenceExecutionV2Schema = z.object({
 
 export type LocalConsequenceExecutionV2 = z.infer<typeof localConsequenceExecutionV2Schema>;
 
+export const oracleVisibleOutcomeV2Schema = z.object({
+  outcome: oracleOutcomeTierV2Schema,
+  question: z.string().trim().min(1).max(500),
+  stakes: z.string().trim().min(1).max(500),
+  selectedMeaning: z.string().trim().min(1).max(500),
+}).strict();
+
+export type OracleVisibleOutcomeV2 = z.infer<typeof oracleVisibleOutcomeV2Schema>;
+
+export const publicStepAuditSummaryV2Schema = z.object({
+  skippedCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+}).strict();
+
+export type PublicStepAuditSummaryV2 =
+  z.infer<typeof publicStepAuditSummaryV2Schema>;
+
 export const settledTurnPacketV2Schema = z.object({
   version: z.literal("settled-turn-packet.v2"),
   packetId: idText,
@@ -1397,14 +1454,16 @@ export const settledTurnPacketV2Schema = z.object({
   baseTick: tick,
   baseWorldVersion: worldVersion,
   resultWorldVersion: worldVersion,
-  gmRead: gmReadV2Schema,
-  oracleSettlement: oracleSettlementV2Schema.nullable().default(null),
+  gmReadPublic: publicGmReadProjectionV2Schema,
+  oracleVisibleOutcome: oracleVisibleOutcomeV2Schema.nullable().default(null),
   acceptedEvidence: z.array(settledEvidenceV2Schema).max(80),
   acceptedRuntimeReceiptIds: z.array(idText).max(80).default([]),
   acceptedDurableEventIds: z.array(idText).max(80).default([]),
-  skippedSteps: z.array(settledStepAuditV2Schema).max(40).default([]),
-  failedSteps: z.array(settledStepAuditV2Schema).max(40).default([]),
-  privateGuardTerms: z.array(shortText).max(80).default([]),
+  stepAudit: publicStepAuditSummaryV2Schema.default({
+    skippedCount: 0,
+    failedCount: 0,
+  }),
+  auditRef: idText.optional(),
 }).strict().superRefine((packet, ctx) => {
   if (packet.resultWorldVersion < packet.baseWorldVersion) {
     ctx.addIssue({
@@ -1412,24 +1471,6 @@ export const settledTurnPacketV2Schema = z.object({
       path: ["resultWorldVersion"],
       message: "Settled packet resultWorldVersion cannot precede baseWorldVersion.",
     });
-  }
-  for (const term of packet.privateGuardTerms) {
-    const normalizedTerm = term.trim().toLowerCase();
-    if (!normalizedTerm) continue;
-    const publicText = JSON.stringify({
-      playerAction: packet.playerAction,
-      gmRead: packet.gmRead,
-      acceptedEvidence: packet.acceptedEvidence,
-      skippedSteps: packet.skippedSteps,
-      failedSteps: packet.failedSteps,
-    }).toLowerCase();
-    if (publicText.includes(normalizedTerm)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["privateGuardTerms"],
-        message: `Private guard term "${term}" leaked into settled public fields.`,
-      });
-    }
   }
   if (packet.acceptedRuntimeReceiptIds.length > 0) {
     const hasRuntimeEvidence = packet.acceptedEvidence.some((evidence) =>
@@ -1442,12 +1483,12 @@ export const settledTurnPacketV2Schema = z.object({
       });
     }
   }
-  if (packet.oracleSettlement) {
-    if (packet.gmRead.path !== "roll_oracle") {
+  if (packet.oracleVisibleOutcome) {
+    if (packet.gmReadPublic.path !== "roll_oracle") {
       ctx.addIssue({
         code: "custom",
-        path: ["oracleSettlement"],
-        message: "Oracle settlement requires a roll_oracle GM Read.",
+        path: ["oracleVisibleOutcome"],
+        message: "Oracle visible outcome requires a roll_oracle GM Read.",
       });
     }
     const hasOracleEvidence = packet.acceptedEvidence.some((evidence) =>
@@ -1456,15 +1497,15 @@ export const settledTurnPacketV2Schema = z.object({
       ctx.addIssue({
         code: "custom",
         path: ["acceptedEvidence"],
-        message: "Oracle settlement requires accepted oracle_outcome evidence.",
+        message: "Oracle visible outcome requires accepted oracle_outcome evidence.",
       });
     }
   }
-  if (!packet.oracleSettlement && packet.gmRead.path === "roll_oracle") {
+  if (!packet.oracleVisibleOutcome && packet.gmReadPublic.path === "roll_oracle") {
     ctx.addIssue({
       code: "custom",
-      path: ["oracleSettlement"],
-      message: "roll_oracle GM Read requires an Oracle settlement.",
+      path: ["oracleVisibleOutcome"],
+      message: "roll_oracle GM Read requires an Oracle visible outcome.",
     });
   }
 });
@@ -1585,6 +1626,10 @@ export function assertGmReadV2(value: unknown): GmReadV2 {
   return gmReadV2Schema.parse(value);
 }
 
+export function assertPublicGmReadProjectionV2(value: unknown): PublicGmReadProjectionV2 {
+  return publicGmReadProjectionV2Schema.parse(value);
+}
+
 export function assertOracleSettlementV2(value: unknown): OracleSettlementV2 {
   return oracleSettlementV2Schema.parse(value);
 }
@@ -1619,6 +1664,23 @@ export function assertLocalConsequenceExecutionV2(value: unknown): LocalConseque
 
 export function assertSettledTurnPacketV2(value: unknown): SettledTurnPacketV2 {
   return settledTurnPacketV2Schema.parse(value);
+}
+
+export function assertNoPrivateTermsInPublicPayloadV2(input: {
+  payloadName: string;
+  payload: unknown;
+  privateGuardTerms: readonly string[];
+}): void {
+  const publicText = JSON.stringify(input.payload).toLowerCase();
+  for (const term of input.privateGuardTerms) {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (!normalizedTerm) continue;
+    if (publicText.includes(normalizedTerm)) {
+      throw new Error(
+        `${input.payloadName} leaked private guard term "${term}" into public fields.`,
+      );
+    }
+  }
 }
 
 export function assertSettledPacketPersistenceV2(value: unknown): SettledPacketPersistenceV2 {

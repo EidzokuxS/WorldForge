@@ -38,7 +38,7 @@ function receiptEvidenceText(receipt: GameplayRuntimeReceiptV2): string {
     case "dialogue.record.v2":
       return `Dialogue receipt accepted: ${receipt.visibleSummary}`;
     case "world_fact.record.v2":
-      return `World fact receipt accepted: ${receipt.visibleSummary}`;
+      return `Player-known knowledge receipt accepted: ${receipt.visibleSummary} This records source-bounded player knowledge only, not objective canon, absence, discovery, movement, item state, or NPC private knowledge.`;
     case "support_actor.create.v2":
       return `Support actor receipt accepted: ${receipt.visibleSummary}`;
     case "entity.tag.v2":

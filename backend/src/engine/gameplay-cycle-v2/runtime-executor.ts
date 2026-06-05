@@ -32,6 +32,7 @@ export type GameplayToolHandlerV2 = (input: {
   checklist: GmActionChecklistV2;
   request: GameplayToolRequestV2;
   refRegistry?: GameplayRefRegistryV2;
+  priorReceipts: readonly GameplayRuntimeReceiptV2[];
 }) => GameplayToolHandlerOutcomeV2 | Promise<GameplayToolHandlerOutcomeV2>;
 
 export type GameplayToolHandlerRegistryV2 =
@@ -191,6 +192,7 @@ export async function executeGameplayToolRequestV2(input: {
   request: unknown;
   handlers: GameplayToolHandlerRegistryV2;
   refRegistry?: GameplayRefRegistryV2;
+  priorReceipts?: readonly GameplayRuntimeReceiptV2[];
   source?: GameplayRuntimeReceiptSourceV2;
   receiptId: string;
   emittedAt: number;
@@ -240,6 +242,7 @@ export async function executeGameplayToolRequestV2(input: {
       checklist: input.checklist,
       request,
       refRegistry: input.refRegistry,
+      priorReceipts: input.priorReceipts ?? [],
     });
   } catch (error) {
     return failedReceipt({

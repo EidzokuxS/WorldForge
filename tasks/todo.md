@@ -161,6 +161,42 @@ P21 item transfer checkpoint:
   - Authority trace operation `gameplay-cycle-v2.item.transfer.v2`, source entity type `item`, state delta `item:<id>:custody`, metadata records previous/next owner/location/equip state; no legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts`, `simulation_proposals`, `turn_clock_ledger`, or `location_recent_events` rows.
   - Artifacts: `output/p21-item-transfer-live/load-r2.json`, `turn-item-transfer-r2.sse.txt`, `turn-item-transfer-r2.events.json`, `turn-item-transfer-r2.db.json`, backend logs.
 
+P22 player-known knowledge / world_fact checkpoint:
+- User reminder still applies: this slice is diagnostic proof only; final acceptance remains several different fresh zero-turn campaigns/clones at about 60 clean turns each with zero failed/replayed/restored/invalid player-facing turns.
+- Oracle/GPT-5.5 Pro review `p22-world-fact-boundary`:
+  - Dry-run: browser mode, forced one bundled attachment via `--browser-bundle-files`, 17 files, about 156.2k tokens, one `attachments-bundle.txt`.
+  - Real browser run completed on GPT-5.5 Pro / Extended Pro with model selection verified.
+  - Recommendation accepted: implement B now as a first-class durable player-known knowledge mutation, not objective world canon and not a terminal/non-mutating narration receipt.
+  - Accepted boundary: `world_fact.record.v2` records one source-bounded private Player-owned knowledge row from accepted prior same-turn runtime receipts; it advances worldVersion, writes one v2 authority trace, emits a mutation receipt, and never owns absence, discovery, movement/arrival, route legality, item state, NPC private knowledge, relationships/factions/conditions/time, or facts sourced from raw player action, GM Read text, checklist intent, failed/skipped receipts, or narrator prose.
+  - Code-level Oracle risk addressed: executor/composer now pass prior accepted receipts to handlers so sourceReceiptIds can be checked by backend authority instead of trusted model text.
+- Implementation in progress:
+  - `world_fact_record` is now mutation-receipt-required in the v2 capability catalog and included in live capabilities.
+  - `world_fact.record.v2` schema now requires `knowledgeOwnerRef="Player"`, `statement`, `summary`, `truthStatus`, `futureUseKind`, source kind/receipt ids/summary, dialogue source quote when applicable, subject refs, and evidence refs.
+  - Runtime prompts admit `world_fact` only as source-bounded player-known knowledge, usually after `dialogue_outcome`, and expose prior accepted receipt summaries to the tool-request planner.
+  - DB handler writes exactly one `actor_knowledge_records` row plus `gameplay-cycle-v2.player_knowledge.record.v2` authority trace in one transaction, advances worldVersion only on accepted mutation, rejects missing source receipts and duplicates without mutation, and rolls back on authority failure.
+  - Added `mutationAuthority="knowledge"` and excluded it from required local consequence scheduling/execution.
+- Verification so far:
+  - GitNexus impact before edits was LOW for `buildGmReadSystemPrompt`, `buildToolRequestSystemPrompt`, `compileSimpleGmActionChecklistV2`, `createDbBackedGameplayToolHandlersV2`, `executeGameplayToolRequestV2`, `composeGameplayCycleMutatingTurnV2`, and `getRuntimeCapabilityDefinitionV2`; schema consts were not indexed as impact targets.
+  - Second Oracle/GPT-5.5 Pro review `p22-settled-public-projection` completed with one bundled attachment, about 104.4k tokens. Recommendation accepted: full GM Read is internal audit; public `SettledTurnPacketV2` must carry only a whitelisted public GM Read projection, visible oracle outcome, accepted evidence, and public step-audit counts. Full GM Read is persisted as private `gm_read_json` audit beside checklist and receipt ledger.
+  - Live diagnostic exposed and fixed an important ownership detail: `runtimePrivateGuardTerms` are frame-scoped, not turn-global. A label hidden in the initial frame may become public after an accepted movement refresh; receipt evidence is checked against its own pre-step packet and final scene evidence is checked against the latest packet.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts` passed with 130 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+- Live/manual diagnostic evidence:
+  - Diagnostic clone `9d46eb18-6b8f-4600-a049-6285b03f1fec` exposed the old bug: first movement action restored because full internal `gmRead` leaked initial-frame private labels into public settled packet validation. This lane is diagnostic-invalid and does not count.
+  - Diagnostic retry clone `9a4e53f0-0d4e-4c89-91ca-bb45b8bd7a41` exposed the second boundary bug: private terms were treated as turn-global, so labels that became visible after movement were still banned in the final public packet. This lane is diagnostic-invalid and does not count.
+  - Fresh clean diagnostic clone `d084cfa3-1320-41e9-a104-ea4b4e66b6b0` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+  - Turn 1 action after preflight moved from `Lowwater Bazaar` to connected `Slip Twelve Berth`. Result: SSE reached `narrative`, `finalizing_turn`, and `done`; packet finalized with public `gmReadPublic.path="tool_plan"`, `requiredEffectKinds=["movement"]`, accepted `actor.move.v2`, accepted local scene-beat visibility receipts for now-visible `Sigil Boss Torvin Kask` and `Litha Corsen`, `gm_read_json` present as private audit, legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts`, and `simulation_proposals` all 0.
+  - Turn 2 action was chosen after inspecting actual state: ask visible `Litha Corsen` for the tube registration procedure and write the answer in working notes. Result: SSE reached `narrative`, `finalizing_turn`, and `done`; packet finalized with `requiredEffectKinds=["dialogue_outcome","world_fact"]`, accepted `dialogue.record.v2` receipt followed by accepted `world_fact.record.v2` receipt.
+  - DB grounding after Turn 2: `gameplay_cycle_v2_packets=2`, `actor_knowledge_records=1`, `authority_traces=2`, `worldVersion=2`, `currentTick=2`; legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `simulation_proposals=0`.
+  - Knowledge row is private player-known knowledge: `route="report_message"`, `truth_status="reported"`, `privacy="private"`, `base_world_version=1`, `valid_from_world_version=2`, metadata `toolName="world_fact.record.v2"`, `scope="player_known"`, `objectiveCanon=false`, `sourceKind="accepted_dialogue_receipt"`, `sourceReceiptIds=["receipt-step-1"]`.
+  - Authority trace operation `gameplay-cycle-v2.player_knowledge.record.v2`, source entity type `actor_knowledge`, state deltas `actor_knowledge:<id>:created` and `actor:<playerId>:knowledge`, metadata `objectiveCanon=false`, `sourceKind="accepted_dialogue_receipt"`.
+  - Backend ran on stable `PORT=3207` with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1`; stopped afterward.
+  - Artifacts: `output/p22-world-fact-live-retry2/turn1-move.sse.txt`, `turn1-db-summary.json`, `turn2-world-fact.sse.txt`, `turn2-db-summary.json`, `authority-traces.json`, backend logs.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- src/routes/__tests__/chat.test.ts` passed with 61 tests.
+  - Source scan found no v2 handler/runtime import of old `runtime-tool-input-schemas`, old `tool-executor`, or legacy `ToolResult`; remaining old names are denylist/test guard strings.
+
 ## Clean-Slate Runtime Scope Update 2026-06-04
 
 Goal changed: rewrite the whole gameplay-cycle runtime boundary, not only the central turn orchestrator.

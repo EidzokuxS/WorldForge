@@ -14,6 +14,7 @@ function acceptedLocalMutationReceipts(
   return ledger.receipts.filter((receipt) =>
     receipt.status === "accepted"
     && receipt.mutationApplied
+    && receipt.mutationAuthority !== "knowledge"
     && receipt.mutationAuthority !== "world"
     && receipt.mutationAuthority !== "ui");
 }

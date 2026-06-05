@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../db/index.js";
 import {
+  actorKnowledgeRecords,
   authorityTraces,
   items,
   locations,
@@ -27,7 +28,7 @@ import {
   type GameplayRefRegistryEntryV2,
   type GameplayRefRegistryV2,
 } from "./ref-registry.js";
-import type { GameplayToolRequestV2, ModelFacingTurnPacketV2 } from "./contracts.js";
+import type { GameplayRuntimeReceiptV2, GameplayToolRequestV2, ModelFacingTurnPacketV2 } from "./contracts.js";
 
 type ActorResolution =
   | {
@@ -77,6 +78,7 @@ type CurrentSceneResolution =
   };
 
 type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }>["effectBinding"]["entityScope"];
+type WorldFactRequestV2 = Extract<GameplayToolRequestV2, { toolId: "world_fact.record.v2" }>;
 type ItemTransferRequestV2 = Extract<GameplayToolRequestV2, { toolId: "item.transfer.v2" }>;
 type ItemTransferBindingV2 = ItemTransferRequestV2["effectBinding"];
 type ItemRow = typeof items.$inferSelect;
@@ -126,6 +128,7 @@ export interface GameplayDbHandlerTestHooksV2 {
   afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
   afterSupportActorInsertBeforeAuthorityTrace?: () => void;
   afterEntityTagRowUpdateBeforeAuthorityTrace?: () => void;
+  afterWorldFactKnowledgeInsertBeforeAuthorityTrace?: () => void;
 }
 
 export interface CreateDbBackedGameplayToolHandlersV2Options {
@@ -165,6 +168,18 @@ function parseStringArray(raw: string | null | undefined): string[] {
       .filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+function parseJsonRecord(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
   }
 }
 
@@ -511,6 +526,98 @@ function resolvePlayerEntry(input: {
     entry: resolution.entry,
     playerActorId,
   };
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])];
+}
+
+function normalizeKnowledgeStatement(statement: string): string {
+  return statement.trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+function knowledgeRouteFor(input: {
+  sourceKind: WorldFactRequestV2["effectBinding"]["source"]["sourceKind"];
+  truthStatus: WorldFactRequestV2["effectBinding"]["truthStatus"];
+}): "direct_observation" | "report_message" | "claim" | "belief" | "public_record" {
+  if (input.sourceKind === "accepted_dialogue_receipt") return "report_message";
+  switch (input.truthStatus) {
+    case "observed":
+      return "direct_observation";
+    case "verified":
+      return "public_record";
+    case "claimed":
+      return "claim";
+    case "reported":
+      return "report_message";
+    case "disputed":
+    default:
+      return "belief";
+  }
+}
+
+function knowledgeConfidence(truthStatus: WorldFactRequestV2["effectBinding"]["truthStatus"]): number {
+  switch (truthStatus) {
+    case "observed":
+    case "verified":
+      return 80;
+    case "reported":
+      return 65;
+    case "claimed":
+      return 55;
+    case "disputed":
+    default:
+      return 35;
+  }
+}
+
+function resolveWorldFactSource(input: {
+  request: WorldFactRequestV2;
+  priorReceipts: readonly GameplayRuntimeReceiptV2[];
+}): {
+  status: "resolved";
+  receipts: GameplayRuntimeReceiptV2[];
+} | {
+  status: "failed";
+  reason: string;
+} {
+  const source = input.request.effectBinding.source;
+  const priorById = new Map(input.priorReceipts.map((receipt) => [receipt.receiptId, receipt]));
+  const receipts: GameplayRuntimeReceiptV2[] = [];
+  for (const receiptId of source.sourceReceiptIds) {
+    const receipt = priorById.get(receiptId);
+    if (!receipt) {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not an accepted prior receipt in this turn.` };
+    }
+    if (receipt.status !== "accepted") {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not accepted.` };
+    }
+    if (receipt.toolId === "world_fact.record.v2") {
+      return { status: "failed", reason: "world_fact.record.v2 cannot source another world_fact.record.v2 receipt in the same turn." };
+    }
+    receipts.push(receipt);
+  }
+
+  if (source.sourceKind === "accepted_dialogue_receipt") {
+    const dialogueReceipt = receipts.find((receipt) => receipt.toolId === "dialogue.record.v2");
+    if (!dialogueReceipt) {
+      return { status: "failed", reason: "Dialogue-sourced player-known knowledge requires an accepted dialogue.record.v2 source receipt." };
+    }
+    const quote = source.sourceQuote?.trim();
+    if (!quote) {
+      return { status: "failed", reason: "Dialogue-sourced player-known knowledge requires sourceQuote." };
+    }
+    if (!dialogueReceipt.visibleSummary.toLowerCase().includes(quote.toLowerCase())) {
+      return { status: "failed", reason: "sourceQuote must match the accepted dialogue receipt visibleSummary." };
+    }
+  }
+
+  return { status: "resolved", receipts };
+}
+
+function sourceReceiptSummary(receipts: readonly GameplayRuntimeReceiptV2[]): string[] {
+  return receipts.map((receipt) =>
+    `${receipt.receiptId}:${receipt.toolId ?? "runtime"}:${receipt.visibleSummary}`);
 }
 
 function resolveItemTransferItem(input: {
@@ -1724,6 +1831,184 @@ function commitItemTransferV2(input: {
   });
 }
 
+function commitWorldFactRecordV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: WorldFactRequestV2;
+  owner: {
+    playerActorId: string;
+    entry: GameplayRefRegistryEntryV2;
+  };
+  sourceReceipts: GameplayRuntimeReceiptV2[];
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  knowledgeId: string;
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const knowledgeId = crypto.randomUUID();
+  const authorityTraceId = crypto.randomUUID();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const binding = input.request.effectBinding;
+  const source = binding.source;
+  const confidence = knowledgeConfidence(binding.truthStatus);
+  const sourceReceiptIds = source.sourceReceiptIds;
+  const normalizedStatement = normalizeKnowledgeStatement(binding.statement);
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    const duplicate = db
+      .select()
+      .from(actorKnowledgeRecords)
+      .where(and(
+        eq(actorKnowledgeRecords.campaignId, input.packet.campaignId),
+        eq(actorKnowledgeRecords.actorId, input.owner.playerActorId),
+      ))
+      .all()
+      .find((row) => {
+        const metadata = parseJsonRecord(row.metadata);
+        const existingSourceReceiptIds = Array.isArray(metadata.sourceReceiptIds)
+          ? metadata.sourceReceiptIds.filter((value): value is string => typeof value === "string")
+          : [];
+        return normalizeKnowledgeStatement(row.statement) === normalizedStatement
+          && existingSourceReceiptIds.length === sourceReceiptIds.length
+          && existingSourceReceiptIds.every((receiptId) => sourceReceiptIds.includes(receiptId));
+      });
+    if (duplicate) {
+      throw new Error("A matching player-known knowledge record already exists for this source.");
+    }
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const insert = db.insert(actorKnowledgeRecords)
+      .values({
+        id: knowledgeId,
+        campaignId: input.packet.campaignId,
+        actorId: input.owner.playerActorId,
+        route: knowledgeRouteFor({
+          sourceKind: source.sourceKind,
+          truthStatus: binding.truthStatus,
+        }),
+        truthStatus: binding.truthStatus,
+        statement: binding.statement.trim(),
+        subjectRefs: stringifyStringArray(binding.subjectRefs),
+        sourceEventIds: "[]",
+        sourceKnowledgeIds: "[]",
+        authorityTraceIds: stringifyStringArray([authorityTraceId]),
+        sourceActorId: null,
+        recipientActorIds: "[]",
+        confidence,
+        reliability: confidence,
+        privacy: "private",
+        baseWorldVersion: clock.worldVersion,
+        validFromWorldVersion: resultWorldVersion,
+        observedAtWorldVersion: clock.worldVersion,
+        invalidatedAtWorldVersion: null,
+        createdWorldTimeMinutes: clock.worldTimeMinutes,
+        deliveredWorldTimeMinutes: clock.worldTimeMinutes,
+        expiresWorldTimeMinutes: null,
+        metadata: stringifyJson({
+          toolName: "world_fact.record.v2",
+          scope: "player_known",
+          objectiveCanon: false,
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          truthStatus: binding.truthStatus,
+          futureUseKind: binding.futureUseKind,
+          summary: binding.summary,
+          sourceKind: source.sourceKind,
+          sourceReceiptIds,
+          sourceQuote: source.sourceQuote ?? null,
+          sourceSummary: source.sourceSummary,
+          sourceReceiptSummaries: sourceReceiptSummary(input.sourceReceipts),
+          evidenceRefs: binding.evidenceRefs,
+          subjectRefs: binding.subjectRefs,
+        }),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .run();
+    if (insert.changes !== 1) {
+      throw new Error("world_fact.record.v2 did not insert exactly one player-known knowledge row.");
+    }
+
+    input.testHooks?.afterWorldFactKnowledgeInsertBeforeAuthorityTrace?.();
+
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before world_fact.record.v2 could commit.");
+    }
+
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.player_knowledge.record.v2",
+        sourceEntityType: "actor_knowledge",
+        sourceEntityId: knowledgeId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray([
+          `actor_knowledge:${knowledgeId}:created`,
+          `actor:${input.owner.playerActorId}:knowledge`,
+        ]),
+        witnesses: stringifyStringArray(binding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          knowledgeOwnerRef: binding.knowledgeOwnerRef,
+          knowledgeOwnerActorId: input.owner.playerActorId,
+          scope: "player_known",
+          objectiveCanon: false,
+          truthStatus: binding.truthStatus,
+          futureUseKind: binding.futureUseKind,
+          sourceKind: source.sourceKind,
+          sourceReceiptIds,
+          subjectRefs: binding.subjectRefs,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      knowledgeId,
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+    };
+  });
+}
+
 function routeCheckHandler(
   packet: ModelFacingTurnPacketV2,
   request: Extract<GameplayToolRequestV2, { toolId: "route.check.v2" }>,
@@ -2127,6 +2412,54 @@ function itemTransferHandler(
   }
 }
 
+function worldFactRecordHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: WorldFactRequestV2,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  priorReceipts: readonly GameplayRuntimeReceiptV2[],
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) return failedOutcome(packet, "Missing or stale gameplay-cycle-v2 ref registry.");
+  const owner = resolvePlayerEntry({
+    registry,
+    playerRef: request.effectBinding.knowledgeOwnerRef,
+  });
+  if (owner.status !== "resolved") return failedOutcome(packet, owner.reason);
+  const source = resolveWorldFactSource({
+    request,
+    priorReceipts,
+  });
+  if (source.status !== "resolved") return failedOutcome(packet, source.reason);
+
+  try {
+    const commit = commitWorldFactRecordV2({
+      packet,
+      request,
+      owner,
+      sourceReceipts: source.receipts,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "knowledge",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: `Player-known knowledge recorded from ${request.effectBinding.source.sourceKind}: ${request.effectBinding.summary}`,
+      evidenceRefs: uniqueStrings([
+        request.effectBinding.knowledgeOwnerRef,
+        ...request.effectBinding.subjectRefs,
+        ...request.effectBinding.evidenceRefs,
+      ]),
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "world_fact.record.v2 failed before committing player-known knowledge.";
+    const isNoOp = reason.includes("already exists");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 export function createDbBackedGameplayToolHandlersV2(
   options: CreateDbBackedGameplayToolHandlersV2Options = {},
 ): GameplayToolHandlerRegistryV2 {
@@ -2178,6 +2511,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "item.transfer.v2 handler received the wrong request type.");
       }
       return itemTransferHandler(packet, request, refRegistry, options.testHooks);
+    },
+    "world_fact.record.v2": ({ packet, request, refRegistry, priorReceipts }) => {
+      if (request.toolId !== "world_fact.record.v2") {
+        return failedOutcome(packet, "world_fact.record.v2 handler received the wrong request type.");
+      }
+      return worldFactRecordHandler(packet, request, refRegistry, priorReceipts, options.testHooks);
     },
   };
 }

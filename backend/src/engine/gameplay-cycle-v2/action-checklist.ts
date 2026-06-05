@@ -200,6 +200,7 @@ const BACKEND_COMPILED_SIMPLE_EFFECTS = new Set<GmActionChecklistEffectKindV2>([
   "support_actor_create",
   "entity_tag",
   "item_transfer",
+  "world_fact",
   "minor_poi_create",
   "scene_beat",
   "dialogue_outcome",
@@ -219,6 +220,8 @@ function stateScopeForSimpleEffect(kind: GmActionChecklistEffectKindV2): GmActio
       return "item";
     case "item_transfer":
       return "item";
+    case "world_fact":
+      return "knowledge";
     case "scene_beat":
     case "dialogue_outcome":
       return "local_scene";
@@ -244,6 +247,8 @@ function purposeForSimpleEffect(input: {
       return "Settle the concrete entity tag change through backend tag authority.";
     case "item_transfer":
       return "Settle the concrete item custody, location, or equip-state change through backend item authority.";
+    case "world_fact":
+      return "Settle source-bounded player-known knowledge through backend knowledge authority.";
     case "scene_beat":
       return "Settle the local scene beat through backend terminal scene-beat authority.";
     case "dialogue_outcome":
@@ -271,6 +276,8 @@ function expectedVisibleEffectForSimpleEffect(input: {
       return `Accepted entity tag mutation receipt for ${target}.`;
     case "item_transfer":
       return `Accepted item transfer mutation receipt for ${target}.`;
+    case "world_fact":
+      return "Accepted player-known knowledge mutation receipt.";
     case "scene_beat":
       return "Accepted terminal scene-beat receipt.";
     case "dialogue_outcome":
