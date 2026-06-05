@@ -46,7 +46,7 @@ function receiptEvidenceText(receipt: GameplayRuntimeReceiptV2): string {
     case "item.transfer.v2":
       return `Item transfer receipt accepted: ${receipt.visibleSummary}`;
     case "actor.condition_set.v2":
-      return `Actor condition receipt accepted: ${receipt.visibleSummary}`;
+      return `Actor condition receipt accepted: ${receipt.visibleSummary} This proves only the listed actor condition or Player HP change. It does not prove combat resolution, NPC private condition, offscreen harm, relationship/faction/reputation change, item/location/world-fact state, or additional injuries.`;
     case "time.advance.v2":
       return `Time advance receipt accepted: ${receipt.visibleSummary}`;
     case "scene_beat.record.v2":

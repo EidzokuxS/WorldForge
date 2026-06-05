@@ -26,6 +26,10 @@ function actorRows(role: "active" | "support" | "background", actors: readonly S
       label: actor.label,
       role,
       awarenessHint: actor.awarenessHint?.trim() || null,
+      status: {
+        conditions: (actor.statusConditions ?? []).slice(0, 12),
+        hp: null,
+      },
     }));
 }
 
@@ -83,6 +87,14 @@ export function buildModelFacingTurnPacketV2(
       label: "Player",
       role: "player" as const,
       awarenessHint: null,
+      status: {
+        conditions: frame.roster.active
+          .find((actor) => actor.type === "player")
+          ?.statusConditions?.slice(0, 12) ?? [],
+        hp: frame.roster.active
+          .find((actor) => actor.type === "player")
+          ?.hp ?? null,
+      },
     },
     ...actorRows("active", frame.roster.active),
     ...actorRows("support", frame.roster.support),

@@ -241,6 +241,10 @@ export const modelFacingActorSchema = z.object({
   label: shortText,
   role: z.enum(["player", "active", "support", "background"]),
   awarenessHint: z.string().trim().max(320).nullable(),
+  status: z.object({
+    conditions: z.array(shortText).max(12),
+    hp: z.number().int().min(0).max(5).nullable(),
+  }).strict(),
 }).strict();
 
 export const modelFacingMovementOptionSchema = z.object({
@@ -727,6 +731,29 @@ const gameplayToolRequestBaseV2Shape = {
 };
 
 const toolEvidenceRefsSchema = z.array(modelSafeRefSchema).min(1).max(12);
+const actorConditionLabelV2Schema = z.enum([
+  "bleeding",
+  "burned",
+  "exhausted",
+  "injured",
+  "poisoned",
+  "prone",
+  "sick",
+  "starving",
+  "wounded",
+]);
+const actorConditionSourceAuthorityV2Schema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("current_scene_visible_evidence"),
+    sourceRefs: z.array(modelSafeRefSchema).min(1).max(8),
+    sourceSummary: shortText,
+  }).strict(),
+  z.object({
+    kind: z.literal("accepted_runtime_receipt"),
+    sourceReceiptIds: z.array(idText).min(1).max(4),
+    sourceSummary: shortText,
+  }).strict(),
+]);
 
 const routeCheckRequestV2Schema = z.object({
   ...gameplayToolRequestBaseV2Shape,
@@ -974,9 +1001,22 @@ const actorConditionSetRequestV2Schema = z.object({
   toolId: z.literal("actor.condition_set.v2"),
   effectBinding: z.object({
     actorRef: modelSafeRefSchema,
-    operation: z.enum(["set", "clear", "adjust_hp"]),
-    conditionLabel: optionalNonEmptyString(180),
-    amount: z.number().int().min(-100).max(100).optional(),
+    actorScope: z.enum(["player_actor", "visible_actor"]),
+    operation: z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("set_condition"),
+        conditionLabel: actorConditionLabelV2Schema,
+      }).strict(),
+      z.object({
+        kind: z.literal("clear_condition"),
+        conditionLabel: actorConditionLabelV2Schema,
+      }).strict(),
+      z.object({
+        kind: z.literal("adjust_player_hp"),
+        hpDelta: z.union([z.literal(-1), z.literal(1)]),
+      }).strict(),
+    ]),
+    sourceAuthority: actorConditionSourceAuthorityV2Schema,
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
 }).strict();

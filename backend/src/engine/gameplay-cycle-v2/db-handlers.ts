@@ -81,8 +81,11 @@ type EntityTagScope = Extract<GameplayToolRequestV2, { toolId: "entity.tag.v2" }
 type WorldFactRequestV2 = Extract<GameplayToolRequestV2, { toolId: "world_fact.record.v2" }>;
 type ItemTransferRequestV2 = Extract<GameplayToolRequestV2, { toolId: "item.transfer.v2" }>;
 type LocationRevealRequestV2 = Extract<GameplayToolRequestV2, { toolId: "location.reveal.v2" }>;
+type ActorConditionRequestV2 = Extract<GameplayToolRequestV2, { toolId: "actor.condition_set.v2" }>;
 type ItemTransferBindingV2 = ItemTransferRequestV2["effectBinding"];
 type ItemRow = typeof items.$inferSelect;
+type PlayerRow = typeof players.$inferSelect;
+type NpcRow = typeof npcs.$inferSelect;
 
 type EntityTagResolution =
   | {
@@ -125,6 +128,7 @@ type ItemTransferResolution =
 
 export interface GameplayDbHandlerTestHooksV2 {
   afterActorRowUpdateBeforeAuthorityTrace?: () => void;
+  afterActorConditionRowUpdateBeforeAuthorityTrace?: () => void;
   afterItemTransferRowUpdateBeforeAuthorityTrace?: () => void;
   afterLocationRevealInsertBeforeAuthorityTrace?: () => void;
   afterMinorPoiInsertBeforeAuthorityTrace?: () => void;
@@ -197,6 +201,16 @@ function canonicalSupportTag(raw: string): string | null {
   if (!normalized || normalized.length > 40) return null;
   return normalized;
 }
+
+const HARM_CONDITION_LABELS = new Set([
+  "bleeding",
+  "burned",
+  "injured",
+  "poisoned",
+  "sick",
+  "starving",
+  "wounded",
+]);
 
 function normalizeActorName(raw: string): string {
   return raw.trim().replace(/\s+/gu, " ").toLowerCase();
@@ -534,6 +548,18 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])];
 }
 
+function uniqueConditionLabels(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
 function normalizeKnowledgeStatement(statement: string): string {
   return statement.trim().replace(/\s+/gu, " ").toLowerCase();
 }
@@ -651,6 +677,53 @@ function resolveLocationRevealSource(input: {
     }
     if (receipt.toolId === "location.reveal.v2") {
       return { status: "failed", reason: "location.reveal.v2 cannot source another location.reveal.v2 receipt in the same turn." };
+    }
+    receipts.push(receipt);
+  }
+  return { status: "resolved", receipts };
+}
+
+function resolveActorConditionSource(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: ActorConditionRequestV2;
+  priorReceipts: readonly GameplayRuntimeReceiptV2[];
+}): {
+  status: "resolved";
+  receipts: GameplayRuntimeReceiptV2[];
+} | {
+  status: "failed";
+  reason: string;
+} {
+  const source = input.request.effectBinding.sourceAuthority;
+  const operation = input.request.effectBinding.operation;
+  if (source.kind === "current_scene_visible_evidence") {
+    const citableRefs = new Set(input.packet.citableRefs.map((ref) => ref.trim().toLowerCase()));
+    for (const ref of source.sourceRefs) {
+      if (!citableRefs.has(ref.trim().toLowerCase())) {
+        return { status: "failed", reason: `Actor condition source ref "${ref}" is not citable in the current scene packet.` };
+      }
+    }
+    if (operation.kind === "adjust_player_hp") {
+      return { status: "failed", reason: "Player HP adjustment requires an accepted runtime receipt source in this slice." };
+    }
+    if (HARM_CONDITION_LABELS.has(operation.conditionLabel)) {
+      return { status: "failed", reason: `Condition "${operation.conditionLabel}" requires an accepted runtime receipt source in this slice.` };
+    }
+    return { status: "resolved", receipts: [] };
+  }
+
+  const priorById = new Map(input.priorReceipts.map((receipt) => [receipt.receiptId, receipt]));
+  const receipts: GameplayRuntimeReceiptV2[] = [];
+  for (const receiptId of source.sourceReceiptIds) {
+    const receipt = priorById.get(receiptId);
+    if (!receipt) {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not an accepted prior receipt in this turn.` };
+    }
+    if (receipt.status !== "accepted") {
+      return { status: "failed", reason: `Source receipt "${receiptId}" is not accepted.` };
+    }
+    if (receipt.toolId === "actor.condition_set.v2") {
+      return { status: "failed", reason: "actor.condition_set.v2 cannot source another actor.condition_set.v2 receipt in the same turn." };
     }
     receipts.push(receipt);
   }
@@ -1188,6 +1261,301 @@ function commitActorMoveV2(input: {
       resultWorldTimeMinutes,
       elapsedWorldTimeMinutes,
       authorityTraceId,
+    };
+  });
+}
+
+function applyConditionToPlayerRecord(input: {
+  player: PlayerRow;
+  operation: ActorConditionRequestV2["effectBinding"]["operation"];
+  locationName: string | null;
+}): {
+  projection: ReturnType<typeof projectPlayerRecord>;
+  previousHp: number;
+  nextHp: number;
+  previousConditions: string[];
+  nextConditions: string[];
+  summary: string;
+  stateDeltaRefs: string[];
+} {
+  const record = hydrateStoredPlayerRecord(input.player, {
+    currentLocationName: input.locationName ?? undefined,
+  });
+  const previousHp = input.player.hp;
+  const previousConditions = uniqueConditionLabels(record.state.conditions);
+  let nextHp = previousHp;
+  let nextConditions = previousConditions;
+  let summary: string;
+  let stateDeltaRefs: string[];
+
+  switch (input.operation.kind) {
+    case "set_condition": {
+      if (previousConditions.includes(input.operation.conditionLabel)) {
+        throw new Error(`Player already has condition "${input.operation.conditionLabel}".`);
+      }
+      nextConditions = uniqueConditionLabels([...previousConditions, input.operation.conditionLabel]);
+      summary = `Player gains condition ${input.operation.conditionLabel}.`;
+      stateDeltaRefs = [`player:${input.player.id}:condition:${input.operation.conditionLabel}`];
+      break;
+    }
+    case "clear_condition": {
+      const conditionLabel = input.operation.conditionLabel;
+      if (!previousConditions.includes(conditionLabel)) {
+        throw new Error(`Player does not have condition "${conditionLabel}".`);
+      }
+      nextConditions = previousConditions.filter((condition) => condition !== conditionLabel);
+      summary = `Player clears condition ${conditionLabel}.`;
+      stateDeltaRefs = [`player:${input.player.id}:condition:${conditionLabel}`];
+      break;
+    }
+    case "adjust_player_hp": {
+      nextHp = previousHp + input.operation.hpDelta;
+      if (nextHp < 0 || nextHp > 5) {
+        throw new Error(`Player HP change would leave backend bounds 0..5: ${previousHp} -> ${nextHp}.`);
+      }
+      summary = `Player HP changes from ${previousHp} to ${nextHp}.`;
+      stateDeltaRefs = [`player:${input.player.id}:hp`];
+      break;
+    }
+  }
+
+  const projection = projectPlayerRecord({
+    ...record,
+    state: {
+      ...record.state,
+      hp: nextHp,
+      conditions: nextConditions,
+    },
+  });
+  return {
+    projection,
+    previousHp,
+    nextHp,
+    previousConditions,
+    nextConditions,
+    summary,
+    stateDeltaRefs,
+  };
+}
+
+function applyConditionToNpcRecord(input: {
+  npc: NpcRow;
+  operation: ActorConditionRequestV2["effectBinding"]["operation"];
+  locationName: string | null;
+}): {
+  projection: ReturnType<typeof projectNpcRecord>;
+  previousConditions: string[];
+  nextConditions: string[];
+  summary: string;
+  stateDeltaRefs: string[];
+} {
+  if (input.operation.kind === "adjust_player_hp") {
+    throw new Error("actor.condition_set.v2 does not support NPC HP.");
+  }
+  const record = hydrateStoredNpcRecord(input.npc, {
+    currentLocationName: input.locationName ?? undefined,
+  });
+  const previousConditions = uniqueConditionLabels(record.state.conditions);
+  let nextConditions = previousConditions;
+  if (input.operation.kind === "set_condition") {
+    if (previousConditions.includes(input.operation.conditionLabel)) {
+      throw new Error(`${input.npc.name} already has condition "${input.operation.conditionLabel}".`);
+    }
+    nextConditions = uniqueConditionLabels([...previousConditions, input.operation.conditionLabel]);
+  } else {
+    const conditionLabel = input.operation.conditionLabel;
+    if (!previousConditions.includes(conditionLabel)) {
+      throw new Error(`${input.npc.name} does not have condition "${conditionLabel}".`);
+    }
+    nextConditions = previousConditions.filter((condition) => condition !== conditionLabel);
+  }
+  const projection = projectNpcRecord({
+    ...record,
+    state: {
+      ...record.state,
+      conditions: nextConditions,
+    },
+  });
+  return {
+    projection,
+    previousConditions,
+    nextConditions,
+    summary: input.operation.kind === "set_condition"
+      ? `${input.npc.name} gains condition ${input.operation.conditionLabel}.`
+      : `${input.npc.name} clears condition ${input.operation.conditionLabel}.`,
+    stateDeltaRefs: [`npc:${input.npc.id}:condition:${input.operation.conditionLabel}`],
+  };
+}
+
+function commitActorConditionSetV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  request: ActorConditionRequestV2;
+  actor: Extract<ActorResolution, { status: "resolved" }>;
+  sourceReceipts: readonly GameplayRuntimeReceiptV2[];
+  testHooks?: GameplayDbHandlerTestHooksV2;
+}): {
+  resultWorldVersion: number;
+  resultWorldTimeMinutes: number;
+  authorityTraceId: string;
+  visibleSummary: string;
+  stateDeltaRefs: string[];
+} {
+  const db = getDb();
+  const timestamp = Date.now();
+  const sourceKey = authoritySourceKey({
+    turnId: input.packet.turnId,
+    requestId: input.request.requestId,
+  });
+  const sourceAuthority = input.request.effectBinding.sourceAuthority;
+  const operation = input.request.effectBinding.operation;
+  const locationNames = locationNameById(input.packet.campaignId);
+
+  return db.transaction(() => {
+    const clock = ensureClockAtBase({
+      campaignId: input.packet.campaignId,
+      baseWorldVersion: input.packet.baseWorldVersion,
+      currentTick: input.packet.baseTick,
+    });
+    if (clock.worldVersion !== input.packet.baseWorldVersion) {
+      throw new Error(
+        `Stale world version for ${input.packet.campaignId}: expected ${clock.worldVersion}, got ${input.packet.baseWorldVersion}.`,
+      );
+    }
+
+    let visibleSummary: string;
+    let stateDeltaRefs: string[];
+    let previousHp: number | null = null;
+    let nextHp: number | null = null;
+    let previousConditions: string[] = [];
+    let nextConditions: string[] = [];
+
+    if (input.actor.actorKind === "player") {
+      const player = db
+        .select()
+        .from(players)
+        .where(and(
+          eq(players.id, input.actor.actorId),
+          eq(players.campaignId, input.packet.campaignId),
+        ))
+        .get();
+      if (!player) throw new Error(`Player actor not found: ${input.actor.actorId}.`);
+      const applied = applyConditionToPlayerRecord({
+        player,
+        operation,
+        locationName: locationNames.get(player.currentLocationId ?? "") ?? null,
+      });
+      const update = db.update(players)
+        .set(applied.projection)
+        .where(and(
+          eq(players.id, input.actor.actorId),
+          eq(players.campaignId, input.packet.campaignId),
+          eq(players.hp, player.hp),
+        ))
+        .run();
+      if (update.changes !== 1) {
+        throw new Error("Player condition update did not affect exactly one row.");
+      }
+      visibleSummary = applied.summary;
+      stateDeltaRefs = applied.stateDeltaRefs;
+      previousHp = applied.previousHp;
+      nextHp = applied.nextHp;
+      previousConditions = applied.previousConditions;
+      nextConditions = applied.nextConditions;
+    } else {
+      if (operation.kind === "adjust_player_hp") {
+        throw new Error("actor.condition_set.v2 does not support NPC HP.");
+      }
+      const npc = db
+        .select()
+        .from(npcs)
+        .where(and(
+          eq(npcs.id, input.actor.actorId),
+          eq(npcs.campaignId, input.packet.campaignId),
+        ))
+        .get();
+      if (!npc) throw new Error(`NPC actor not found: ${input.actor.actorId}.`);
+      const applied = applyConditionToNpcRecord({
+        npc,
+        operation,
+        locationName: locationNames.get(npc.currentLocationId ?? "") ?? null,
+      });
+      const update = db.update(npcs)
+        .set(applied.projection)
+        .where(and(
+          eq(npcs.id, input.actor.actorId),
+          eq(npcs.campaignId, input.packet.campaignId),
+        ))
+        .run();
+      if (update.changes !== 1) {
+        throw new Error("NPC condition update did not affect exactly one row.");
+      }
+      visibleSummary = applied.summary;
+      stateDeltaRefs = applied.stateDeltaRefs;
+      previousConditions = applied.previousConditions;
+      nextConditions = applied.nextConditions;
+    }
+
+    input.testHooks?.afterActorConditionRowUpdateBeforeAuthorityTrace?.();
+
+    const resultWorldVersion = clock.worldVersion + 1;
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        currentTick: Math.max(clock.currentTick, input.packet.baseTick),
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(worldClocks.campaignId, input.packet.campaignId),
+        eq(worldClocks.worldVersion, clock.worldVersion),
+      ))
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new Error("World clock changed before actor.condition_set.v2 could commit.");
+    }
+
+    const authorityTraceId = crypto.randomUUID();
+    db.insert(authorityTraces)
+      .values({
+        id: authorityTraceId,
+        campaignId: input.packet.campaignId,
+        operation: "gameplay-cycle-v2.actor.condition_set.v2",
+        sourceEntityType: input.actor.actorKind,
+        sourceEntityId: input.actor.actorId,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: clock.worldTimeMinutes,
+        elapsedWorldTimeMinutes: 0,
+        toolResultId: sourceKey,
+        eventIds: "[]",
+        stateDeltaRefs: stringifyStringArray(stateDeltaRefs),
+        witnesses: stringifyStringArray(input.request.effectBinding.evidenceRefs),
+        metadata: stringifyJson({
+          requestId: input.request.requestId,
+          turnId: input.packet.turnId,
+          toolId: input.request.toolId,
+          actorRef: input.request.effectBinding.actorRef,
+          actorScope: input.request.effectBinding.actorScope,
+          actorKind: input.actor.actorKind,
+          actorId: input.actor.actorId,
+          operation,
+          sourceAuthority,
+          sourceReceiptSummaries: sourceReceiptSummary(input.sourceReceipts),
+          previousHp,
+          nextHp,
+          previousConditions,
+          nextConditions,
+        }),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      resultWorldVersion,
+      resultWorldTimeMinutes: clock.worldTimeMinutes,
+      authorityTraceId,
+      visibleSummary,
+      stateDeltaRefs,
     };
   });
 }
@@ -2718,6 +3086,69 @@ function worldFactRecordHandler(
   }
 }
 
+function actorConditionSetHandler(
+  packet: ModelFacingTurnPacketV2,
+  request: ActorConditionRequestV2,
+  refRegistry: GameplayRefRegistryV2 | undefined,
+  priorReceipts: readonly GameplayRuntimeReceiptV2[],
+  testHooks?: GameplayDbHandlerTestHooksV2,
+): GameplayToolHandlerOutcomeV2 {
+  const registry = requireRegistry(packet, refRegistry);
+  if (!registry) {
+    return failedOutcome(packet, "actor.condition_set.v2 requires a fresh gameplay ref registry.");
+  }
+  const actor = resolveActor({
+    packet,
+    registry,
+    actorRef: request.effectBinding.actorRef,
+  });
+  if (actor.status !== "resolved") return failedOutcome(packet, actor.reason);
+  if (request.effectBinding.actorScope === "player_actor" && actor.actorKind !== "player") {
+    return failedOutcome(packet, "actorScope=player_actor requires actorRef=Player.");
+  }
+  if (request.effectBinding.actorScope === "visible_actor" && actor.actorKind !== "npc") {
+    return failedOutcome(packet, "actorScope=visible_actor requires a visible non-player actor ref.");
+  }
+  if (request.effectBinding.operation.kind === "adjust_player_hp" && actor.actorKind !== "player") {
+    return failedOutcome(packet, "adjust_player_hp is only valid for Player.");
+  }
+
+  const source = resolveActorConditionSource({
+    packet,
+    request,
+    priorReceipts,
+  });
+  if (source.status !== "resolved") return failedOutcome(packet, source.reason);
+
+  try {
+    const commit = commitActorConditionSetV2({
+      packet,
+      request,
+      actor,
+      sourceReceipts: source.receipts,
+      testHooks,
+    });
+    return {
+      status: "accepted",
+      mutationApplied: true,
+      mutationAuthority: "actor",
+      resultWorldVersion: commit.resultWorldVersion,
+      visibleSummary: commit.visibleSummary,
+      evidenceRefs: uniqueStrings([
+        request.effectBinding.actorRef,
+        ...request.effectBinding.evidenceRefs,
+      ]),
+      durableEventIds: [],
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "actor.condition_set.v2 failed before committing actor condition.";
+    const isNoOp = reason.includes("already has condition")
+      || reason.includes("does not have condition")
+      || reason.includes("would leave backend bounds");
+    return failedOutcome(packet, reason, isNoOp ? "rejected" : "failed");
+  }
+}
+
 export function createDbBackedGameplayToolHandlersV2(
   options: CreateDbBackedGameplayToolHandlersV2Options = {},
 ): GameplayToolHandlerRegistryV2 {
@@ -2775,6 +3206,12 @@ export function createDbBackedGameplayToolHandlersV2(
         return failedOutcome(packet, "item.transfer.v2 handler received the wrong request type.");
       }
       return itemTransferHandler(packet, request, refRegistry, options.testHooks);
+    },
+    "actor.condition_set.v2": ({ packet, request, refRegistry, priorReceipts }) => {
+      if (request.toolId !== "actor.condition_set.v2") {
+        return failedOutcome(packet, "actor.condition_set.v2 handler received the wrong request type.");
+      }
+      return actorConditionSetHandler(packet, request, refRegistry, priorReceipts, options.testHooks);
     },
     "world_fact.record.v2": ({ packet, request, refRegistry, priorReceipts }) => {
       if (request.toolId !== "world_fact.record.v2") {

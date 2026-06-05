@@ -1108,6 +1108,85 @@ function itemTransferToolPlanFixture() {
   return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
 }
 
+function actorConditionToolPlanFixture() {
+  const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+    version: "scene-frame-envelope.v2",
+    attempt: attemptContext(),
+    frame: sceneFrame(),
+    scopedForecastExcerpt: null,
+    refs: {
+      visibleRefs: ["Atrium", "Atrium Floor", "Player", "Clerk Mara"],
+      privateGuardTerms: [],
+      allowedCapabilityIds: ["observe_visible", "condition_set"],
+    },
+  }));
+  const readResult = validateGmReadChecklistV2({
+    packet,
+    candidate: {
+      version: "gm-read.v2",
+      path: "tool_plan",
+      situationSummary: "The player deliberately drops to one knee in the current scene.",
+      sceneQuestion: "What actor condition mutation must be settled?",
+      focalActorRefs: ["Player"],
+      evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+      actionInterpretation: {
+        intent: "Set the player's visible posture to prone.",
+        method: "physical posture change",
+        targetRefs: ["Player"],
+      },
+      turnNeed: "backend_action_checklist",
+      rationale: "A concrete visible actor condition requires backend actor authority.",
+      checklistRequest: {
+        turnPath: "mutating",
+        requiredEffectKinds: ["condition"],
+        actorRefs: ["Player"],
+        targetRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Apply one concrete visible Player condition through actor condition authority.",
+      },
+    },
+  });
+  expect(readResult.status).toBe("accepted");
+  if (readResult.status !== "accepted") {
+    throw new Error("Actor condition GM Read fixture must be accepted.");
+  }
+  const checklistResult = validateGmActionChecklistV2({
+    packet,
+    gmRead: readResult.read,
+    candidate: {
+      version: "gm-action-checklist.v2",
+      checklistId: "checklist-actor-condition-1",
+      campaignId: "campaign-alpha",
+      turnId: "turn-alpha",
+      baseWorldVersion: 7,
+      sourceGmReadPath: "tool_plan",
+      turnPath: "mutating",
+      turnIntent: "Set the Player prone condition.",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Set the Player's visible posture condition to prone.",
+        actorRef: "Player",
+        targetRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        requiredCapabilityId: "condition_set",
+        intendedEffect: {
+          kind: "condition",
+          summary: "The Player is visibly prone in the current scene.",
+          stateScope: "actor",
+        },
+        expectedVisibleEffect: "Accepted actor condition mutation receipt for Player.",
+        dependsOnStepIds: [],
+      }],
+    },
+  });
+  expect(checklistResult.status).toBe("accepted");
+  if (checklistResult.status !== "accepted") {
+    throw new Error("Actor condition checklist fixture must be accepted.");
+  }
+
+  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+}
+
 function dbTempFixture(prefix: string): {
   tempDir: string;
   cleanup: () => void;
@@ -1394,7 +1473,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("toolName");
   });
 
-  it("compiles simple movement, dialogue, support actor, entity tag, item transfer, and scene-beat GM Reads without executable payloads", () => {
+  it("compiles simple movement, dialogue, support actor, entity tag, item transfer, condition, and scene-beat GM Reads without executable payloads", () => {
     const movement = movementAdmissionFixture();
     const acceptedMovement = validateGmReadChecklistV2({
       packet: movement.packet,
@@ -1549,6 +1628,25 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         stateScope: "item",
       },
     });
+
+    const actorCondition = actorConditionToolPlanFixture();
+    const compiledActorCondition = compileSimpleGmActionChecklistV2({
+      packet: actorCondition.packet,
+      gmRead: actorCondition.gmRead,
+    });
+    expect(compiledActorCondition?.status).toBe("accepted");
+    if (!compiledActorCondition || compiledActorCondition.status !== "accepted") {
+      throw new Error("Simple actor-condition checklist must compile.");
+    }
+    expect(compiledActorCondition.checklist.steps[0]).toMatchObject({
+      requiredCapabilityId: "condition_set",
+      targetRefs: ["Player"],
+      intendedEffect: {
+        kind: "condition",
+        stateScope: "actor",
+      },
+    });
+
     const publicShape = JSON.stringify({
       movement: compiledMovement.checklist,
       dialogue: compiledDialogue.checklist,
@@ -1556,6 +1654,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       supportActor: compiledSupportActor.checklist,
       entityTag: compiledEntityTag.checklist,
       itemTransfer: compiledItemTransfer.checklist,
+      actorCondition: compiledActorCondition.checklist,
     });
     expect(publicShape).not.toContain("actor.move.v2");
     expect(publicShape).not.toContain("dialogue.record.v2");
@@ -1563,6 +1662,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("scene_beat.record.v2");
     expect(publicShape).not.toContain("entity.tag.v2");
     expect(publicShape).not.toContain("item.transfer.v2");
+    expect(publicShape).not.toContain("actor.condition_set.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
 
@@ -1829,6 +1929,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       label: "Local Dockhand",
       role: "support",
       awarenessHint: "waiting near the loading marks",
+      status: {
+        conditions: [],
+        hp: null,
+      },
     });
     expect(packet.citableRefs).toContain("Local Dockhand");
     expect(resolveGameplayRefV2({
@@ -3637,6 +3741,142 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
 
     expect(uncitedTarget.status).toBe("rejected");
     expect(uncitedTarget.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
+  });
+
+  it("accepts a clean actor.condition_set.v2 request with scoped actor authority", () => {
+    const { packet, checklist } = actorConditionToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-actor-condition-1",
+        stepId: "step-1",
+        capabilityId: "condition_set",
+        toolId: "actor.condition_set.v2",
+        effectBinding: {
+          actorRef: "Player",
+          actorScope: "player_actor",
+          operation: {
+            kind: "set_condition",
+            conditionLabel: "prone",
+          },
+          sourceAuthority: {
+            kind: "current_scene_visible_evidence",
+            sourceRefs: ["Player", "Atrium Floor"],
+            sourceSummary: "The player visibly drops to one knee in the current scene.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error("Actor condition tool request fixture must be accepted.");
+    }
+    expect(result.request.toolId).toBe("actor.condition_set.v2");
+    expect(result.request.effectBinding).toMatchObject({
+      actorRef: "Player",
+      actorScope: "player_actor",
+      operation: {
+        kind: "set_condition",
+        conditionLabel: "prone",
+      },
+      sourceAuthority: {
+        kind: "current_scene_visible_evidence",
+      },
+    });
+    expect(JSON.stringify(result.request)).not.toContain("set_actor_condition");
+    expect(JSON.stringify(result.request)).not.toContain('"operation":"set"');
+    expect(JSON.stringify(result.request)).not.toContain("amount");
+  });
+
+  it("rejects old placeholder and invalid actor.condition_set.v2 request shapes", () => {
+    const { packet, checklist } = actorConditionToolPlanFixture();
+
+    const legacy = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-actor-condition-legacy",
+        stepId: "step-1",
+        capabilityId: "condition_set",
+        toolId: "actor.condition_set.v2",
+        effectBinding: {
+          actorRef: "Player",
+          operation: "set",
+          conditionLabel: "prone",
+          amount: 1,
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(legacy.status).toBe("rejected");
+    expect(legacy.issues.some((issue) => issue.path.includes("actorScope"))).toBe(true);
+    expect(legacy.issues.some((issue) => issue.path.includes("sourceAuthority"))).toBe(true);
+
+    const noncanonical = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-actor-condition-noncanonical",
+        stepId: "step-1",
+        capabilityId: "condition_set",
+        toolId: "actor.condition_set.v2",
+        effectBinding: {
+          actorRef: "Player",
+          actorScope: "player_actor",
+          operation: {
+            kind: "set_condition",
+            conditionLabel: "hiddenly-shattered",
+          },
+          sourceAuthority: {
+            kind: "current_scene_visible_evidence",
+            sourceRefs: ["Player", "Atrium Floor"],
+            sourceSummary: "The player visibly changes posture.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(noncanonical.status).toBe("rejected");
+    expect(noncanonical.issues.some((issue) => issue.path.includes("conditionLabel"))).toBe(true);
+
+    const badHp = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-actor-condition-bad-hp",
+        stepId: "step-1",
+        capabilityId: "condition_set",
+        toolId: "actor.condition_set.v2",
+        effectBinding: {
+          actorRef: "Player",
+          actorScope: "player_actor",
+          operation: {
+            kind: "adjust_player_hp",
+            hpDelta: -2,
+          },
+          sourceAuthority: {
+            kind: "accepted_runtime_receipt",
+            sourceReceiptIds: ["receipt-source-1"],
+            sourceSummary: "A prior accepted receipt settled the harm.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+    expect(badHp.status).toBe("rejected");
+    expect(badHp.issues.some((issue) => issue.path.includes("hpDelta"))).toBe(true);
   });
 
   it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
@@ -8527,6 +8767,461 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         equipState: "carried",
         equippedSlot: null,
       });
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(7);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("executes actor.condition_set.v2 Player posture as atomic actor mutation with authority trace", async () => {
+    const fixture = dbTempFixture("wf-v2-db-actor-condition-player-");
+    const previousCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
+    try {
+      process.env.GSD_CAMPAIGNS_ROOT = fixture.tempDir;
+      const campaignDir = join(fixture.tempDir, "campaign-alpha");
+      mkdirSync(campaignDir, { recursive: true });
+      writeFileSync(join(campaignDir, "config.json"), JSON.stringify({
+        name: "P16 Fixture",
+        premise: "A test campaign for gameplay-cycle-v2 handlers.",
+        currentTick: 0,
+        createdAt: 1_000,
+        updatedAt: 1_000,
+      }));
+      seedP16World();
+      const { packet, checklist } = actorConditionToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-player-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Player",
+            actorScope: "player_actor",
+            operation: {
+              kind: "set_condition",
+              conditionLabel: "prone",
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The player visibly drops to one knee in the current scene.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-actor-condition-player-db-1",
+        emittedAt: 35,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        toolId: "actor.condition_set.v2",
+        evidenceAuthority: "mutation_receipt",
+        mutationApplied: true,
+        mutationAuthority: "actor",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        durableEventIds: [],
+      });
+      expect(execution.receipt.visibleSummary).toBe("Player gains condition prone.");
+      expect(execution.receipt.evidenceRefs).toEqual(expect.arrayContaining([
+        "Player",
+        "Atrium",
+        "Atrium Floor",
+      ]));
+
+      const player = getDb().select().from(players).where(eq(players.id, "player-alpha")).get();
+      expect(player).toMatchObject({
+        hp: 5,
+        currentLocationId: "location-alpha",
+        currentSceneLocationId: "scene-alpha",
+      });
+      const playerRecord = JSON.parse(player?.characterRecord ?? "{}") as {
+        state?: { hp?: number; conditions?: string[] };
+      };
+      expect(playerRecord.state?.hp).toBe(5);
+      expect(playerRecord.state?.conditions).toEqual(["prone"]);
+      expect(JSON.parse(player?.derivedTags ?? "[]")).toContain("prone");
+
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock).toMatchObject({
+        worldVersion: 8,
+        worldTimeMinutes: 10,
+      });
+      const traces = getDb().select().from(authorityTraces).all();
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        operation: "gameplay-cycle-v2.actor.condition_set.v2",
+        sourceEntityType: "player",
+        sourceEntityId: "player-alpha",
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        toolResultId: "gameplay-v2:turn-alpha:actor-condition-player-db-1",
+      });
+      expect(JSON.parse(traces[0]?.stateDeltaRefs ?? "[]")).toEqual(["player:player-alpha:condition:prone"]);
+      expect(JSON.parse(traces[0]?.metadata ?? "{}")).toMatchObject({
+        actorRef: "Player",
+        actorScope: "player_actor",
+        actorKind: "player",
+        operation: {
+          kind: "set_condition",
+          conditionLabel: "prone",
+        },
+        previousHp: 5,
+        nextHp: 5,
+        previousConditions: [],
+        nextConditions: ["prone"],
+        sourceAuthority: {
+          kind: "current_scene_visible_evidence",
+        },
+      });
+      expect(getDb().select().from(turnClockLedger).all()).toHaveLength(0);
+      expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
+
+      const refreshedFrame = await buildSceneFrame({
+        campaignId: "campaign-alpha",
+        tick: 0,
+        playerAction: "I stay prone.",
+      });
+      const refreshedPlayer = refreshedFrame.roster.active.find((actor) => actor.type === "player");
+      expect(refreshedPlayer).toMatchObject({
+        label: "Player",
+        statusConditions: ["prone"],
+        hp: 5,
+      });
+      const refreshedPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext({
+          playerAction: "I stay prone.",
+          baseTick: refreshedFrame.tick,
+          baseWorldVersion: 8,
+        }),
+        frame: refreshedFrame,
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "condition_set"],
+        },
+      }));
+      expect(refreshedPacket.scene.actors).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          ref: "Player",
+          status: {
+            conditions: ["prone"],
+            hp: 5,
+          },
+        }),
+      ]));
+    } finally {
+      if (previousCampaignRoot === undefined) {
+        delete process.env.GSD_CAMPAIGNS_ROOT;
+      } else {
+        process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
+      }
+      fixture.cleanup();
+    }
+  });
+
+  it("executes actor.condition_set.v2 against a visible NPC condition but rejects NPC HP authority", async () => {
+    const fixture = dbTempFixture("wf-v2-db-actor-condition-npc-");
+    try {
+      seedP16World();
+      const { packet, checklist } = actorConditionToolPlanFixture();
+      const npcChecklist = {
+        ...checklist,
+        steps: [{
+          ...checklist.steps[0],
+          actorRef: "Clerk Mara",
+          targetRefs: ["Clerk Mara"],
+          evidenceRefs: ["Player", "Atrium", "Clerk Mara"],
+        }],
+      };
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist: npcChecklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-npc-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Clerk Mara",
+            actorScope: "visible_actor",
+            operation: {
+              kind: "set_condition",
+              conditionLabel: "exhausted",
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Clerk Mara"],
+              sourceSummary: "Clerk Mara is visibly sagging in the current scene.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Clerk Mara"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-actor-condition-npc-db-1",
+        emittedAt: 36,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: true,
+        mutationAuthority: "actor",
+        resultWorldVersion: 8,
+      });
+      const npc = getDb().select().from(npcs).where(eq(npcs.id, "actor-npc-1")).get();
+      const npcRecord = JSON.parse(npc?.characterRecord ?? "{}") as {
+        state?: { conditions?: string[] };
+      };
+      expect(npcRecord.state?.conditions).toEqual(["exhausted"]);
+      expect(JSON.parse(npc?.derivedTags ?? "[]")).toContain("exhausted");
+
+      const npcHpExecution = await executeGameplayToolRequestV2({
+        packet: { ...packet, baseWorldVersion: 8 },
+        checklist: { ...npcChecklist, baseWorldVersion: 8 },
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-npc-hp-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Clerk Mara",
+            actorScope: "visible_actor",
+            operation: {
+              kind: "adjust_player_hp",
+              hpDelta: -1,
+            },
+            sourceAuthority: {
+              kind: "accepted_runtime_receipt",
+              sourceReceiptIds: ["receipt-actor-condition-npc-db-1"],
+              sourceSummary: "A prior accepted source exists, but NPC HP remains out of scope.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Clerk Mara"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: {
+          ...registryForPacket(sceneFrame({ worldVersion: 8 })),
+          baseWorldVersion: 8,
+        },
+        priorReceipts: [execution.receipt],
+        receiptId: "receipt-actor-condition-npc-hp-db-1",
+        emittedAt: 37,
+      });
+      expect(npcHpExecution.status).toBe("rejected");
+      expect(npcHpExecution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 8,
+      });
+      expect(npcHpExecution.receipt.failureReason).toContain("adjust_player_hp is only valid for Player");
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects actor.condition_set.v2 duplicate and unsupported Player HP sources without mutating DB state", async () => {
+    const fixture = dbTempFixture("wf-v2-db-actor-condition-noop-");
+    try {
+      seedP16World();
+      const { packet, checklist } = actorConditionToolPlanFixture();
+      const first = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-noop-first-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Player",
+            actorScope: "player_actor",
+            operation: {
+              kind: "set_condition",
+              conditionLabel: "prone",
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The player visibly drops to one knee.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-actor-condition-noop-first-db-1",
+        emittedAt: 38,
+      });
+      expect(first.status).toBe("accepted");
+
+      const duplicate = await executeGameplayToolRequestV2({
+        packet: { ...packet, baseWorldVersion: 8 },
+        checklist: { ...checklist, baseWorldVersion: 8 },
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-noop-second-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Player",
+            actorScope: "player_actor",
+            operation: {
+              kind: "set_condition",
+              conditionLabel: "prone",
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The player is already visibly prone.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: {
+          ...registryForPacket(sceneFrame({ worldVersion: 8 })),
+          baseWorldVersion: 8,
+        },
+        receiptId: "receipt-actor-condition-noop-second-db-1",
+        emittedAt: 39,
+      });
+
+      expect(duplicate.status).toBe("rejected");
+      expect(duplicate.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 8,
+      });
+      expect(duplicate.receipt.failureReason).toContain("already has condition");
+
+      const hpFromVisibleScene = await executeGameplayToolRequestV2({
+        packet: { ...packet, baseWorldVersion: 8 },
+        checklist: { ...checklist, baseWorldVersion: 8 },
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-hp-visible-source-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Player",
+            actorScope: "player_actor",
+            operation: {
+              kind: "adjust_player_hp",
+              hpDelta: -1,
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "Raw visible scene evidence is not enough for HP harm in this slice.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: {
+          ...registryForPacket(sceneFrame({ worldVersion: 8 })),
+          baseWorldVersion: 8,
+        },
+        receiptId: "receipt-actor-condition-hp-visible-source-db-1",
+        emittedAt: 40,
+      });
+      expect(hpFromVisibleScene.status).toBe("rejected");
+      expect(hpFromVisibleScene.receipt.failureReason).toContain("Player HP adjustment requires an accepted runtime receipt source");
+      const player = getDb().select().from(players).where(eq(players.id, "player-alpha")).get();
+      expect(player?.hp).toBe(5);
+      const playerRecord = JSON.parse(player?.characterRecord ?? "{}") as {
+        state?: { conditions?: string[] };
+      };
+      expect(playerRecord.state?.conditions).toEqual(["prone"]);
+      const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
+      expect(clock?.worldVersion).toBe(8);
+      expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rolls back actor.condition_set.v2 row changes when authority commit fails inside the v2 transaction", async () => {
+    const fixture = dbTempFixture("wf-v2-db-actor-condition-rollback-");
+    try {
+      seedP16World();
+      const { packet, checklist } = actorConditionToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "actor-condition-rollback-db-1",
+          stepId: "step-1",
+          capabilityId: "condition_set",
+          toolId: "actor.condition_set.v2",
+          effectBinding: {
+            actorRef: "Player",
+            actorScope: "player_actor",
+            operation: {
+              kind: "set_condition",
+              conditionLabel: "prone",
+            },
+            sourceAuthority: {
+              kind: "current_scene_visible_evidence",
+              sourceRefs: ["Player", "Atrium Floor"],
+              sourceSummary: "The player visibly drops to one knee.",
+            },
+            evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2({
+          testHooks: {
+            afterActorConditionRowUpdateBeforeAuthorityTrace: () => {
+              throw new Error("forced actor condition authority failure");
+            },
+          },
+        }),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-actor-condition-rollback-db-1",
+        emittedAt: 41,
+      });
+
+      expect(execution.status).toBe("failed");
+      expect(execution.receipt).toMatchObject({
+        mutationApplied: false,
+        mutationAuthority: "none",
+        resultWorldVersion: 7,
+      });
+      expect(execution.receipt.failureReason).toContain("forced actor condition authority failure");
+      const player = getDb().select().from(players).where(eq(players.id, "player-alpha")).get();
+      expect(player?.hp).toBe(5);
+      const playerRecord = JSON.parse(player?.characterRecord ?? "{}") as {
+        state?: { conditions?: string[] };
+      };
+      expect(playerRecord.state?.conditions ?? []).toEqual([]);
       const clock = getDb().select().from(worldClocks).where(eq(worldClocks.campaignId, "campaign-alpha")).get();
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);

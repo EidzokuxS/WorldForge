@@ -46,6 +46,8 @@ export interface SceneActor {
   knowledgeBasis?: KnowledgeBasis;
   awarenessHint?: string | null;
   tags?: string[];
+  statusConditions?: string[];
+  hp?: number | null;
   summary?: string | null;
 }
 
@@ -320,6 +322,7 @@ function cloneActors(actors: readonly SceneActor[]): SceneActor[] {
     ...actor,
     actorId: actor.actorId ?? actor.id,
     tags: actor.tags ? [...actor.tags] : undefined,
+    statusConditions: actor.statusConditions ? [...actor.statusConditions] : undefined,
   }));
 }
 
@@ -743,11 +746,14 @@ function buildRoster(input: {
     awareness: "clear",
     knowledgeBasis: "perceived_now",
     tags: playerTags,
+    statusConditions: hydrateStoredPlayerRecord(input.player).state.conditions,
+    hp: input.player.hp,
   };
   const npcActors = npcRowsInBroadLocation.map((npc): SceneActor => {
     const visibility = inferPresenceVisibility(npc.tags);
     const awareness = getObserverAwareness(snapshot, input.player.id, npc.id);
     const knowledgeBasis = getObserverKnowledgeBasis(snapshot, input.player.id, npc.id);
+    const npcRecord = hydrateStoredNpcRecord(npc);
 
     return {
       id: npc.id,
@@ -760,6 +766,8 @@ function buildRoster(input: {
       knowledgeBasis,
       awarenessHint: visibility.awarenessHint,
       tags: parseTags(npc.tags),
+      statusConditions: npcRecord.state.conditions,
+      hp: null,
       summary: npc.persona,
     };
   });
