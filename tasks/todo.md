@@ -2062,3 +2062,15 @@ Session: `gm-v1-consequenc-slice`.
   - Player-facing narration: `Вы выходите из The Copper Tap и попадаете в Slip Twelve Berth. Здесь вы видите Sigil Boss Torvin Kask и Litha Corsen.` This is grounded by accepted movement and visibility receipts.
   - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn5-move-slip-twelve.*` and `backend-p52-3101.*.log`.
   - P49 is now 5 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
+- P53 P49 turn-6 local dialogue live evidence:
+  - Continued clean zero-turn clone `p49-explicit-movement-owned-refs-live-proof`, after five clean turns, from inspected state: player `Mira Voss` in `Slip Twelve Berth`, visible `Litha Corsen` and `Sigil Boss Torvin Kask`, discovered routes to `Lowwater Bazaar`, `Silt Warrens`, and `The Copper Tap`.
+  - Manual action: `Я обращаюсь к Litha Corsen и спрашиваю, что сейчас происходит у Slip Twelve Berth. Я остаюсь на месте и ничего не трогаю.`
+  - Stable backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped after verification; ports `3001` and `3101` were clear afterward.
+  - SSE reached v2 `done`, packet `v2packet-mq1wv19k-d8f39e390105`, `tick=6`, `worldVersion=3`, `worldTimeMinutes=2`; backend log recorded route duration about 182s.
+  - DB after turn 6: `gameplay_cycle_v2_packets=6`, `turn_clock_ledger=2`, `authority_traces=3`, legacy packet/saga/narrator/proposals all 0, chat history length 12, player still in `Slip Twelve Berth`.
+  - Persisted packet: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["dialogue_outcome"]`; acceptedRuntimeReceiptIds `["receipt-step-1"]`; stepAudit skipped/failed counts 0.
+  - Accepted evidence: one `dialogue.record.v2` runtime receipt from `Litha Corsen`, source refs `Litha Corsen`, `Player`, and `Slip Twelve Berth`.
+  - Player-facing narration matched the accepted dialogue content and did not claim movement, route availability, item state, hidden facts, or absence.
+  - Observed prose debt, not counted as gameplay truth failure: narrator rendered the label as `Лита Corsen`, mixing localized given name with the canonical visible label `Litha Corsen`.
+  - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn6-ask-litha-berth-status.*` and `backend-p53-3101.*.log`.
+  - P49 is now 6 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
