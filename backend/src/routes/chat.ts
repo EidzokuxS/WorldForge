@@ -107,6 +107,10 @@ import {
   resolveQuickActionSelection,
 } from "../engine/quick-action-offers.js";
 import { withSafeTurnProgressPayload } from "../engine/turn-processor.js";
+import {
+  isCleanGameplayRuntimeEnabled,
+  processCleanGameplayTurn,
+} from "../engine/gameplay-cycle-runtime/runtime.js";
 
 const log = createLogger("chat");
 
@@ -1599,19 +1603,37 @@ app.post("/action", async (c) => {
           chatHistoryLengthBeforeTurn,
         });
         try {
-          const turnGenerator = processTurn({
-            campaignId,
-            playerAction,
-            intent: compatibilityIntent,
-            method: compatibilityMethod,
-            judgeProvider: judgeResult.resolved.provider,
-            storytellerProvider: stResult.resolved.provider,
-            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-            embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-            preTurnSnapshot: snapshot,
-            onPostTurn: postTurnHooks.onPostTurn,
-          });
+          const cleanRuntimeEnabled = isCleanGameplayRuntimeEnabled();
+          const turnGenerator = cleanRuntimeEnabled
+            ? processCleanGameplayTurn({
+              campaignId,
+              submittedPlayerAction,
+              normalizedPlayerAction: playerAction,
+              quickActionSelection: quickActionSelection
+                ? {
+                  handle: quickActionSelection.handle,
+                  offerId: quickActionSelection.offerId,
+                  actionId: quickActionSelection.actionId,
+                  baseWorldVersion: quickActionSelection.baseWorldVersion,
+                }
+                : null,
+              judgeProvider: judgeResult.resolved.provider,
+              storytellerProvider: stResult.resolved.provider,
+              preTurnSnapshot: snapshot,
+            })
+            : processTurn({
+              campaignId,
+              playerAction,
+              intent: compatibilityIntent,
+              method: compatibilityMethod,
+              judgeProvider: judgeResult.resolved.provider,
+              storytellerProvider: stResult.resolved.provider,
+              storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+              storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+              embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+              preTurnSnapshot: snapshot,
+              onPostTurn: postTurnHooks.onPostTurn,
+            });
 
           let terminalEventType: TerminalTurnEventType | null = null;
           const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);

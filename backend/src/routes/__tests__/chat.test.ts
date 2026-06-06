@@ -5,6 +5,14 @@ const { resolveQuickActionSelectionMock } = vi.hoisted(() => ({
   resolveQuickActionSelectionMock: vi.fn(),
 }));
 
+const {
+  isCleanGameplayRuntimeEnabledMock,
+  processCleanGameplayTurnMock,
+} = vi.hoisted(() => ({
+  isCleanGameplayRuntimeEnabledMock: vi.fn(() => false),
+  processCleanGameplayTurnMock: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -170,6 +178,11 @@ vi.mock("../../engine/quick-action-offers.js", () => ({
   resolveQuickActionSelection: (...args: unknown[]) => resolveQuickActionSelectionMock(...args),
   isQuickActionSelectionError: (error: unknown) =>
     Boolean(error && typeof error === "object" && (error as { name?: string }).name === "QuickActionSelectionError"),
+}));
+
+vi.mock("../../engine/gameplay-cycle-runtime/runtime.js", () => ({
+  isCleanGameplayRuntimeEnabled: () => isCleanGameplayRuntimeEnabledMock(),
+  processCleanGameplayTurn: (...args: unknown[]) => processCleanGameplayTurnMock(...args),
 }));
 
 const mockEmbedAndUpdateEvent = vi.fn();
@@ -410,6 +423,9 @@ function parseSseEvents(body: string): Array<{ event: string; data: unknown }> {
 beforeEach(() => {
   vi.clearAllMocks();
   resolveQuickActionSelectionMock.mockReset();
+  isCleanGameplayRuntimeEnabledMock.mockReset();
+  isCleanGameplayRuntimeEnabledMock.mockReturnValue(false);
+  processCleanGameplayTurnMock.mockReset();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
@@ -703,6 +719,62 @@ describe("Targeted gameplay route campaignId validation", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("campaignId is required.");
+  });
+
+  it("routes /chat/action to the clean gameplay runtime when the clean lane is enabled", async () => {
+    setupStoryteller();
+    setupDbMock();
+    isCleanGameplayRuntimeEnabledMock.mockReturnValue(true);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      bundleDir: "clean-pre-turn",
+      capturedAt: 1,
+    }) as any);
+    processCleanGameplayTurnMock.mockImplementation((options) =>
+      createTurnStream([
+        {
+          type: "scene-settling",
+          data: { stage: "scene-frame", phase: "gameplay-cycle-runtime" },
+        },
+        {
+          type: "narrative",
+          data: { text: "Текущая сцена: Market." },
+        },
+        {
+          type: "done",
+          data: {
+            runtime: "gameplay-cycle-runtime",
+            turnId: "clean-turn-1",
+            packetId: "frame-1",
+          },
+        },
+      ])
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Осматриваюсь.",
+        intent: "legacy field ignored",
+        method: "legacy field ignored",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("gameplay-cycle-runtime");
+    expect(body).toContain("Текущая сцена: Market.");
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(processCleanGameplayTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        submittedPlayerAction: "Осматриваюсь.",
+        normalizedPlayerAction: "Осматриваюсь.",
+      }),
+    );
+    expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
   });
 
   it("rejects /chat/retry without campaignId", async () => {

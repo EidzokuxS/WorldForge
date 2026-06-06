@@ -2100,3 +2100,47 @@ Session: `gm-v1-consequenc-slice`.
     - Accepted evidence: `dialogue.record.v2` receipt from `Litha Corsen`, then `world_fact.record.v2` private player-known knowledge receipt sourced to accepted dialogue receipt `receipt-step-1`.
     - Player-facing narration stated the repeated warning and that the player recorded it as a working clue; this was grounded by the accepted dialogue and world_fact receipts.
     - Artifacts: `output/p54-dialogue-memory-contract/turn8-repeat-warning-memory.*` and `backend-3101.*.log`.
+
+- P55 clean gameplay runtime reset after process correction:
+  - Status:
+    - [x] Stop patching current `gameplay-cycle-v2` as the target runtime.
+    - [x] Revert the misaligned uncommitted Stage 4/5 v2 patch set and keep only process lessons.
+    - [x] Produce a forensic architecture map of the current gameplay-cycle runtime: entrypoints, old tools, schemas, receipts, mutations, persistence, narration evidence. See `tasks/gameplay-runtime-clean-rewrite-map.md`.
+    - [x] Mark each current part as full replacement, explicit data/source adapter, or out-of-scope. See `tasks/gameplay-runtime-clean-rewrite-map.md`.
+    - [x] Define the new clean runtime as primitives from player message entrypoint to frozen player-facing exitpoint. See `tasks/gameplay-runtime-clean-rewrite-map.md`.
+    - [x] For the first primitive, prepare one Oracle/GPT context bundle with canonical doc plus relevant code excerpts and record question, answer, accepted decision.
+    - [x] Implement only Primitive 0/1 as new clean runtime code.
+    - [x] Add focused contract tests for Primitive 0/1.
+    - [x] Wire the minimum adapter needed for a real `/api/chat/action` turn.
+    - [x] Verify with manual one-action-at-a-time live turns on zero-turn clones before moving to the next primitive.
+  - Process invariants:
+    - Current `gameplay-cycle-v2` is forensic/rollback evidence, not the target architecture.
+    - No guard piles, semantic regex patches, fallback hacks, or special-case bypasses.
+    - If a guard looks necessary, fix the ownership/contract/runtime layer that made it necessary.
+    - Each primitive must define owner, input, output, downstream consumer, mutation authority, evidence authority, failure mode, and forbidden responsibilities before implementation.
+    - Final acceptance remains 3+ different zero-turn worlds/clones at about 60 clean manual turns each with zero failed, replayed, restored, or invalid player-facing turns.
+  - Primitive 0/1 implementation:
+    - Added new clean runtime core under `backend/src/engine/gameplay-cycle-runtime/`.
+    - Added `GameplayRuntimeTurnInput`, authoritative `SceneFrame`, scoped advisory forecast, and frozen no-mutation projection contracts.
+    - Added read-only frame adapter that calls existing `buildSceneFrame` as a source adapter and does not import current v2.
+    - Added clean route adapter gated by `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN`; clean path bypasses `processTurn` and the old `WORLDFORGE_GAMEPLAY_CYCLE_V2` switch.
+    - Added focused tests:
+      - `gameplay-cycle-runtime-contracts.test.ts`: static import fence, clean flag independence from v2 flag, Primitive 0 input shape, forecast non-authority, SceneFrame contract.
+      - `chat.test.ts`: `/chat/action` routes to clean runtime when clean lane is enabled and does not call `processTurn`.
+    - Verification:
+      - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 5 tests.
+      - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 62 tests.
+      - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+      - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts --bail=1` passed with 277 tests.
+      - `npm --prefix backend run typecheck` passed.
+    - Live/manual `/api/chat/action` smoke:
+      - Backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1` on port `3219`, then stopped; ports `3219` and `3001` were clear afterward.
+      - Candidate zero-turn clone: `0bef1a0c-0c56-4f4c-b536-f6df01960398`.
+      - Precheck: chat history empty, `gameplay_cycle_v2_packets=0`, `settled_turn_packets=0`, `turn_sagas=0`, `authority_traces=0`, clock `world_version=0/world_time_minutes=0/current_tick=0`.
+      - First live attempt without legacy `intent/method` exposed an old boundary bug: route schema still required `intent`. Fixed `chatActionBodySchema` so plain player-message input is valid and added schema coverage.
+      - Second live attempt reached clean frame builder but restored because the new frame adapter incorrectly put the separate `player` object into `actors` without a role. Fixed adapter so `player` is separate and `actors` excludes Player.
+      - Final manual action after inspecting actual state: `Я стою в Lowwater Bazaar и внимательно осматриваю текущую сцену, не двигаясь и ничего не трогая.`
+      - Final SSE: `scene-settling` phase `gameplay-cycle-runtime`, `narrative` text `Текущая сцена: Lowwater Bazaar (Lowwater Bazaar). Видимые участники: Sigil Boss Torvin Kask, Litha Corsen.`, `finalizing_turn`, `done` with `runtime="gameplay-cycle-runtime"` and frame packet id.
+      - Postcheck: chat history remained empty, `gameplay_cycle_v2_packets=0`, legacy packets/sagas `0`, `authority_traces=0`, clock remained `0/0/0`.
+      - Artifacts: `output/clean-runtime-p01-live-sse.txt`, `output/clean-runtime-backend-3219.log`.
+      - This is Primitive 0/1 smoke only, not final acceptance progress.

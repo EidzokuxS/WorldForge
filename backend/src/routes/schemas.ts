@@ -188,7 +188,7 @@ export const chatHistoryQuerySchema = z.object({
 export const chatActionBodySchema = z.object({
   campaignId: campaignIdSchema,
   playerAction: z.string().min(1).max(2000),
-  intent: z.string().min(1).max(2000),
+  intent: z.string().max(2000).optional().default(""),
   method: z.string().max(500).default(""),
   quickActionHandle: z.string().trim().min(1).max(128).optional(),
 });

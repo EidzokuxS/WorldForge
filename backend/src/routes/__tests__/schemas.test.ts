@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import {
+  chatActionBodySchema,
   chatBodySchema,
   seedCategorySchema,
   settingsPayloadSchema,
@@ -1206,6 +1207,24 @@ describe("chatBodySchema", () => {
     expect(result.success).toBe(false);
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// chatActionBodySchema
+// ---------------------------------------------------------------------------
+describe("chatActionBodySchema", () => {
+  it("accepts the clean player-message boundary without legacy intent/method fields", () => {
+    const result = chatActionBodySchema.safeParse({
+      campaignId: "campaign-1",
+      playerAction: "I look around.",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.intent).toBe("");
+      expect(result.data.method).toBe("");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
