@@ -2387,10 +2387,10 @@ Session: `gm-v1-consequenc-slice`.
 
 - P59 clean gameplay runtime Primitive 5 Settled API Response / Turn Persistence:
   - Status:
-    - [ ] Prepare one Oracle/GPT context bundle with canonical architecture, P55-P58 clean runtime, current `/api/chat/action` adapter, chat history persistence, and live P58 `historyLength=0` evidence.
-    - [ ] Record Oracle question, answer, accepted decision, and rejected alternatives.
-    - [ ] Implement only the clean settled response / persistence boundary after Oracle review.
-    - [ ] Add focused contract tests for player-facing exit state, persisted chat messages, idempotency/snapshot cleanup, and no old v2/saga packet leakage.
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, P55-P58 clean runtime, current `/api/chat/action` adapter, chat history persistence, and live P58 `historyLength=0` evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Implement only the clean settled response / persistence boundary after Oracle review.
+    - [x] Add focused contract tests for player-facing exit state, persisted chat messages, idempotency/snapshot cleanup, and no old v2/saga packet leakage.
     - [ ] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone: response SSE reaches done, player-facing narration is persisted, next-turn entrypoint sees the frozen prior turn, old runtime tables remain untouched, backend stopped.
   - Primitive boundary draft:
     - Owner: clean runtime response/persistence adapter at the `/api/chat/action` boundary, not old `turn_sagas`, old `settled_turn_packets`, old v2 packet persistence, or old narrator attempts.
@@ -2399,3 +2399,51 @@ Session: `gm-v1-consequenc-slice`.
     - Mutation authority: none for P59 except chat/turn-response persistence owned by the API adapter.
     - Evidence authority: persistence of already-settled clean truth only; P59 cannot create new world facts, infer missing state, replay failed turns, or restore over clean success.
     - Open Oracle decision: whether P59 should introduce a new clean packet store now, or append only existing chat history plus a minimal clean runtime metadata record until later tool/mutation receipts exist.
+  - Oracle review:
+    - Session: `wf-clean-runtime-settled-response`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`
+    - Bundle: one bundled text attachment, 18 files, about 172,019 input tokens; `output.log` records `Packed 18 files into 1 bundle`.
+    - Answer artifact: `output/oracle/p59-clean-settled-response-answer.md`
+    - Recommendation:
+      - P59 owns the clean terminal commit boundary between validated clean runtime projection and `/api/chat/action` player-facing exit state.
+      - Add a minimal clean player-facing turn metadata store now; do not build a full v2-like settled packet store yet.
+      - Append exactly two chat messages on commit: resolved user action and assistant narrative.
+      - Persist a small record (`gameplay-runtime.player-facing-turn-record.v1`) that links transcript indices/hashes, public-safe done ids, internal clean ids, frozen projection, and minimal clean evidence refs.
+      - `done` must be yielded only after chat append and clean record write succeed.
+      - On pre-commit error/abort, restore pre-turn snapshot and leave no chat pair/clean record. After commit, preserve state even if client disconnects before seeing `done`.
+      - `appendChatMessages` is allowed only as a low-level file adapter wrapped by history-length/idempotency/tail validation.
+      - `setLastTurnSnapshot` needs clean runtime metadata; `/chat/retry` must not replay clean turns through old runtime. Block clean retry until implemented deliberately.
+      - Split clean snapshot metadata from old `createPostTurnHooks` simulation/pending-narration behavior; do not queue post-turn simulation for clean turns.
+    - Accepted P59 contract direction:
+      - New clean runtime module candidate: `backend/src/engine/gameplay-cycle-runtime/turn-persistence.ts`.
+      - New persisted record should be minimal and terminal: version, runtime, route, record/public/internal ids, idempotency key, committedAt, input summary, base snapshot/clock/history length, terminal projection, minimal evidence refs, chat indices/hashes, done boundary, empty durable event ids.
+      - Record must avoid full SceneFrame/GM Read/Judge/Oracle payloads, model prompts, raw chance/roll/reasoning, private terms, old packet ids, and receipt ledgers.
+      - Public `done.turnId`/`done.packetId` should be public-safe ids, not raw UUIDs or backend-looking `frame-*` ids.
+      - History invariant: actual history length must equal `turn.base.chatHistoryLengthBeforeTurn` immediately before commit, and after commit must be exactly `before + 2` with the expected user/assistant tail.
+      - Record uniqueness should protect `(campaignId, internalTurnId)` and `(campaignId, idempotencyKey)`.
+    - Accepted tests:
+      - Schema accepts minimal direct and Oracle committed clean records.
+      - Schema rejects old v2/saga/narrator/receipt ledger fields.
+      - P59 appends exactly two chat messages only when history length matches; rejects drift; validates tail and hashes.
+      - P59 persists record before yielding done and does not duplicate on same idempotency key.
+      - Persistence failure emits no done and route restore leaves no chat pair/record.
+      - Clean `/chat/action` route appends user+assistant, does not call old `processTurn`, and does not queue simulation.
+      - Clean `/chat/retry` blocks old-runtime replay for clean metadata until clean retry exists.
+      - Clean `/chat/undo` removes clean transcript pair via snapshot restore without durable event retraction.
+      - Done sanitizer preserves public-safe ids.
+  - Implementation:
+    - Added `gameplay-runtime.player-facing-turn-record.v1` and clean committed `done` boundary schemas in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`.
+    - Added `backend/src/engine/gameplay-cycle-runtime/turn-persistence.ts` as the P59 owner. It wraps low-level chat append with history-length, exact tail, hash, idempotency, and record uniqueness validation.
+    - Added SQLite table `clean_gameplay_turn_records` with uniqueness on `(campaign_id, internal_turn_id)` and `(campaign_id, idempotency_key)`, plus migration `0020_clean_gameplay_turn_records.sql`.
+    - Added the clean table to store manifest and clean-start clone cleanup. The existing optional `gameplay_cycle_v2_packets` manifest test helper now treats that old optional physical table as optional instead of migrating old v2 storage.
+    - Runtime now commits the clean player-facing record after `finalizing_turn` and emits `done` only after commit succeeds. Public `done.turnId`/`packetId` are `cgturn_*`/`cgpacket_*`, not internal `clean-turn-*` or `frame-*`.
+    - `/chat/action` clean branch stores clean snapshot metadata directly and does not call legacy `createPostTurnHooks.onDone`, so it does not queue old post-turn simulation.
+    - `/chat/retry` blocks clean runtime metadata before restore/replay until a deliberate clean retry primitive exists.
+  - Contract verification:
+    - GitNexus impact before edits: `buildFrozenProjection` LOW, `appendChatMessages` LOW, `setLastTurnSnapshot` LOW, `createPostTurnHooks` LOW, `getLiveGameplayBoundaryAtTail` LOW; `processCleanGameplayTurn*` was not found by the GitNexus index, so direct file context plus contract tests covered it.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 86 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- chat.test.ts --bail=1` passed with 63 tests.
+    - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+    - `npm --prefix backend test -- store-manifest.test.ts clone.test.ts --bail=1` passed with 12 tests.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts store-manifest.test.ts clone.test.ts --bail=1` passed with 371 tests.

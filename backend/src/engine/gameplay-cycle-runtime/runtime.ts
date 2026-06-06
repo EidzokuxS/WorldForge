@@ -25,10 +25,16 @@ import {
   assertFrozenApiProjection,
   assertGameplayRuntimeTurnInput,
   type AuthoritativeSceneFrame,
+  type CleanPlayerFacingTurnEvidenceRef,
   type FrozenApiProjection,
   type GameplayRuntimeProviderSummary,
   type GameplayRuntimeTurnInput,
 } from "./contracts.js";
+import {
+  commitCleanPlayerFacingTurn,
+  type CommitCleanPlayerFacingTurnInput,
+  type CleanPlayerFacingTurnCommitResult,
+} from "./turn-persistence.js";
 
 export type CleanGameplayRuntimeEvent = {
   type:
@@ -70,6 +76,9 @@ export interface CleanGameplayRuntimeCoreOptions {
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
   oracleAdapter?: OracleAdapter;
+  commitTurn?: (
+    input: Omit<CommitCleanPlayerFacingTurnInput, "chat" | "store">,
+  ) => Promise<CleanPlayerFacingTurnCommitResult>;
 }
 
 function envFlagEnabled(name: string): boolean {
@@ -197,6 +206,46 @@ function buildFrozenProjection(input: {
   });
 }
 
+function cleanEvidenceRefs(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmReadRunResult;
+  judgeUncertainty?: JudgeUncertaintyRunResult;
+  oracleSettlement?: OracleSettlementRunResult;
+}): CleanPlayerFacingTurnEvidenceRef[] {
+  const refs: CleanPlayerFacingTurnEvidenceRef[] = [
+    {
+      kind: "scene_frame",
+      ref: input.frame.frameId,
+      authority: "snapshot",
+    },
+  ];
+  if (input.gmRead.status === "accepted") {
+    refs.push({
+      kind: "gm_read",
+      ref: `gm_read_${input.frame.frameId}`,
+      authority: "interpretation_only",
+    });
+  }
+  if (input.judgeUncertainty?.status === "accepted") {
+    refs.push({
+      kind: "judge_uncertainty",
+      ref: input.judgeUncertainty.judgment.judgmentId,
+      authority: "admission_only",
+    });
+  }
+  if (
+    input.oracleSettlement?.status === "settled"
+    || input.oracleSettlement?.status === "settled_with_fallback"
+  ) {
+    refs.push({
+      kind: "oracle_settlement",
+      ref: input.oracleSettlement.settlement.settlementId,
+      authority: "visible_uncertainty_outcome",
+    });
+  }
+  return refs;
+}
+
 export async function* processCleanGameplayTurnFromInput(
   options: CleanGameplayRuntimeCoreOptions,
 ): AsyncGenerator<CleanGameplayRuntimeEvent> {
@@ -282,13 +331,14 @@ export async function* processCleanGameplayTurnFromInput(
       stage: "gameplay-cycle-runtime",
     },
   };
+  const commit = await (options.commitTurn ?? commitCleanPlayerFacingTurn)({
+    turn,
+    projection,
+    evidenceRefs: cleanEvidenceRefs({ frame, gmRead, judgeUncertainty, oracleSettlement }),
+  });
   yield {
     type: "done",
-    data: {
-      runtime: projection.runtime,
-      turnId: projection.turnId,
-      packetId: projection.frameId,
-    },
+    data: commit.doneBoundary,
   };
 }
 

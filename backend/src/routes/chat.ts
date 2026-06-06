@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { parseLookupLogEntry, type ChatMessage } from "@worldforge/shared";
 import { buildLookupHistoryMessages } from "../campaign/chat-history.js";
 import {
@@ -117,6 +117,16 @@ const log = createLogger("chat");
 const app = new Hono();
 type PostTurnRoute = "/chat/action" | "/chat/retry" | "/chat/resume";
 type TerminalTurnEventType = "done" | "error";
+type CleanRuntimeDoneBoundaryData = {
+  runtime: "gameplay-cycle-runtime";
+  recordId: string;
+  turnId: string;
+  packetId: string;
+  chatHistoryLengthBeforeTurn: number;
+  chatHistoryLengthAfterTurn: number;
+  userMessageSha256: string;
+  assistantMessageSha256: string;
+};
 
 function registerTurnAbortCleanup(args: {
   signal: AbortSignal;
@@ -632,6 +642,43 @@ function isWholeNonNegativeNumber(value: unknown): value is number {
   return Number.isInteger(value) && typeof value === "number" && value >= 0;
 }
 
+function isCleanRuntimeDoneBoundaryData(value: unknown): value is CleanRuntimeDoneBoundaryData {
+  return isRecord(value)
+    && value.runtime === "gameplay-cycle-runtime"
+    && typeof value.recordId === "string"
+    && typeof value.turnId === "string"
+    && typeof value.packetId === "string"
+    && isWholeNonNegativeNumber(value.chatHistoryLengthBeforeTurn)
+    && isWholeNonNegativeNumber(value.chatHistoryLengthAfterTurn)
+    && typeof value.userMessageSha256 === "string"
+    && typeof value.assistantMessageSha256 === "string";
+}
+
+function setCleanLastTurnSnapshot(input: {
+  campaignId: string;
+  snapshot: TurnSnapshot;
+  playerAction: string;
+  done: CleanRuntimeDoneBoundaryData;
+}): void {
+  setLastTurnSnapshot(input.campaignId, input.snapshot, {
+    acceptedDurableEventIds: [],
+    producedDurableEventIds: [],
+    playerAction: input.playerAction,
+    chatHistoryLengthBeforeTurn: input.done.chatHistoryLengthBeforeTurn,
+    chatHistoryLengthAfterTurn: input.done.chatHistoryLengthAfterTurn,
+    runtime: "gameplay-cycle-runtime",
+    cleanRecordId: input.done.recordId,
+    cleanPublicTurnId: input.done.turnId,
+    cleanPublicPacketId: input.done.packetId,
+    userMessageSha256: input.done.userMessageSha256,
+    assistantMessageSha256: input.done.assistantMessageSha256,
+  });
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 function getLiveGameplayBoundaryAtTail(
   campaignId: string,
 ): LastTurnSnapshotMetadata | null {
@@ -661,6 +708,18 @@ function getLiveGameplayBoundaryAtTail(
     || userMessage.content !== metadata.playerAction
     || assistantMessage?.role !== "assistant"
     || parseLookupLogEntry(assistantMessage.content)
+  ) {
+    return null;
+  }
+  if (
+    metadata.userMessageSha256
+    && sha256Hex(userMessage.content) !== metadata.userMessageSha256
+  ) {
+    return null;
+  }
+  if (
+    metadata.assistantMessageSha256
+    && sha256Hex(assistantMessage.content) !== metadata.assistantMessageSha256
   ) {
     return null;
   }
@@ -796,19 +855,25 @@ function playerSafeOracleResult(value: unknown): Record<string, unknown> {
 function playerSafeDoneBoundary(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) return {};
   const data: Record<string, unknown> = {};
-  for (const key of ["tick", "worldVersion", "worldTimeMinutes"] as const) {
+  for (const key of [
+    "tick",
+    "worldVersion",
+    "worldTimeMinutes",
+    "chatHistoryLengthBeforeTurn",
+    "chatHistoryLengthAfterTurn",
+  ] as const) {
     const numberValue = value[key];
     if (typeof numberValue === "number" && Number.isFinite(numberValue)) {
       data[key] = numberValue;
     }
   }
-  for (const key of ["opening", "resumed", "lookup"] as const) {
+  for (const key of ["opening", "resumed", "lookup", "mutationApplied", "settled"] as const) {
     const booleanValue = value[key];
     if (typeof booleanValue === "boolean") {
       data[key] = booleanValue;
     }
   }
-  for (const key of ["turnId", "packetId", "runtime"] as const) {
+  for (const key of ["recordId", "turnId", "packetId", "runtime"] as const) {
     const stringValue = playerSafeText(value[key]);
     if (stringValue) {
       data[key] = stringValue;
@@ -1661,8 +1726,21 @@ app.post("/action", async (c) => {
             }
 
             if (event.type === "done") {
+              if (cleanRuntimeEnabled) {
+                if (!isCleanRuntimeDoneBoundaryData(event.data)) {
+                  throw new Error("Clean runtime emitted an invalid committed done boundary.");
+                }
+                settledTurnRollbackShield = true;
+                setCleanLastTurnSnapshot({
+                  campaignId,
+                  snapshot,
+                  playerAction,
+                  done: event.data,
+                });
+              } else {
               settledTurnRollbackShield = true;
               postTurnHooks.onDone(event, snapshot);
+              }
             }
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
@@ -2208,6 +2286,11 @@ app.post("/retry", async (c) => {
       turnStartedForCampaign = null;
       clearLastTurnSnapshot(campaignId);
       return c.json({ error: "Nothing to retry." }, 400);
+    }
+    if (previousBoundary.runtime === "gameplay-cycle-runtime") {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json({ error: "Clean runtime retry is not implemented yet." }, 409);
     }
     const playerAction = previousBoundary.playerAction;
     if (!playerAction) {

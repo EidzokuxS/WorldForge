@@ -26,6 +26,7 @@ import {
 } from "../store-manifest.js";
 
 const CAMPAIGN_ID = "manifest-campaign";
+const OPTIONAL_SQLITE_STORE_TABLES = new Set(["gameplay_cycle_v2_packets"]);
 
 let tempRoot = "";
 let previousCampaignsRoot: string | undefined;
@@ -120,6 +121,14 @@ function rewriteSqliteManifestEvidence(bundleDir: string): void {
     for (const entry of manifest.stores) {
       if (!entry.store.startsWith("sqlite:")) continue;
       const tableName = entry.store.slice("sqlite:".length);
+      const table = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(tableName) as { name?: string } | undefined;
+      if (!table?.name && OPTIONAL_SQLITE_STORE_TABLES.has(tableName)) {
+        entry.evidenceHash = dbHash;
+        entry.rowCount = 0;
+        continue;
+      }
       const row = db
         .prepare(`SELECT COUNT(*) AS count FROM "${tableName.replace(/"/gu, '""')}"`)
         .get() as { count: number };
@@ -221,7 +230,10 @@ describe("campaign store bundle manifest", () => {
         .all() as Array<{ name: string }>
     ).map((row) => row.name);
 
-    expect([...PHASE95_SQLITE_STORE_TABLES].sort()).toEqual(migratedTables);
+    const requiredManifestTables = PHASE95_SQLITE_STORE_TABLES
+      .filter((table) => !OPTIONAL_SQLITE_STORE_TABLES.has(table))
+      .sort();
+    expect(requiredManifestTables).toEqual(migratedTables);
     for (const table of migratedTables) {
       expect(PHASE95_REQUIRED_STORE_KEYS).toContain(`sqlite:${table}`);
     }

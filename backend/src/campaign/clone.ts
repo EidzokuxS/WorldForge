@@ -169,6 +169,32 @@ function ensureGameplayCycleV2PacketCloneTable(db: Database.Database): void {
   `);
 }
 
+function ensureCleanGameplayTurnRecordsCloneTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS clean_gameplay_turn_records (
+      record_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      internal_turn_id TEXT NOT NULL,
+      public_turn_id TEXT NOT NULL,
+      public_packet_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      frame_id TEXT NOT NULL,
+      user_message_index INTEGER NOT NULL,
+      assistant_message_index INTEGER NOT NULL,
+      user_message_sha256 TEXT NOT NULL,
+      assistant_message_sha256 TEXT NOT NULL,
+      record_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS clean_gameplay_turn_records_campaign_turn_unique
+      ON clean_gameplay_turn_records (campaign_id, internal_turn_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS clean_gameplay_turn_records_campaign_idempotency_unique
+      ON clean_gameplay_turn_records (campaign_id, idempotency_key);
+    CREATE INDEX IF NOT EXISTS idx_clean_gameplay_turn_records_campaign_public
+      ON clean_gameplay_turn_records (campaign_id, public_turn_id, public_packet_id);
+  `);
+}
+
 function applySqliteClonePlan(input: {
   dbPath: string;
   plan: CampaignStoreManifestOperationPlan;
@@ -190,6 +216,7 @@ function applySqliteClonePlan(input: {
   try {
     db.pragma("foreign_keys = OFF");
     ensureGameplayCycleV2PacketCloneTable(db);
+    ensureCleanGameplayTurnRecordsCloneTable(db);
     const applyPlan = db.transaction(() => {
       for (const { step, tableName } of sqliteSteps) {
         if (!tableExists(db, tableName)) {

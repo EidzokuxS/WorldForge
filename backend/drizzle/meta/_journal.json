@@ -141,6 +141,13 @@
       "when": 1779587400000,
       "tag": "0019_turn_clock_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1779588000000,
+      "tag": "0020_clean_gameplay_turn_records",
+      "breakpoints": true
     }
   ]
 }

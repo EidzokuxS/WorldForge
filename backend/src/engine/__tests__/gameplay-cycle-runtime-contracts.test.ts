@@ -11,6 +11,8 @@ import {
   gameplayRuntimeTurnInputSchema,
   type JudgeUncertainty,
   judgeUncertaintySchema,
+  cleanPlayerFacingTurnRecordSchema,
+  type CleanPlayerFacingTurnRecord,
   oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
@@ -33,6 +35,10 @@ import {
   runCleanOracleSettlement,
   validateOracleSettlement,
 } from "../gameplay-cycle-runtime/oracle-settlement.js";
+import {
+  commitCleanPlayerFacingTurn,
+  type CleanPlayerFacingTurnRecordStore,
+} from "../gameplay-cycle-runtime/turn-persistence.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -208,6 +214,215 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       expect(paths).toContain("privateGuards.forbiddenPrivateTerms.0");
       expect(paths).toContain("forecast.forbiddenPrivateTerms.0");
     }
+  });
+});
+
+describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence contracts", () => {
+  function memoryStore(initial: CleanPlayerFacingTurnRecord[] = []): {
+    store: CleanPlayerFacingTurnRecordStore;
+    records: CleanPlayerFacingTurnRecord[];
+  } {
+    const records = [...initial];
+    return {
+      records,
+      store: {
+        findByIdempotencyKey: (campaignId, idempotencyKey) =>
+          records.find((record) =>
+            record.campaignId === campaignId && record.idempotencyKey === idempotencyKey
+          ) ?? null,
+        findByInternalTurnId: (campaignId, internalTurnId) =>
+          records.find((record) =>
+            record.campaignId === campaignId && record.internalTurnId === internalTurnId
+          ) ?? null,
+        insert: (record) => {
+          records.push(record);
+        },
+      },
+    };
+  }
+
+  function memoryChat(seed: Array<{ role: "user" | "assistant"; content: string }> = []) {
+    const history = [...seed];
+    return {
+      history,
+      adapter: {
+        getHistory: () => [...history],
+        append: (_campaignId: string, messages: Array<{ role: "user" | "assistant"; content: string }>) => {
+          history.push(...messages);
+        },
+      },
+    };
+  }
+
+  function projectionFor(turn = validTurnInput()) {
+    return {
+      version: "gameplay-runtime.frozen-api-projection.v1" as const,
+      runtime: "gameplay-cycle-runtime" as const,
+      campaignId: turn.campaignId,
+      turnId: turn.turnId,
+      frameId: "frame-1",
+      narrativeText: "Текущая сцена: Market.",
+      mutationApplied: false as const,
+      settled: true as const,
+    };
+  }
+
+  const evidenceRefs = [{
+    kind: "scene_frame" as const,
+    ref: "frame-1",
+    authority: "snapshot" as const,
+  }];
+
+  it("accepts a minimal committed direct clean player-facing record", async () => {
+    const turn = validTurnInput();
+    const store = memoryStore();
+    const chat = memoryChat();
+
+    const result = await commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs,
+      now: 42,
+      chat: chat.adapter,
+      store: store.store,
+    });
+
+    expect(cleanPlayerFacingTurnRecordSchema.safeParse(result.record).success).toBe(true);
+    expect(result.record.version).toBe("gameplay-runtime.player-facing-turn-record.v1");
+    expect(result.record.doneBoundary.turnId).toMatch(/^cgturn_/u);
+    expect(result.record.doneBoundary.packetId).toMatch(/^cgpacket_/u);
+    expect(chat.history).toEqual([
+      { role: "user", content: "I look around." },
+      { role: "assistant", content: "Текущая сцена: Market." },
+    ]);
+  });
+
+  it("accepts a minimal committed Oracle clean record with only evidence refs, not adapter internals", async () => {
+    const turn = validTurnInput();
+    const store = memoryStore();
+    const chat = memoryChat();
+    const result = await commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs: [
+        ...evidenceRefs,
+        {
+          kind: "oracle_settlement",
+          ref: "oracle-settlement-1",
+          authority: "visible_uncertainty_outcome",
+        },
+      ],
+      now: 42,
+      chat: chat.adapter,
+      store: store.store,
+    });
+
+    expect(result.record.evidenceRefs.map((ref) => ref.kind)).toEqual([
+      "scene_frame",
+      "oracle_settlement",
+    ]);
+    expect(JSON.stringify(result.record)).not.toContain("roll");
+    expect(JSON.stringify(result.record)).not.toContain("chance");
+    expect(JSON.stringify(result.record)).not.toContain("reasoning");
+  });
+
+  it("rejects old v2, saga, narrator, and receipt-ledger surfaces in clean records", async () => {
+    const turn = validTurnInput();
+    const store = memoryStore();
+    const chat = memoryChat();
+    const { record } = await commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs,
+      now: 42,
+      chat: chat.adapter,
+      store: store.store,
+    });
+
+    for (const forbidden of [
+      { gameplay_cycle_v2_packet_id: "v2packet-1" },
+      { turn_saga_id: "saga-1" },
+      { narrator_attempt_id: "narrator-1" },
+      { receipt_ledger_json: "{}" },
+    ]) {
+      expect(cleanPlayerFacingTurnRecordSchema.safeParse({ ...record, ...forbidden }).success)
+        .toBe(false);
+    }
+  });
+
+  it("appends exactly two chat messages only when the base history length matches", async () => {
+    const turn = validTurnInput();
+    const store = memoryStore();
+    const chat = memoryChat([{ role: "assistant", content: "prior drift" }]);
+
+    await expect(commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs,
+      now: 42,
+      chat: chat.adapter,
+      store: store.store,
+    })).rejects.toThrow(/history drifted/u);
+
+    expect(chat.history).toEqual([{ role: "assistant", content: "prior drift" }]);
+    expect(store.records).toEqual([]);
+  });
+
+  it("validates the committed tail and reuses an existing idempotency record without duplication", async () => {
+    const turn = validTurnInput();
+    const store = memoryStore();
+    const chat = memoryChat();
+    const first = await commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs,
+      now: 42,
+      chat: chat.adapter,
+      store: store.store,
+    });
+    const second = await commitCleanPlayerFacingTurn({
+      turn,
+      projection: projectionFor(turn),
+      evidenceRefs,
+      now: 43,
+      chat: chat.adapter,
+      store: store.store,
+    });
+
+    expect(first.record.recordId).toBe(second.record.recordId);
+    expect(chat.history).toHaveLength(2);
+    expect(store.records).toHaveLength(1);
+  });
+
+  it("makes runtime done wait for the injected commit adapter and uses public-safe done ids", async () => {
+    const order: string[] = [];
+    const frame = minimalFrame();
+    const events = [];
+    for await (const event of processCleanGameplayTurnFromInput({
+      turn: validTurnInput(),
+      judgeProvider: provider,
+      buildFrame: async () => frame,
+      gmReadCandidateGenerator: async () => validGmRead(frame),
+      judgeUncertaintyCandidateGenerator: async () => validJudgeUncertainty(frame),
+      commitTurn: async (input) => {
+        order.push(`commit:${input.projection.narrativeText}`);
+        return fakeCommitTurn(input);
+      },
+    })) {
+      if (event.type === "done") order.push("done");
+      events.push(event);
+    }
+
+    expect(order).toEqual(["commit:Текущая сцена: Market (Market). Видимые участники: Guide.", "done"]);
+    const done = events.at(-1);
+    expect(done?.type).toBe("done");
+    expect(done?.data).toMatchObject({
+      runtime: "gameplay-cycle-runtime",
+      turnId: "cgturn_fakecommit0000000000",
+      packetId: "cgpacket_fakecommit00000000",
+    });
+    expect(JSON.stringify(done?.data)).not.toContain("clean-turn-1");
+    expect(JSON.stringify(done?.data)).not.toContain("frame-1");
   });
 });
 
@@ -404,6 +619,70 @@ function validTurnInput(): GameplayRuntimeTurnInput {
   });
 }
 
+async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTurn>[0]) {
+  const userMessageSha256 = "a".repeat(64);
+  const assistantMessageSha256 = "b".repeat(64);
+  return {
+    record: cleanPlayerFacingTurnRecordSchema.parse({
+      version: "gameplay-runtime.player-facing-turn-record.v1",
+      runtime: "gameplay-cycle-runtime",
+      route: "/api/chat/action",
+      campaignId: input.turn.campaignId,
+      recordId: "cgtr_fakecommit000000000000",
+      publicTurnId: "cgturn_fakecommit0000000000",
+      publicPacketId: "cgpacket_fakecommit00000000",
+      internalTurnId: input.turn.turnId,
+      internalFrameId: input.projection.frameId,
+      idempotencyKey: input.turn.idempotencyKey,
+      committedAt: 1,
+      input: {
+        submittedPlayerAction: input.turn.playerAction.submitted,
+        normalizedPlayerAction: input.turn.playerAction.normalized,
+        source: input.turn.playerAction.source,
+      },
+      base: {
+        tick: input.turn.base.tick,
+        worldVersion: input.turn.base.worldVersion,
+        worldTimeMinutes: input.turn.base.worldTimeMinutes ?? 0,
+        chatHistoryLengthBeforeTurn: input.turn.base.chatHistoryLengthBeforeTurn,
+      },
+      chat: {
+        userMessageIndex: 0,
+        assistantMessageIndex: 1,
+        userMessageSha256,
+        assistantMessageSha256,
+      },
+      terminalProjection: input.projection,
+      evidenceRefs: input.evidenceRefs,
+      durableEventIds: { accepted: [], produced: [] },
+      doneBoundary: {
+        runtime: "gameplay-cycle-runtime",
+        recordId: "cgtr_fakecommit000000000000",
+        turnId: "cgturn_fakecommit0000000000",
+        packetId: "cgpacket_fakecommit00000000",
+        mutationApplied: false,
+        settled: true,
+        chatHistoryLengthBeforeTurn: 0,
+        chatHistoryLengthAfterTurn: 2,
+        userMessageSha256,
+        assistantMessageSha256,
+      },
+    }),
+    doneBoundary: {
+      runtime: "gameplay-cycle-runtime" as const,
+      recordId: "cgtr_fakecommit000000000000",
+      turnId: "cgturn_fakecommit0000000000",
+      packetId: "cgpacket_fakecommit00000000",
+      mutationApplied: false as const,
+      settled: true as const,
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+      userMessageSha256,
+      assistantMessageSha256,
+    },
+  };
+}
+
 describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
   it("accepts a strict interpretation without admission, executable, mutation, receipt, or narration authority", () => {
     const parsed = gmReadSchema.parse(validGmRead());
@@ -590,6 +869,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         order.push("judge-uncertainty");
         return validJudgeUncertainty(frame);
       },
+      commitTurn: fakeCommitTurn,
     })) {
       events.push(event);
       if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
@@ -955,6 +1235,7 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         order.push("judge-called");
         return validJudgeUncertainty(frame);
       },
+      commitTurn: fakeCommitTurn,
     })) {
       if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
         const stage = (event.data as { stage?: unknown }).stage;
@@ -1214,6 +1495,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
           reasoning: "Adapter resolved the admitted visible uncertainty.",
         };
       },
+      commitTurn: fakeCommitTurn,
     })) {
       events.push(event);
       if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {

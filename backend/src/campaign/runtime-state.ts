@@ -7,6 +7,12 @@ export interface LastTurnSnapshotMetadata {
   playerAction: string | null;
   chatHistoryLengthBeforeTurn: number | null;
   chatHistoryLengthAfterTurn: number | null;
+  runtime: "legacy" | "gameplay-cycle-runtime";
+  cleanRecordId: string | null;
+  cleanPublicTurnId: string | null;
+  cleanPublicPacketId: string | null;
+  userMessageSha256: string | null;
+  assistantMessageSha256: string | null;
 }
 
 const EMPTY_LAST_TURN_SNAPSHOT_METADATA: LastTurnSnapshotMetadata = {
@@ -15,6 +21,12 @@ const EMPTY_LAST_TURN_SNAPSHOT_METADATA: LastTurnSnapshotMetadata = {
   playerAction: null,
   chatHistoryLengthBeforeTurn: null,
   chatHistoryLengthAfterTurn: null,
+  runtime: "legacy",
+  cleanRecordId: null,
+  cleanPublicTurnId: null,
+  cleanPublicPacketId: null,
+  userMessageSha256: null,
+  assistantMessageSha256: null,
 };
 
 const lastTurnSnapshotMetadata = new Map<string, LastTurnSnapshotMetadata>();
@@ -50,6 +62,12 @@ export function setLastTurnSnapshot(
     playerAction?: string | null;
     chatHistoryLengthBeforeTurn?: number | null;
     chatHistoryLengthAfterTurn?: number | null;
+    runtime?: "legacy" | "gameplay-cycle-runtime";
+    cleanRecordId?: string | null;
+    cleanPublicTurnId?: string | null;
+    cleanPublicPacketId?: string | null;
+    userMessageSha256?: string | null;
+    assistantMessageSha256?: string | null;
   },
 ): void {
   lastTurnSnapshots.set(campaignId, snapshot);
@@ -59,6 +77,12 @@ export function setLastTurnSnapshot(
     playerAction: metadata?.playerAction ?? null,
     chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
     chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
+    runtime: metadata?.runtime ?? "legacy",
+    cleanRecordId: metadata?.cleanRecordId ?? null,
+    cleanPublicTurnId: metadata?.cleanPublicTurnId ?? null,
+    cleanPublicPacketId: metadata?.cleanPublicPacketId ?? null,
+    userMessageSha256: metadata?.userMessageSha256 ?? null,
+    assistantMessageSha256: metadata?.assistantMessageSha256 ?? null,
   });
 }
 

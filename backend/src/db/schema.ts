@@ -1192,3 +1192,32 @@ export const narratorAttempts = sqliteTable(
     ),
   ]
 );
+
+export const cleanGameplayTurnRecords = sqliteTable(
+  "clean_gameplay_turn_records",
+  {
+    recordId: text("record_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    internalTurnId: text("internal_turn_id").notNull(),
+    publicTurnId: text("public_turn_id").notNull(),
+    publicPacketId: text("public_packet_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    frameId: text("frame_id").notNull(),
+    userMessageIndex: integer("user_message_index").notNull(),
+    assistantMessageIndex: integer("assistant_message_index").notNull(),
+    userMessageSha256: text("user_message_sha256").notNull(),
+    assistantMessageSha256: text("assistant_message_sha256").notNull(),
+    recordJson: text("record_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("clean_gameplay_turn_records_campaign_turn_unique")
+      .on(table.campaignId, table.internalTurnId),
+    uniqueIndex("clean_gameplay_turn_records_campaign_idempotency_unique")
+      .on(table.campaignId, table.idempotencyKey),
+    index("idx_clean_gameplay_turn_records_campaign_public")
+      .on(table.campaignId, table.publicTurnId, table.publicPacketId),
+  ],
+);

@@ -460,6 +460,126 @@ export const frozenApiProjectionSchema = z.object({
   settled: z.literal(true),
 });
 
+const publicSafeRuntimeId = z.string().trim().regex(
+  /^[a-z][a-z0-9_]{7,96}$/u,
+  "Clean runtime public ids must be stable public-safe tokens.",
+);
+const sha256Hex = z.string().trim().regex(/^[a-f0-9]{64}$/u);
+
+export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
+  kind: z.enum([
+    "scene_frame",
+    "gm_read",
+    "judge_uncertainty",
+    "oracle_settlement",
+  ]),
+  ref: shortText,
+  authority: z.enum([
+    "snapshot",
+    "interpretation_only",
+    "admission_only",
+    "visible_uncertainty_outcome",
+  ]),
+}).strict();
+
+export const cleanPlayerFacingTurnDoneBoundarySchema = z.object({
+  runtime: z.literal("gameplay-cycle-runtime"),
+  recordId: publicSafeRuntimeId,
+  turnId: publicSafeRuntimeId,
+  packetId: publicSafeRuntimeId,
+  mutationApplied: z.literal(false),
+  settled: z.literal(true),
+  chatHistoryLengthBeforeTurn: z.number().int().nonnegative(),
+  chatHistoryLengthAfterTurn: z.number().int().nonnegative(),
+  userMessageSha256: sha256Hex,
+  assistantMessageSha256: sha256Hex,
+}).strict();
+
+export const cleanPlayerFacingTurnRecordSchema = z.object({
+  version: z.literal("gameplay-runtime.player-facing-turn-record.v1"),
+  runtime: z.literal("gameplay-cycle-runtime"),
+  route: z.literal("/api/chat/action"),
+  campaignId: shortText,
+  recordId: publicSafeRuntimeId,
+  publicTurnId: publicSafeRuntimeId,
+  publicPacketId: publicSafeRuntimeId,
+  internalTurnId: shortText,
+  internalFrameId: shortText,
+  idempotencyKey: shortText,
+  committedAt: z.number().int().nonnegative(),
+  input: z.object({
+    submittedPlayerAction: shortText,
+    normalizedPlayerAction: shortText,
+    source: z.enum(["typed", "quick_action"]),
+  }).strict(),
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+    chatHistoryLengthBeforeTurn: z.number().int().nonnegative(),
+  }).strict(),
+  chat: z.object({
+    userMessageIndex: z.number().int().nonnegative(),
+    assistantMessageIndex: z.number().int().nonnegative(),
+    userMessageSha256: sha256Hex,
+    assistantMessageSha256: sha256Hex,
+  }).strict(),
+  terminalProjection: frozenApiProjectionSchema,
+  evidenceRefs: z.array(cleanPlayerFacingTurnEvidenceRefSchema).min(1).max(8),
+  durableEventIds: z.object({
+    accepted: z.array(shortText).max(0),
+    produced: z.array(shortText).max(0),
+  }).strict(),
+  doneBoundary: cleanPlayerFacingTurnDoneBoundarySchema,
+}).strict().superRefine((record, ctx) => {
+  if (record.publicTurnId !== record.doneBoundary.turnId) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "turnId"], message: "doneBoundary.turnId must match publicTurnId." });
+  }
+  if (record.publicPacketId !== record.doneBoundary.packetId) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "packetId"], message: "doneBoundary.packetId must match publicPacketId." });
+  }
+  if (record.recordId !== record.doneBoundary.recordId) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "recordId"], message: "doneBoundary.recordId must match recordId." });
+  }
+  if (record.internalTurnId !== record.terminalProjection.turnId) {
+    ctx.addIssue({ code: "custom", path: ["terminalProjection", "turnId"], message: "terminalProjection.turnId must match internalTurnId." });
+  }
+  if (record.internalFrameId !== record.terminalProjection.frameId) {
+    ctx.addIssue({ code: "custom", path: ["terminalProjection", "frameId"], message: "terminalProjection.frameId must match internalFrameId." });
+  }
+  if (record.chat.userMessageIndex !== record.base.chatHistoryLengthBeforeTurn) {
+    ctx.addIssue({ code: "custom", path: ["chat", "userMessageIndex"], message: "user message index must equal base chat length." });
+  }
+  if (record.chat.assistantMessageIndex !== record.chat.userMessageIndex + 1) {
+    ctx.addIssue({ code: "custom", path: ["chat", "assistantMessageIndex"], message: "assistant message must immediately follow user message." });
+  }
+  if (record.doneBoundary.chatHistoryLengthBeforeTurn !== record.base.chatHistoryLengthBeforeTurn) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "chatHistoryLengthBeforeTurn"], message: "done before length must match base." });
+  }
+  if (record.doneBoundary.chatHistoryLengthAfterTurn !== record.chat.assistantMessageIndex + 1) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "chatHistoryLengthAfterTurn"], message: "done after length must include exactly two appended messages." });
+  }
+  if (record.doneBoundary.userMessageSha256 !== record.chat.userMessageSha256) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "userMessageSha256"], message: "done user hash must match chat hash." });
+  }
+  if (record.doneBoundary.assistantMessageSha256 !== record.chat.assistantMessageSha256) {
+    ctx.addIssue({ code: "custom", path: ["doneBoundary", "assistantMessageSha256"], message: "done assistant hash must match chat hash." });
+  }
+  const serialized = JSON.stringify(record);
+  for (const forbidden of [
+    "gameplay_cycle_v2",
+    "turn_saga",
+    "settled_turn_packet",
+    "narrator_attempt",
+    "receipt_ledger",
+    "tool_payload",
+  ]) {
+    if (serialized.includes(forbidden)) {
+      ctx.addIssue({ code: "custom", path: [], message: `Clean player-facing record must not carry ${forbidden}.` });
+    }
+  }
+});
+
 export type GameplayRuntimeProviderSummary = z.infer<typeof gameplayRuntimeProviderSummarySchema>;
 export type GameplayRuntimeTurnInput = z.infer<typeof gameplayRuntimeTurnInputSchema>;
 export type GameplayRuntimeCapabilityId = z.infer<typeof gameplayRuntimeCapabilityIdSchema>;
@@ -476,6 +596,9 @@ export type OracleOutcomeTier = z.infer<typeof oracleOutcomeTierSchema>;
 export type OracleAdapterSettlementResult = z.infer<typeof oracleAdapterSettlementResultSchema>;
 export type OracleSettlement = z.infer<typeof oracleSettlementSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
+export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
+export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;
+export type CleanPlayerFacingTurnRecord = z.infer<typeof cleanPlayerFacingTurnRecordSchema>;
 
 export function assertGameplayRuntimeTurnInput(value: unknown): GameplayRuntimeTurnInput {
   return gameplayRuntimeTurnInputSchema.parse(value);
@@ -499,4 +622,12 @@ export function assertOracleSettlement(value: unknown): OracleSettlement {
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {
   return frozenApiProjectionSchema.parse(value);
+}
+
+export function assertCleanPlayerFacingTurnRecord(value: unknown): CleanPlayerFacingTurnRecord {
+  return cleanPlayerFacingTurnRecordSchema.parse(value);
+}
+
+export function assertCleanPlayerFacingTurnDoneBoundary(value: unknown): CleanPlayerFacingTurnDoneBoundary {
+  return cleanPlayerFacingTurnDoneBoundarySchema.parse(value);
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 
 const { resolveQuickActionSelectionMock } = vi.hoisted(() => ({
   resolveQuickActionSelectionMock: vi.fn(),
@@ -209,6 +210,12 @@ const runtimeSnapshotMetadata = new Map<string, {
   playerAction: string | null;
   chatHistoryLengthBeforeTurn: number | null;
   chatHistoryLengthAfterTurn: number | null;
+  runtime: "legacy" | "gameplay-cycle-runtime";
+  cleanRecordId: string | null;
+  cleanPublicTurnId: string | null;
+  cleanPublicPacketId: string | null;
+  userMessageSha256: string | null;
+  assistantMessageSha256: string | null;
 }>();
 const runtimeActiveTurns = new Set<string>();
 
@@ -243,6 +250,12 @@ vi.mock("../../campaign/runtime-state.js", () => ({
       playerAction?: string | null;
       chatHistoryLengthBeforeTurn?: number | null;
       chatHistoryLengthAfterTurn?: number | null;
+      runtime?: "legacy" | "gameplay-cycle-runtime";
+      cleanRecordId?: string | null;
+      cleanPublicTurnId?: string | null;
+      cleanPublicPacketId?: string | null;
+      userMessageSha256?: string | null;
+      assistantMessageSha256?: string | null;
     },
   ) => {
     runtimeSnapshots.set(campaignId, snapshot);
@@ -252,6 +265,12 @@ vi.mock("../../campaign/runtime-state.js", () => ({
       playerAction: metadata?.playerAction ?? null,
       chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
       chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
+      runtime: metadata?.runtime ?? "legacy",
+      cleanRecordId: metadata?.cleanRecordId ?? null,
+      cleanPublicTurnId: metadata?.cleanPublicTurnId ?? null,
+      cleanPublicPacketId: metadata?.cleanPublicPacketId ?? null,
+      userMessageSha256: metadata?.userMessageSha256 ?? null,
+      assistantMessageSha256: metadata?.assistantMessageSha256 ?? null,
     });
   },
   getLastTurnSnapshot: (campaignId: string) => runtimeSnapshots.get(campaignId),
@@ -262,6 +281,12 @@ vi.mock("../../campaign/runtime-state.js", () => ({
       playerAction: null,
       chatHistoryLengthBeforeTurn: null,
       chatHistoryLengthAfterTurn: null,
+      runtime: "legacy",
+      cleanRecordId: null,
+      cleanPublicTurnId: null,
+      cleanPublicPacketId: null,
+      userMessageSha256: null,
+      assistantMessageSha256: null,
     },
   clearLastTurnSnapshot: (campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
@@ -418,6 +443,10 @@ function parseSseEvents(body: string): Array<{ event: string; data: unknown }> {
     }
   }
   return events;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 beforeEach(() => {
@@ -730,26 +759,35 @@ describe("Targeted gameplay route campaignId validation", () => {
       bundleDir: "clean-pre-turn",
       capturedAt: 1,
     }) as any);
-    processCleanGameplayTurnMock.mockImplementation((options) =>
-      createTurnStream([
-        {
-          type: "scene-settling",
-          data: { stage: "scene-frame", phase: "gameplay-cycle-runtime" },
+    processCleanGameplayTurnMock.mockImplementation((options) => (async function* () {
+      yield {
+        type: "scene-settling",
+        data: { stage: "scene-frame", phase: "gameplay-cycle-runtime" },
+      } as any;
+      yield {
+        type: "narrative",
+        data: { text: "Текущая сцена: Market." },
+      } as any;
+      mockedAppendChatMessages(options.campaignId, [
+        { role: "user", content: options.normalizedPlayerAction },
+        { role: "assistant", content: "Текущая сцена: Market." },
+      ] as any);
+      yield {
+        type: "done",
+        data: {
+          runtime: "gameplay-cycle-runtime",
+          recordId: "cgtr_cleanroute000000000000",
+          turnId: "cgturn_cleanroute000000000",
+          packetId: "cgpacket_cleanroute0000000",
+          mutationApplied: false,
+          settled: true,
+          chatHistoryLengthBeforeTurn: 0,
+          chatHistoryLengthAfterTurn: 2,
+          userMessageSha256: sha256Hex(options.normalizedPlayerAction),
+          assistantMessageSha256: sha256Hex("Текущая сцена: Market."),
         },
-        {
-          type: "narrative",
-          data: { text: "Текущая сцена: Market." },
-        },
-        {
-          type: "done",
-          data: {
-            runtime: "gameplay-cycle-runtime",
-            turnId: "clean-turn-1",
-            packetId: "frame-1",
-          },
-        },
-      ])
-    );
+      } as any;
+    })());
 
     const res = await app.request("/chat/action", {
       method: "POST",
@@ -766,6 +804,9 @@ describe("Targeted gameplay route campaignId validation", () => {
     const body = await res.text();
     expect(body).toContain("gameplay-cycle-runtime");
     expect(body).toContain("Текущая сцена: Market.");
+    expect(body).toContain("cgturn_cleanroute000000000");
+    expect(body).not.toContain("clean-turn-1");
+    expect(body).not.toContain("frame-1");
     expect(mockedProcessTurn).not.toHaveBeenCalled();
     expect(processCleanGameplayTurnMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -774,6 +815,18 @@ describe("Targeted gameplay route campaignId validation", () => {
         normalizedPlayerAction: "Осматриваюсь.",
       }),
     );
+    expect(mockedAppendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "user", content: "Осматриваюсь." },
+      { role: "assistant", content: "Текущая сцена: Market." },
+    ]);
+    expect(runtimeSnapshotMetadata.get(CAMPAIGN_ID)).toMatchObject({
+      runtime: "gameplay-cycle-runtime",
+      cleanRecordId: "cgtr_cleanroute000000000000",
+      cleanPublicTurnId: "cgturn_cleanroute000000000",
+      cleanPublicPacketId: "cgpacket_cleanroute0000000",
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+    });
     expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
   });
 
@@ -787,6 +840,47 @@ describe("Targeted gameplay route campaignId validation", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("campaignId is required.");
+  });
+
+  it("blocks /chat/retry for clean runtime metadata before old replay or restore", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const playerAction = "Осматриваюсь.";
+    const assistantText = "Текущая сцена: Market.";
+    runtimeSnapshots.set(CAMPAIGN_ID, {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "clean-pre-turn",
+      capturedAt: 1,
+    });
+    chatHistoryByCampaign.set(CAMPAIGN_ID, [
+      { role: "user", content: playerAction },
+      { role: "assistant", content: assistantText },
+    ]);
+    runtimeSnapshotMetadata.set(CAMPAIGN_ID, {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      playerAction,
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+      runtime: "gameplay-cycle-runtime",
+      cleanRecordId: "cgtr_cleanroute000000000000",
+      cleanPublicTurnId: "cgturn_cleanroute000000000",
+      cleanPublicPacketId: "cgpacket_cleanroute0000000",
+      userMessageSha256: sha256Hex(playerAction),
+      assistantMessageSha256: sha256Hex(assistantText),
+    });
+
+    const res = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("Clean runtime retry is not implemented yet.");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
   });
 
   it("rejects /chat/undo without campaignId", async () => {
@@ -2964,6 +3058,12 @@ describe("Campaign-loaded gameplay transport", () => {
       playerAction: "Retry the costly turn",
       chatHistoryLengthBeforeTurn: 0,
       chatHistoryLengthAfterTurn: 2,
+      runtime: "legacy",
+      cleanRecordId: null,
+      cleanPublicTurnId: null,
+      cleanPublicPacketId: null,
+      userMessageSha256: null,
+      assistantMessageSha256: null,
     });
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockImplementation(async (campaignId) => ({
