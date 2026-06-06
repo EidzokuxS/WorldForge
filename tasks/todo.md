@@ -2051,3 +2051,14 @@ Session: `gm-v1-consequenc-slice`.
   - Player-facing narration: `Slip Twelve Berth — открытый и доступный маршрут из The Copper Tap. Путь проходит напрямую: The Copper Tap -> Slip Twelve Berth. Ты остаёшься на месте.` This stays within route availability/current-scene evidence and does not claim arrival, discovery, item state, NPC knowledge, hidden facts, or absence.
   - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn4-check-route-slip-twelve.*` and `backend-p51-3101.*.log`.
   - P49 is now 4 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
+- P52 P49 turn-5 movement-after-route-check live evidence:
+  - Continued clean zero-turn clone `p49-explicit-movement-owned-refs-live-proof`, after four clean turns, from inspected state: player `Mira Voss` in `The Copper Tap`; `Slip Twelve Berth` was already confirmed as an open route by accepted `route.check.v2` evidence on turn 4.
+  - Manual action: `Я выхожу из The Copper Tap и иду в Slip Twelve Berth по только что проверенному открытому маршруту. Я не делаю ничего другого.`
+  - Stable backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped after verification; ports `3001` and `3101` were clear afterward.
+  - SSE reached v2 `done`, packet `v2packet-mq1wmpn4-d65ba28d5f23`, `tick=5`, `worldVersion=3`, `worldTimeMinutes=2`.
+  - DB after turn 5: `gameplay_cycle_v2_packets=5`, `turn_clock_ledger=2`, `authority_traces=3`, legacy packet/saga/narrator/proposals all 0, chat history length 10, player current scene `Slip Twelve Berth`.
+  - Persisted packet: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["movement"]`; acceptedRuntimeReceiptIds `["receipt-step-1","receipt-local-consequence-1","receipt-local-consequence-2"]`; stepAudit skipped/failed counts 0.
+  - Accepted evidence: one `actor.move.v2` runtime receipt moving Player from `The Copper Tap` to `Slip Twelve Berth`, plus post-move `scene_beat.record.v2` visibility receipts for `Sigil Boss Torvin Kask` and `Litha Corsen`.
+  - Player-facing narration: `Вы выходите из The Copper Tap и попадаете в Slip Twelve Berth. Здесь вы видите Sigil Boss Torvin Kask и Litha Corsen.` This is grounded by accepted movement and visibility receipts.
+  - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn5-move-slip-twelve.*` and `backend-p52-3101.*.log`.
+  - P49 is now 5 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
