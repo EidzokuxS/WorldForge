@@ -2040,3 +2040,14 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing narration matched the accepted dialogue receipt and did not claim travel, route availability as backend truth, item state, hidden facts, or absence.
     - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn3-ask-sessik-silt-safety.*` and `backend-p50-3101.*.log`.
     - P49 is now 3 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
+- P51 P49 turn-4 route-check live evidence:
+  - Continued clean zero-turn clone `p49-explicit-movement-owned-refs-live-proof`, after three clean turns, from inspected state: player `Mira Voss` in `The Copper Tap`, visible `Old Route Hand Sessik` and `Tap-Keeper Brost`, discovered routes to `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`.
+  - Manual action: `Я остаюсь в The Copper Tap и проверяю, открыт ли сейчас видимый маршрут к Slip Twelve Berth. Я не выхожу и не иду по маршруту.`
+  - Stable backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped after verification; ports `3001` and `3101` were clear afterward.
+  - SSE reached v2 `done`, packet `v2packet-mq1wgvqn-bc537b349c8f`, `tick=4`, `worldVersion=2`, `worldTimeMinutes=1`.
+  - DB after turn 4: `gameplay_cycle_v2_packets=4`, `turn_clock_ledger=1`, `authority_traces=2`, legacy packet/saga/narrator/proposals all 0, chat history length 8, player still in `The Copper Tap`.
+  - Persisted packet: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["route_check"]`; acceptedRuntimeReceiptIds `["receipt-step-1"]`; stepAudit skipped/failed counts 0.
+  - Accepted evidence: one `route.check.v2` runtime receipt: `Slip Twelve Berth is an exposed legal route for Player; route path: The Copper Tap -> Slip Twelve Berth. This proves route availability only, not movement or arrival.`
+  - Player-facing narration: `Slip Twelve Berth — открытый и доступный маршрут из The Copper Tap. Путь проходит напрямую: The Copper Tap -> Slip Twelve Berth. Ты остаёшься на месте.` This stays within route availability/current-scene evidence and does not claim arrival, discovery, item state, NPC knowledge, hidden facts, or absence.
+  - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn4-check-route-slip-twelve.*` and `backend-p51-3101.*.log`.
+  - P49 is now 4 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
