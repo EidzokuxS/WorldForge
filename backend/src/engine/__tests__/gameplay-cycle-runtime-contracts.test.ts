@@ -21,6 +21,7 @@ import {
   type CleanStage4ExecutionResult,
   type CleanStage4Receipt,
   type CleanPlayerFacingTurnRecord,
+  type CleanNarratorView,
   oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
@@ -57,6 +58,7 @@ import {
   buildCleanNarratorView,
   buildCleanSettledTurnPacket,
 } from "../gameplay-cycle-runtime/settlement.js";
+import type { CleanNarrationRunResult } from "../gameplay-cycle-runtime/narration.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -87,6 +89,12 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       "tool-schemas",
       "runtime-tool-input-schemas",
       "runtime-tool-descriptors",
+      "narrator-packet",
+      "narration-grounding-guard",
+      "visible-narration-output-guard",
+      "settled_turn_packets",
+      "narrator_attempts",
+      "turn_sagas",
     ];
 
     for (const source of runtimeSources()) {
@@ -453,6 +461,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
       buildFrame: async () => frame,
       gmReadCandidateGenerator: async () => validGmRead(frame),
       judgeUncertaintyCandidateGenerator: async () => validJudgeUncertainty(frame),
+      runNarration: fakeRunNarration,
       commitTurn: async (input) => {
         order.push(`commit:${input.projection.narrativeText}`);
         return fakeCommitTurn(input);
@@ -845,6 +854,23 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
   };
 }
 
+async function fakeRunNarration(input: {
+  narratorView: CleanNarratorView;
+  provider: ProviderConfig;
+}): Promise<CleanNarrationRunResult> {
+  void input.provider;
+  const text = input.narratorView.acceptedEvidence[0]?.backendFacts[0]?.text
+    ?? "Current scene is Market.";
+  return {
+    version: "gameplay-runtime.clean-narration-result.v1",
+    packetId: input.narratorView.packetId,
+    turnId: input.narratorView.turnId,
+    text,
+    source: "model",
+    validationIssues: [],
+  };
+}
+
 function acceptedMovementReceipt(
   frame = actionPlanFrame(),
   checklist = validActionChecklist(frame),
@@ -1122,6 +1148,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         order.push("judge-uncertainty");
         return validJudgeUncertainty(frame);
       },
+      runNarration: fakeRunNarration,
       commitTurn: fakeCommitTurn,
     })) {
       events.push(event);
@@ -1533,6 +1560,7 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         order.push("judge-called");
         return validJudgeUncertainty(frame);
       },
+      runNarration: fakeRunNarration,
       commitTurn: fakeCommitTurn,
     })) {
       if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
@@ -1970,6 +1998,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           publicEvents: [stateUpdate],
         };
       },
+      runNarration: fakeRunNarration,
       commitTurn: async (input) => {
         commits.push(input);
         return fakeCommitTurn(input);
@@ -2404,6 +2433,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
           reasoning: "Adapter resolved the admitted visible uncertainty.",
         };
       },
+      runNarration: fakeRunNarration,
       commitTurn: fakeCommitTurn,
     })) {
       events.push(event);

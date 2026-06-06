@@ -49,8 +49,11 @@ import {
 import {
   buildCleanNarratorView,
   buildCleanSettledTurnPacket,
-  deterministicSettlementBridge,
 } from "./settlement.js";
+import {
+  runCleanNarration,
+  type CleanNarrationRunResult,
+} from "./narration.js";
 
 export type CleanGameplayRuntimeEvent = {
   type:
@@ -89,6 +92,7 @@ export interface CleanGameplayRuntimeOptions {
 export interface CleanGameplayRuntimeCoreOptions {
   turn: GameplayRuntimeTurnInput;
   judgeProvider: ProviderConfig;
+  storytellerProvider?: ProviderConfig;
   buildFrame?: (turn: GameplayRuntimeTurnInput) => Promise<AuthoritativeSceneFrame>;
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
@@ -100,6 +104,10 @@ export interface CleanGameplayRuntimeCoreOptions {
   commitTurn?: (
     input: Omit<CommitCleanPlayerFacingTurnInput, "chat" | "store">,
   ) => Promise<CleanPlayerFacingTurnCommitResult>;
+  runNarration?: (input: {
+    narratorView: ReturnType<typeof buildCleanNarratorView>;
+    provider: ProviderConfig;
+  }) => Promise<CleanNarrationRunResult>;
 }
 
 function envFlagEnabled(name: string): boolean {
@@ -380,7 +388,11 @@ export async function* processCleanGameplayTurnFromInput(
     stage4Execution: stage4Execution?.execution ?? null,
   });
   const narratorView = buildCleanNarratorView(settledPacket);
-  const narrativeText = deterministicSettlementBridge(narratorView);
+  const narration = await (options.runNarration ?? runCleanNarration)({
+    narratorView,
+    provider: options.storytellerProvider ?? options.judgeProvider,
+  });
+  const narrativeText = narration.text;
   const projection = buildFrozenProjection({
     turn,
     frame,
@@ -429,6 +441,7 @@ export async function* processCleanGameplayTurn(
   yield* processCleanGameplayTurnFromInput({
     turn,
     judgeProvider: options.judgeProvider,
+    storytellerProvider: options.storytellerProvider,
     gmReadCandidateGenerator: options.gmReadCandidateGenerator,
     judgeUncertaintyCandidateGenerator: options.judgeUncertaintyCandidateGenerator,
     oracleAdapter: options.oracleAdapter,

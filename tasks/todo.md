@@ -2692,3 +2692,50 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/clean-runtime-p62-settlement-live-20260606143641/*`.
     - Backend listener check after harness: port `3227` listener count was 0.
   - Status: diagnostic slice complete for P62; source commit/push/reindex completed in the P62 delivery step. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P63 clean gameplay runtime Primitive 9 Narration:
+  - Status:
+    - [x] Identify next primitive from canonical architecture after P62 settled packet.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 6 target, current P55-P62 clean runtime contracts, current deterministic settlement bridge, current LLM generation patterns, and old narrator/grounding files as negative/forensic evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the clean narrator primitive and runtime handoff from `CleanNarratorView`.
+    - [x] Add focused contract tests for prompt boundary, output validation, fallback, private guard handling, failed/skipped audit limits, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where accepted Stage 4 movement produces player-facing narration grounded only in P62 accepted evidence.
+  - Primitive boundary draft:
+    - Owner: new clean narrator module under `backend/src/engine/gameplay-cycle-runtime/`, not old `narrator-packet.ts`, `narration-grounding-guard.ts`, `visible-narration-output-guard.ts`, v1 narrator prompt, v2 packet narrator, or old pending-narration stack.
+    - Input: `CleanNarratorView` only, plus storyteller provider/config and optional test adapter. No raw SceneFrame, raw Stage 4 receipts, P60 checklist internals, raw Oracle adapter internals, player text as truth, or DB adapters.
+    - Output: one player-facing prose string plus a small narrator result/attempt object if Oracle approves; it must be grounded in accepted evidence and explicit failed/skipped public reasons only.
+    - Mutation authority: none. P63 must not mutate DB, call tools, append chat, advance clocks, create simulation proposals, or alter settlement.
+    - Evidence authority: prose may state only claims supported by `view.acceptedEvidence.backendFacts`; it may explain failed/skipped reasons without treating them as world truth; it may not infer absence/no-change/movement/discovery/item/NPC/private/world facts outside accepted evidence.
+    - Failure behavior: if generation/validation fails, use deterministic fallback from `CleanNarratorView`; do not restore/replay the already settled turn.
+    - Initial implementation scope candidate: no separate narrator attempt table in P63 unless Oracle says it is necessary; store final text in existing clean player-facing record projection, with settlement already embedded by P62.
+  - Oracle question draft:
+    - Given committed P62, what exactly should P63 Stage 6 Narration own now so it replaces old narrator prompt/grounding guard/pending narration semantics without reusing the old narrator stack? Decide whether to implement a model narrator now or keep deterministic bridge until more tools exist; whether to persist narrator attempts separately or keep only final text in P59 record for this slice; return prompt/input shape, validator rules, fallback behavior, runtime event order, evidence authority limits, language policy, and focused contract/live tests.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p63-narration`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one bundled text attachment, 21 files, usage `inputTokens=139847`, `outputTokens=4993`.
+    - Question artifact: `output/oracle/p63-clean-narration-question.md`.
+    - Answer artifact: `output/oracle/p63-clean-narration-answer.md`.
+    - Transcript artifact: `C:\Users\robra\.oracle\sessions\wf-clean-p63-narration\artifacts\transcript.md`.
+    - Delivery verification: session meta had `options.file` listing all 21 intended files, `promptSubmitted=true`, `browserBundleFiles=true`, `browserBundleFormat="text"`, model selection verified as `Extended Pro`, and transcript saved.
+    - Accepted decision: MODIFY -> GO. Implement clean model narrator now, but only as a narrow one-attempt structured candidate with deterministic fallback on generation or validation failure.
+    - Accepted persistence direction: no `clean_narrator_attempts`, no old `narrator_attempts`, no pending-narration semantics; store only final text in existing P59 terminal projection.
+    - Accepted input direction: Stage 6 consumes `CleanNarratorView` only and builds a prompt-safe projection that explicitly excludes `privateGuardSidecar`.
+    - Accepted validator direction: structured sentence declarations must cite accepted evidence refs/backend fact refs or failed/skipped audit ids; `finalText` must equal joined sentence text; reject private terms, backend refs, UUID-like ids, old runtime markers, Oracle chance/roll/reasoning, and unsupported declared claim kinds.
+    - Accepted fallback direction: fallback is deterministic, final, grounded in `CleanNarratorView`, and must not restore/replay/pending the already-settled turn.
+    - Rejected alternatives: deterministic bridge as normal path, separate narrator-attempt persistence, importing/wrapping old narrator packet/guards/v1/v2 stacks, and semantic regex piles for gameplay meaning.
+  - Implementation review:
+    - Added `backend/src/engine/gameplay-cycle-runtime/narration.ts` as the clean Stage 6 owner. It builds a prompt-safe `CleanNarratorPromptInput`, asks for one structured `clean-narration-candidate.v1`, validates declared evidence/audit citations, and returns either model text or deterministic fallback without mutation/persistence ownership.
+    - Replaced the P62 deterministic bridge handoff in `runtime.ts` with `runCleanNarration`, injected through `storytellerProvider`/`runNarration` for production/test boundaries; removed the temporary `deterministicSettlementBridge` export after GitNexus confirmed LOW/no upstream callers.
+    - Extended contracts with `cleanNarratorPromptInputSchema`, `cleanNarrationCandidateSchema`, and `cleanNarrationResultSchema`.
+    - Live defect caught: first P63 live run proved that exposing raw `playerAction` let model narration copy request prose (`Lowwater Bazaar` / `visible connected route`) that was not present in accepted backend facts. Fixed by changing prompt-safe ownership: `CleanNarratorView` may retain raw player action for backend language detection, but `CleanNarratorPromptInput` no longer exposes raw player action; it exposes only `language` and `languageSource`.
+  - Verification:
+    - Executed `npm --prefix backend run typecheck` after final bridge removal.
+    - Executed `npm --prefix backend test -- gameplay-cycle-runtime-narration.test.ts gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts gameplay-cycle-runtime-stage4.test.ts --bail=1` after final bridge removal: 4 files, 144 tests passed.
+    - Live proof after fix: clone `p63-narration-movement-890091ac`, action `I walk from Lowwater Bazaar toward The Copper Tap along the visible connected route.`, artifacts `output/clean-runtime-p63-narration-live-20260606150925/*`.
+    - Live SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, public `state_update: location_change`, `settled-turn-packet`, `narrative`, `finalizing_turn`, `done`.
+    - Live narration: `You arrive at The Copper Tap. The journey took 1 minute.` It matched persisted `terminalProjection.narrativeText`, included accepted destination/time evidence, and did not copy the raw request wording.
+    - Live DB proof: one clean turn record, one clean Stage 4 receipt, one authority trace, one travel clock ledger row; old v2/saga/narrator/oracle/simulation stores stayed 0; backend PID from harness was not running after shutdown.
+    - Status: diagnostic slice complete for P63. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

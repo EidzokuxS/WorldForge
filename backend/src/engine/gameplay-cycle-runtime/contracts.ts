@@ -921,6 +921,29 @@ export const cleanSettledTurnPacketSchema = z.object({
   }
 });
 
+const cleanNarratorAcceptedEvidenceSchema = z.object({
+  ref: shortText,
+  authority: cleanSettledEvidenceAuthoritySchema,
+  claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+  text: shortText,
+  backendFacts: z.array(cleanSettledBackendFactSchema).min(1).max(8),
+  limits: cleanEvidenceLimitSchema,
+}).strict();
+
+const cleanNarratorAuditNoticeSchema = z.object({
+  stepId: gmActionChecklistStepIdSchema,
+  status: z.enum(["failed", "skipped"]),
+  publicReason: shortText,
+  mayUseAsWorldTruth: z.literal(false),
+}).strict();
+
+const cleanNarratorGuardSchema = z.object({
+  mayCallTools: z.literal(false),
+  mayInferNewFacts: z.literal(false),
+  mayUseFailedOrSkippedAsTruth: z.literal(false),
+  mayNarrateNoChangeWithoutExplicitEvidence: z.literal(false),
+}).strict();
+
 export const cleanNarratorViewSchema = z.object({
   version: z.literal("gameplay-runtime.narrator-view.v1"),
   packetId: shortText,
@@ -929,26 +952,9 @@ export const cleanNarratorViewSchema = z.object({
   playerAction: shortText,
   responseLanguage: z.literal("match_player_action"),
   preserveLabelsVerbatim: z.literal(true),
-  acceptedEvidence: z.array(z.object({
-    ref: shortText,
-    authority: cleanSettledEvidenceAuthoritySchema,
-    claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
-    text: shortText,
-    backendFacts: z.array(cleanSettledBackendFactSchema).min(1).max(8),
-    limits: cleanEvidenceLimitSchema,
-  }).strict()).max(24),
-  stepAuditForGrounding: z.array(z.object({
-    stepId: gmActionChecklistStepIdSchema,
-    status: z.enum(["failed", "skipped"]),
-    publicReason: shortText,
-    mayUseAsWorldTruth: z.literal(false),
-  }).strict()).max(6),
-  guard: z.object({
-    mayCallTools: z.literal(false),
-    mayInferNewFacts: z.literal(false),
-    mayUseFailedOrSkippedAsTruth: z.literal(false),
-    mayNarrateNoChangeWithoutExplicitEvidence: z.literal(false),
-  }).strict(),
+  acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
+  stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
+  guard: cleanNarratorGuardSchema,
   privateGuardSidecar: z.object({
     forbiddenActorLabels: z.array(shortText).max(64),
     forbiddenPrivateTerms: z.array(shortText).max(128),
@@ -967,6 +973,52 @@ export const cleanNarratorViewSchema = z.object({
     ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose backend refs." });
   }
 });
+
+export const cleanNarrationLanguageSchema = z.enum(["en", "ru", "mixed"]);
+
+export const cleanNarratorPromptInputSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-prompt-input.v1"),
+  packetId: shortText,
+  turnId: shortText,
+  responseLanguage: z.literal("match_player_action"),
+  language: cleanNarrationLanguageSchema,
+  languageSource: z.literal("derived_from_player_action_without_prompting_raw_action"),
+  preserveLabelsVerbatim: z.literal(true),
+  acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
+  stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
+  guard: cleanNarratorGuardSchema,
+}).strict();
+
+export const cleanNarrationSentenceSchema = z.object({
+  kind: z.enum(["accepted_evidence", "audit_notice"]),
+  text: z.string().trim().min(1).max(500),
+  evidenceRefs: z.array(shortText).max(6),
+  backendFactRefs: z.array(shortText).max(12),
+  claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
+  auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6),
+}).strict();
+
+export const cleanNarrationCandidateSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narration-candidate.v1"),
+  packetId: shortText,
+  turnId: shortText,
+  language: cleanNarrationLanguageSchema,
+  sentences: z.array(cleanNarrationSentenceSchema).min(1).max(6),
+  finalText: z.string().trim().min(1).max(900),
+}).strict();
+
+export const cleanNarrationResultSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narration-result.v1"),
+  packetId: shortText,
+  turnId: shortText,
+  text: z.string().trim().min(1).max(900),
+  source: z.enum([
+    "model",
+    "fallback_generation_error",
+    "fallback_validation_error",
+    "fallback_empty_evidence",
+  ]),
+}).strict();
 
 const publicSafeRuntimeId = z.string().trim().regex(
   /^[a-z][a-z0-9_]{7,96}$/u,
@@ -1138,6 +1190,11 @@ export type CleanSettledEvidence = z.infer<typeof cleanSettledEvidenceSchema>;
 export type CleanSettledStepAudit = z.infer<typeof cleanSettledStepAuditSchema>;
 export type CleanSettledTurnPacket = z.infer<typeof cleanSettledTurnPacketSchema>;
 export type CleanNarratorView = z.infer<typeof cleanNarratorViewSchema>;
+export type CleanNarrationLanguage = z.infer<typeof cleanNarrationLanguageSchema>;
+export type CleanNarratorPromptInput = z.infer<typeof cleanNarratorPromptInputSchema>;
+export type CleanNarrationSentence = z.infer<typeof cleanNarrationSentenceSchema>;
+export type CleanNarrationCandidate = z.infer<typeof cleanNarrationCandidateSchema>;
+export type CleanNarrationResult = z.infer<typeof cleanNarrationResultSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
 export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;
@@ -1185,6 +1242,18 @@ export function assertCleanSettledTurnPacket(value: unknown): CleanSettledTurnPa
 
 export function assertCleanNarratorView(value: unknown): CleanNarratorView {
   return cleanNarratorViewSchema.parse(value);
+}
+
+export function assertCleanNarratorPromptInput(value: unknown): CleanNarratorPromptInput {
+  return cleanNarratorPromptInputSchema.parse(value);
+}
+
+export function assertCleanNarrationCandidate(value: unknown): CleanNarrationCandidate {
+  return cleanNarrationCandidateSchema.parse(value);
+}
+
+export function assertCleanNarrationResult(value: unknown): CleanNarrationResult {
+  return cleanNarrationResultSchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {
