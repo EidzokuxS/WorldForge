@@ -1702,3 +1702,22 @@ Session: `gm-v1-consequenc-slice`.
   - Local decision: extend the existing backend-owned `compileSimpleGmActionChecklistV2` instead of repairing checklist prompt output. The compiler now handles any admitted list where every effect is in the simple backend-owned set, assigns deterministic `step-N` ids, orders route-check before movement and dialogue before world-fact, and adds dependencies for movement-after-route-check and world-fact-after-dialogue.
   - Contract verification: `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 151 tests; `npm --prefix backend run typecheck` passed.
   - Turn 3 retry after fix reached v2 `done`, accepted one `dialogue.record.v2` receipt, current scene stayed `The Copper Tap`, worldVersion/time stayed `2/6`, `actor_knowledge_records=0`, legacy packet/saga/narrator/proposal rows stayed 0. Artifacts: `output/p31-v2-composition-burnin/turn3-retry-ask-sessik-route.*`.
+- P32 checklist compiler strict admission graph:
+  - Oracle/GPT-5.5 Pro gate status:
+    - Valid browser review completed in session `p32-checklist-compiler-review-r2` with one bundled text attachment.
+    - Bundle included `action-checklist.ts`, `runtime.ts`, `contracts.ts`, `gm-judge.ts`, `mutating-composer.ts`, focused v2 contract tests, and `docs/gm-turn-architecture-review-2026-05-03.md`.
+    - Recommendation accepted: keep deterministic checklist compiler, but do not compile every simple-effect list. Gate it by an explicit supported effect graph and add exact admission/checklist bijection invariants.
+  - Implemented contract changes:
+    - `compileSimpleGmActionChecklistV2` now compiles only supported simple effect graphs: singletons, `route_check -> movement`, and `dialogue_outcome -> world_fact`.
+    - Unsupported mixed simple-effect graphs return `null` until their dependency/refresh ownership is explicitly designed.
+    - `validateGmActionChecklistV2` now rejects duplicate checklist effect kinds, duplicate Judge effect admissions, missing admitted effects, non-contiguous `step-N` ids, and step refs outside Judge checklist admission refs.
+    - `validateGmJudgeV2` now rejects duplicate `checklistAdmission.requiredEffectKinds` for action-checklist lane.
+  - Verification:
+    - GitNexus impact before edits: `validateGmJudgeV2`, `validateGmActionChecklistV2`, and `compileSimpleGmActionChecklistV2` all LOW risk.
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 155 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Live diagnostic setup:
+    - Fresh zero-turn clone `p32-v2-clean-burnin-75c13461` was created from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Preflight proved empty `gameplay_cycle_v2_packets`, `turn_clock_ledger`, `authority_traces`, legacy packet/saga/narrator/proposal stores, chat length 0, clock `0/0/0`, and player `Mira Voss` at `Lowwater Bazaar`.
+    - Next step is one-action-at-a-time P32 diagnostic burn-in from this clone after inspecting the actual current SceneFrame. This does not count toward final acceptance.

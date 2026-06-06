@@ -67,6 +67,7 @@ function lowerSet(values: readonly string[]): Set<string> {
 
 export interface ActionChecklistValidationIssueV2 {
   code:
+    | "admission_mismatch"
     | "capability_mismatch"
     | "executable_payload"
     | "gm_read_mismatch"
@@ -192,6 +193,41 @@ function validateGmReadAlignment(input: {
     });
   }
   const requestedKinds = new Set(admission.requiredEffectKinds);
+  const checklistKinds = input.checklist.steps.map((step) => step.intendedEffect.kind);
+  const checklistKindSet = new Set(checklistKinds);
+  if (checklistKinds.length !== checklistKindSet.size) {
+    issues.push({
+      code: "admission_mismatch",
+      path: "steps.intendedEffect.kind",
+      message: "Checklist cannot contain duplicate intended effect kinds.",
+    });
+  }
+  if (requestedKinds.size !== admission.requiredEffectKinds.length) {
+    issues.push({
+      code: "admission_mismatch",
+      path: "gmJudge.checklistAdmission.requiredEffectKinds",
+      message: "GM Judge checklistAdmission.requiredEffectKinds cannot contain duplicates.",
+    });
+  }
+  for (const requestedKind of requestedKinds) {
+    if (!checklistKindSet.has(requestedKind)) {
+      issues.push({
+        code: "admission_mismatch",
+        path: "steps.intendedEffect.kind",
+        message: `Checklist is missing admitted effect "${requestedKind}".`,
+      });
+    }
+  }
+  input.checklist.steps.forEach((step, index) => {
+    const expectedStepId = `step-${index + 1}`;
+    if (step.stepId !== expectedStepId) {
+      issues.push({
+        code: "admission_mismatch",
+        path: `steps.${index}.stepId`,
+        message: `Checklist stepId must be canonical and contiguous: expected ${expectedStepId}.`,
+      });
+    }
+  });
   input.checklist.steps.forEach((step, index) => {
     if (!requestedKinds.has(step.intendedEffect.kind)) {
       issues.push({
@@ -199,6 +235,34 @@ function validateGmReadAlignment(input: {
         path: `steps.${index}.intendedEffect.kind`,
         message: `Checklist effect "${step.intendedEffect.kind}" was not admitted by GM Judge.`,
       });
+    }
+    const admittedActorRefs = lowerSet(admission.actorRefs);
+    if (!admittedActorRefs.has(step.actorRef.toLowerCase())) {
+      issues.push({
+        code: "admission_mismatch",
+        path: `steps.${index}.actorRef`,
+        message: `Checklist actorRef "${step.actorRef}" was not admitted by GM Judge.`,
+      });
+    }
+    const admittedTargetRefs = lowerSet(admission.targetRefs);
+    for (const targetRef of step.targetRefs) {
+      if (!admittedTargetRefs.has(targetRef.toLowerCase())) {
+        issues.push({
+          code: "admission_mismatch",
+          path: `steps.${index}.targetRefs`,
+          message: `Checklist targetRef "${targetRef}" was not admitted by GM Judge.`,
+        });
+      }
+    }
+    const admittedEvidenceRefs = lowerSet(admission.evidenceRefs);
+    for (const evidenceRef of step.evidenceRefs) {
+      if (!admittedEvidenceRefs.has(evidenceRef.toLowerCase())) {
+        issues.push({
+          code: "admission_mismatch",
+          path: `steps.${index}.evidenceRefs`,
+          message: `Checklist evidenceRef "${evidenceRef}" was not admitted by GM Judge.`,
+        });
+      }
     }
   });
   return issues;
@@ -334,6 +398,14 @@ function simpleEffectSortRank(kind: GmActionChecklistEffectKindV2): number {
   }
 }
 
+function supportedSimpleEffectGraph(inputKinds: readonly GmActionChecklistEffectKindV2[]): boolean {
+  const kinds = [...new Set(inputKinds)];
+  if (kinds.length !== inputKinds.length) return false;
+  if (kinds.length === 1) return true;
+  const signature = kinds.slice().sort().join("+");
+  return signature === "movement+route_check" || signature === "dialogue_outcome+world_fact";
+}
+
 export function compileSimpleGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
@@ -342,6 +414,7 @@ export function compileSimpleGmActionChecklistV2(input: {
   const admission = input.gmJudge.checklistAdmission;
   const requestedKinds = admission.requiredEffectKinds;
   if (requestedKinds.length < 1) return null;
+  if (!supportedSimpleEffectGraph(requestedKinds)) return null;
   if (!requestedKinds.every((kind) => BACKEND_COMPILED_SIMPLE_EFFECTS.has(kind))) return null;
 
   const actorRef = admission.actorRefs[0];

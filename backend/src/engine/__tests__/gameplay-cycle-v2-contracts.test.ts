@@ -434,11 +434,11 @@ function movementToolPlanFixture(options: {
       rationale: "Movement needs backend settlement.",
       checklistRequest: {
         turnPath: "mutating",
-        requiredEffectKinds: ["movement", "route_check"],
+        requiredEffectKinds: ["movement"],
         actorRefs: ["Player"],
         targetRefs: ["North Hall"],
         evidenceRefs: ["Player", "Atrium", "North Hall"],
-        checklistGoal: "Plan route verification and movement.",
+        checklistGoal: "Plan movement.",
       },
     },
   });
@@ -830,7 +830,7 @@ function dialogueToWorldFactToolPlanFixture() {
       checklistRequest: {
         turnPath: "mutating",
         requiredEffectKinds: ["dialogue_outcome", "world_fact"],
-        actorRefs: ["Player"],
+        actorRefs: ["Player", "Clerk Mara"],
         targetRefs: ["Clerk Mara"],
         evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
         checklistGoal: "Record Clerk Mara's answer, then record the player-known procedure sourced to that receipt.",
@@ -841,9 +841,22 @@ function dialogueToWorldFactToolPlanFixture() {
   if (readResult.status !== "accepted") {
     throw new Error("Dialogue-to-world-fact GM Read fixture must be accepted.");
   }
+  const gmJudge = checklistJudgeFor({ gmRead: readResult.read });
+  const dialogueThenFactJudge: GmJudgeChecklistV2 = {
+    ...gmJudge,
+    checklistAdmission: {
+      ...gmJudge.checklistAdmission,
+      requiredEffectKinds: ["dialogue_outcome", "world_fact"],
+      actorRefs: ["Player", "Clerk Mara"],
+      targetRefs: ["Player", "Clerk Mara"],
+      evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+      checklistGoal: "Record Clerk Mara's answer, then record the player-known procedure sourced to that receipt.",
+    },
+  };
   const checklistResult = validateGmActionChecklistV2({
     packet,
     gmRead: readResult.read,
+    gmJudge: dialogueThenFactJudge,
     candidate: {
       version: "gm-action-checklist.v2",
       checklistId: "checklist-dialogue-world-fact-1",
@@ -892,7 +905,12 @@ function dialogueToWorldFactToolPlanFixture() {
     throw new Error("Dialogue-to-world-fact checklist fixture must be accepted.");
   }
 
-  return { packet, gmRead: readResult.read, checklist: checklistResult.checklist };
+  return {
+    packet,
+    gmRead: readResult.read,
+    gmJudge: dialogueThenFactJudge,
+    checklist: checklistResult.checklist,
+  };
 }
 
 function supportActorToolPlanFixture() {
@@ -1954,8 +1972,21 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
 
   it("compiles multi-effect route and movement admissions in executable dependency order", () => {
     const { packet, gmRead } = movementToolPlanFixture();
+    const gmJudge = checklistJudgeFor({ gmRead });
+    const routeThenMoveJudge: GmJudgeChecklistV2 = {
+      ...gmJudge,
+      checklistAdmission: {
+        ...gmJudge.checklistAdmission,
+        requiredEffectKinds: ["route_check", "movement"],
+        checklistGoal: "Check route availability, then move to North Hall.",
+      },
+    };
 
-    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead });
+    const compiled = compileSimpleGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: routeThenMoveJudge,
+    });
 
     expect(compiled?.status).toBe("accepted");
     if (!compiled || compiled.status !== "accepted") {
@@ -1988,9 +2019,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
   });
 
   it("compiles dialogue then player-known world fact admissions without invoking checklist payload planning", () => {
-    const { packet, gmRead } = dialogueToWorldFactToolPlanFixture();
+    const { packet, gmRead, gmJudge } = dialogueToWorldFactToolPlanFixture();
 
-    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead });
+    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead, gmJudge });
 
     expect(compiled?.status).toBe("accepted");
     if (!compiled || compiled.status !== "accepted") {
@@ -2022,6 +2053,28 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("dialogue.record.v2");
     expect(publicShape).not.toContain("world_fact.record.v2");
     expect(publicShape).not.toContain("effectBinding");
+  });
+
+  it("does not compile unsupported mixed simple-effect graphs without an explicit dependency rule", () => {
+    const { packet, gmRead } = dialogueToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+    const unsupportedJudge: GmJudgeChecklistV2 = {
+      ...judge,
+      checklistAdmission: {
+        ...judge.checklistAdmission,
+        requiredEffectKinds: ["support_actor_create", "dialogue_outcome"],
+        actorRefs: ["Clerk Mara"],
+        targetRefs: ["Clerk Mara"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        checklistGoal: "Create a support actor and then use dialogue, which requires an explicit refresh graph.",
+      },
+    };
+
+    expect(compileSimpleGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: unsupportedJudge,
+    })).toBeNull();
   });
 
   it("accepts a SceneFrame envelope only when frame and attempt authority match", () => {
@@ -3630,6 +3683,180 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     )).toBe(true);
   });
 
+  it("rejects duplicate gm-judge checklist effect admissions", () => {
+    const { packet, gmRead } = movementToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+
+    const rejected = validateGmJudgeV2({
+      packet,
+      gmRead,
+      candidate: {
+        ...judge,
+        checklistAdmission: {
+          ...judge.checklistAdmission,
+          requiredEffectKinds: ["movement", "movement"],
+        },
+      },
+    });
+
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues.some((issue) =>
+      issue.path === "checklistAdmission.requiredEffectKinds"
+      && issue.message.includes("unique")
+    )).toBe(true);
+  });
+
+  it("rejects action checklists that miss admitted effects or duplicate checklist effects", () => {
+    const { packet, gmRead } = movementToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+    const routeThenMoveJudge: GmJudgeChecklistV2 = {
+      ...judge,
+      checklistAdmission: {
+        ...judge.checklistAdmission,
+        requiredEffectKinds: ["route_check", "movement"],
+        checklistGoal: "Check route availability, then move to North Hall.",
+      },
+    };
+
+    const missingMovement = validateGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: routeThenMoveJudge,
+      candidate: {
+        version: "gm-action-checklist.v2",
+        checklistId: "checklist-missing-movement",
+        campaignId: packet.campaignId,
+        turnId: packet.turnId,
+        baseWorldVersion: packet.baseWorldVersion,
+        sourceGmReadPath: "tool_plan",
+        turnPath: "mutating",
+        turnIntent: "Check the route but omit movement.",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Check route availability only.",
+          actorRef: "Player",
+          targetRefs: ["North Hall"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          requiredCapabilityId: "route_check",
+          intendedEffect: {
+            kind: "route_check",
+            summary: "Route to North Hall is checked.",
+            stateScope: "location",
+          },
+          expectedVisibleEffect: "Route availability is settled.",
+          dependsOnStepIds: [],
+        }],
+      },
+    });
+
+    expect(missingMovement.status).toBe("rejected");
+    expect(missingMovement.issues.some((issue) =>
+      issue.code === "admission_mismatch"
+      && issue.message.includes("missing admitted effect")
+    )).toBe(true);
+
+    const duplicateMovement = validateGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: routeThenMoveJudge,
+      candidate: {
+        version: "gm-action-checklist.v2",
+        checklistId: "checklist-duplicate-movement",
+        campaignId: packet.campaignId,
+        turnId: packet.turnId,
+        baseWorldVersion: packet.baseWorldVersion,
+        sourceGmReadPath: "tool_plan",
+        turnPath: "mutating",
+        turnIntent: "Duplicate movement incorrectly.",
+        steps: [
+          {
+            stepId: "step-1",
+            purpose: "First movement.",
+            actorRef: "Player",
+            targetRefs: ["North Hall"],
+            evidenceRefs: ["Player", "Atrium", "North Hall"],
+            requiredCapabilityId: "movement",
+            intendedEffect: {
+              kind: "movement",
+              summary: "Move once.",
+              stateScope: "actor",
+            },
+            expectedVisibleEffect: "Move once.",
+            dependsOnStepIds: [],
+          },
+          {
+            stepId: "step-2",
+            purpose: "Second movement.",
+            actorRef: "Player",
+            targetRefs: ["North Hall"],
+            evidenceRefs: ["Player", "Atrium", "North Hall"],
+            requiredCapabilityId: "movement",
+            intendedEffect: {
+              kind: "movement",
+              summary: "Move twice.",
+              stateScope: "actor",
+            },
+            expectedVisibleEffect: "Move twice.",
+            dependsOnStepIds: [],
+          },
+        ],
+      },
+    });
+
+    expect(duplicateMovement.status).toBe("rejected");
+    expect(duplicateMovement.issues.some((issue) =>
+      issue.code === "admission_mismatch"
+      && issue.message.includes("duplicate intended effect")
+    )).toBe(true);
+  });
+
+  it("rejects non-contiguous checklist step ids and refs outside Judge admission", () => {
+    const { packet, gmRead } = movementToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+
+    const rejected = validateGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: judge,
+      candidate: {
+        version: "gm-action-checklist.v2",
+        checklistId: "checklist-bad-step-id-and-ref",
+        campaignId: packet.campaignId,
+        turnId: packet.turnId,
+        baseWorldVersion: packet.baseWorldVersion,
+        sourceGmReadPath: "tool_plan",
+        turnPath: "mutating",
+        turnIntent: "Move with invalid structure.",
+        steps: [{
+          stepId: "step-2",
+          purpose: "Move with an unadmitted scene ref.",
+          actorRef: "Player",
+          targetRefs: ["Atrium"],
+          evidenceRefs: ["Player", "Atrium", "North Hall"],
+          requiredCapabilityId: "movement",
+          intendedEffect: {
+            kind: "movement",
+            summary: "Move to North Hall.",
+            stateScope: "actor",
+          },
+          expectedVisibleEffect: "Player moves.",
+          dependsOnStepIds: [],
+        }],
+      },
+    });
+
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues.some((issue) =>
+      issue.code === "admission_mismatch"
+      && issue.message.includes("expected step-1")
+    )).toBe(true);
+    expect(rejected.issues.some((issue) =>
+      issue.code === "admission_mismatch"
+      && issue.message.includes("targetRef")
+      && issue.message.includes("not admitted")
+    )).toBe(true);
+  });
+
   it("accepts an action checklist with one intended backend-owned effect per step", () => {
     const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
@@ -3685,21 +3912,38 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         sourceGmReadPath: "tool_plan",
         turnPath: "mutating",
         turnIntent: "Move to North Hall.",
-        steps: [{
-          stepId: "step-1",
-          purpose: "Verify and apply the player's movement to North Hall.",
-          actorRef: "Player",
-          targetRefs: ["North Hall"],
-          evidenceRefs: ["Player", "Atrium", "North Hall"],
-          requiredCapabilityId: "movement",
-          intendedEffect: {
-            kind: "movement",
-            summary: "Player current scene/location changes to North Hall if legal.",
-            stateScope: "location",
+        steps: [
+          {
+            stepId: "step-1",
+            purpose: "Verify the route to North Hall.",
+            actorRef: "Player",
+            targetRefs: ["North Hall"],
+            evidenceRefs: ["Player", "Atrium", "North Hall"],
+            requiredCapabilityId: "route_check",
+            intendedEffect: {
+              kind: "route_check",
+              summary: "Route to North Hall is checked.",
+              stateScope: "location",
+            },
+            expectedVisibleEffect: "Route availability to North Hall is settled.",
+            dependsOnStepIds: [],
           },
-          expectedVisibleEffect: "The player arrives at North Hall if the receipt is accepted.",
-          dependsOnStepIds: [],
-        }],
+          {
+            stepId: "step-2",
+            purpose: "Apply the player's movement to North Hall.",
+            actorRef: "Player",
+            targetRefs: ["North Hall"],
+            evidenceRefs: ["Player", "Atrium", "North Hall"],
+            requiredCapabilityId: "movement",
+            intendedEffect: {
+              kind: "movement",
+              summary: "Player current scene/location changes to North Hall if legal.",
+              stateScope: "actor",
+            },
+            expectedVisibleEffect: "The player arrives at North Hall if the receipt is accepted.",
+            dependsOnStepIds: ["step-1"],
+          },
+        ],
       },
     });
 
@@ -3707,7 +3951,7 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     if (checklistResult.status !== "accepted") {
       throw new Error("Checklist fixture must be accepted.");
     }
-    expect(checklistResult.checklist.steps).toHaveLength(1);
+    expect(checklistResult.checklist.steps).toHaveLength(2);
     expect(JSON.stringify(checklistResult.checklist)).not.toContain("toolName");
     expect(JSON.stringify(checklistResult.checklist)).not.toContain("input");
   });

@@ -170,6 +170,14 @@ function alignmentIssues(input: {
         message: "Checklist admission requires an accepted tool_plan GM Read source.",
       });
     }
+    const effectKinds = input.judge.checklistAdmission.requiredEffectKinds;
+    if (new Set(effectKinds).size !== effectKinds.length) {
+      issues.push({
+        code: "gm_read_mismatch",
+        path: "checklistAdmission.requiredEffectKinds",
+        message: "Checklist admission requiredEffectKinds must be unique.",
+      });
+    }
     issues.push(...refsAreSubset({
       role: "checklistAdmission.actorRefs",
       values: input.judge.checklistAdmission.actorRefs,
