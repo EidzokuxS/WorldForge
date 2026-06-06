@@ -553,9 +553,223 @@ export const frozenApiProjectionSchema = z.object({
   turnId: shortText,
   frameId: shortText,
   narrativeText: z.string().min(1).max(4000),
-  mutationApplied: z.literal(false),
+  mutationApplied: z.boolean(),
   settled: z.literal(true),
 });
+
+export const cleanStage4CapabilityIdSchema = z.enum([
+  "route_check",
+  "movement",
+]);
+
+export const cleanStage4RequestSchema = z.object({
+  version: z.literal("gameplay-runtime.stage4-request.v1"),
+  requestId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  checklistId: shortText,
+  stepId: gmActionChecklistStepIdSchema,
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1"),
+    judgeVersion: z.literal("judge-uncertainty.v1"),
+    checklistVersion: z.literal("gm-action-checklist.v1"),
+    checklistId: shortText,
+    checklistStepId: gmActionChecklistStepIdSchema,
+  }).strict(),
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+  }).strict(),
+  author: z.literal("backend_from_checklist"),
+  modelAuthored: z.literal(false),
+  capabilityId: cleanStage4CapabilityIdSchema,
+  effect: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("route_check"),
+      actorRef: z.literal("Player"),
+      destinationRef: modelSafeRef,
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+    z.object({
+      kind: z.literal("movement"),
+      actorRef: z.literal("Player"),
+      destinationRef: modelSafeRef,
+      travelMode: z.literal("walk"),
+      requiredRouteReceiptId: shortText.nullable(),
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+  ]),
+}).strict();
+
+export const cleanStage4ReceiptSchema = z.object({
+  version: z.literal("gameplay-runtime.stage4-receipt.v1"),
+  receiptId: shortText,
+  requestId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  checklistId: shortText,
+  stepId: gmActionChecklistStepIdSchema,
+  capabilityId: cleanStage4CapabilityIdSchema,
+  status: z.enum(["accepted", "skipped", "failed"]),
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1"),
+    judgeVersion: z.literal("judge-uncertainty.v1"),
+    checklistVersion: z.literal("gm-action-checklist.v1"),
+    checklistId: shortText,
+    checklistStepId: gmActionChecklistStepIdSchema,
+  }).strict(),
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+  }).strict(),
+  result: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+    mutationApplied: z.boolean(),
+  }).strict(),
+  authority: z.object({
+    evidenceAuthority: z.enum([
+      "route_check_receipt",
+      "terminal_mutation_receipt",
+      "failure_receipt",
+      "skip_receipt",
+    ]),
+    mutationAuthority: z.enum([
+      "none",
+      "player_location_and_world_clock",
+    ]),
+    visibleResultAuthority: z.enum([
+      "may_explain_route_status",
+      "may_claim_player_location_change",
+      "failure_only",
+      "none",
+    ]),
+    maySupportNarrationClaim: z.boolean(),
+    mayAuthorizeMutation: z.boolean(),
+  }).strict(),
+  publicResult: z.object({
+    summary: shortText,
+    visibleRefs: z.array(modelSafeRef).min(1).max(12),
+    routeStatus: z.enum(["connected", "disconnected"]).nullable(),
+    locationChange: z.object({
+      type: z.literal("location_change"),
+      locationName: shortText,
+      travelCost: z.number().int().nonnegative(),
+      path: z.array(shortText).max(12),
+    }).strict().nullable(),
+  }).strict(),
+  privateResult: z.object({
+    playerId: shortText.nullable(),
+    fromLocationId: shortText.nullable(),
+    destinationLocationId: shortText.nullable(),
+    edgeIds: z.array(shortText).max(24),
+    authorityTraceId: shortText.nullable(),
+    clockReceiptId: shortText.nullable(),
+    stateDeltaRefs: z.array(shortText).max(24),
+  }).strict(),
+  failure: z.object({
+    kind: z.enum([
+      "invalid_backend_request",
+      "unsupported_capability_for_p61",
+      "frame_mismatch",
+      "stale_frame_or_clock",
+      "missing_or_ambiguous_destination",
+      "route_disconnected",
+      "dependency_not_accepted",
+      "mutation_apply_failed",
+      "receipt_persist_failed",
+    ]),
+    message: shortText,
+    hiddenMutationApplied: z.literal(false),
+  }).strict().nullable(),
+}).strict().superRefine((receipt, ctx) => {
+  if (receipt.status === "accepted" && receipt.capabilityId === "movement") {
+    if (!receipt.result.mutationApplied) {
+      ctx.addIssue({ code: "custom", path: ["result", "mutationApplied"], message: "Accepted movement must apply mutation." });
+    }
+    if (receipt.result.worldVersion <= receipt.base.worldVersion) {
+      ctx.addIssue({ code: "custom", path: ["result", "worldVersion"], message: "Accepted movement must advance world version." });
+    }
+    if (receipt.authority.mutationAuthority !== "player_location_and_world_clock") {
+      ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Accepted movement must own player location and clock mutation." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_player_location_change") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted movement must authorize location-change narration." });
+    }
+    if (receipt.publicResult.locationChange === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "locationChange"], message: "Accepted movement requires public location change." });
+    }
+  }
+  if (receipt.capabilityId === "route_check") {
+    if (receipt.result.mutationApplied) {
+      ctx.addIssue({ code: "custom", path: ["result", "mutationApplied"], message: "Route check must not mutate." });
+    }
+    if (receipt.result.worldVersion !== receipt.base.worldVersion) {
+      ctx.addIssue({ code: "custom", path: ["result", "worldVersion"], message: "Route check must not advance world version." });
+    }
+    if (receipt.authority.mutationAuthority !== "none") {
+      ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Route check mutation authority must be none." });
+    }
+  }
+  if (receipt.status !== "accepted") {
+    if (receipt.result.mutationApplied || receipt.result.worldVersion !== receipt.base.worldVersion) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Skipped/failed receipts must not advance world state." });
+    }
+    if (receipt.failure === null) {
+      ctx.addIssue({ code: "custom", path: ["failure"], message: "Skipped/failed receipts require a failure reason." });
+    }
+  }
+  const publicJson = JSON.stringify(receipt.publicResult).replace(/location_change/g, "");
+  if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
+    ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
+  }
+  if (/\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|route|scene|turn|world)[_:]/i.test(publicJson)) {
+    ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose backend refs." });
+  }
+});
+
+export const cleanStage4ExecutionResultSchema = z.object({
+  version: z.literal("gameplay-runtime.stage4-execution-result.v1"),
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  checklistId: shortText,
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+  }).strict(),
+  receipts: z.array(cleanStage4ReceiptSchema).min(1).max(6),
+  acceptedReceiptIds: z.array(shortText).max(6),
+  skippedStepIds: z.array(gmActionChecklistStepIdSchema).max(6),
+  failedStepIds: z.array(gmActionChecklistStepIdSchema).max(6),
+  mutationApplied: z.boolean(),
+  resultWorldVersion: z.number().int().nonnegative(),
+  visibleResults: z.array(z.object({
+    receiptId: shortText,
+    authority: z.enum([
+      "route_check_receipt",
+      "terminal_mutation_receipt",
+      "failure_receipt",
+      "skip_receipt",
+    ]),
+    summary: shortText,
+    visibleRefs: z.array(modelSafeRef).min(1).max(12),
+    locationChange: z.object({
+      type: z.literal("location_change"),
+      locationName: shortText,
+      travelCost: z.number().int().nonnegative(),
+      path: z.array(shortText).max(12),
+    }).strict().nullable(),
+  }).strict()).max(6),
+}).strict();
 
 const publicSafeRuntimeId = z.string().trim().regex(
   /^[a-z][a-z0-9_]{7,96}$/u,
@@ -570,6 +784,7 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "judge_uncertainty",
     "oracle_settlement",
     "gm_action_checklist",
+    "stage4_execution",
   ]),
   ref: shortText,
   authority: z.enum([
@@ -578,6 +793,11 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "admission_only",
     "visible_uncertainty_outcome",
     "planning_only",
+    "stage4_execution_result",
+    "route_check_receipt",
+    "terminal_mutation_receipt",
+    "failure_receipt",
+    "skip_receipt",
   ]),
 }).strict();
 
@@ -586,7 +806,7 @@ export const cleanPlayerFacingTurnDoneBoundarySchema = z.object({
   recordId: publicSafeRuntimeId,
   turnId: publicSafeRuntimeId,
   packetId: publicSafeRuntimeId,
-  mutationApplied: z.literal(false),
+  mutationApplied: z.boolean(),
   settled: z.literal(true),
   chatHistoryLengthBeforeTurn: z.number().int().nonnegative(),
   chatHistoryLengthAfterTurn: z.number().int().nonnegative(),
@@ -696,6 +916,9 @@ export type OracleAdapterSettlementResult = z.infer<typeof oracleAdapterSettleme
 export type OracleSettlement = z.infer<typeof oracleSettlementSchema>;
 export type GmActionChecklistEffectKind = z.infer<typeof gmActionChecklistEffectKindSchema>;
 export type GmActionChecklist = z.infer<typeof gmActionChecklistSchema>;
+export type CleanStage4Request = z.infer<typeof cleanStage4RequestSchema>;
+export type CleanStage4Receipt = z.infer<typeof cleanStage4ReceiptSchema>;
+export type CleanStage4ExecutionResult = z.infer<typeof cleanStage4ExecutionResultSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
 export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;
@@ -723,6 +946,18 @@ export function assertOracleSettlement(value: unknown): OracleSettlement {
 
 export function assertGmActionChecklist(value: unknown): GmActionChecklist {
   return gmActionChecklistSchema.parse(value);
+}
+
+export function assertCleanStage4Request(value: unknown): CleanStage4Request {
+  return cleanStage4RequestSchema.parse(value);
+}
+
+export function assertCleanStage4Receipt(value: unknown): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse(value);
+}
+
+export function assertCleanStage4ExecutionResult(value: unknown): CleanStage4ExecutionResult {
+  return cleanStage4ExecutionResultSchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {

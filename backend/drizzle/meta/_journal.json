@@ -148,6 +148,13 @@
       "when": 1779588000000,
       "tag": "0020_clean_gameplay_turn_records",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779588600000,
+      "tag": "0021_clean_gameplay_stage4_receipts",
+      "breakpoints": true
     }
   ]
 }

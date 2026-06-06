@@ -2560,3 +2560,87 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing narrative: `Действие требует дальнейшего разрешения последствий: зафиксирован план из 1 шаг(ов), но состояние мира ещё не изменено.`
     - Postcheck: chat history length 2; clean record count 1; evidence refs include `{ kind: "gm_action_checklist", authority: "planning_only" }`; old v2/saga/narrator/ledger/oracle/simulation tables remained 0; clock remained `0/0/0`; player location/scene unchanged; no forbidden old tool/receipt/fallback strings in the record.
     - Artifacts: `output/clean-runtime-p60-action-checklist-live-r6/*`.
+
+- P61 clean gameplay runtime Primitive 7 Stage 4 Tool Execution / Mutation Receipts:
+  - Status:
+    - [x] Confirm current clean boundary from P60: action checklist may require backend resolution, but it is planning-only and cannot authorize narration or mutation by itself.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 4 target, P55-P60 clean runtime contracts, current route/persistence adapter, old v2/tool-loop files as negative/forensic evidence, and the P60 live proof.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the clean Stage 4 request/execute/receipt primitive.
+    - [x] Add focused contract tests for tool request schemas, backend validation/apply/fail behavior, receipt authority, mutation ownership, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where a P60 movement checklist becomes accepted Stage 4 receipts and the player-facing frozen state reflects only accepted receipts.
+  - Primitive boundary draft:
+    - Owner: new clean gameplay-cycle-runtime Stage 4 module(s), not `gameplay-cycle-v2/runtime-executor.ts`, `gameplay-cycle-v2/receipt-ledger.ts`, `gm-tool-loop.ts`, `gm-tool-step.ts`, root `tool-executor.ts`, or old runtime tool schemas.
+    - Inputs: authoritative `SceneFrame`, accepted `gm-read.v1`, accepted `judge-uncertainty.v1`, and accepted `gm-action-checklist.v1`.
+    - Output: accepted/skipped/failed clean execution receipts. Each accepted receipt has precise evidence authority, mutation authority, source checklist step, pre/post clock/world state anchor, and public-safe visible result.
+    - Mutation authority: backend-owned only. Model may request a narrow Stage 4 action if Oracle approves that pattern, but backend validates and applies or fails. No model-authored world deltas, state patches, receipt ids, or narration.
+    - Evidence authority: accepted receipts can support later settled truth only for their exact result shape. Failed/skipped/revised steps must be visible to the settled packet as failure reasons and cannot be narrated as happened.
+    - Stage fence: no execution without an accepted P60 checklist; direct/no-roll/clarification/oracle-visible-only branches skip P61.
+    - Initial capability focus candidate: route check and movement first, because P60 live proof already produces a movement checklist and the canonical Stage 4 requires single-tool mutation proof. Do not broaden to all gameplay tools until Oracle confirms the clean capability registry shape.
+  - Oracle question draft:
+    - Given committed P60, what should P61 Stage 4 own so it replaces old gameplay tools/tool schemas/receipt semantics without binding the clean runtime to v2/root tool loops? Decide whether P61 should start with a deterministic backend executor for a narrow capability set or include one-model-request-per-checklist-step. Return request/receipt schema shape, mutation apply/fail contracts, adapter boundaries to existing DB/source APIs, runtime events, settled-packet handoff, failure behavior, and focused contract/live tests.
+  - Oracle review:
+    - Session: `wf-clean-stage4-p61-bundle`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one local single attachment `output/oracle/p61-clean-stage4-single-attachment.txt`, 18 embedded `### File:` sections, about 668,942 bytes, Oracle usage `inputTokens=152558`.
+    - Invalid attempt explicitly rejected: session `wf-clean-stage4-p61` had `meta.options.file=[]` after a multiline prompt/Start-Process quoting failure, so it was stopped and not used as evidence.
+    - Answer artifact: `output/oracle/p61-clean-stage4-answer.md`.
+    - Transcript artifact: `C:\Users\robra\.oracle\sessions\wf-clean-stage4-p61-bundle\artifacts\transcript.md`.
+    - Recommendation:
+      - P61 should be a deterministic clean Stage 4 backend executor for `route_check` + `movement`.
+      - P61 should not add model-authored tool requests yet. Movement is mechanically determined by accepted P60 checklist + SceneFrame movement options, and adding a model request loop would reopen authority ambiguity.
+      - Define a clean internal backend-authored request object only if useful for testability/future compatibility; it must have `author="backend_from_checklist"` and `modelAuthored=false`.
+      - Produce clean receipts for executable/skipped/failed Stage 4 steps, with public/private separation and precise authority.
+      - Apply accepted movement in one SQLite transaction only after DB state still matches the SceneFrame/base clock. Route check is non-mutating evidence authority only.
+      - Current P59 `mutationApplied`/done boundary must become boolean rather than literal false once accepted movement exists.
+      - Until Stage 5 exists, narration should be a minimal deterministic projection from accepted/skipped/failed P61 receipts, never from P60 `expectedVisibleEffect` or raw player text.
+    - Accepted initial capability scope:
+      - `route_check`: accepted non-mutating receipt with connected/disconnected status and no worldVersion advance.
+      - `movement`: accepted mutation receipt only when target is the Player, destination is exactly one SceneFrame movement option, dependencies are accepted, frame/base clock/player location remain current, and path is connected.
+    - Accepted low-level adapters:
+      - `getDb`, SQLite write/transaction primitives, DB schema tables (`players`, `locations`, `locationEdges`, `worldClocks`, `authorityTraces`, `turnClockLedger`, new clean receipt table if needed).
+      - Graph/path/source helpers such as `loadLocationGraph`, `resolveTravelPath`, `listConnectedPaths`.
+      - Player projection helpers such as `hydrateStoredPlayerRecord` / `projectPlayerRecord` if needed to keep stored player record consistent.
+    - Forbidden production imports:
+      - `gameplay-cycle-v2/runtime-executor.ts`, `tool-request-planner.ts`, `receipt-ledger.ts`, `db-handlers.ts`.
+      - Root `tool-executor.ts`, `runtime-tool-input-schemas.ts`, `gm-tool-loop.ts`, `gm-tool-step.ts`, `bridge-state-tools.ts`, old `tool-contracts`, `tool-schemas`, `runtime-tool-descriptors`, old saga/settled packet owners.
+    - Accepted runtime event order for action-plan branch:
+      - `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, optional public `state_update` for accepted movement, `narrative`, `finalizing_turn`, commit P59, `done`.
+    - Accepted failure behavior:
+      - One deterministic attempt per step; no revision loop in P61.
+      - Unsupported capabilities become skipped receipts.
+      - Stale frame/clock/player location fails without mutation.
+      - Disconnected route check is accepted route evidence; dependent movement skips/fails and cannot narrate arrival.
+      - Mutation writes and receipt persistence must be transactional. If rollback cannot be proven after apply failure, throw to outer snapshot recovery rather than emitting false no-mutation receipt.
+    - Rejected alternatives:
+      - Reject model-authored request loop in P61.
+      - Reject importing/wrapping v2 `route.check.v2`, `actor.move.v2`, old root `move_to`, old receipt ledger, or root tool executor.
+      - Reject broad capability implementation before movement proof.
+      - Reject mutating first and constructing receipts later.
+  - Implementation:
+    - Added clean `gameplay-runtime.stage4-request.v1`, `gameplay-runtime.stage4-receipt.v1`, and `gameplay-runtime.stage4-execution-result.v1` contracts in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`.
+    - Added clean Stage 4 owner `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts`.
+    - P61 production executor is deterministic/backend-authored only: requests use `author="backend_from_checklist"` and `modelAuthored=false`.
+    - Implemented `route_check` as non-mutating route evidence and `movement` as a transactional SQLite mutation that updates player location/scene, world clock, `authority_traces`, `turn_clock_ledger`, and the new clean Stage 4 receipt row.
+    - Added `clean_gameplay_stage4_receipts` schema/migration/clone-manifest coverage so clean-start clones begin with no P61 receipts.
+    - Runtime now emits `stage4-execution`, public `state_update` for accepted movement, deterministic receipt-derived narration, boolean `mutationApplied`, and `stage4_execution` evidence in the clean player-facing turn record.
+    - Forbidden old runtime/tool-loop owners remain out of production clean runtime imports.
+  - Contract verification:
+    - GitNexus impact before edits: `buildFrozenProjection`, `narrativeFromFrame`, `cleanEvidenceRefs`, `commitCleanPlayerFacingTurn`, `assertFrozenApiProjection`, `applySqliteClonePlan`, and clone/table helpers were LOW; `loadLocationGraph` was CRITICAL if edited, so it was used only as a read-only source adapter and not modified.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 129 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-stage4.test.ts schemas.test.ts chat.test.ts store-manifest.test.ts clone.test.ts --bail=1` passed with 415 tests.
+  - Live/manual `/api/chat/action` evidence:
+    - Tooling failures not counted as gameplay evidence: root `npx tsx` was unavailable; one npm-prefix path was wrong; two proof-harness prechecks failed before backend/runtime execution because of harness field/query assumptions. These created partial diagnostic artifacts only.
+    - Accepted P61 live proof clone: `p61-stage4-movement-03e93149` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `clean_gameplay_turn_records`, `clean_gameplay_stage4_receipts`, old v2/saga/narrator/oracle/simulation stores, `authority_traces`, and `turn_clock_ledger` all 0; clock `0/0/0`; Mira Voss in `Lowwater Bazaar` with visible connected route to `The Copper Tap`.
+    - Manual action after inspecting actual current state: `I walk from Lowwater Bazaar toward The Copper Tap along the visible connected route.`
+    - Stable backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` on port `3227`, then stopped after verification; port `3227` had no listener afterward.
+    - SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, `state_update`, `narrative`, `finalizing_turn`, `done`.
+    - Done boundary: `mutationApplied=true`, `worldVersion=1`, `worldTimeMinutes=1`, chat history `0 -> 2`, runtime `gameplay-cycle-runtime`.
+    - Postcheck: one accepted `movement` receipt with `mutationAuthority="player_location_and_world_clock"`, one clean authority trace `gameplay-cycle-runtime.player.move.v1`, one travel clock ledger row, player location/current scene changed to `The Copper Tap`, clean turn record evidence includes `{ kind: "stage4_execution", authority: "stage4_execution_result" }`.
+    - Old runtime stores remained 0: `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs`.
+    - Player-facing narrative was receipt-derived: `Вы перемещаетесь в The Copper Tap.`
+    - Artifacts: `output/clean-runtime-p61-stage4-live-20260606140110/*`.
+  - Status: diagnostic slice complete, pending GitNexus detect_changes, commit, push, and `npx gitnexus analyze --embeddings`. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

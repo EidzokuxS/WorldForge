@@ -1221,3 +1221,32 @@ export const cleanGameplayTurnRecords = sqliteTable(
       .on(table.campaignId, table.publicTurnId, table.publicPacketId),
   ],
 );
+
+export const cleanGameplayStage4Receipts = sqliteTable(
+  "clean_gameplay_stage4_receipts",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    frameId: text("frame_id").notNull(),
+    checklistId: text("checklist_id").notNull(),
+    stepId: text("step_id").notNull(),
+    capabilityId: text("capability_id").notNull(),
+    status: text("status", { enum: ["accepted", "skipped", "failed"] }).notNull(),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version").notNull(),
+    mutationApplied: integer("mutation_applied", { mode: "boolean" }).notNull(),
+    receiptJson: text("receipt_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("clean_gameplay_stage4_receipts_campaign_step_unique")
+      .on(table.campaignId, table.turnId, table.checklistId, table.stepId),
+    index("idx_clean_gameplay_stage4_receipts_campaign_turn")
+      .on(table.campaignId, table.turnId),
+    index("idx_clean_gameplay_stage4_receipts_campaign_result_version")
+      .on(table.campaignId, table.resultWorldVersion),
+  ],
+);

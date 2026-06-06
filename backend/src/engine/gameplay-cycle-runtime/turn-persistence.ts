@@ -201,7 +201,7 @@ function buildRecord(input: {
       recordId,
       turnId: publicTurnId,
       packetId: publicPacketId,
-      mutationApplied: false,
+      mutationApplied: input.projection.mutationApplied,
       settled: true,
       chatHistoryLengthBeforeTurn: input.beforeLength,
       chatHistoryLengthAfterTurn: input.beforeLength + 2,
