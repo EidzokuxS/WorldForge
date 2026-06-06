@@ -7,6 +7,11 @@ import { getDb } from "../../db/index.js";
 import { worldClocks } from "../../db/schema.js";
 import { buildAuthoritativeSceneFrame } from "./frame.js";
 import {
+  runCleanGmRead,
+  type GmReadCandidateGenerator,
+  type GmReadRunResult,
+} from "./gm-read.js";
+import {
   assertFrozenApiProjection,
   assertGameplayRuntimeTurnInput,
   type AuthoritativeSceneFrame,
@@ -42,6 +47,14 @@ export interface CleanGameplayRuntimeOptions {
     bundleDir: string;
     capturedAt: number;
   };
+  gmReadCandidateGenerator?: GmReadCandidateGenerator;
+}
+
+export interface CleanGameplayRuntimeCoreOptions {
+  turn: GameplayRuntimeTurnInput;
+  judgeProvider: ProviderConfig;
+  buildFrame?: (turn: GameplayRuntimeTurnInput) => Promise<AuthoritativeSceneFrame>;
+  gmReadCandidateGenerator?: GmReadCandidateGenerator;
 }
 
 function envFlagEnabled(name: string): boolean {
@@ -113,7 +126,10 @@ export function buildGameplayRuntimeTurnInput(
   });
 }
 
-function narrativeFromFrame(frame: AuthoritativeSceneFrame): string {
+function narrativeFromFrame(frame: AuthoritativeSceneFrame, gmRead: GmReadRunResult): string {
+  if (gmRead.read.path === "clarification") {
+    return `Нужно уточнение: ${gmRead.read.liveSceneQuestion}`;
+  }
   const scene = frame.scene.currentScene.label;
   const location = frame.scene.currentLocation.label;
   const actors = frame.actors
@@ -143,10 +159,10 @@ function buildFrozenProjection(input: {
   });
 }
 
-export async function* processCleanGameplayTurn(
-  options: CleanGameplayRuntimeOptions,
+export async function* processCleanGameplayTurnFromInput(
+  options: CleanGameplayRuntimeCoreOptions,
 ): AsyncGenerator<CleanGameplayRuntimeEvent> {
-  const turn = buildGameplayRuntimeTurnInput(options);
+  const turn = options.turn;
   yield {
     type: "scene-settling",
     data: {
@@ -154,8 +170,20 @@ export async function* processCleanGameplayTurn(
       phase: "gameplay-cycle-runtime",
     },
   };
-  const frame = await buildAuthoritativeSceneFrame(turn);
-  const narrativeText = narrativeFromFrame(frame);
+  const frame = await (options.buildFrame ?? buildAuthoritativeSceneFrame)(turn);
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "gm-read",
+      phase: "gameplay-cycle-runtime",
+    },
+  };
+  const gmRead = await runCleanGmRead({
+    frame,
+    provider: options.judgeProvider,
+    generateCandidate: options.gmReadCandidateGenerator,
+  });
+  const narrativeText = narrativeFromFrame(frame, gmRead);
   const projection = buildFrozenProjection({ turn, frame, narrativeText });
   yield {
     type: "narrative",
@@ -179,3 +207,13 @@ export async function* processCleanGameplayTurn(
   };
 }
 
+export async function* processCleanGameplayTurn(
+  options: CleanGameplayRuntimeOptions,
+): AsyncGenerator<CleanGameplayRuntimeEvent> {
+  const turn = buildGameplayRuntimeTurnInput(options);
+  yield* processCleanGameplayTurnFromInput({
+    turn,
+    judgeProvider: options.judgeProvider,
+    gmReadCandidateGenerator: options.gmReadCandidateGenerator,
+  });
+}

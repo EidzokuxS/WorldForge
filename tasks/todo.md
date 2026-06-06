@@ -2144,3 +2144,90 @@ Session: `gm-v1-consequenc-slice`.
       - Postcheck: chat history remained empty, `gameplay_cycle_v2_packets=0`, legacy packets/sagas `0`, `authority_traces=0`, clock remained `0/0/0`.
       - Artifacts: `output/clean-runtime-p01-live-sse.txt`, `output/clean-runtime-backend-3219.log`.
       - This is Primitive 0/1 smoke only, not final acceptance progress.
+
+- P56 clean gameplay runtime Primitive 2 GM Read:
+  - Status:
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, clean runtime Primitive 0/1 code, forensic v2 GM Read code, and current map.
+    - [x] Record Oracle question, answer, and accepted decision.
+    - [x] Implement GM Read as new clean runtime code only.
+    - [x] Add focused GM Read contract tests.
+    - [x] Compose Primitive 0/1 + GM Read through `/api/chat/action` clean lane.
+    - [x] Verify with manual one-action-at-a-time live turns on zero-turn clone before moving to Judge/Oracle.
+  - 6+1 canvas:
+    - A1 Source/Request Lock — Status: complete. Scope: enforce the user process and canonical architecture for P56. Output: [inspected] Target is a fresh clean GM Read primitive only; current v2 GM Read is forensic context, not a donor runtime.
+    - A2 Current-State Map — Status: complete. Scope: identify current clean runtime entry/exit and safe adapters. Output: [inspected] Clean lane now builds SceneFrame, runs validated GM Read, and emits frozen no-mutation projection.
+    - A3 Reference/Oracle — Status: complete. Scope: validate GM Read boundary with GPT-5.5 Pro using one bundled attachment. Output: [sourced] Oracle accepted strict interpretive GM Read with no admission, tool, mutation, receipt, Oracle, or narrator authority.
+    - A4 Architecture/Protocol — Status: complete. Scope: define schema, validator, failure mode, and runtime order. Output: [executed] GM Read consumes SceneFrame and returns a validated interpretation packet; invalid model output gets one local repair attempt, then backend-authored clarification.
+    - A5 Verification/Proof — Status: complete. Scope: contract tests and live `/api/chat/action` smoke for Primitive 0/1 + GM Read. Output: [executed] Contract tests cover schema, forbidden payloads, ref/private leaks, prompt contract, local repair/fallback, source fence, and runtime stage order.
+    - A6 Cleanup/Migration/Risk — Status: complete. Scope: prevent old code coupling and guard/fallback pile recurrence. Output: [executed] Clean runtime source fence rejects old runtime/tool-loop imports; live proof showed no legacy packet/saga/proposal/chat/mutation writes.
+    - +1 Integration — Status: complete. Decision: P56 is complete as a no-mutation GM Read primitive; next primitive is Judge/Uncertainty only after a new Oracle gate.
+  - Primitive 2 contract:
+    - Owner: clean GM Read LLM adapter plus validator.
+    - Input: authoritative `SceneFrame` and normalized player action.
+    - Output: interpretation only: situation summary, player action interpretation, decision path, focal refs, evidence refs, uncertainty statement if any.
+    - Mutation authority: none.
+    - Evidence authority: none; GM Read is interpretation, not settled truth.
+    - Forbidden: concrete tool payloads, checklist steps, state deltas, narration, oracle result, mutation receipts.
+    - Failure: one repair attempt, then clarification/no-mutation response.
+  - Oracle question draft:
+    - Given the clean Primitive 0/1 runtime in `backend/src/engine/gameplay-cycle-runtime/`, what should the new Primitive 2 GM Read contract and validator look like so it replaces old `world-brain` + `gm-turn-decision` interpretation without importing or patching `gameplay-cycle-v2`? Return schema shape, prompt boundary, validator rules, failure behavior, and tests.
+  - Oracle review:
+    - Session: `wf-clean-runtime-gm-read`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`
+    - Bundle: one `attachments-bundle.txt`, 11 files, about 130k tokens
+    - Recommendation:
+      - Implement GM Read as interpretation packet, not admission packet.
+      - New file: `backend/src/engine/gameplay-cycle-runtime/gm-read.ts`.
+      - Add clean GM Read contracts in `gameplay-cycle-runtime/contracts.ts`.
+      - Do not import or patch `gameplay-cycle-v2`, `world-brain`, or `gm-turn-decision`.
+      - Merge only safe old responsibilities: situation, scene question, focal refs, action interpretation, coarse decision-path signal.
+      - Do not own physical possibility, check need, effect kinds, tool planning, Oracle payloads, checklist steps, receipts, mutation, or narration.
+    - Accepted schema direction:
+      - `path`: `direct | continue | clarification | uncertain | procedural | combat_pressure`
+      - `situationSummary`, `liveSceneQuestion`, `focalRefs`, `evidenceRefs`, `actionInterpretation`, `uncertainty`, `interpretationRationale`
+      - Strict schema, bounded arrays, all refs must be in `SceneFrame.citableRefs`.
+    - Accepted validator rules:
+      - Reject unknown root fields.
+      - Recursively reject executable/admission keys: tool ids/names/inputs, payloads, effects, mutations, receipts, `requiredEffectKinds`, checklist/oracle fields, state deltas, result world version.
+      - Reject refs outside `citableRefs`, backend-only refs, UUID-like refs, and private guard terms in public fields.
+      - Path invariants stay interpretive only: `procedural` does not imply tool/effect; `uncertain` does not imply Oracle call.
+    - Accepted failure behavior:
+      - Generate once, validate.
+      - Repair once with validation issues and original candidate.
+      - If still invalid, backend-authored clarification/no-mutation GM Read.
+      - No Judge/Oracle/tools/mutation/chat append on GM Read failure.
+    - Accepted tests:
+      - Grounded direct/procedural/uncertain/clarification reads.
+      - Negative tests for tool/checklist/oracle/mutation/receipt/narration smuggling.
+      - Ref/private guard tests.
+      - Static import fence.
+      - Prompt contract tests.
+      - Runtime stage-order test: `scene-frame`, `gm-read`, then current no-mutation projection.
+  - Implementation:
+    - Added clean GM Read schemas/types to `backend/src/engine/gameplay-cycle-runtime/contracts.ts`.
+    - Added `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` as a clean runtime LLM adapter and validator.
+    - GM Read generation uses `safeGenerateObject` plus `createModel(..., { role: "judge", reasoningMode: "bypass" })` as infrastructure only, with native JSON requested, text fallback disabled, built-in repair disabled, and one local validation-reprompt repair.
+    - Validator recursively rejects executable/admission/mutation/receipt/Oracle/state-delta fields, unknown root fields, refs outside `SceneFrame.citableRefs`, UUID/backend-looking refs, and private guard terms in public output.
+    - Runtime order is now `scene-frame` progress, authoritative frame build, `gm-read` progress, validated GM Read, then current frozen no-mutation projection.
+    - GM Read still does not persist, narrate, mutate, call Judge/Oracle/tools, or authorize receipts in P56.
+  - Contract verification:
+    - GitNexus impact before edits: LOW for indexed clean runtime symbols (`assertAuthoritativeSceneFrame`, `assertFrozenApiProjection`, `buildFrozenProjection`); `processCleanGameplayTurn` was not found by GitNexus by name.
+    - GitNexus `detect_changes(scope=all)` before live smoke: changed files 4, changed symbols 6, risk low, affected processes 0. New `gm-read.ts` was not yet indexed as a symbol.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 33 tests.
+    - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 62 tests after rerun with `NODE_OPTIONS=--max-old-space-size=4096`; the first parallel run OOMed, not a contract failure.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts --bail=1` passed with 305 tests.
+    - `npm --prefix backend run typecheck` passed with `NODE_OPTIONS=--max-old-space-size=4096`; the first parallel run OOMed.
+  - Live/manual `/api/chat/action` evidence:
+    - Diagnostic note: old clone `0bef1a0c-0c56-4f4c-b536-f6df01960398` had a pre-existing `turn_clock_ledger` row `reason_kind="replay_restore"`, so it is not clean acceptance evidence.
+    - Fresh clean-start clone: `5476b525-398a-4eea-a65b-437b3a2d3805` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `authority_traces`, `turn_clock_ledger`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs` all 0; clock `world_version=0/world_time_minutes=0/current_tick=0`; player Mira Voss at Lowwater Bazaar.
+    - Manual action after inspecting actual current world: `Я стою в Lowwater Bazaar и внимательно осматриваю текущую сцену, не двигаясь и ничего не трогая.`
+    - SSE order: `scene-settling(stage="scene-frame")`, `scene-settling(stage="gm-read")`, `narrative`, `finalizing_turn`, `done`.
+    - SSE exclusions: no `gm-judge`, no `action-checklist`, no `tool-execution`, no old runtime `gameplay-cycle-v2`, no `v2packet-*`.
+    - GM Read used a real LLM call: backend log shows `safeGenerateObject` success with `strategy="native_json"` against `glm-5-turbo`; no repair/fallback log appeared.
+    - Postcheck matched precheck: chat history 0, all legacy/v2/ledger/oracle/simulation rows 0, clock remained `0/0/0`, and player location/scene unchanged.
+    - Backend was stopped after verification; ports `3219` and `3001` were clear.
+    - Artifacts: `output/clean-runtime-p56-gm-read-live/fresh-5476b525-398a-4eea-a65b-437b3a2d3805/*`.
+  - Transport note:
+    - Clean runtime `done` data includes internal `turnId`, but current route player-facing projection did not expose it in the P56 SSE. This is transport adapter debt for a later API-boundary primitive, not a P56 GM Read contract failure.

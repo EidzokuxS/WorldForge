@@ -171,6 +171,42 @@ export const authoritativeSceneFrameSchema = z.object({
   forecast: scopedForecastEnvelopeSchema,
 });
 
+export const gmReadPathSchema = z.enum([
+  "direct",
+  "continue",
+  "clarification",
+  "uncertain",
+  "procedural",
+  "combat_pressure",
+]);
+
+export const gmReadActionInterpretationSchema = z.object({
+  summary: shortText,
+  playerIntent: shortText,
+  method: z.string().trim().max(500).nullable(),
+  targetRefs: z.array(modelSafeRef).max(16),
+}).strict();
+
+export const gmReadUncertaintySchema = z.object({
+  present: z.boolean(),
+  question: z.string().trim().max(500).nullable(),
+  basis: z.string().trim().max(500).nullable(),
+}).strict();
+
+export const gmReadSchema = z.object({
+  version: z.literal("gm-read.v1"),
+  frameId: shortText,
+  turnId: shortText,
+  path: gmReadPathSchema,
+  situationSummary: shortText,
+  liveSceneQuestion: shortText,
+  focalRefs: z.array(modelSafeRef).max(16),
+  evidenceRefs: z.array(modelSafeRef).max(16),
+  actionInterpretation: gmReadActionInterpretationSchema,
+  uncertainty: gmReadUncertaintySchema,
+  interpretationRationale: shortText,
+}).strict();
+
 export const frozenApiProjectionSchema = z.object({
   version: z.literal("gameplay-runtime.frozen-api-projection.v1"),
   runtime: z.literal("gameplay-cycle-runtime"),
@@ -187,6 +223,8 @@ export type GameplayRuntimeTurnInput = z.infer<typeof gameplayRuntimeTurnInputSc
 export type GameplayRuntimeCapabilityId = z.infer<typeof gameplayRuntimeCapabilityIdSchema>;
 export type ScopedForecastEnvelope = z.infer<typeof scopedForecastEnvelopeSchema>;
 export type AuthoritativeSceneFrame = z.infer<typeof authoritativeSceneFrameSchema>;
+export type GmReadPath = z.infer<typeof gmReadPathSchema>;
+export type GmRead = z.infer<typeof gmReadSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 
 export function assertGameplayRuntimeTurnInput(value: unknown): GameplayRuntimeTurnInput {
@@ -197,7 +235,10 @@ export function assertAuthoritativeSceneFrame(value: unknown): AuthoritativeScen
   return authoritativeSceneFrameSchema.parse(value);
 }
 
+export function assertGmRead(value: unknown): GmRead {
+  return gmReadSchema.parse(value);
+}
+
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {
   return frozenApiProjectionSchema.parse(value);
 }
-
