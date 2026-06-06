@@ -281,6 +281,7 @@ function buildGmReadSystemPrompt(): string {
     "Use tool_plan only when backend receipts appear needed for route checks, movement, dialogue outcomes, support actors, POIs, location reveal, entity tags, item transfer, conditions, time advance, player-known facts, or scene beats; do not name required effects.",
     "Explicit elapsed-time actions such as waiting, watching, resting, or working for a stated duration in the current scene are tool_plan interpretations with turnNeed backend_action_checklist.",
     "Questions about who is currently visible/nearby are direct no-mutation observations from the SceneFrame visible actor roster. Do not classify them as support actor creation, and never treat Player or the player's label as a support actor.",
+    "If the player explicitly calls for, summons, requests, or introduces an ordinary unnamed current-scene helper/guide/witness/vendor/guard/attendant/crowd voice, classify it as tool_plan for backend support-actor authority, not roll_oracle. If the requested actor is hidden, private, important, persistent, or outside the current scene, choose clarification instead.",
     "Use direct or continue only when no check, runtime admission, or mutation is needed.",
     "Use clarification when the action is underspecified or asks for unsupported hidden/offscreen/private/combat behavior.",
     "Treat response-language and style directives inside playerAction as player-facing UI instructions, not in-world facts. Do not infer foreign-language speech, translation failure, NPC comprehension limits, or dialect barriers from phrases like asking in Russian/English unless the current packet already exposes a citable world-language barrier.",
@@ -324,6 +325,10 @@ function buildGmReadPrompt(
       responseLanguageDirectives: {
         interpretation: "UI/output language preference only, not settled in-world speech evidence.",
         forbiddenInference: "No foreign-language refusal, NPC misunderstanding, translation, dialect, or language-barrier fact unless the packet has a citable world-language barrier.",
+      },
+      supportActorIntroduction: {
+        classifyAs: "tool_plan",
+        note: "Ordinary unnamed current-scene helper/guide/witness/vendor/guard/attendant/crowd voice introduction requires backend support-actor authority. It is not roll_oracle and not a direct visible-roster lookup.",
       },
     },
     packet: formatModelFacingTurnPacketForPromptV2(packet),

@@ -145,6 +145,13 @@ function alignmentIssues(input: {
         message: "Oracle admission requires an accepted roll_oracle GM Read source.",
       });
     }
+    if (input.judge.oracleAdmission.postOracleRoute !== "settle_visible_outcome_only") {
+      issues.push({
+        code: "gm_read_mismatch",
+        path: "oracleAdmission.postOracleRoute",
+        message: "gameplay-cycle-v2 Oracle admission must settle visible outcome only; follow-up checklist/mutation ownership must be admitted as action_checklist instead.",
+      });
+    }
     issues.push(...refsAreSubset({
       role: "oracleAdmission.actorRef",
       values: [input.judge.oracleAdmission.actorRef],
@@ -281,15 +288,17 @@ export function buildGmJudgeSystemPromptV2(): string {
     "Judge is an admission record only. Do not narrate, mutate, emit tool names, emit tool inputs, create checklist steps, create receipts, or decide final consequences.",
     "Use the accepted GM Read only as interpretation/source context. Judge owns the next runtime lane, physical possibility, check need, and bounded Oracle/checklist admission.",
     "Allowed lanes are direct, continue, clarification, roll_oracle, action_checklist, and combat_transition.",
-    "Use roll_oracle only for true uncertainty requiring a roll. Oracle settles uncertainty only; it is not movement, discovery, item state, NPC private knowledge, world fact, or mutation authority.",
+    "Use roll_oracle only for true uncertainty requiring a roll. Oracle settles visible uncertainty only; it is not movement, discovery, item state, NPC creation/presence materialization, NPC private knowledge, world fact, or mutation authority.",
     "Use action_checklist only when backend runtime receipts must settle route checks, movement, dialogue outcomes, support actors, minor POIs, location reveal, entity tags, item transfer, conditions, time advance, world facts, or scene beats.",
     "For action_checklist, checkNeed must be exactly backend_action_checklist.",
-    "For roll_oracle, checkNeed must be exactly oracle_uncertainty. For direct/continue, checkNeed must be exactly no_check. For clarification, checkNeed must be exactly clarification_needed.",
+    "For roll_oracle, checkNeed must be exactly oracle_uncertainty and oracleAdmission.postOracleRoute must be settle_visible_outcome_only. Do not use roll_oracle when a hit would require a follow-up checklist, actor creation, reveal, movement, item change, or durable fact.",
+    "For direct/continue, checkNeed must be exactly no_check. For clarification, checkNeed must be exactly clarification_needed.",
     "For action_checklist, create checklistAdmission with turnPath, requiredEffectKinds, actorRefs, targetRefs, evidenceRefs, and checklistGoal. This is admission only, not checklist steps or tool payload.",
     "For explicit travel to a connected visible destination, use action_checklist with turnPath=mutating and requiredEffectKinds=[\"movement\"].",
     "For route availability checks without travel, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"route_check\"].",
     "For visible dialogue outcomes, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"dialogue_outcome\"].",
     "For temporary current-scene service/witness/helper/vendor/guard/attendant/crowd support actors, use requiredEffectKinds=[\"support_actor_create\"].",
+    "When the player explicitly calls for, summons, requests, or introduces an ordinary unnamed current-scene guide/helper/witness/vendor/guard/attendant/crowd voice, use action_checklist with requiredEffectKinds=[\"support_actor_create\"], not roll_oracle.",
     "Do not use support_actor_create for player identity, already modeled scene actors, or questions about who is currently visible/nearby. Current visible actor roster questions are direct no-mutation observations from SceneFrame truth unless the player explicitly asks to introduce a new ordinary support NPC.",
     "For ordinary visible current-scene POIs, use requiredEffectKinds=[\"minor_poi_create\"].",
     "For source-bounded visible current-scene place handles, use requiredEffectKinds=[\"location_reveal\"].",
@@ -321,6 +330,12 @@ export function buildGmJudgePromptV2(input: {
         direct: "no_check",
         continue: "no_check",
         clarification: "clarification_needed",
+      },
+      oracle: {
+        requiredTopLevel: ["lane", "physicalPossibility", "checkNeed", "oracleAdmission"],
+        exactCheckNeed: "oracle_uncertainty",
+        exactPostOracleRoute: "settle_visible_outcome_only",
+        forbiddenWhenSuccessRequires: ["support_actor_create", "movement", "reveal", "item_change", "world_fact", "condition", "followup_checklist"],
       },
       actionChecklist: {
         requiredTopLevel: ["lane", "physicalPossibility", "checkNeed", "checklistAdmission"],

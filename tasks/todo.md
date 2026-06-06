@@ -146,6 +146,38 @@ P37 visible actor roster / support-actor ownership checkpoint:
   - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
 - Status: diagnostic slice fixed and live-proven on P38. This adds 0% final acceptance until the multi-campaign ~60-turn clean lanes run.
 
+P38 continuation / support-actor Oracle ownership checkpoint:
+- Diagnostic burn-in after the visible-roster fix:
+  - Continued clone `p38-visible-roster-clean-614dd1f7` one action at a time from the fixed turn-1 direct visible-roster proof.
+  - Turns 2-7 were clean diagnostic evidence: movement to `The Copper Tap`, positive visible-roster direct observation for `Old Route Hand Sessik` and `Tap-Keeper Brost`, dialogue with `Old Route Hand Sessik`, movement to `Silt Warrens`, route check to `Resonance Tower`, and negative visible-roster direct observation in `Silt Warrens`.
+  - DB through turn 7: `gameplay_cycle_v2_packets=7`, legacy packet/saga/narrator/proposal rows stayed 0, accepted receipts had no failed/skipped entries, and support actor creation did not duplicate Player.
+  - Turn 8 action: `Я остаюсь в Silt Warrens и громко прошу обычного местного проводника подойти ко мне, чтобы спросить дорогу; я никого не называю по имени и никуда не двигаюсь.`
+  - Failure: GM Judge chose `roll_oracle` but omitted mandatory `oracleAdmission`, causing pre-settlement contract failure and route restore. The lane is diagnostic-invalid from turn 8.
+  - Restore evidence: no new v2 packet was persisted, legacy rows stayed 0, world stayed at `Silt Warrens`, but `turn_clock_ledger` gained a `replay_restore` row.
+- Boundary decision:
+  - Oracle-only lane may settle visible uncertainty only. It must not stand in for actor creation, reveal, movement, item state, world fact, or any hit/miss meaning that requires a follow-up checklist in the current runtime.
+  - Explicitly calling for, summoning, requesting, or introducing an ordinary unnamed current-scene guide/helper/witness/vendor/guard/attendant/crowd voice is backend support-actor ownership: `tool_plan` -> `action_checklist` -> `support_actor.create.v2`.
+  - If the requested actor is hidden, private, important, persistent, offscreen, or outside current-scene support scope, Judge should clarify rather than roll an Oracle whose hit would require unsupported mutation.
+- Implementation:
+  - GM Read prompt now classifies ordinary unnamed current-scene support actor introduction as `tool_plan`, not `roll_oracle`.
+  - GM Judge prompt now requires such requests to use `action_checklist` with `requiredEffectKinds=["support_actor_create"]`.
+  - GM Judge prompt and validator now restrict Oracle admissions to `postOracleRoute="settle_visible_outcome_only"`; `may_require_followup_checklist` is rejected until post-Oracle checklist ownership is explicitly implemented.
+  - Added focused contract tests for support-actor introduction ownership and rejected post-Oracle follow-up mutation.
+- Verification:
+  - GitNexus impact before edits: `buildGmReadSystemPrompt`, `buildGmJudgeSystemPromptV2`, `buildGmJudgePromptV2`, `validateGmJudgeV2`, and `assertGmJudgeV2` were LOW risk; `gmJudgeOracleV2Schema` was not indexed as a standalone symbol.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 169 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Fresh zero-turn clone `p39-support-guide-clean-e5e6af6c` preflight: v2 packets/clock ledger/authority traces/legacy packet/saga/narrator/proposal rows all 0; clock `0/0/0`; current scene `Lowwater Bazaar`.
+  - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и громко прошу обычного местного проводника подойти ко мне, чтобы спросить дорогу; я никого не называю по имени и никуда не двигаюсь.`
+  - Live result: HTTP 200, v2 `done`, packet `v2packet-mq1si5qx-3f793baf5d84`, `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=1`.
+  - DB result: `gameplay_cycle_v2_packets=1`, `authority_traces=1`, `turn_clock_ledger=0`, legacy packet/saga/narrator/proposal rows stayed 0.
+  - Accepted receipts: `support_actor.create.v2` created temporary non-player NPC `unnamed local guide`, plus local `scene_beat.record.v2` visibility receipt; no failed/skipped receipts.
+  - Persisted packet: `gmReadPublic.path="tool_plan"`, `gmJudgePublic.lane="action_checklist"`, `gmJudgePublic.requiredEffectKinds=["support_actor_create"]`.
+  - Artifacts: `output/p38-visible-roster-evidence-r2/turn2-*` through `turn8-*` and `output/p39-support-actor-admission/*`.
+  - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
+- Status: diagnostic slice fixed and live-proven on P39. This adds 0% final acceptance until the multi-campaign ~60-turn clean lanes run.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.

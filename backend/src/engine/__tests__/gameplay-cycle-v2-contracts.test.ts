@@ -3731,6 +3731,122 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(prompt).not.toContain("toolInput");
   });
 
+  it("keeps ordinary current-scene support actor introduction in checklist ownership, not Oracle", () => {
+    const runtimeSource = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf8",
+    );
+    const systemPrompt = buildGmJudgeSystemPromptV2();
+    const prompt = buildGmJudgePromptV2({
+      packet: buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+        version: "scene-frame-envelope.v2",
+        attempt: attemptContext(),
+        frame: sceneFrame(),
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Player"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "support_actor_create"],
+        },
+      })),
+      gmRead: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player calls for an ordinary current-scene guide.",
+        sceneQuestion: "Does this require backend support actor authority?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium"],
+        actionInterpretation: {
+          intent: "Call an ordinary guide to approach.",
+          method: "call out",
+          targetRefs: [],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Creating a visible ordinary support NPC is backend-owned.",
+      },
+      deterministicAdmission: null,
+    });
+
+    expect(runtimeSource).toContain("classify it as tool_plan for backend support-actor authority, not roll_oracle");
+    expect(runtimeSource).toContain("Ordinary unnamed current-scene helper/guide/witness/vendor/guard/attendant/crowd voice introduction requires backend support-actor authority");
+    expect(systemPrompt).toContain("use action_checklist with requiredEffectKinds=[\"support_actor_create\"], not roll_oracle");
+    expect(systemPrompt).toContain("Do not use roll_oracle when a hit would require a follow-up checklist");
+    expect(prompt).toContain('"exactPostOracleRoute": "settle_visible_outcome_only"');
+    expect(prompt).toContain('"support_actor_create"');
+    expect(prompt).not.toContain("toolInput");
+  });
+
+  it("rejects roll_oracle Judge admissions that would require follow-up mutation ownership", () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "oracle_roll"],
+      },
+    }));
+    const readResult = validateGmReadOracleCoreV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "roll_oracle",
+        situationSummary: "The player waits for an uncertain pressure cue.",
+        sceneQuestion: "Does the pressure manifest visibly?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium"],
+        actionInterpretation: {
+          intent: "Check whether the pressure manifests.",
+          method: "wait and listen",
+          targetRefs: [],
+        },
+        turnNeed: "oracle_uncertainty",
+        rationale: "This is a visible uncertainty check.",
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Oracle GM Read fixture must be accepted.");
+    }
+
+    const validation = validateGmJudgeV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: {
+        version: "gm-judge.v2",
+        lane: "roll_oracle",
+        physicalPossibility: "uncertain",
+        checkNeed: "oracle_uncertainty",
+        actorRefs: ["Player"],
+        targetRefs: [],
+        evidenceRefs: ["Player", "Atrium"],
+        rationale: "Incorrectly asks Oracle to feed later runtime mutation.",
+        oracleAdmission: {
+          question: "Does someone respond?",
+          stakes: "A hit would require a support actor to be created.",
+          outcomeMeanings: {
+            strong_hit: "A guide responds and must be created.",
+            weak_hit: "A guide responds under pressure and must be created.",
+            miss: "No guide responds.",
+          },
+          uncertaintyKind: "chance",
+          actorRef: "Player",
+          targetRefs: [],
+          evidenceRefs: ["Player", "Atrium"],
+          postOracleRoute: "may_require_followup_checklist",
+        },
+      },
+    });
+
+    expect(validation.status).toBe("rejected");
+    expect(validation.issues.some((issue) =>
+      issue.path === "oracleAdmission.postOracleRoute"
+      && issue.message.includes("follow-up checklist/mutation ownership")
+    )).toBe(true);
+  });
+
   it("rejects gm-judge.v2 executable payloads, uncited refs, and lane drift", () => {
     const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
