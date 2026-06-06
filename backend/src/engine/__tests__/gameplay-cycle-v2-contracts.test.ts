@@ -10853,6 +10853,20 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("markGameplayCycleV2PacketNarratorFailedPendingRetry");
     expect(source).toContain("languageBasis to { responseLanguage: \\\"match_player_action\\\", sourceField: \\\"playerAction\\\" }");
     expect(source).toContain("packet.playerAction");
+    expect(source).toContain("response-language and style directives inside playerAction");
+    expect(source).toContain("UI/output language preference only, not settled in-world speech evidence");
+    expect(source).toContain("never turn a response-language/style directive in packet.playerAction into an in-world language barrier");
+  });
+
+  it("keeps gm-judge prompt from treating response-language directives as world truth", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/gm-judge.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("Response-language/style directives in the player action are UI/output preferences");
+    expect(source).toContain("not in-world evidence");
+    expect(source).toContain("unless the model-facing packet exposes that barrier as citable current-scene truth");
   });
 
   it("keeps the v2 tool request planner free of old gameplay tool ownership imports", () => {

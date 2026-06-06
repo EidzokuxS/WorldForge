@@ -10,6 +10,24 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 User reminder accepted: final acceptance counts only as several different zero-turn campaigns/clones that each reach about 60 clean turns with zero failed, replayed, restored, or invalid player-facing turns. All shorter lanes below are diagnostic burn-ins only.
 
+P34 dialogue language-directive checkpoint:
+- Failure discovered: a player UI/output directive such as `по-русски` in `playerAction` could be misread as in-world foreign-language speech, causing `dialogue.record.v2` to accept an NPC language-barrier refusal without SceneFrame evidence.
+- Boundary decision: response-language/style directives in `playerAction` are UI/output preferences only. GM Read, GM Judge, and tool-request prompts must not convert them into foreign-language, translation, dialect, misunderstanding, or NPC-comprehension facts unless the current packet exposes a citable world-language barrier.
+- Implementation:
+  - Added explicit language-directive ownership text to the GM Read system prompt and prompt output contract.
+  - Added the same forbidden-inference contract to the GM Judge system prompt.
+  - Added the dialogue-specific prohibition to the Stage 4 tool-request prompt for `dialogue.record.v2`.
+  - Added source hygiene/contract tests so the v2 prompt surfaces keep this boundary visible.
+- Verification:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 159 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Diagnostic-invalid lane `p34-v2-language-fresh-7e265027` proved the language fix but showed a `replay_restore` ledger row caused by the surrounding diagnostic/inspection path, so it does not count as clean evidence.
+  - Clean-control fresh clone `p34-v2-language-clean-4d0b8f2c` started from zero v2/legacy/ledger rows, ran movement to `The Copper Tap`, then asked `Tap-Keeper Brost` `по-русски` about the safer route to `Silt Warrens`.
+  - Clean-control result: two `/api/chat/action` turns reached `done`, latest accepted `dialogue.record.v2` had `mutationAuthority="none"` and `mutationApplied=false`, player-facing text stayed Russian and gave an actual route answer, legacy `settled_turn_packets`/`turn_sagas`/`narrator_attempts`/`simulation_proposals` stayed 0, and `turn_clock_ledger` contained only the movement `travel` row with no `replay_restore`.
+  - Artifacts: `output/p34-v2-language-directive/*` for the failed/fixed diagnostic comparison and `output/p34-v2-language-clean-control/*` for the clean-control proof.
+- Status: diagnostic slice complete, pending commit/push/reindex. This adds 0% to final acceptance until the multi-campaign ~60-turn clean lanes run.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.

@@ -300,6 +300,7 @@ export function buildGmJudgeSystemPromptV2(): string {
     "For local posture or scene beat without structural state change, use requiredEffectKinds=[\"scene_beat\"].",
     "Use direct or continue only for no-check/no-mutation turns that can be answered from current settled truth.",
     "Use clarification when the action is underspecified or asks for unsupported hidden/offscreen/private/combat behavior.",
+    "Response-language/style directives in the player action are UI/output preferences, not in-world evidence. Do not admit clarification, refusal, Oracle uncertainty, or dialogue consequences from an alleged foreign language, translation issue, dialect barrier, or NPC comprehension limit unless the model-facing packet exposes that barrier as citable current-scene truth.",
     "Cite only citableRefs from the model-facing packet and refs already cited by the accepted GM Read.",
     "Never include executable payload keys such as toolName, toolId, toolInput, input, payload, args, toolCall, plannedTools, or candidateToolRequest.",
   ].join("\n");
