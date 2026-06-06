@@ -75,6 +75,10 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function normalizedActorLabel(value: string | null | undefined): string {
+  return String(value ?? "").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
 function forbiddenPayloadPaths(value: unknown): string[] {
   const normalizedForbidden = new Set([...FORBIDDEN_TOOL_REQUEST_KEYS].map(normalizedKey));
   const paths: string[] = [];
@@ -339,6 +343,25 @@ export function validateGameplayToolRequestV2(input: {
         path: "toolId",
         message: `Capability "${step.requiredCapabilityId}" requires toolId "${expectedToolId}".`,
       });
+    }
+    if (request.toolId === "support_actor.create.v2") {
+      const requestedLabels = [
+        request.effectBinding.displayName,
+        request.effectBinding.roleLabel,
+      ].map(normalizedActorLabel).filter(Boolean);
+      const existingActorLabels = new Set(input.packet.scene.actors
+        .map((actor) => normalizedActorLabel(actor.label))
+        .filter(Boolean));
+      const existingActorRefs = new Set(input.packet.scene.actors
+        .map((actor) => normalizedActorLabel(actor.ref))
+        .filter(Boolean));
+      if (requestedLabels.some((label) => existingActorLabels.has(label) || existingActorRefs.has(label))) {
+        issues.push({
+          code: "capability_mismatch",
+          path: "effectBinding.displayName",
+          message: "support_actor.create.v2 can create only new non-player support actors; it cannot duplicate Player or any already modeled scene actor.",
+        });
+      }
     }
 
     const citableRefs = lowerSet(input.packet.citableRefs);

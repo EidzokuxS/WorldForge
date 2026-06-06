@@ -113,7 +113,19 @@ export function currentSceneEvidence(packet: ModelFacingTurnPacketV2): SettledEv
       sourceRefs: uniqueStrings([packet.scene.currentScene.ref ?? undefined, packet.scene.currentLocation.ref ?? undefined]),
     });
   }
-  for (const actor of packet.scene.actors.filter((actor) => actor.role !== "player").slice(0, 8)) {
+  const visibleNonPlayerActors = packet.scene.actors.filter((actor) => actor.role !== "player");
+  evidence.push({
+    evidenceId: evidenceId("visible-actor-roster", evidence.length),
+    kind: "scene_status",
+    authority: "scene_frame",
+    text: visibleNonPlayerActors.length > 0
+      ? `Current visible non-player actors: ${visibleNonPlayerActors.map((actor) => actor.label).join(", ")}.`
+      : "Current visible non-player actors: none.",
+    sourceRefs: visibleNonPlayerActors.length > 0
+      ? visibleNonPlayerActors.slice(0, 8).map((actor) => actor.ref)
+      : uniqueStrings([packet.scene.currentScene.ref ?? undefined, packet.scene.currentLocation.ref ?? undefined]),
+  });
+  for (const actor of visibleNonPlayerActors.slice(0, 8)) {
     evidence.push({
       evidenceId: evidenceId("visible-actor", evidence.length),
       kind: "visible_actor",

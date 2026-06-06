@@ -32,6 +32,7 @@ import {
   buildModelFacingTurnPacketV2,
   buildGameplayRefRegistryV2,
   buildNoReceiptSettledTurnPacketV2 as buildNoReceiptSettledTurnPacketCoreV2,
+  currentSceneEvidence,
   buildGmJudgePromptV2,
   buildGmJudgeSystemPromptV2,
   buildOraclePayloadV2 as buildOraclePayloadCoreV2,
@@ -4506,6 +4507,81 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(result.request)).not.toContain("toolName");
   });
 
+  it("rejects support_actor.create.v2 requests that duplicate Player or existing scene actors", () => {
+    const { packet, checklist } = supportActorToolPlanFixture();
+
+    const playerDuplicate = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-support-actor-player-duplicate",
+        stepId: "step-1",
+        capabilityId: "support_actor_create",
+        toolId: "support_actor.create.v2",
+        effectBinding: {
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          roleKind: "courier",
+          roleLabel: "Mira Voss",
+          displayName: "Player",
+          persona: {
+            publicSummary: "Incorrect duplicate of the player.",
+          },
+          tags: ["courier"],
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+            mayBecomePersistentHere: false,
+          },
+          reason: "Invalidly answers a visible-people lookup by creating the player.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    const visibleActorDuplicate = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-support-actor-visible-duplicate",
+        stepId: "step-1",
+        capabilityId: "support_actor_create",
+        toolId: "support_actor.create.v2",
+        effectBinding: {
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          roleKind: "clerk",
+          roleLabel: "local clerk",
+          displayName: "Clerk Mara",
+          persona: {
+            publicSummary: "Incorrect duplicate of an existing visible actor.",
+          },
+          tags: ["clerk"],
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+            mayBecomePersistentHere: false,
+          },
+          reason: "Invalidly duplicates an already modeled actor.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+    });
+
+    expect(playerDuplicate.status).toBe("rejected");
+    expect(visibleActorDuplicate.status).toBe("rejected");
+    expect(JSON.stringify(playerDuplicate.issues)).toContain("cannot duplicate Player");
+    expect(JSON.stringify(visibleActorDuplicate.issues)).toContain("already modeled scene actor");
+  });
+
   it("accepts a clean minor_poi.create.v2 request with current-scene target-only authority", () => {
     const { packet, checklist } = minorPoiToolPlanFixture();
 
@@ -7725,6 +7801,69 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(packet.gmJudgePublic.checkNeed).toBe("no_check");
     expect(JSON.stringify(packet.acceptedEvidence)).not.toContain("private faction timer");
     expect(JSON.stringify(packet.acceptedEvidence)).not.toContain("hidden courier");
+  });
+
+  it("makes the SceneFrame visible actor roster explicit for direct observation narration", () => {
+    const modelPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player", "Clerk Mara"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible"],
+      },
+    }));
+
+    const evidence = currentSceneEvidence(modelPacket);
+
+    expect(evidence.some((entry) =>
+      entry.kind === "scene_status"
+      && entry.text === "Current visible non-player actors: Clerk Mara."
+      && entry.sourceRefs.includes("Clerk Mara"),
+    )).toBe(true);
+    expect(evidence.some((entry) =>
+      entry.kind === "visible_actor"
+      && entry.text === "Visible actor: Clerk Mara.",
+    )).toBe(true);
+  });
+
+  it("makes an empty visible actor roster explicit instead of forcing narrator absence inference", () => {
+    const modelPacket = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame({
+        roster: {
+          active: [],
+          support: [],
+          background: [{
+            id: "actor-hidden-1",
+            actorId: "actor-hidden-1",
+            type: "npc",
+            label: "Hidden Clerk",
+            locationId: "location-alpha",
+            sceneScopeId: "scene-alpha",
+            awareness: "none",
+          }],
+        },
+      }),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Player"],
+        privateGuardTerms: ["Hidden Clerk"],
+        allowedCapabilityIds: ["observe_visible"],
+      },
+    }));
+
+    const evidence = currentSceneEvidence(modelPacket);
+
+    expect(evidence.some((entry) =>
+      entry.kind === "scene_status"
+      && entry.text === "Current visible non-player actors: none.",
+      )).toBe(true);
+    expect(evidence.some((entry) => entry.kind === "visible_actor")).toBe(false);
+    expect(JSON.stringify(evidence)).not.toContain("Hidden Clerk");
   });
 
   it("settles Oracle results as evidence without runtime mutation authority", () => {
@@ -11275,5 +11414,24 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(functionBody).toContain("nothing happened");
     expect(functionBody).toContain("A time.advance.v2 receipt proves elapsed time and the updated world clock only");
     expect(functionBody).not.toContain("replace(");
+  });
+
+  it("keeps support_actor creation out of player/current-actor visibility lookup ownership", () => {
+    const runtimeSource = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf-8",
+    );
+    const judgeSource = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/gm-judge.ts"),
+      "utf-8",
+    );
+
+    expect(runtimeSource).toContain("Questions about who is currently visible/nearby are direct no-mutation observations");
+    expect(judgeSource).toContain("Do not use support_actor_create for player identity");
+    expect(judgeSource).toContain("questions about who is currently visible/nearby");
+    expect(judgeSource).toContain("Current visible actor roster questions are direct no-mutation observations");
+    expect(runtimeSource).toContain("support_actor.create.v2 must never create Player");
+    expect(runtimeSource).toContain("any actor already present in packet.scene.actors");
+    expect(runtimeSource).toContain("It is not a visibility lookup or a way to answer who is nearby");
   });
 });

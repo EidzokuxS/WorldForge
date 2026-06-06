@@ -111,6 +111,41 @@ P36 continuation burn-in after no-change fix:
 - Backend cleanup: stable backend on `3101` was stopped after turn 5; ports `3001`, `3101`, and `3208` were clear.
 - Status: turns 1-5 clean as diagnostic burn-in. This remains 0% final acceptance until a full several-campaign 60-turn manual acceptance run is completed.
 
+P37 visible actor roster / support-actor ownership checkpoint:
+- Failure discovered on P36 continuation:
+  - Turn 6 on diagnostic clone `p36-time-narrator-clean-0e86cbce` asked who was visibly nearby while standing in `Upper Dam Ruins`.
+  - Runtime settled it as direct/no-mutation and avoided false absence, but narration answered routes/items instead of the requested visible-people question.
+  - Packet evidence had no explicit actor-roster answer; it only exposed generic GM Read text saying the actors array defines visible presence. P36 lane is diagnostic-invalid from turn 6.
+- Second failure reproduced on fresh clone:
+  - Fresh zero-turn clone `p37-visible-roster-clean-78791e43` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+  - Pre-turn SceneFrame at `Lowwater Bazaar` had only Player/Mira Voss as clear active actor; `Sigil Boss Torvin Kask` and `Litha Corsen` were background awareness `none`.
+  - Same visible-people query caused GM Read/Judge to admit `support_actor_create`; runtime accepted `support_actor.create.v2` and created `Mira Voss` as a temporary Signal-house representative, plus a local visibility scene beat.
+  - Player-facing narration said `Mira Voss` was visible nearby, duplicating the player as an NPC-like actor. P37 lane is diagnostic-invalid.
+- Boundary decision:
+  - SceneFrame visible actor roster is authoritative direct-observation evidence and must be explicit even when empty.
+  - `support_actor.create.v2` creates only new temporary non-player support actors. It must never create Player, the player's label, or any already modeled actor, and it is not a visibility lookup.
+  - GM Read/Judge visible/nearby-people questions should resolve as direct no-mutation observations from SceneFrame unless the player explicitly asks to introduce a new ordinary support NPC.
+- Implementation:
+  - `currentSceneEvidence` now emits a `scene_frame` roster summary such as `Current visible non-player actors: none.` or a comma-separated visible non-player actor list.
+  - Tool-request validation rejects `support_actor.create.v2` when `displayName` or `roleLabel` collides with Player or any actor already present in `packet.scene.actors`.
+  - DB handler also rejects duplicate Player/current-scene actor support creation before mutation commit.
+  - GM Read, GM Judge, and tool-request prompts now state that visible/nearby-people lookup is not support actor creation and that Player/current actors cannot be created as support actors.
+- Verification:
+  - GitNexus impact before edits: `currentSceneEvidence`, `gmReadEvidence`, `buildNoReceiptSettledTurnPacketV2`, `validateGameplayToolRequestV2`, `supportActorCreateHandler`, `validateGmJudgeV2`, `buildGmJudgeSystemPromptV2`, `buildToolRequestSystemPrompt`, and `buildGmReadSystemPrompt` were LOW risk.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 167 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Fresh zero-turn clone `p38-visible-roster-clean-614dd1f7` preflight: v2 packets/clock ledger/authority traces/legacy packet/saga/narrator/proposal rows all 0; clock `0/0/0`; current scene `Lowwater Bazaar`.
+  - P38 SceneFrame: only Player/Mira Voss clear; `Sigil Boss Torvin Kask` and `Litha Corsen` background awareness `none`.
+  - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и осматриваюсь, чтобы понять, кто из людей виден рядом, ничего не трогая и никуда не двигаясь.`
+  - Live result: HTTP 200, v2 `done`, packet `v2packet-mq1rldhk-d8b26379eeb8`, direct/no-check/no-receipt, `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=1`.
+  - DB result: `gameplay_cycle_v2_packets=1`, `turn_clock_ledger=0`, `authority_traces=0`, legacy rows stayed 0, no support actor created.
+  - Accepted evidence included `Current visible non-player actors: none.` and no `Mira Voss` visible_actor/support_actor receipt.
+  - Player-facing narration: `Рядом в Lowwater Bazaar людей не видно.`
+  - Artifacts: `output/p36-time-narrator-nochange/turn6-*`, `output/p37-visible-roster-evidence/*`, and `output/p38-visible-roster-evidence-r2/*`.
+  - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
+- Status: diagnostic slice fixed and live-proven on P38. This adds 0% final acceptance until the multi-campaign ~60-turn clean lanes run.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.

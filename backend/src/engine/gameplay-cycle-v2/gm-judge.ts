@@ -290,6 +290,7 @@ export function buildGmJudgeSystemPromptV2(): string {
     "For route availability checks without travel, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"route_check\"].",
     "For visible dialogue outcomes, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"dialogue_outcome\"].",
     "For temporary current-scene service/witness/helper/vendor/guard/attendant/crowd support actors, use requiredEffectKinds=[\"support_actor_create\"].",
+    "Do not use support_actor_create for player identity, already modeled scene actors, or questions about who is currently visible/nearby. Current visible actor roster questions are direct no-mutation observations from SceneFrame truth unless the player explicitly asks to introduce a new ordinary support NPC.",
     "For ordinary visible current-scene POIs, use requiredEffectKinds=[\"minor_poi_create\"].",
     "For source-bounded visible current-scene place handles, use requiredEffectKinds=[\"location_reveal\"].",
     "For concrete tags/marks/labels on visible/current/inventory entities, use requiredEffectKinds=[\"entity_tag\"].",

@@ -2991,6 +2991,17 @@ function supportActorCreateHandler(
   }
   const displayName = request.effectBinding.displayName?.trim()
     || request.effectBinding.roleLabel.trim();
+  const requestedActorName = normalizeActorName(displayName);
+  const existingPacketActor = packet.scene.actors.find((actor) =>
+    normalizeActorName(actor.label) === requestedActorName
+    || normalizeActorName(actor.ref) === requestedActorName);
+  if (existingPacketActor) {
+    return failedOutcome(
+      packet,
+      `support_actor.create.v2 can create only new non-player support actors; "${displayName}" already refers to ${existingPacketActor.role === "player" ? "Player" : "a modeled scene actor"}.`,
+      "rejected",
+    );
+  }
 
   try {
     const commit = commitSupportActorCreateV2({
