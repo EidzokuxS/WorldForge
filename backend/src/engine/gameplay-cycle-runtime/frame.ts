@@ -39,6 +39,22 @@ function firstText(...values: unknown[]): string {
   return "current_scene";
 }
 
+function uniqueRefs(refs: readonly string[]): string[] {
+  return refs.filter((ref, index, allRefs) => refs.indexOf(ref) === index);
+}
+
+function normalizedRef(ref: string): string {
+  return ref.trim().toLowerCase();
+}
+
+function removePublicPrivateTerms(input: {
+  terms: readonly string[];
+  citableRefs: readonly string[];
+}): string[] {
+  const publicRefs = new Set(input.citableRefs.map(normalizedRef));
+  return input.terms.filter((term) => !publicRefs.has(normalizedRef(term)));
+}
+
 function stableFrameId(input: GameplayRuntimeTurnInput): string {
   const hash = createHash("sha256")
     .update(`${input.campaignId}:${input.turnId}:${input.base.tick}:${input.base.worldVersion}`)
@@ -186,6 +202,23 @@ export async function buildAuthoritativeSceneFrame(
   }));
   const recentLocalFacts = eventRows(frame);
   const forecast = buildForecastEnvelope(frame, input.campaignId);
+  const citableRefs = uniqueRefs([
+    "Player",
+    currentLocationLabel,
+    currentSceneLabel,
+    ...actors.map((actor) => actor.ref),
+    ...movementOptions.map((option) => option.ref),
+    ...targets.map((target) => target.ref),
+    ...inventory.map((item) => item.ref),
+  ]);
+  const forecastForbiddenPrivateTerms = removePublicPrivateTerms({
+    terms: forecast.forbiddenPrivateTerms,
+    citableRefs,
+  });
+  const forbiddenActorLabels = removePublicPrivateTerms({
+    terms: frame.perception.forbiddenActorLabels?.slice(0, 64) ?? [],
+    citableRefs,
+  });
 
   return assertAuthoritativeSceneFrame({
     version: "scene-frame.v1",
@@ -226,19 +259,14 @@ export async function buildAuthoritativeSceneFrame(
           : "receipt_required",
       allowed: true,
     })),
-    citableRefs: [
-      "Player",
-      currentLocationLabel,
-      currentSceneLabel,
-      ...actors.map((actor) => actor.ref),
-      ...movementOptions.map((option) => option.ref),
-      ...targets.map((target) => target.ref),
-      ...inventory.map((item) => item.ref),
-    ].filter((ref, index, refs) => refs.indexOf(ref) === index),
+    citableRefs,
     privateGuards: {
-      forbiddenActorLabels: frame.perception.forbiddenActorLabels?.slice(0, 64) ?? [],
-      forbiddenPrivateTerms: forecast.forbiddenPrivateTerms,
+      forbiddenActorLabels,
+      forbiddenPrivateTerms: forecastForbiddenPrivateTerms,
     },
-    forecast,
+    forecast: {
+      ...forecast,
+      forbiddenPrivateTerms: forecastForbiddenPrivateTerms,
+    },
   });
 }

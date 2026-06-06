@@ -2306,3 +2306,81 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/clean-runtime-p57-judge-live/*`.
   - Decision for next primitive:
     - P58 is Oracle Roll/Settlement only, consuming accepted P57 `nextStep="oracle_roll"` judgments and producing binding `oracle-settlement.v1` evidence with no mutation authority.
+
+- P58 clean gameplay runtime Primitive 4 Oracle Roll/Settlement:
+  - Status:
+    - [x] Resume from committed P57 baseline: commit `2eb6940e`, worktree clean, backend stopped, ports clear, GitNexus reindexed with embeddings.
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, P57 answer, clean runtime contracts/runtime/Judge, existing Oracle infrastructure, and forensic old oracle settlement evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Implement only clean Oracle Roll/Settlement after Oracle review.
+    - [x] Add focused Oracle settlement contract tests.
+    - [x] Compose SceneFrame + GM Read + Judge/Uncertainty + Oracle Settlement through `/api/chat/action`.
+    - [x] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone with an action that truly admits Oracle.
+  - Primitive boundary draft:
+    - Owner: clean Oracle Roll/Settlement adapter plus backend validator, not old `gameplay-cycle-v2` settlement and not old GM Read/Judge.
+    - Inputs: authoritative `SceneFrame`, accepted `gm-read.v1`, accepted `judge-uncertainty.v1` with `nextStep="oracle_roll"` and complete `oracleAdmission`.
+    - Output: `oracle-settlement.v1` with accepted admission, backend adapter result, selected predeclared outcome meaning, visible outcome, evidence authority, and mutation authority `none`.
+    - Mutation authority: none.
+    - Evidence authority: binding uncertainty outcome only; it still cannot prove movement, item state, discovery, absence, NPC knowledge, or durable world facts unless later primitives materialize them.
+    - Infrastructure candidate: existing `callOracle` can be used only as a probability/roll adapter if the new P58 boundary validates its input/output and does not inherit old v1/v2 gameplay semantics.
+    - Failure draft: P58 runs only after valid P57 Oracle admission; adapter failure may settle conservative `miss`/`uncertain_result` with no hidden mutation, but Oracle review must choose exact failure shape.
+  - Oracle question draft:
+    - Given committed P57, what should P58 Oracle Roll/Settlement own and output so it consumes only accepted P57 `oracle_roll` admissions, calls the probability/roll adapter safely, and emits binding visible outcome evidence without mutation or old v2 coupling? Return schema shape, adapter mapping, validator rules, failure behavior, runtime events, and contract/live tests.
+  - Oracle review:
+    - Session: `wf-clean-runtime-oracle-settlement`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`
+    - Bundle: one bundled text attachment, 15 files, about 133,415 input tokens; `output.log` records `Packed 15 files into 1 bundle`.
+    - Answer artifact: `output/oracle/p58-clean-oracle-settlement-answer.md`
+    - Recommendation:
+      - P58 owns Oracle execution and settlement only.
+      - P58 consumes accepted P57 `judge-uncertainty.v1` Oracle admission, calls probability adapter, binds tier, selects predeclared meaning, and emits `oracle-settlement.v1`.
+      - Settlement has evidence authority for visible uncertainty only and `mutationAuthority="none"`.
+      - P58 must not action-plan, receipt, narrate, mutate, append chat, persist old v2 packets, or bridge old v2 semantics.
+      - Existing `callOracle` may be used as infrastructure only; clean runtime must build payload from `SceneFrame`, GM Read, and P57 admission, not old v2 packets.
+      - Adapter failure after valid P57 admission should settle conservative miss fallback with no fake chance/roll and no hidden mutation.
+    - Accepted schema direction:
+      - `version: "oracle-settlement.v1"`, settlement/campaign/turn/frame ids, source linkage to SceneFrame/GM Read/Judge/admission.
+      - `admission` copy from P57 Oracle admission.
+      - `adapter` with `adapterId="callOracle"`, clean `OraclePayload`, and result union: `ok` with chance/roll/outcome/reasoning, or `fallback` with `fallbackPolicy="conservative_miss"`.
+      - `selectedMeaning` equals `admission.outcomeMeanings[outcome]`.
+      - `visibleOutcome` exposes outcome, question, stakes, selected meaning.
+      - `authority` declares `evidenceAuthority="oracle_settlement"`, `mutationAuthority="none"`, `mayAuthorizeMutation=false`, `claimScope="visible_uncertainty_outcome_only"`, and forbidden claim kinds.
+    - Accepted validator/runtime rules:
+      - Run only on accepted P57 branch: `nextStep="oracle_roll"`, `checkNeed="oracle_roll_needed"`, present `oracleAdmission`/`difficulty`, null `noRollReason`, visible-outcome-only, no follow-up mutation.
+      - Re-check frame/turn/source/admission linkage.
+      - Re-check refs from `SceneFrame.citableRefs`; reject backend/UUID/private refs and private terms.
+      - Normal adapter result must have chance 1..99, roll 1..100, outcome in strong/weak/miss, bounded reasoning.
+      - Fallback result has no chance/roll/reasoning; selected meaning is miss meaning.
+      - Reject smuggling of tool/checklist/receipt/mutation/narration/old-v2 surfaces.
+      - Reject outcome meanings that require backend state materialization: movement, arrival, route state, discovery/location reveal, item state, NPC private knowledge, actor creation, condition/HP change, durable world fact, absence/no-change, or hidden/offscreen fact.
+      - Runtime Oracle branch order: `scene-frame`, `gm-read`, `judge-uncertainty`, `oracle-roll`, validated settlement, sanitized `oracle_result`, `oracle-settlement`, `narrative`, `finalizing_turn`, `done`.
+      - `oracle_result` public payload should expose only outcome by default; no chance/roll/reasoning/private data.
+  - Implementation:
+    - Added clean P58 schemas/types/assertion in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`: adapter payload/result, `oracle-settlement.v1`, selected meaning, visible outcome, and authority block.
+    - Added `backend/src/engine/gameplay-cycle-runtime/oracle-settlement.ts` as the clean settlement owner. It consumes only accepted P57 Oracle admissions, maps to `callOracle` as infrastructure, validates adapter output, binds the selected predeclared meaning, and emits sanitized `oracle_result`.
+    - Runtime now emits `oracle-roll`, `oracle_result`, and `oracle-settlement` only after accepted P57 `nextStep="oracle_roll"`.
+    - Added SceneFrame invariant: public `citableRefs` cannot also appear in `privateGuards` or forecast forbidden private terms. This fixed live GM Read fallback where visible/citable `Litha Corsen` was also marked private.
+    - Added Judge nullable branch normalization for model-facing generation: omitted nullable `difficulty`/`oracleAdmission`/`noRollReason` become explicit `null` before semantic validation. Non-Oracle branches still require `noRollReason`; Oracle branches require `difficulty` and `oracleAdmission`.
+    - P58 does not import old `gameplay-cycle-v2`, old GM tool loops, old tool schemas, old receipt semantics, or old post-turn simulation paths.
+  - Contract verification:
+    - GitNexus impact before edits: `runCleanJudgeUncertainty` LOW, `generateJudgeUncertaintyCandidate` LOW, `buildAuthoritativeSceneFrame` LOW, `validateGmReadCandidate` LOW, `validateJudgeUncertaintyCandidate` LOW, `assertAuthoritativeSceneFrame` LOW. `validateOracleSettlement` and new P58 schema symbols were not in the pre-commit index yet.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 80 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- chat.test.ts --bail=1` passed with 62 tests.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts --bail=1` passed with 351 tests.
+  - Diagnostic/live evidence:
+    - Diagnostic clone `9528d343-25b2-4e39-80e6-3dec69c8f8eb` initially showed GM Read fallback because `SceneFrame.citableRefs` included `Litha Corsen` while `privateGuards.forbiddenActorLabels` also forbade `Litha Corsen`. After the SceneFrame invariant fix, the same local chain reached `scene-frame -> gm-read -> judge-uncertainty -> oracle-roll -> oracle_result -> oracle-settlement -> narrative -> finalizing_turn -> done`.
+    - First API attempt on clone `da89a0d6-fa7a-4b07-8d11-1c3d847b25bc` used the wrong request field (`message`), producing route schema 400 and no gameplay turn; diagnostic only.
+    - Second API diagnostic on the same clone reached Judge but exposed model omission of nullable `noRollReason`; after normalization fix this is covered by contract test.
+    - Accepted P58 live proof clone: `97b5d0ab-2d82-4bf2-8822-647a728cb684` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `authority_traces`, `turn_clock_ledger`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs` all 0; clock `worldVersion=0/worldTimeMinutes=0/currentTick=0`; SceneFrame exposed `Sigil Boss Torvin Kask` and `Litha Corsen`; private guards empty.
+    - Manual action after inspecting actual current state: `I remain in Lowwater Bazaar and quietly watch Litha Corsen to see whether she notices my gaze right now. I do not move and I do not touch anything.`
+    - Stable backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` on port `3221`, then stopped after verification.
+    - SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `oracle-roll`, `oracle_result`, `oracle-settlement`, `narrative`, `finalizing_turn`, `done`.
+    - Public `oracle_result`: `{ "outcome": "miss" }`; chance/roll/reasoning were not exposed in the SSE event.
+    - Player-facing narrative: `Проверка неопределённости разрешена: Litha catches Mira's gaze directly and recognizes she is being watched.`
+    - Postcheck matched no-mutation/no-old-runtime expectations: all legacy/v2/ledger/oracle/simulation row counts remained 0, clock remained `0/0/0`, and no backend process was left running.
+    - Artifacts: `output/clean-runtime-p58-oracle-live-after-fix-r2/*`.
+  - Known next-layer blocker:
+    - Clean runtime currently returns player-facing SSE but does not append chat history in this slice (`historyLength` remained 0). Treat this as the next clean persistence/settled API response primitive, not as P58 Oracle settlement authority.

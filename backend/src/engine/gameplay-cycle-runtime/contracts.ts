@@ -3,6 +3,10 @@ import { z } from "zod";
 const shortText = z.string().trim().min(1).max(500);
 const modelSafeRef = z.string().trim().min(1).max(200);
 
+function normalizedContractRef(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 export const gameplayRuntimeProviderSummarySchema = z.object({
   id: shortText,
   model: shortText.nullable(),
@@ -169,6 +173,38 @@ export const authoritativeSceneFrameSchema = z.object({
     forbiddenPrivateTerms: z.array(shortText).max(64),
   }),
   forecast: scopedForecastEnvelopeSchema,
+}).superRefine((frame, ctx) => {
+  const citableRefs = new Set(frame.citableRefs.map(normalizedContractRef));
+  const checkPrivateTerms = (
+    terms: readonly string[],
+    pathPrefix: Array<string | number>,
+    label: string,
+  ): void => {
+    terms.forEach((term, index) => {
+      if (!citableRefs.has(normalizedContractRef(term))) return;
+      ctx.addIssue({
+        code: "custom",
+        path: [...pathPrefix, index],
+        message: `${label} must not duplicate a public SceneFrame.citableRefs entry.`,
+      });
+    });
+  };
+
+  checkPrivateTerms(
+    frame.privateGuards.forbiddenActorLabels,
+    ["privateGuards", "forbiddenActorLabels"],
+    "privateGuards.forbiddenActorLabels",
+  );
+  checkPrivateTerms(
+    frame.privateGuards.forbiddenPrivateTerms,
+    ["privateGuards", "forbiddenPrivateTerms"],
+    "privateGuards.forbiddenPrivateTerms",
+  );
+  checkPrivateTerms(
+    frame.forecast.forbiddenPrivateTerms,
+    ["forecast", "forbiddenPrivateTerms"],
+    "forecast.forbiddenPrivateTerms",
+  );
 });
 
 export const gmReadPathSchema = z.enum([
@@ -315,6 +351,104 @@ export const judgeUncertaintySchema = z.object({
   noRollReason: judgeNoRollReasonSchema.nullable(),
 }).strict();
 
+export const oracleOutcomeTierSchema = z.enum([
+  "strong_hit",
+  "weak_hit",
+  "miss",
+]);
+
+export const oracleAdapterPayloadSchema = z.object({
+  intent: shortText,
+  method: shortText,
+  actorTags: z.array(shortText).max(16),
+  targetTags: z.array(shortText).max(16),
+  environmentTags: z.array(shortText).max(16),
+  sceneContext: z.string().trim().min(1).max(2000),
+}).strict();
+
+export const oracleAdapterOkResultSchema = z.object({
+  status: z.literal("ok"),
+  chance: z.number().int().min(1).max(99),
+  roll: z.number().int().min(1).max(100),
+  outcome: oracleOutcomeTierSchema,
+  reasoning: shortText,
+}).strict();
+
+export const oracleAdapterFallbackResultSchema = z.object({
+  status: z.literal("fallback"),
+  fallbackPolicy: z.literal("conservative_miss"),
+  outcome: z.literal("miss"),
+  reason: z.object({
+    kind: z.enum(["adapter_generation_failed", "invalid_adapter_output"]),
+    message: z.string().trim().min(1).max(500),
+  }).strict(),
+}).strict();
+
+export const oracleAdapterSettlementResultSchema = z.discriminatedUnion("status", [
+  oracleAdapterOkResultSchema,
+  oracleAdapterFallbackResultSchema,
+]);
+
+export const oracleSettlementAuthorityForbiddenClaimKindSchema = z.enum([
+  "movement",
+  "arrival",
+  "route_state",
+  "discovery",
+  "location_reveal",
+  "item_state",
+  "npc_private_knowledge",
+  "actor_creation",
+  "world_fact",
+  "absence_or_no_change",
+  "condition_or_hp_change",
+]);
+
+export const oracleSettlementSchema = z.object({
+  version: z.literal("oracle-settlement.v1"),
+  settlementId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1"),
+    judgeVersion: z.literal("judge-uncertainty.v1"),
+    gmReadPath: gmReadPathSchema,
+    judgmentId: shortText,
+    oracleAdmissionId: shortText,
+  }).strict(),
+  admission: judgeOracleAdmissionSchema,
+  adapter: z.object({
+    adapterId: z.literal("callOracle"),
+    payload: oracleAdapterPayloadSchema,
+    result: oracleAdapterSettlementResultSchema,
+  }).strict(),
+  selectedMeaning: z.object({
+    outcome: oracleOutcomeTierSchema,
+    text: shortText,
+    source: z.literal("admission.outcomeMeanings[result.outcome]"),
+  }).strict(),
+  visibleOutcome: z.object({
+    outcome: oracleOutcomeTierSchema,
+    question: shortText,
+    stakes: shortText,
+    selectedMeaning: shortText,
+  }).strict(),
+  authority: z.object({
+    evidenceAuthority: z.literal("oracle_settlement"),
+    mutationAuthority: z.literal("none"),
+    evidenceRefs: z.array(modelSafeRef).min(1).max(16),
+    mayAuthorizeMutation: z.literal(false),
+    claimScope: z.literal("visible_uncertainty_outcome_only"),
+    forbiddenClaimKinds: z.array(oracleSettlementAuthorityForbiddenClaimKindSchema).min(1).max(16),
+  }).strict(),
+  failure: z.object({
+    kind: z.enum(["adapter_generation_failed", "invalid_adapter_output"]),
+    fallbackPolicy: z.literal("conservative_miss"),
+    hiddenMutationApplied: z.literal(false),
+  }).strict().nullable(),
+}).strict();
+
 export const frozenApiProjectionSchema = z.object({
   version: z.literal("gameplay-runtime.frozen-api-projection.v1"),
   runtime: z.literal("gameplay-cycle-runtime"),
@@ -338,6 +472,9 @@ export type JudgeCheckNeed = z.infer<typeof judgeCheckNeedSchema>;
 export type JudgeNextStep = z.infer<typeof judgeNextStepSchema>;
 export type JudgeDifficultyTier = z.infer<typeof judgeDifficultyTierSchema>;
 export type JudgeUncertainty = z.infer<typeof judgeUncertaintySchema>;
+export type OracleOutcomeTier = z.infer<typeof oracleOutcomeTierSchema>;
+export type OracleAdapterSettlementResult = z.infer<typeof oracleAdapterSettlementResultSchema>;
+export type OracleSettlement = z.infer<typeof oracleSettlementSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 
 export function assertGameplayRuntimeTurnInput(value: unknown): GameplayRuntimeTurnInput {
@@ -354,6 +491,10 @@ export function assertGmRead(value: unknown): GmRead {
 
 export function assertJudgeUncertainty(value: unknown): JudgeUncertainty {
   return judgeUncertaintySchema.parse(value);
+}
+
+export function assertOracleSettlement(value: unknown): OracleSettlement {
+  return oracleSettlementSchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {

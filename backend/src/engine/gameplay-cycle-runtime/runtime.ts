@@ -17,6 +17,11 @@ import {
   type JudgeUncertaintyRunResult,
 } from "./judge-uncertainty.js";
 import {
+  runCleanOracleSettlement,
+  type OracleAdapter,
+  type OracleSettlementRunResult,
+} from "./oracle-settlement.js";
+import {
   assertFrozenApiProjection,
   assertGameplayRuntimeTurnInput,
   type AuthoritativeSceneFrame,
@@ -28,6 +33,7 @@ import {
 export type CleanGameplayRuntimeEvent = {
   type:
     | "scene-settling"
+    | "oracle_result"
     | "narrative"
     | "finalizing_turn"
     | "done"
@@ -54,6 +60,7 @@ export interface CleanGameplayRuntimeOptions {
   };
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
+  oracleAdapter?: OracleAdapter;
 }
 
 export interface CleanGameplayRuntimeCoreOptions {
@@ -62,6 +69,7 @@ export interface CleanGameplayRuntimeCoreOptions {
   buildFrame?: (turn: GameplayRuntimeTurnInput) => Promise<AuthoritativeSceneFrame>;
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
+  oracleAdapter?: OracleAdapter;
 }
 
 function envFlagEnabled(name: string): boolean {
@@ -137,9 +145,13 @@ function narrativeFromFrame(
   frame: AuthoritativeSceneFrame,
   gmRead: GmReadRunResult,
   judgeUncertainty?: JudgeUncertaintyRunResult,
+  oracleSettlement?: OracleSettlementRunResult,
 ): string {
   if (gmRead.read.path === "clarification") {
     return `Нужно уточнение: ${gmRead.read.liveSceneQuestion}`;
+  }
+  if (oracleSettlement?.status === "settled" || oracleSettlement?.status === "settled_with_fallback") {
+    return `Проверка неопределённости разрешена: ${oracleSettlement.settlement.visibleOutcome.selectedMeaning}`;
   }
   if (judgeUncertainty?.judgment.nextStep === "ask_clarification") {
     return `Нужно уточнение: ${judgeUncertainty.judgment.noRollReason?.explanation ?? gmRead.read.liveSceneQuestion}`;
@@ -210,6 +222,7 @@ export async function* processCleanGameplayTurnFromInput(
     generateCandidate: options.gmReadCandidateGenerator,
   });
   let judgeUncertainty: JudgeUncertaintyRunResult | undefined;
+  let oracleSettlement: OracleSettlementRunResult | undefined;
   if (gmRead.status === "accepted") {
     yield {
       type: "scene-settling",
@@ -224,8 +237,38 @@ export async function* processCleanGameplayTurnFromInput(
       provider: options.judgeProvider,
       generateCandidate: options.judgeUncertaintyCandidateGenerator,
     });
+    if (
+      judgeUncertainty.status === "accepted"
+      && judgeUncertainty.judgment.nextStep === "oracle_roll"
+    ) {
+      yield {
+        type: "scene-settling",
+        data: {
+          stage: "oracle-roll",
+          phase: "gameplay-cycle-runtime",
+        },
+      };
+      oracleSettlement = await runCleanOracleSettlement({
+        frame,
+        gmRead: gmRead.read,
+        judgment: judgeUncertainty.judgment,
+        provider: options.judgeProvider,
+        settlementId: `oracle-settlement-${randomUUID()}`,
+        adapter: options.oracleAdapter,
+      });
+      if (oracleSettlement.status === "settled" || oracleSettlement.status === "settled_with_fallback") {
+        yield oracleSettlement.publicEvent;
+        yield {
+          type: "scene-settling",
+          data: {
+            stage: "oracle-settlement",
+            phase: "gameplay-cycle-runtime",
+          },
+        };
+      }
+    }
   }
-  const narrativeText = narrativeFromFrame(frame, gmRead, judgeUncertainty);
+  const narrativeText = narrativeFromFrame(frame, gmRead, judgeUncertainty, oracleSettlement);
   const projection = buildFrozenProjection({ turn, frame, narrativeText });
   yield {
     type: "narrative",
@@ -258,5 +301,6 @@ export async function* processCleanGameplayTurn(
     judgeProvider: options.judgeProvider,
     gmReadCandidateGenerator: options.gmReadCandidateGenerator,
     judgeUncertaintyCandidateGenerator: options.judgeUncertaintyCandidateGenerator,
+    oracleAdapter: options.oracleAdapter,
   });
 }

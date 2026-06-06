@@ -11,6 +11,7 @@ import {
   gameplayRuntimeTurnInputSchema,
   type JudgeUncertainty,
   judgeUncertaintySchema,
+  oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
@@ -27,6 +28,11 @@ import {
   runCleanJudgeUncertainty,
   validateJudgeUncertaintyCandidate,
 } from "../gameplay-cycle-runtime/judge-uncertainty.js";
+import {
+  buildOraclePayloadV1,
+  runCleanOracleSettlement,
+  validateOracleSettlement,
+} from "../gameplay-cycle-runtime/oracle-settlement.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -179,6 +185,29 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
 
     expect(parsed.citableRefs).toContain("Player");
     expect(parsed.capabilities[0]?.capabilityId).toBe("observe_visible");
+  });
+
+  it("rejects SceneFrame private terms that duplicate public citable refs", () => {
+    const frame = minimalFrame({
+      privateGuards: {
+        forbiddenActorLabels: ["Guide"],
+        forbiddenPrivateTerms: ["Market"],
+      },
+      forecast: {
+        ...minimalFrame().forecast,
+        forbiddenPrivateTerms: ["North Hall"],
+      },
+    });
+
+    const result = authoritativeSceneFrameSchema.safeParse(frame);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("privateGuards.forbiddenActorLabels.0");
+      expect(paths).toContain("privateGuards.forbiddenPrivateTerms.0");
+      expect(paths).toContain("forecast.forbiddenPrivateTerms.0");
+    }
   });
 });
 
@@ -808,6 +837,23 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(result.issues.some((issue) => issue.path === "oracleAdmission")).toBe(true);
   });
 
+  it("normalizes omitted nullable branch fields before validating Oracle admission", async () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const { noRollReason: _omitted, ...oracleCandidate } = validOracleJudgeUncertainty(frame, gmRead);
+
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async () => oracleCandidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.judgment.nextStep).toBe("oracle_roll");
+    expect(result.judgment.noRollReason).toBeNull();
+  });
+
   it("rejects non-Oracle branches that smuggle Oracle admission or difficulty", () => {
     const frame = minimalFrame();
     const gmRead = validGmRead(frame);
@@ -917,5 +963,290 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     }
 
     expect(order).toEqual(["scene-frame", "gm-read"]);
+  });
+});
+
+describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", () => {
+  it.each([
+    ["strong_hit", "The player acts without Guide noticing."],
+    ["weak_hit", "Guide notices something but does not fully understand it."],
+    ["miss", "Guide notices and reacts immediately."],
+  ] as const)("settles %s by selecting the predeclared admission meaning", async (outcome, expectedMeaning) => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+    const result = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: `oracle-${outcome}`,
+      adapter: async () => ({
+        chance: 65,
+        roll: outcome === "strong_hit" ? 10 : outcome === "weak_hit" ? 50 : 90,
+        outcome,
+        reasoning: "Adapter resolved the admitted visible uncertainty.",
+      }),
+    });
+
+    expect(result.status).toBe("settled");
+    if (result.status !== "settled") throw new Error("expected settled");
+    expect(result.settlement.version).toBe("oracle-settlement.v1");
+    expect(result.settlement.authority.evidenceAuthority).toBe("oracle_settlement");
+    expect(result.settlement.authority.mutationAuthority).toBe("none");
+    expect(result.settlement.selectedMeaning.text).toBe(expectedMeaning);
+    expect(result.settlement.visibleOutcome.selectedMeaning).toBe(expectedMeaning);
+    expect(result.publicEvent).toEqual({
+      type: "oracle_result",
+      data: { outcome },
+    });
+    expect(JSON.stringify(result.publicEvent)).not.toContain("chance");
+    expect(JSON.stringify(result.publicEvent)).not.toContain("roll");
+  });
+
+  it("builds OraclePayload from SceneFrame, GM Read, and P57 admission without old packet coupling", () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+
+    const payload = buildOraclePayloadV1({ frame, gmRead, judgment });
+
+    expect(payload.intent).toBe(judgment.oracleAdmission?.question);
+    expect(payload.actorTags).toContain("Player");
+    expect(payload.targetTags).toContain("Guide");
+    expect(payload.environmentTags.some((tag) => tag.includes("current-scene:Market"))).toBe(true);
+    expect(payload.sceneContext).toContain("Strong hit means:");
+    expect(payload.sceneContext).toContain("Evidence refs:");
+    expect(JSON.stringify(payload)).not.toContain("ModelFacingTurnPacketV2");
+    expect(JSON.stringify(payload)).not.toContain("receipt");
+    expect(JSON.stringify(payload)).not.toContain("toolId");
+  });
+
+  it("refuses to run when P57 did not admit an Oracle roll", async () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    let adapterCalls = 0;
+
+    const result = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment: validJudgeUncertainty(frame, gmRead),
+      provider,
+      settlementId: "oracle-not-applicable",
+      adapter: async () => {
+        adapterCalls += 1;
+        return {
+          chance: 50,
+          roll: 50,
+          outcome: "weak_hit",
+          reasoning: "should not happen",
+        };
+      },
+    });
+
+    expect(result.status).toBe("not_applicable");
+    expect(adapterCalls).toBe(0);
+  });
+
+  it("falls back to conservative miss after adapter generation failure without fake chance or roll", async () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+    const result = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-fallback",
+      adapter: async () => {
+        throw new Error("adapter offline");
+      },
+    });
+
+    expect(result.status).toBe("settled_with_fallback");
+    if (result.status !== "settled_with_fallback") throw new Error("expected fallback");
+    expect(result.settlement.adapter.result.status).toBe("fallback");
+    expect(result.settlement.visibleOutcome.outcome).toBe("miss");
+    expect(result.settlement.selectedMeaning.text).toBe(judgment.oracleAdmission?.outcomeMeanings.miss);
+    expect(JSON.stringify(result.settlement.adapter.result)).not.toContain("chance");
+    expect(JSON.stringify(result.settlement.adapter.result)).not.toContain("roll");
+    expect(result.settlement.failure?.hiddenMutationApplied).toBe(false);
+  });
+
+  it("falls back to conservative miss after invalid adapter output", async () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+    const result = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-invalid-output",
+      adapter: async () => ({
+        chance: 0,
+        roll: 101,
+        outcome: "weak_hit",
+        reasoning: "invalid",
+      }),
+    });
+
+    expect(result.status).toBe("settled_with_fallback");
+    if (result.status !== "settled_with_fallback") throw new Error("expected fallback");
+    expect(result.settlement.failure?.kind).toBe("invalid_adapter_output");
+    expect(result.settlement.visibleOutcome.outcome).toBe("miss");
+  });
+
+  it("rejects settlement selected meaning mismatches and forbidden materialization claims", async () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = {
+      ...validOracleJudgeUncertainty(frame, gmRead),
+      oracleAdmission: {
+        ...validOracleJudgeUncertainty(frame, gmRead).oracleAdmission!,
+        outcomeMeanings: {
+          strong_hit: "The player arrives at Guide's hidden room.",
+          weak_hit: "Guide visibly notices something.",
+          miss: "Guide visibly reacts immediately.",
+        },
+      },
+    };
+    const run = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-forbidden-claim",
+      adapter: async () => ({
+        chance: 50,
+        roll: 10,
+        outcome: "strong_hit",
+        reasoning: "valid adapter result",
+      }),
+    });
+
+    expect(run.status).toBe("not_applicable");
+    if (run.status !== "not_applicable") throw new Error("expected rejection");
+    expect(run.issues.some((issue) => issue.code === "forbidden_claim")).toBe(true);
+  });
+
+  it("validates oracle-settlement.v1 schema and selected meaning equality", async () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+    const result = await runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-schema",
+      adapter: async () => ({
+        chance: 50,
+        roll: 10,
+        outcome: "strong_hit",
+        reasoning: "valid adapter result",
+      }),
+    });
+    if (result.status !== "settled") throw new Error("expected settled");
+    const settlement = {
+      ...result.settlement,
+      selectedMeaning: {
+        ...result.settlement.selectedMeaning,
+        text: "wrong meaning",
+      },
+    };
+
+    expect(oracleSettlementSchema.safeParse(result.settlement).success).toBe(true);
+    const validation = validateOracleSettlement({ frame, gmRead, judgment, settlement });
+    expect(validation.status).toBe("rejected");
+    expect(validation.issues.some((issue) => issue.code === "selected_meaning_mismatch")).toBe(true);
+  });
+
+  it("composes Oracle settlement after Judge admission and before frozen projection events", async () => {
+    const order: string[] = [];
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const judgment = validOracleJudgeUncertainty(frame, gmRead);
+    const events = [];
+
+    for await (const event of processCleanGameplayTurnFromInput({
+      turn: validTurnInput(),
+      judgeProvider: provider,
+      buildFrame: async () => {
+        order.push("frame");
+        return frame;
+      },
+      gmReadCandidateGenerator: async () => {
+        order.push("gm-read");
+        return gmRead;
+      },
+      judgeUncertaintyCandidateGenerator: async () => {
+        order.push("judge-uncertainty");
+        return judgment;
+      },
+      oracleAdapter: async () => {
+        order.push("oracle-adapter");
+        return {
+          chance: 65,
+          roll: 10,
+          outcome: "strong_hit",
+          reasoning: "Adapter resolved the admitted visible uncertainty.",
+        };
+      },
+    })) {
+      events.push(event);
+      if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
+        const stage = (event.data as { stage?: unknown }).stage;
+        if (typeof stage === "string") order.push(`${stage}-progress`);
+      }
+      if (event.type === "oracle_result") order.push("oracle_result");
+    }
+
+    expect(order).toEqual([
+      "scene-frame-progress",
+      "frame",
+      "gm-read-progress",
+      "gm-read",
+      "judge-uncertainty-progress",
+      "judge-uncertainty",
+      "oracle-roll-progress",
+      "oracle-adapter",
+      "oracle_result",
+      "oracle-settlement-progress",
+    ]);
+    expect(events.map((event) => event.type)).toEqual([
+      "scene-settling",
+      "scene-settling",
+      "scene-settling",
+      "scene-settling",
+      "oracle_result",
+      "scene-settling",
+      "narrative",
+      "finalizing_turn",
+      "done",
+    ]);
+    const oracleEvent = events.find((event) => event.type === "oracle_result");
+    expect(oracleEvent?.data).toEqual({ outcome: "strong_hit" });
   });
 });

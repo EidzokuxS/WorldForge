@@ -58,7 +58,13 @@ const NORMALIZED_FORBIDDEN_SETTLEMENT_KEYS = new Set(
 const UUID_LIKE_REF = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|packet|receipt|route|scene|turn|world)[_:]/i;
 
-const judgeUncertaintyGenerationSchema = judgeUncertaintySchema.passthrough();
+const judgeUncertaintyGenerationSchema = judgeUncertaintySchema
+  .partial({
+    difficulty: true,
+    oracleAdmission: true,
+    noRollReason: true,
+  })
+  .passthrough();
 
 export interface JudgeUncertaintyValidationIssue {
   code:
@@ -107,6 +113,16 @@ function normalizedKey(key: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeNullableBranchFields(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  return {
+    ...candidate,
+    difficulty: Object.hasOwn(candidate, "difficulty") ? candidate.difficulty : null,
+    oracleAdmission: Object.hasOwn(candidate, "oracleAdmission") ? candidate.oracleAdmission : null,
+    noRollReason: Object.hasOwn(candidate, "noRollReason") ? candidate.noRollReason : null,
+  };
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -600,10 +616,11 @@ export async function runCleanJudgeUncertainty(input: {
     };
   }
 
+  const firstCandidateForValidation = normalizeNullableBranchFields(firstCandidate);
   const firstValidation = validateJudgeUncertaintyCandidate({
     frame: input.frame,
     gmRead: input.gmRead,
-    candidate: firstCandidate,
+    candidate: firstCandidateForValidation,
   });
   if (firstValidation.status === "accepted") {
     return {
@@ -620,18 +637,19 @@ export async function runCleanJudgeUncertainty(input: {
       prompt: buildJudgeUncertaintyRepairPrompt({
         frame: input.frame,
         gmRead: input.gmRead,
-        candidate: firstCandidate,
+        candidate: firstCandidateForValidation,
         issues: firstValidation.issues,
       }),
       repairOf: {
-        candidate: firstCandidate,
+        candidate: firstCandidateForValidation,
         issues: firstValidation.issues,
       },
     });
+    const repairCandidateForValidation = normalizeNullableBranchFields(repairCandidate);
     const repairValidation = validateJudgeUncertaintyCandidate({
       frame: input.frame,
       gmRead: input.gmRead,
-      candidate: repairCandidate,
+      candidate: repairCandidateForValidation,
     });
     if (repairValidation.status === "accepted") {
       return {
