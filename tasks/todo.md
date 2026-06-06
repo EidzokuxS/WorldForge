@@ -1684,3 +1684,13 @@ Session: `gm-v1-consequenc-slice`.
     - `npm --prefix backend run typecheck` passed.
     - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 150 tests.
     - Real clone smoke from played v2 source `p28-gmread-judge-6c5958d2` to `p29-clone-reset-b76ba090`: clone purged `gameplay_cycle_v2_packets`, `turn_clock_ledger`, `authority_traces`; target config/current clock are `0/0/0`; legacy packet/saga/narrator/proposals also 0.
+- P30 post-clone-reset live v2 verification:
+  - Scope: prove that the P29 reset clone can enter `/api/chat/action` through v2 from frozen zero-turn state after the v2 evidence stores were purged/reset.
+  - Starting inspected state: clone `p29-clone-reset-b76ba090`, player `Mira Voss`, current scene `Lowwater Bazaar`, config `currentTick=0`, world clock `world_version=0/world_time_minutes=0/current_tick=0`, and empty `gameplay_cycle_v2_packets`, `turn_clock_ledger`, and `authority_traces`.
+  - Manual action selected from current state: `Я остаюсь в Lowwater Bazaar и спокойно жду ровно 5 минут, ничего не трогая и никуда не двигаясь.`
+  - Live result: HTTP 200; SSE stages reached `scene-frame`, `gm-read`, `gm-judge`, `action-checklist`, `tool-execution`, `narrator`, `narrative`, `finalizing_turn`, and `done`; `done.runtime=gameplay-cycle-v2`, `done.tick=5`, `worldVersion=1`, `worldTimeMinutes=5`, packet `v2packet-mq1lgzp2-f6777de49a82`.
+  - DB result: `gameplay_cycle_v2_packets=1`, `turn_clock_ledger=1`, `authority_traces=1`, legacy `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, `simulation_proposals=0`, chat history length `2`.
+  - Packet/receipt result: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["time_advance"]`; one accepted `time.advance.v2` receipt with `mutationAuthority=world`, `mutationApplied=true`, `visibleSummary="5 minutes pass in Lowwater Bazaar."`; failed/skipped receipts empty.
+  - Player-facing narration: `Пять минут проходят в Lowwater Bazaar без каких-либо заметных событий. Вы остаётесь на месте, ничего не трогая.` This is grounded by the accepted time receipt and does not claim movement, discovery, absence, item state, NPC knowledge, or offscreen events.
+  - Artifacts: `output/p30-post-clone-reset-live/turn1-wait5.sse.txt`, `turn1-wait5.events.json`, `turn1-wait5.db.json`.
+  - Backend cleanup: stable backend started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped; ports `3001` and `3101` clear afterward.
