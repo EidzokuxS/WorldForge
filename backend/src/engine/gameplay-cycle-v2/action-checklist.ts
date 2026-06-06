@@ -319,6 +319,21 @@ function expectedVisibleEffectForSimpleEffect(input: {
   }
 }
 
+function simpleEffectSortRank(kind: GmActionChecklistEffectKindV2): number {
+  switch (kind) {
+    case "route_check":
+      return 10;
+    case "movement":
+      return 20;
+    case "dialogue_outcome":
+      return 10;
+    case "world_fact":
+      return 20;
+    default:
+      return 15;
+  }
+}
+
 export function compileSimpleGmActionChecklistV2(input: {
   packet: ModelFacingTurnPacketV2;
   gmRead: GmReadChecklistV2;
@@ -326,26 +341,40 @@ export function compileSimpleGmActionChecklistV2(input: {
 }): ActionChecklistValidationResultV2 | null {
   const admission = input.gmJudge.checklistAdmission;
   const requestedKinds = admission.requiredEffectKinds;
-  if (requestedKinds.length !== 1) return null;
-  const kind = requestedKinds[0];
-  if (!BACKEND_COMPILED_SIMPLE_EFFECTS.has(kind)) return null;
+  if (requestedKinds.length < 1) return null;
+  if (!requestedKinds.every((kind) => BACKEND_COMPILED_SIMPLE_EFFECTS.has(kind))) return null;
 
   const actorRef = admission.actorRefs[0];
   const targetRefs = uniqueStrings(admission.targetRefs);
   const evidenceRefs = uniqueStrings(admission.evidenceRefs);
-  const requiredCapabilityId = capabilityForEffectKindV2(kind) as RuntimeCapabilityIdV2;
+  const orderedKinds = requestedKinds
+    .map((kind, index) => ({ kind, index }))
+    .sort((left, right) =>
+      simpleEffectSortRank(left.kind) - simpleEffectSortRank(right.kind) || left.index - right.index)
+    .map((entry) => entry.kind);
+  const routeCheckStepIndex = orderedKinds.findIndex((kind) => kind === "route_check");
+  const dialogueStepIndex = orderedKinds.findIndex((kind) => kind === "dialogue_outcome");
   const candidate: GmActionChecklistV2 = {
     version: "gm-action-checklist.v2",
-    checklistId: `chk-${input.packet.turnId}-${kind}`,
+    checklistId: `chk-${input.packet.turnId}-${orderedKinds.join("-")}`,
     campaignId: input.packet.campaignId,
     turnId: input.packet.turnId,
     baseWorldVersion: input.packet.baseWorldVersion,
     sourceGmReadPath: input.gmRead.path,
     turnPath: admission.turnPath,
     turnIntent: input.gmRead.actionInterpretation.intent,
-    steps: [
-      {
-        stepId: "step-1",
+    steps: orderedKinds.map((kind, index) => {
+      const stepId = `step-${index + 1}` as `step-${number}`;
+      const requiredCapabilityId = capabilityForEffectKindV2(kind) as RuntimeCapabilityIdV2;
+      const dependsOnStepIds: Array<`step-${number}`> = [];
+      if (kind === "world_fact" && dialogueStepIndex >= 0 && dialogueStepIndex < index) {
+        dependsOnStepIds.push(`step-${dialogueStepIndex + 1}` as `step-${number}`);
+      }
+      if (kind === "movement" && routeCheckStepIndex >= 0 && routeCheckStepIndex < index) {
+        dependsOnStepIds.push(`step-${routeCheckStepIndex + 1}` as `step-${number}`);
+      }
+      return {
+        stepId,
         purpose: purposeForSimpleEffect({ kind, gmRead: input.gmRead, admission }),
         actorRef,
         targetRefs,
@@ -357,9 +386,9 @@ export function compileSimpleGmActionChecklistV2(input: {
           stateScope: stateScopeForSimpleEffect(kind),
         },
         expectedVisibleEffect: expectedVisibleEffectForSimpleEffect({ kind, targetRefs }),
-        dependsOnStepIds: [],
-      },
-    ],
+        dependsOnStepIds,
+      };
+    }),
   };
 
   return validateGmActionChecklistV2({

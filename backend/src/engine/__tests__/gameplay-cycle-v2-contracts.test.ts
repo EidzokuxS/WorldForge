@@ -1952,10 +1952,76 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("effectBinding");
   });
 
-  it("leaves multi-effect GM Reads outside the simple backend checklist compiler", () => {
+  it("compiles multi-effect route and movement admissions in executable dependency order", () => {
     const { packet, gmRead } = movementToolPlanFixture();
 
-    expect(compileSimpleGmActionChecklistV2({ packet, gmRead })).toBeNull();
+    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Multi-effect movement checklist must compile.");
+    }
+    expect(compiled.checklist.steps).toMatchObject([
+      {
+        stepId: "step-1",
+        requiredCapabilityId: "route_check",
+        intendedEffect: {
+          kind: "route_check",
+          stateScope: "location",
+        },
+        dependsOnStepIds: [],
+      },
+      {
+        stepId: "step-2",
+        requiredCapabilityId: "movement",
+        intendedEffect: {
+          kind: "movement",
+          stateScope: "actor",
+        },
+        dependsOnStepIds: ["step-1"],
+      },
+    ]);
+    const publicShape = JSON.stringify(compiled.checklist);
+    expect(publicShape).not.toContain("route.check.v2");
+    expect(publicShape).not.toContain("actor.move.v2");
+    expect(publicShape).not.toContain("effectBinding");
+  });
+
+  it("compiles dialogue then player-known world fact admissions without invoking checklist payload planning", () => {
+    const { packet, gmRead } = dialogueToWorldFactToolPlanFixture();
+
+    const compiled = compileSimpleGmActionChecklistV2({ packet, gmRead });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Dialogue-to-world-fact checklist must compile.");
+    }
+    expect(compiled.checklist.steps).toMatchObject([
+      {
+        stepId: "step-1",
+        actorRef: "Player",
+        requiredCapabilityId: "dialogue_record",
+        intendedEffect: {
+          kind: "dialogue_outcome",
+          stateScope: "local_scene",
+        },
+        dependsOnStepIds: [],
+      },
+      {
+        stepId: "step-2",
+        actorRef: "Player",
+        requiredCapabilityId: "world_fact_record",
+        intendedEffect: {
+          kind: "world_fact",
+          stateScope: "knowledge",
+        },
+        dependsOnStepIds: ["step-1"],
+      },
+    ]);
+    const publicShape = JSON.stringify(compiled.checklist);
+    expect(publicShape).not.toContain("dialogue.record.v2");
+    expect(publicShape).not.toContain("world_fact.record.v2");
+    expect(publicShape).not.toContain("effectBinding");
   });
 
   it("accepts a SceneFrame envelope only when frame and attempt authority match", () => {
