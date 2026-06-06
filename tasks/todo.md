@@ -1720,4 +1720,19 @@ Session: `gm-v1-consequenc-slice`.
   - Live diagnostic setup:
     - Fresh zero-turn clone `p32-v2-clean-burnin-75c13461` was created from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
     - Preflight proved empty `gameplay_cycle_v2_packets`, `turn_clock_ledger`, `authority_traces`, legacy packet/saga/narrator/proposal stores, chat length 0, clock `0/0/0`, and player `Mira Voss` at `Lowwater Bazaar`.
-    - Next step is one-action-at-a-time P32 diagnostic burn-in from this clone after inspecting the actual current SceneFrame. This does not count toward final acceptance.
+  - Live diagnostic evidence:
+    - Turn 1 was selected after inspecting actual SceneFrame: `Lowwater Bazaar` with visible connected route `The Copper Tap`.
+    - Turn 1 action: `Я иду из Lowwater Bazaar в The Copper Tap, выбирая этот видимый маршрут и не делая ничего другого.`
+    - Turn 1 reached v2 `done`, `tick=1`, `worldVersion=1`, `worldTimeMinutes=1`, packet `v2packet-mq1mxume-b7580ff13a0d`.
+    - Turn 1 DB: `gameplay_cycle_v2_packets=1`, `turn_clock_ledger=1`, `authority_traces=1`, legacy packet/saga/narrator/proposal rows 0.
+    - Turn 1 receipts: accepted `actor.move.v2` movement receipt, plus accepted local-consequence `scene_beat.record.v2` receipts for visible `Old Route Hand Sessik` and `Tap-Keeper Brost` in `The Copper Tap`. Player row current scene became `The Copper Tap`.
+    - Turn 1 player-facing narration stayed grounded to the accepted movement and visible-actor receipts.
+    - Turn 2 was selected after inspecting post-turn SceneFrame: current scene `The Copper Tap`, visible `Old Route Hand Sessik` and `Tap-Keeper Brost`, routes to `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`.
+    - Turn 2 action: `Я обращаюсь к Old Route Hand Sessik и спрашиваю, какой путь через Silt Warrens сейчас безопаснее для ночного курьера. Я остаюсь в The Copper Tap.`
+    - Turn 2 reached v2 `done`, `tick=2`, `worldVersion=1`, `worldTimeMinutes=1`, packet `v2packet-mq1n1k0i-21de0cf62ba1`.
+    - Turn 2 DB: `gameplay_cycle_v2_packets=2`, `turn_clock_ledger=1`, `authority_traces=1`, legacy packet/saga/narrator/proposal rows 0, player still in `The Copper Tap`.
+    - Turn 2 receipts: accepted single `dialogue.record.v2` receipt, no mutation and no failed/skipped receipts.
+    - Observed prose debt: the accepted dialogue quote/player-facing quote was partly English despite Russian player action. This is not a P32 checklist/admission contract failure because settled truth stayed receipt-grounded, but it remains language-quality debt for later narration/tool-prose hardening.
+    - Artifacts: `output/p32-v2-clean-burnin/turn1-scene-frame.json`, `turn1-move-copper-tap.*`, `turn2-scene-frame.json`, `turn2-ask-sessik-silt-route.*`.
+    - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
+    - This P32 lane is diagnostic burn-in only and does not count toward final 60-turn acceptance.
