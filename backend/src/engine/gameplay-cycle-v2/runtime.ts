@@ -29,7 +29,6 @@ import {
   assertSceneFrameEnvelopeV2,
   assertTurnAttemptContextV2,
   assertTurnStartEnvelopeV2,
-  gameplayToolRequestV2Schema,
   gmJudgeV2Schema,
   gmActionChecklistV2Schema,
   gmReadCandidateV2LooseSchema,
@@ -401,6 +400,15 @@ function actionChecklistGenerationSchemaFor(gmJudge: GmJudgeChecklistV2) {
   }) satisfies z.ZodType<unknown>;
 }
 
+const gameplayToolRequestCandidateGenerationSchemaV2 = z.object({
+  version: z.literal("gameplay-tool-request.v2"),
+  requestId: z.string().trim().min(1),
+  stepId: z.string().trim().min(1),
+  capabilityId: z.string().trim().min(1),
+  toolId: z.string().trim().min(1),
+  effectBinding: z.record(z.string(), z.unknown()),
+}).strict();
+
 function buildToolRequestSystemPrompt(): string {
   return [
     "You are the WorldForge gameplay-tool-request.v2 planner.",
@@ -514,6 +522,16 @@ function runtimeContractError(message: string): Error {
   return new Error(`gameplay-cycle-v2 pre-settlement contract failed: ${message}`);
 }
 
+function requiredStepFailureSummary(receipts: GameplayRuntimeReceiptLedgerV2["receipts"]): string {
+  return receipts
+    .filter((receipt) => receipt.status !== "accepted")
+    .map((receipt) =>
+      `${receipt.stepId}:${receipt.status}:${receipt.toolId ?? receipt.capabilityId ?? "unknown"}:${
+        receipt.failureReason ?? receipt.visibleSummary
+      }`)
+    .join("; ");
+}
+
 async function generateActionChecklistCandidateV2(input: {
   options: TurnOptions;
   packet: ModelFacingTurnPacketV2;
@@ -579,7 +597,7 @@ async function generateToolRequestCandidateV2(input: {
 
   return (await safeGenerateObject({
     model: createModel(input.options.judgeProvider, { role: "judge" }),
-    schema: gameplayToolRequestV2Schema,
+    schema: gameplayToolRequestCandidateGenerationSchemaV2,
     system: buildToolRequestSystemPrompt(),
     prompt: buildToolRequestPrompt({
       packet: input.packet,
@@ -991,8 +1009,11 @@ export async function* processGameplayTurnCycleV2(
       composition.settledPacket.stepAudit.failedCount > 0
       || composition.settledPacket.stepAudit.skippedCount > 0
     ) {
+      const failureSummary = requiredStepFailureSummary(composition.ledger.receipts);
       throw runtimeContractError(
-        "Tool-plan composition produced failed or skipped required steps before packet persistence.",
+        `Tool-plan composition produced failed or skipped required steps before packet persistence.${
+          failureSummary ? ` ${failureSummary}` : ""
+        }`,
       );
     }
     settledPacket = composition.settledPacket;

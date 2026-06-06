@@ -178,6 +178,30 @@ P38 continuation / support-actor Oracle ownership checkpoint:
   - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
 - Status: diagnostic slice fixed and live-proven on P39. This adds 0% final acceptance until the multi-campaign ~60-turn clean lanes run.
 
+P40/P42 dialogue receipt evidence ownership checkpoint:
+- Failure discovered after P39:
+  - Continuing P39 to ask the newly created guide for a route answer failed before settlement because Stage 4 generated `dialogue.record.v2` without `effectBinding.evidenceRefs`; the final strict tool schema rejected it before backend-owned validation could bind checklist evidence. P39 is diagnostic-invalid from turn 2.
+  - P40 replay with the relaxed generation schema proved the missing-field issue was fixed, but an earlier failed/restored turn made the lane invalid for clean evidence.
+  - Fresh P41 reproduced the next root cause: `dialogue.record.v2` handler returned an over-wide receipt evidence array (`speaker + addressees + request.evidenceRefs`) and executor rejected the handler outcome with `Too big: expected array to have <=12 items`. P41 is diagnostic-invalid from turn 2.
+- Boundary decision:
+  - Model may author dialogue content (`summary`, `quotedSpeech`, outcome kind, speaker/addressee refs), but audit evidence refs are backend-owned from the selected checklist step.
+  - DB-backed handlers own canonical receipt evidence refs; they must dedupe and cap receipt evidence before executor outcome validation, instead of returning raw concatenated refs that can violate the receipt schema.
+- Implementation:
+  - Added a relaxed Stage 4 generation schema for tool-request candidates, then final validation fills missing `effectBinding.evidenceRefs` from the selected checklist step before applying the strict `gameplayToolRequestV2Schema`.
+  - Added failed/skipped receipt summaries to the pre-settlement runtime contract error so live diagnostics expose the exact failed tool/step reason before route restore.
+  - Added `receiptEvidenceRefs()` in DB-backed gameplay handlers and applied it to handler outcome evidence refs, including `dialogue.record.v2`.
+- Verification:
+  - GitNexus impact before edits: `validateGameplayToolRequestV2`, `generateToolRequestCandidateV2`, `composeGameplayCycleMutatingTurnV2`, `executeGameplayToolRequestV2`, and `dialogueRecordHandler` were LOW risk.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 171 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Fresh zero-turn clone `p42-guide-dialogue-clean-proof` preflight: chat/runtime/legacy rows all 0, clock `0/0/0`, scene `Lowwater Bazaar`.
+  - Turn 1 real `/api/chat/action` called an ordinary unnamed current-scene guide; accepted `support_actor.create.v2`, created visible actor `Local guide`, persisted one v2 packet and one authority trace, legacy rows stayed 0.
+  - Turn 2 was chosen after inspecting post-turn state: asked `Local guide` for the safer visible path without moving.
+  - Turn 2 result: HTTP 200, v2 `done`, packet `v2packet-mq1tlb4u-c942452b13bc`, accepted `dialogue.record.v2`, `mutationAuthority="none"`, `mutationApplied=false`, `evidenceAuthority="terminal_receipt"`, canonical evidence refs `["Local guide","Player","Lowwater Bazaar"]`, failed/skipped counts 0, current scene stayed `Lowwater Bazaar`, legacy packet/saga/narrator/proposal rows stayed 0.
+  - Artifacts: `output/p39-support-actor-admission/*`, `output/p40-dialogue-backend-evidence/*`, `output/p41-dialogue-clean-proof/*`, and `output/p42-dialogue-clean-proof/*`.
+- Status: diagnostic slice fixed and live-proven on P42. This adds 0% final acceptance until the multi-campaign ~60-turn clean lanes run.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.

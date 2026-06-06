@@ -171,6 +171,22 @@ function stepRefs(step: GmActionChecklistStepV2): string[] {
   ];
 }
 
+function withBackendOwnedEvidenceRefs(input: {
+  candidate: unknown;
+  step: GmActionChecklistStepV2 | null;
+}): unknown {
+  if (!input.step || !isRecord(input.candidate)) return input.candidate;
+  const effectBinding = input.candidate.effectBinding;
+  if (!isRecord(effectBinding) || "evidenceRefs" in effectBinding) return input.candidate;
+  return {
+    ...input.candidate,
+    effectBinding: {
+      ...effectBinding,
+      evidenceRefs: uniqueStrings(stepRefs(input.step)),
+    },
+  };
+}
+
 export interface ToolRequestPlannerIssueV2 {
   code:
     | "capability_mismatch"
@@ -271,9 +287,13 @@ export function validateGameplayToolRequestV2(input: {
     message: "Tool request must use clean gameplay-cycle-v2 tool ids, not old runtime tool names.",
   })));
 
-  const parsed = gameplayToolRequestV2Schema.safeParse(input.candidate);
   const step = input.checklist.steps.find((candidateStep) =>
     candidateStep.stepId === input.stepId);
+  const normalizedCandidate = withBackendOwnedEvidenceRefs({
+    candidate: input.candidate,
+    step: step ?? null,
+  });
+  const parsed = gameplayToolRequestV2Schema.safeParse(normalizedCandidate);
 
   if (
     isRecord(input.candidate)

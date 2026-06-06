@@ -5335,6 +5335,44 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     )).toBe(true);
   });
 
+  it("fills missing tool request evidenceRefs from the selected checklist step", () => {
+    const { packet, checklist } = dialogueToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-dialogue-backend-evidence",
+        stepId: "step-1",
+        capabilityId: "dialogue_record",
+        toolId: "dialogue.record.v2",
+        effectBinding: {
+          speakerRef: "Clerk Mara",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answer",
+          summary: "Clerk Mara gives the desk procedure.",
+          quotedSpeech: "Keep the ledger here until I stamp it.",
+          languageBasis: {
+            responseLanguage: "match_player_action",
+            sourceField: "playerAction",
+          },
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error(`Expected accepted tool request, got ${JSON.stringify(result.issues)}`);
+    }
+    expect(result.request.effectBinding.evidenceRefs).toEqual([
+      "Clerk Mara",
+      "Player",
+      "Atrium",
+    ]);
+  });
+
   it("rejects old runtime tool request surfaces and executable payload fields", () => {
     const { packet, checklist } = movementToolPlanFixture();
 
@@ -8836,6 +8874,61 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       expect(clock?.worldVersion).toBe(7);
       expect(getDb().select().from(locationRecentEvents).all()).toHaveLength(0);
       expect(getDb().select().from(authorityTraces).all()).toHaveLength(0);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("canonicalizes dialogue receipt evidence refs before handler outcome validation", async () => {
+    const fixture = dbTempFixture("wf-v2-db-dialogue-evidence-");
+    try {
+      seedP16World();
+      const { packet, checklist } = dialogueToolPlanFixture();
+      const execution = await executeGameplayToolRequestV2({
+        packet,
+        checklist,
+        stepId: "step-1",
+        request: {
+          version: "gameplay-tool-request.v2",
+          requestId: "dialogue-db-overwide-evidence",
+          stepId: "step-1",
+          capabilityId: "dialogue_record",
+          toolId: "dialogue.record.v2",
+          effectBinding: {
+            speakerRef: "Clerk Mara",
+            addresseeRefs: ["Player"],
+            outcomeKind: "answer",
+            summary: "Clerk Mara says the ledger must stay on the desk.",
+            quotedSpeech: "Keep the ledger here until I stamp it.",
+            languageBasis: {
+              responseLanguage: "match_player_action",
+              sourceField: "playerAction",
+            },
+            evidenceRefs: [
+              "Clerk Mara",
+              "Player",
+              "Atrium",
+              "Clerk Mara",
+              "Player",
+              "Atrium",
+              "Clerk Mara",
+              "Player",
+              "Atrium",
+              "Clerk Mara",
+              "Player",
+              "Atrium",
+            ],
+          },
+        },
+        handlers: createDbBackedGameplayToolHandlersV2(),
+        refRegistry: registryForPacket(),
+        receiptId: "receipt-dialogue-db-overwide-evidence",
+        emittedAt: 26,
+      });
+
+      expect(execution.status).toBe("accepted");
+      expect(execution.receipt.evidenceRefs).toEqual(["Clerk Mara", "Player", "Atrium"]);
+      expect(execution.receipt.evidenceRefs.length).toBeLessThanOrEqual(12);
     } finally {
       fixture.cleanup();
     }

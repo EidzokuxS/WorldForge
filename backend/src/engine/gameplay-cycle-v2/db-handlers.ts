@@ -549,6 +549,12 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])];
 }
 
+const RECEIPT_EVIDENCE_REF_LIMIT = 12;
+
+function receiptEvidenceRefs(values: Array<string | null | undefined>): string[] {
+  return uniqueStrings(values).slice(0, RECEIPT_EVIDENCE_REF_LIMIT);
+}
+
 function uniqueConditionLabels(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -2749,11 +2755,11 @@ function routeCheckHandler(
       mutationAuthority: "none",
       resultWorldVersion: packet.baseWorldVersion,
       visibleSummary: `${destination.label} is not an exposed legal route from ${actor.label}'s current position. Available routes: ${reachable.join(", ") || "none"}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.actorRef,
         request.effectBinding.destinationRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   }
@@ -2764,11 +2770,11 @@ function routeCheckHandler(
     mutationAuthority: "none",
     resultWorldVersion: packet.baseWorldVersion,
     visibleSummary: `${destination.label} is an exposed legal route for ${actor.label}; route path: ${pathNames(packet.campaignId, path.locationIds).join(" -> ")}.`,
-    evidenceRefs: [
+    evidenceRefs: receiptEvidenceRefs([
       request.effectBinding.actorRef,
       request.effectBinding.destinationRef,
       ...request.effectBinding.evidenceRefs,
-    ],
+    ]),
     durableEventIds: [],
   };
 }
@@ -2825,11 +2831,11 @@ function actorMoveHandler(
       mutationAuthority: "actor",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${actor.label} moves to ${destination.label}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.actorRef,
         request.effectBinding.destinationRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -2887,7 +2893,7 @@ function timeAdvanceHandler(
       mutationAuthority: "world",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${commit.elapsedWorldTimeMinutes} minutes pass in ${anchor.label}.`,
-      evidenceRefs: uniqueStrings([
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.actorRef,
         request.effectBinding.anchorRef,
         ...request.effectBinding.evidenceRefs,
@@ -2920,10 +2926,10 @@ function sceneBeatHandler(
     mutationAuthority: "none",
     resultWorldVersion: packet.baseWorldVersion,
     visibleSummary: request.effectBinding.summary,
-    evidenceRefs: [
+    evidenceRefs: receiptEvidenceRefs([
       request.effectBinding.actorRef,
       ...request.effectBinding.evidenceRefs,
-    ],
+    ]),
     durableEventIds: [],
   };
 }
@@ -2963,11 +2969,11 @@ function dialogueRecordHandler(
     mutationAuthority: "none",
     resultWorldVersion: packet.baseWorldVersion,
     visibleSummary: `${speaker.entry.label} dialogue outcome (${request.effectBinding.outcomeKind}): ${request.effectBinding.summary}${quotedSpeech}`,
-    evidenceRefs: [
+    evidenceRefs: receiptEvidenceRefs([
       request.effectBinding.speakerRef,
       ...request.effectBinding.addresseeRefs,
       ...request.effectBinding.evidenceRefs,
-    ],
+    ]),
     durableEventIds: [],
   };
 }
@@ -3018,10 +3024,10 @@ function supportActorCreateHandler(
       mutationAuthority: "actor",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${displayName} appears as a temporary ${request.effectBinding.roleLabel} in ${anchor.label}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.anchorRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -3069,10 +3075,10 @@ function minorPoiCreateHandler(
       mutationAuthority: "local_scene",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${poiLabel} is now a visible minor point of interest in ${anchor.label}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.anchorRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -3128,10 +3134,10 @@ function locationRevealHandler(
       mutationAuthority: "local_scene",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${locationLabel} is now a visible current-scene place handle in ${anchor.label}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.anchorRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -3175,10 +3181,10 @@ function entityTagHandler(
       mutationAuthority: target.mutationAuthority,
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${target.label} ${verb} tag ${tag}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.entityRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -3216,12 +3222,12 @@ function itemTransferHandler(
       mutationAuthority: "item",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `${transfer.itemLabel} moves to ${transfer.targetLabel}.`,
-      evidenceRefs: [
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.itemRef,
         request.effectBinding.sourceRef,
         request.effectBinding.targetRef,
         ...request.effectBinding.evidenceRefs,
-      ],
+      ]),
       durableEventIds: [],
     };
   } catch (error) {
@@ -3270,7 +3276,7 @@ function worldFactRecordHandler(
       mutationAuthority: "knowledge",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: `Player-known knowledge recorded from ${request.effectBinding.source.sourceKind}: ${request.effectBinding.summary}`,
-      evidenceRefs: uniqueStrings([
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.knowledgeOwnerRef,
         ...request.effectBinding.subjectRefs,
         ...request.effectBinding.evidenceRefs,
@@ -3332,7 +3338,7 @@ function actorConditionSetHandler(
       mutationAuthority: "actor",
       resultWorldVersion: commit.resultWorldVersion,
       visibleSummary: commit.visibleSummary,
-      evidenceRefs: uniqueStrings([
+      evidenceRefs: receiptEvidenceRefs([
         request.effectBinding.actorRef,
         ...request.effectBinding.evidenceRefs,
       ]),
