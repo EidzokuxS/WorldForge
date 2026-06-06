@@ -2384,3 +2384,18 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/clean-runtime-p58-oracle-live-after-fix-r2/*`.
   - Known next-layer blocker:
     - Clean runtime currently returns player-facing SSE but does not append chat history in this slice (`historyLength` remained 0). Treat this as the next clean persistence/settled API response primitive, not as P58 Oracle settlement authority.
+
+- P59 clean gameplay runtime Primitive 5 Settled API Response / Turn Persistence:
+  - Status:
+    - [ ] Prepare one Oracle/GPT context bundle with canonical architecture, P55-P58 clean runtime, current `/api/chat/action` adapter, chat history persistence, and live P58 `historyLength=0` evidence.
+    - [ ] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [ ] Implement only the clean settled response / persistence boundary after Oracle review.
+    - [ ] Add focused contract tests for player-facing exit state, persisted chat messages, idempotency/snapshot cleanup, and no old v2/saga packet leakage.
+    - [ ] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone: response SSE reaches done, player-facing narration is persisted, next-turn entrypoint sees the frozen prior turn, old runtime tables remain untouched, backend stopped.
+  - Primitive boundary draft:
+    - Owner: clean runtime response/persistence adapter at the `/api/chat/action` boundary, not old `turn_sagas`, old `settled_turn_packets`, old v2 packet persistence, or old narrator attempts.
+    - Inputs: accepted clean runtime terminal projection plus any accepted clean evidence packet produced by prior primitives (`SceneFrame`, GM Read, Judge/Uncertainty, optional Oracle Settlement).
+    - Output: player-facing frozen turn record sufficient for the next player input: user action, assistant narration, runtime ids, frame/settlement ids, mutation flag, and settled status.
+    - Mutation authority: none for P59 except chat/turn-response persistence owned by the API adapter.
+    - Evidence authority: persistence of already-settled clean truth only; P59 cannot create new world facts, infer missing state, replay failed turns, or restore over clean success.
+    - Open Oracle decision: whether P59 should introduce a new clean packet store now, or append only existing chat history plus a minimal clean runtime metadata record until later tool/mutation receipts exist.
