@@ -890,6 +890,10 @@ const dialogueRecordRequestV2Schema = z.object({
     outcomeKind: z.enum(["answer", "refusal", "warning", "redirect", "silence", "other"]),
     summary: z.string().trim().min(1).max(700),
     quotedSpeech: optionalNonEmptyString(700),
+    languageBasis: z.object({
+      responseLanguage: z.literal("match_player_action"),
+      sourceField: z.literal("playerAction"),
+    }).strict(),
     evidenceRefs: toolEvidenceRefsSchema,
   }).strict(),
 }).strict().superRefine((request, ctx) => {

@@ -729,7 +729,7 @@ function dialogueToolPlanFixture() {
     refs: {
       visibleRefs: ["Atrium", "Player", "Clerk Mara"],
       privateGuardTerms: [],
-      allowedCapabilityIds: ["observe_visible", "dialogue_record"],
+      allowedCapabilityIds: ["observe_visible", "dialogue_record", "scene_beat_record", "time_advance"],
     },
   }));
   const readResult = validateGmReadChecklistV2({
@@ -2052,6 +2052,99 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     const publicShape = JSON.stringify(compiled.checklist);
     expect(publicShape).not.toContain("dialogue.record.v2");
     expect(publicShape).not.toContain("world_fact.record.v2");
+    expect(publicShape).not.toContain("effectBinding");
+  });
+
+  it("compiles dialogue plus local scene-beat admissions as a terminal non-mutating graph", () => {
+    const { packet, gmRead } = dialogueToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+    const dialogueThenBeatJudge: GmJudgeChecklistV2 = {
+      ...judge,
+      checklistAdmission: {
+        ...judge.checklistAdmission,
+        requiredEffectKinds: ["dialogue_outcome", "scene_beat"],
+        actorRefs: ["Player", "Clerk Mara"],
+        targetRefs: ["Player", "Clerk Mara"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        checklistGoal: "Record the visible reply and the player's local non-moving scene beat.",
+      },
+    };
+
+    const compiled = compileSimpleGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: dialogueThenBeatJudge,
+    });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Dialogue plus scene-beat checklist must compile.");
+    }
+    expect(compiled.checklist.steps).toMatchObject([
+      {
+        stepId: "step-1",
+        requiredCapabilityId: "dialogue_record",
+        intendedEffect: {
+          kind: "dialogue_outcome",
+          stateScope: "local_scene",
+        },
+        dependsOnStepIds: [],
+      },
+      {
+        stepId: "step-2",
+        requiredCapabilityId: "scene_beat_record",
+        intendedEffect: {
+          kind: "scene_beat",
+          stateScope: "local_scene",
+        },
+        dependsOnStepIds: [],
+      },
+    ]);
+    const publicShape = JSON.stringify(compiled.checklist);
+    expect(publicShape).not.toContain("dialogue.record.v2");
+    expect(publicShape).not.toContain("scene_beat.record.v2");
+    expect(publicShape).not.toContain("effectBinding");
+  });
+
+  it("compiles dialogue plus local stay and elapsed-time admissions without free-form checklist planning", () => {
+    const { packet, gmRead } = dialogueToolPlanFixture();
+    const judge = checklistJudgeFor({ gmRead });
+    const dialogueStayWaitJudge: GmJudgeChecklistV2 = {
+      ...judge,
+      checklistAdmission: {
+        ...judge.checklistAdmission,
+        turnPath: "mutating",
+        requiredEffectKinds: ["dialogue_outcome", "scene_beat", "time_advance"],
+        actorRefs: ["Player", "Clerk Mara"],
+        targetRefs: ["Player", "Clerk Mara", "Atrium"],
+        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        checklistGoal: "Record the visible reply, the player's local stay, and explicit elapsed time.",
+      },
+    };
+
+    const compiled = compileSimpleGmActionChecklistV2({
+      packet,
+      gmRead,
+      gmJudge: dialogueStayWaitJudge,
+    });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Dialogue plus local stay/time checklist must compile.");
+    }
+    expect(compiled.checklist.steps.map((step) => ({
+      stepId: step.stepId,
+      capability: step.requiredCapabilityId,
+      effectKind: step.intendedEffect.kind,
+    }))).toEqual([
+      { stepId: "step-1", capability: "dialogue_record", effectKind: "dialogue_outcome" },
+      { stepId: "step-2", capability: "scene_beat_record", effectKind: "scene_beat" },
+      { stepId: "step-3", capability: "time_advance", effectKind: "time_advance" },
+    ]);
+    const publicShape = JSON.stringify(compiled.checklist);
+    expect(publicShape).not.toContain("dialogue.record.v2");
+    expect(publicShape).not.toContain("scene_beat.record.v2");
+    expect(publicShape).not.toContain("time.advance.v2");
     expect(publicShape).not.toContain("effectBinding");
   });
 
@@ -4179,6 +4272,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
           outcomeKind: "answer",
           summary: "Clerk Mara says the ledger must stay on the desk.",
           quotedSpeech: "Keep the ledger here until I stamp it.",
+          languageBasis: {
+            responseLanguage: "match_player_action",
+            sourceField: "playerAction",
+          },
           evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
         },
       },
@@ -4189,6 +4286,13 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
       throw new Error("Dialogue tool request fixture must be accepted.");
     }
     expect(result.request.toolId).toBe("dialogue.record.v2");
+    if (result.request.toolId !== "dialogue.record.v2") {
+      throw new Error("Dialogue tool request fixture must narrow to dialogue.record.v2.");
+    }
+    expect(result.request.effectBinding.languageBasis).toEqual({
+      responseLanguage: "match_player_action",
+      sourceField: "playerAction",
+    });
     expect(JSON.stringify(result.request)).not.toContain("record_dialogue_outcome");
     expect(JSON.stringify(result.request)).not.toContain("stateEffects");
     expect(JSON.stringify(result.request)).not.toContain("worldFact");
@@ -4843,6 +4947,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
           addresseeRefs: ["Player"],
           outcomeKind: "answer",
           summary: "Clerk Mara gives an answer, but the content is not recorded.",
+          languageBasis: {
+            responseLanguage: "match_player_action",
+            sourceField: "playerAction",
+          },
           evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
         },
       },
@@ -4852,6 +4960,37 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(result.issues.some((issue) =>
       issue.path === "effectBinding.quotedSpeech"
       && issue.message.includes("Non-silence dialogue outcomes require quotedSpeech")
+    )).toBe(true);
+  });
+
+  it("rejects dialogue tool requests without player-action language basis", () => {
+    const { packet, checklist } = dialogueToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-dialogue-no-language",
+        stepId: "step-1",
+        capabilityId: "dialogue_record",
+        toolId: "dialogue.record.v2",
+        effectBinding: {
+          speakerRef: "Clerk Mara",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answer",
+          summary: "Clerk Mara gives an answer.",
+          quotedSpeech: "Keep the ledger here until I stamp it.",
+          evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "schema_invalid"
+      && issue.path.includes("languageBasis")
     )).toBe(true);
   });
 
@@ -4918,6 +5057,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
           outcomeKind: "other",
           summary: "Wrong tool for a movement step.",
           quotedSpeech: "This is the wrong tool for the selected step.",
+          languageBasis: {
+            responseLanguage: "match_player_action",
+            sourceField: "playerAction",
+          },
           evidenceRefs: ["Player", "Atrium", "North Hall"],
         },
       },
@@ -8184,6 +8327,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
             outcomeKind: "answer",
             summary: "Clerk Mara says the ledger must stay on the desk.",
             quotedSpeech: "Keep the ledger here until I stamp it.",
+            languageBasis: {
+              responseLanguage: "match_player_action",
+              sourceField: "playerAction",
+            },
             evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
           },
         },
@@ -8286,6 +8433,10 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
             outcomeKind: "answer",
             summary: "Clerk Mara says the ledger must stay on the desk.",
             quotedSpeech: "Keep the ledger here until I stamp it.",
+            languageBasis: {
+              responseLanguage: "match_player_action",
+              sourceField: "playerAction",
+            },
             evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
           },
         },
@@ -10700,6 +10851,8 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("localConsequenceCandidateProvider");
     expect(source).toContain("failed or skipped required steps before packet persistence");
     expect(source).toContain("markGameplayCycleV2PacketNarratorFailedPendingRetry");
+    expect(source).toContain("languageBasis to { responseLanguage: \\\"match_player_action\\\", sourceField: \\\"playerAction\\\" }");
+    expect(source).toContain("packet.playerAction");
   });
 
   it("keeps the v2 tool request planner free of old gameplay tool ownership imports", () => {

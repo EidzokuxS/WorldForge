@@ -403,7 +403,11 @@ function supportedSimpleEffectGraph(inputKinds: readonly GmActionChecklistEffect
   if (kinds.length !== inputKinds.length) return false;
   if (kinds.length === 1) return true;
   const signature = kinds.slice().sort().join("+");
-  return signature === "movement+route_check" || signature === "dialogue_outcome+world_fact";
+  return signature === "movement+route_check"
+    || signature === "dialogue_outcome+world_fact"
+    || signature === "dialogue_outcome+scene_beat"
+    || signature === "dialogue_outcome+time_advance"
+    || signature === "dialogue_outcome+scene_beat+time_advance";
 }
 
 export function compileSimpleGmActionChecklistV2(input: {

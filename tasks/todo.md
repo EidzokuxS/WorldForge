@@ -1736,3 +1736,23 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/p32-v2-clean-burnin/turn1-scene-frame.json`, `turn1-move-copper-tap.*`, `turn2-scene-frame.json`, `turn2-ask-sessik-silt-route.*`.
     - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
     - This P32 lane is diagnostic burn-in only and does not count toward final 60-turn acceptance.
+- P33 dialogue tool-request language basis / terminal graph hardening:
+  - Root observation from P32/P33 diagnostic: accepted `dialogue.record.v2` receipts can feed player-facing narration directly, so dialogue `summary`/`quotedSpeech` language ownership belongs at the tool-request/receipt contract boundary, not in narrator post-processing.
+  - Implemented contract changes:
+    - `dialogue.record.v2.effectBinding` now requires `languageBasis={ responseLanguage: "match_player_action", sourceField: "playerAction" }`.
+    - Tool-request prompt now requires dialogue `summary` and `quotedSpeech` to use the same ordinary language as `packet.playerAction`, preserving accepted labels/proper nouns verbatim.
+    - Backend checklist compiler now explicitly supports terminal/simple graphs `dialogue_outcome+scene_beat`, `dialogue_outcome+time_advance`, and `dialogue_outcome+scene_beat+time_advance`; create/reveal/tag/support-actor chains remain unsupported until explicit refresh/dependency ownership is designed.
+  - Verification:
+    - GitNexus impact before edits: `buildToolRequestSystemPrompt`, `buildToolRequestPrompt`, `validateGameplayToolRequestV2`, `assertGameplayToolRequestV2`, `dialogueRecordHandler`, `supportedSimpleEffectGraph`, and `compileSimpleGmActionChecklistV2` were LOW risk.
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 158 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Live diagnostic evidence:
+    - Continued from diagnostic clone `p32-v2-clean-burnin-75c13461`, current scene `The Copper Tap`, visible `Tap-Keeper Brost`.
+    - First P33 action attempt failed/restored before tool execution: free-form checklist path rejected because checklist targetRef `Player` was not admitted by Judge. DB restore evidence: v2 packet count stayed 2, legacy rows stayed 0, but `turn_clock_ledger` had a `replay_restore`; this invalidates the lane for acceptance.
+    - After graph/compiler hardening, retry2 of the same action reached v2 `done`, packet `v2packet-mq1nr4v8-c4e9c60e5ec3`, `tick=3`, `worldVersion=1`, `worldTimeMinutes=1`.
+    - Retry2 accepted one `dialogue.record.v2` receipt, no mutation, no failed/skipped receipts, no legacy packet/saga/narrator/proposal rows.
+    - Accepted dialogue quote/player-facing text was in Russian except preserved mixed canon/proper label fragment `sluice-огня`.
+    - Artifacts: `output/p33-dialogue-language-contract/pre-turn-scene-frame.json`, `turn3-ask-brost-russian-wait.*`, `turn3-retry-ask-brost-russian-wait.*`, `turn3-retry2-ask-brost-russian-wait.*`.
+    - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
+    - This remains diagnostic evidence only because restored attempts occurred before the successful retry.
