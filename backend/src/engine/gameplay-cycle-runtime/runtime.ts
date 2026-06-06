@@ -7,6 +7,10 @@ import { getDb } from "../../db/index.js";
 import { worldClocks } from "../../db/schema.js";
 import { buildAuthoritativeSceneFrame } from "./frame.js";
 import {
+  runCleanGmActionChecklist,
+  type GmActionChecklistRunResult,
+} from "./action-checklist.js";
+import {
   runCleanGmRead,
   type GmReadCandidateGenerator,
   type GmReadRunResult,
@@ -155,6 +159,7 @@ function narrativeFromFrame(
   gmRead: GmReadRunResult,
   judgeUncertainty?: JudgeUncertaintyRunResult,
   oracleSettlement?: OracleSettlementRunResult,
+  actionChecklist?: GmActionChecklistRunResult,
 ): string {
   if (gmRead.read.path === "clarification") {
     return `Нужно уточнение: ${gmRead.read.liveSceneQuestion}`;
@@ -170,6 +175,12 @@ function narrativeFromFrame(
   }
   if (judgeUncertainty?.judgment.nextStep === "oracle_roll") {
     return `Нужна проверка неопределённости: ${judgeUncertainty.judgment.oracleAdmission?.question ?? judgeUncertainty.judgment.checkRationale}`;
+  }
+  if (actionChecklist?.status === "accepted") {
+    return `Действие требует дальнейшего разрешения последствий: зафиксирован план из ${actionChecklist.checklist.steps.length} шаг(ов), но состояние мира ещё не изменено.`;
+  }
+  if (actionChecklist?.status === "fallback_no_mutation") {
+    return `Нужно уточнение: ${actionChecklist.fallbackReason}`;
   }
   if (judgeUncertainty?.judgment.nextStep === "action_plan") {
     return `Действие требует разрешения последствий: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
@@ -211,6 +222,7 @@ function cleanEvidenceRefs(input: {
   gmRead: GmReadRunResult;
   judgeUncertainty?: JudgeUncertaintyRunResult;
   oracleSettlement?: OracleSettlementRunResult;
+  actionChecklist?: GmActionChecklistRunResult;
 }): CleanPlayerFacingTurnEvidenceRef[] {
   const refs: CleanPlayerFacingTurnEvidenceRef[] = [
     {
@@ -243,6 +255,13 @@ function cleanEvidenceRefs(input: {
       authority: "visible_uncertainty_outcome",
     });
   }
+  if (input.actionChecklist?.status === "accepted") {
+    refs.push({
+      kind: "gm_action_checklist",
+      ref: input.actionChecklist.checklist.checklistId,
+      authority: "planning_only",
+    });
+  }
   return refs;
 }
 
@@ -272,6 +291,7 @@ export async function* processCleanGameplayTurnFromInput(
   });
   let judgeUncertainty: JudgeUncertaintyRunResult | undefined;
   let oracleSettlement: OracleSettlementRunResult | undefined;
+  let actionChecklist: GmActionChecklistRunResult | undefined;
   if (gmRead.status === "accepted") {
     yield {
       type: "scene-settling",
@@ -315,9 +335,32 @@ export async function* processCleanGameplayTurnFromInput(
           },
         };
       }
+    } else if (
+      judgeUncertainty.status === "accepted"
+      && judgeUncertainty.judgment.nextStep === "action_plan"
+    ) {
+      yield {
+        type: "scene-settling",
+        data: {
+          stage: "gm-action-checklist",
+          phase: "gameplay-cycle-runtime",
+        },
+      };
+      actionChecklist = await runCleanGmActionChecklist({
+        frame,
+        gmRead: gmRead.read,
+        judgment: judgeUncertainty.judgment,
+        checklistId: `gm-action-checklist-${randomUUID()}`,
+      });
     }
   }
-  const narrativeText = narrativeFromFrame(frame, gmRead, judgeUncertainty, oracleSettlement);
+  const narrativeText = narrativeFromFrame(
+    frame,
+    gmRead,
+    judgeUncertainty,
+    oracleSettlement,
+    actionChecklist,
+  );
   const projection = buildFrozenProjection({ turn, frame, narrativeText });
   yield {
     type: "narrative",
@@ -334,7 +377,13 @@ export async function* processCleanGameplayTurnFromInput(
   const commit = await (options.commitTurn ?? commitCleanPlayerFacingTurn)({
     turn,
     projection,
-    evidenceRefs: cleanEvidenceRefs({ frame, gmRead, judgeUncertainty, oracleSettlement }),
+    evidenceRefs: cleanEvidenceRefs({
+      frame,
+      gmRead,
+      judgeUncertainty,
+      oracleSettlement,
+      actionChecklist,
+    }),
   });
   yield {
     type: "done",

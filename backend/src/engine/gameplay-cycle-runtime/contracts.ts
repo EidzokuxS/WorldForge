@@ -449,6 +449,103 @@ export const oracleSettlementSchema = z.object({
   }).strict().nullable(),
 }).strict();
 
+export const gmActionChecklistStepIdSchema = z.enum([
+  "step-1",
+  "step-2",
+  "step-3",
+  "step-4",
+  "step-5",
+  "step-6",
+]);
+
+export const gmActionChecklistEffectKindSchema = z.enum([
+  "route_check",
+  "movement",
+  "dialogue_record",
+  "world_fact_record",
+  "support_actor_create",
+  "entity_tag",
+  "item_transfer",
+  "condition_set",
+  "time_advance",
+  "quick_action_offer",
+  "scene_beat_record",
+  "location_reveal",
+  "minor_poi_create",
+]);
+
+export const gmActionChecklistDispositionKindSchema = z.enum([
+  "stage4_backend_resolution_required",
+  "skip_already_satisfied_by_scene_frame",
+  "skip_insufficient_grounding",
+]);
+
+export const gmActionChecklistStateOrEvidenceSchema = z.enum([
+  "state",
+  "evidence",
+  "terminal_player_visible",
+]);
+
+export const gmActionChecklistStepSchema = z.object({
+  stepId: gmActionChecklistStepIdSchema,
+  purpose: shortText,
+  actorRef: modelSafeRef,
+  targetRefs: z.array(modelSafeRef).max(8),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(8),
+  intended: z.object({
+    kind: gmActionChecklistEffectKindSchema,
+    stateOrEvidence: gmActionChecklistStateOrEvidenceSchema,
+    requiredCapabilityId: gameplayRuntimeCapabilityIdSchema,
+    summary: shortText,
+  }).strict(),
+  disposition: z.object({
+    kind: gmActionChecklistDispositionKindSchema,
+    reason: shortText,
+  }).strict(),
+  dependsOnStepIds: z.array(gmActionChecklistStepIdSchema).max(5),
+  expectedVisibleEffect: z.object({
+    summary: shortText,
+    visibleRefs: z.array(modelSafeRef).min(1).max(8),
+  }).strict(),
+}).strict();
+
+export const gmActionChecklistSchema = z.object({
+  version: z.literal("gm-action-checklist.v1"),
+  checklistId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1"),
+    judgeVersion: z.literal("judge-uncertainty.v1"),
+    gmReadPath: gmReadPathSchema,
+    judgmentId: shortText,
+    judgeCheckNeed: z.literal("backend_action_plan_needed"),
+    judgeNextStep: z.literal("action_plan"),
+    judgeNoRollReasonCode: z.literal("backend_receipt_required"),
+  }).strict(),
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+  }).strict(),
+  turnIntent: z.object({
+    playerIntent: shortText,
+    admittedConsequenceNeed: shortText,
+  }).strict(),
+  steps: z.array(gmActionChecklistStepSchema).min(1).max(6),
+  authority: z.object({
+    evidenceAuthority: z.literal("planning_only"),
+    mutationAuthority: z.literal("none"),
+    mayAuthorizeMutation: z.literal(false),
+    mayGenerateExecutableRequest: z.literal(false),
+    maySupportNarrationClaim: z.literal(false),
+    settledTruth: z.literal(false),
+    publicExposure: z.literal("stage_summary_only"),
+  }).strict(),
+}).strict();
+
 export const frozenApiProjectionSchema = z.object({
   version: z.literal("gameplay-runtime.frozen-api-projection.v1"),
   runtime: z.literal("gameplay-cycle-runtime"),
@@ -472,6 +569,7 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "gm_read",
     "judge_uncertainty",
     "oracle_settlement",
+    "gm_action_checklist",
   ]),
   ref: shortText,
   authority: z.enum([
@@ -479,6 +577,7 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "interpretation_only",
     "admission_only",
     "visible_uncertainty_outcome",
+    "planning_only",
   ]),
 }).strict();
 
@@ -595,6 +694,8 @@ export type JudgeUncertainty = z.infer<typeof judgeUncertaintySchema>;
 export type OracleOutcomeTier = z.infer<typeof oracleOutcomeTierSchema>;
 export type OracleAdapterSettlementResult = z.infer<typeof oracleAdapterSettlementResultSchema>;
 export type OracleSettlement = z.infer<typeof oracleSettlementSchema>;
+export type GmActionChecklistEffectKind = z.infer<typeof gmActionChecklistEffectKindSchema>;
+export type GmActionChecklist = z.infer<typeof gmActionChecklistSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
 export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;
@@ -618,6 +719,10 @@ export function assertJudgeUncertainty(value: unknown): JudgeUncertainty {
 
 export function assertOracleSettlement(value: unknown): OracleSettlement {
   return oracleSettlementSchema.parse(value);
+}
+
+export function assertGmActionChecklist(value: unknown): GmActionChecklist {
+  return gmActionChecklistSchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {

@@ -297,8 +297,19 @@ function subsetIssue(input: {
   }];
 }
 
-function branchIssues(judgment: JudgeUncertainty): JudgeUncertaintyValidationIssue[] {
+function hasAvailableBackendConsequenceCapability(frame: AuthoritativeSceneFrame): boolean {
+  return frame.capabilities.some((capability) =>
+    capability.allowed && capability.evidenceAuthority !== "observation_only"
+  );
+}
+
+function branchIssues(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+  judgment: JudgeUncertainty;
+}): JudgeUncertaintyValidationIssue[] {
   const issues: JudgeUncertaintyValidationIssue[] = [];
+  const { frame, gmRead, judgment } = input;
 
   function add(path: string, message: string): void {
     issues.push({ code: "branch_invalid", path, message });
@@ -379,6 +390,23 @@ function branchIssues(judgment: JudgeUncertainty): JudgeUncertaintyValidationIss
   if (judgment.checkNeed === "combat_judge_needed" && judgment.nextStep !== "combat_boundary") {
     add("nextStep", "Combat need requires nextStep=combat_boundary.");
   }
+  if (
+    gmRead.path === "procedural"
+    && hasAvailableBackendConsequenceCapability(frame)
+    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
+    && judgment.checkNeed === "no_roll_needed"
+  ) {
+    add(
+      "checkNeed",
+      "Procedural GM Read with available backend consequence capability requires backend_action_plan_needed unless a true Oracle or combat boundary is admitted.",
+    );
+  }
+  if (
+    judgment.checkNeed === "backend_action_plan_needed"
+    && judgment.noRollReason?.code !== "backend_receipt_required"
+  ) {
+    add("noRollReason.code", "Backend action-plan admission requires noRollReason.code=backend_receipt_required.");
+  }
 
   return issues;
 }
@@ -413,7 +441,11 @@ export function validateJudgeUncertaintyCandidate(input: {
       gmRead: input.gmRead,
     }));
     issues.push(...refValidationIssues(parsed.data, input.frame));
-    issues.push(...branchIssues(parsed.data));
+    issues.push(...branchIssues({
+      frame: input.frame,
+      gmRead: input.gmRead,
+      judgment: parsed.data,
+    }));
   }
 
   if (issues.length > 0) {
@@ -514,6 +546,7 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "GM Read is interpretation context only. gm-read uncertain is a signal, not permission to roll.",
     "Use nextStep=oracle_roll only for true visible uncertainty that needs a random outcome before downstream consequences.",
     "Use nextStep=action_plan for backend-owned consequences; do not include effect kinds, tool names, checklist steps, or payloads.",
+    "When GM Read path is procedural and SceneFrame shows allowed receipt-required backend capabilities, do not use settle_no_roll; admit backend_action_plan_needed with noRollReason.code=backend_receipt_required unless a true Oracle roll or combat boundary is required.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",
     "For non-Oracle branches, oracleAdmission and difficulty must be null and noRollReason must be present.",
     "For Oracle branches, include difficulty plus oracleAdmission with strong_hit, weak_hit, and miss meanings; do not include noRollReason.",

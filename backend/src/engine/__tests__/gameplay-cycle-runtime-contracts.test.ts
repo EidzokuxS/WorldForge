@@ -8,6 +8,8 @@ import {
   type GameplayRuntimeTurnInput,
   type GmRead,
   gmReadSchema,
+  type GmActionChecklist,
+  gmActionChecklistSchema,
   gameplayRuntimeTurnInputSchema,
   type JudgeUncertainty,
   judgeUncertaintySchema,
@@ -36,6 +38,10 @@ import {
   validateOracleSettlement,
 } from "../gameplay-cycle-runtime/oracle-settlement.js";
 import {
+  runCleanGmActionChecklist,
+  validateGmActionChecklistCandidate,
+} from "../gameplay-cycle-runtime/action-checklist.js";
+import {
   commitCleanPlayerFacingTurn,
   type CleanPlayerFacingTurnRecordStore,
 } from "../gameplay-cycle-runtime/turn-persistence.js";
@@ -61,8 +67,11 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       "gm-turn-read",
       "turn-processor",
       "world-brain",
+      "../gm-action-checklist",
       "gm-tool-loop",
+      "gm-tool-step",
       "tool-executor",
+      "tool-contracts",
       "tool-schemas",
       "runtime-tool-input-schemas",
       "runtime-tool-descriptors",
@@ -590,6 +599,118 @@ function validOracleJudgeUncertainty(
   };
 }
 
+function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  return minimalFrame({
+    capabilities: [
+      { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+      { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      { capabilityId: "world_fact_record", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    ...overrides,
+  });
+}
+
+function actionPlanGmRead(frame = actionPlanFrame()): GmRead {
+  return {
+    ...validGmRead(frame),
+    path: "procedural",
+    liveSceneQuestion: "Which backend consequences are needed for the action?",
+    focalRefs: ["Player"],
+    evidenceRefs: ["Player", "Market", "North Hall"],
+    actionInterpretation: {
+      summary: "The player intends to move toward a visible connected destination.",
+      playerIntent: "Move toward North Hall.",
+      method: "walk",
+      targetRefs: ["North Hall"],
+    },
+    interpretationRationale: "The action requests a world-state consequence.",
+  };
+}
+
+function actionPlanJudge(frame = actionPlanFrame(), gmRead = actionPlanGmRead(frame)): JudgeUncertainty {
+  return {
+    ...validJudgeUncertainty(frame, gmRead),
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      gmReadPath: gmRead.path,
+    },
+    checkNeed: "backend_action_plan_needed",
+    nextStep: "action_plan",
+    targetRefs: ["North Hall"],
+    evidenceRefs: ["Player", "Market", "North Hall"],
+    checkRationale: "Moving to a destination needs later backend-owned consequence resolution.",
+    noRollReason: {
+      code: "backend_receipt_required",
+      explanation: "Movement needs later backend receipt authority.",
+      evidenceRefs: ["Player", "North Hall"],
+    },
+  };
+}
+
+function validActionChecklist(
+  frame = actionPlanFrame(),
+  gmRead = actionPlanGmRead(frame),
+  judgment = actionPlanJudge(frame, gmRead),
+): GmActionChecklist {
+  return {
+    version: "gm-action-checklist.v1",
+    checklistId: "gm-action-checklist-1",
+    campaignId: frame.campaignId,
+    turnId: frame.turnId,
+    frameId: frame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      gmReadPath: gmRead.path,
+      judgmentId: judgment.judgmentId,
+      judgeCheckNeed: "backend_action_plan_needed",
+      judgeNextStep: "action_plan",
+      judgeNoRollReasonCode: "backend_receipt_required",
+    },
+    base: frame.base,
+    turnIntent: {
+      playerIntent: gmRead.actionInterpretation.playerIntent,
+      admittedConsequenceNeed: judgment.noRollReason?.explanation ?? judgment.checkRationale,
+    },
+    steps: [{
+      stepId: "step-1",
+      purpose: "Resolve the intended movement with later backend authority.",
+      actorRef: "Player",
+      targetRefs: ["North Hall"],
+      evidenceRefs: ["Player", "North Hall"],
+      intended: {
+        kind: "movement",
+        stateOrEvidence: "state",
+        requiredCapabilityId: "movement",
+        summary: "Plan movement toward North Hall for later Stage 4 resolution.",
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+        reason: "Movement needs a later terminal backend receipt.",
+      },
+      dependsOnStepIds: [],
+      expectedVisibleEffect: {
+        summary: "The player may visibly move toward North Hall if later execution accepts it.",
+        visibleRefs: ["Player", "North Hall"],
+      },
+    }],
+    authority: {
+      evidenceAuthority: "planning_only",
+      mutationAuthority: "none",
+      mayAuthorizeMutation: false,
+      mayGenerateExecutableRequest: false,
+      maySupportNarrationClaim: false,
+      settledTruth: false,
+      publicExposure: "stage_summary_only",
+    },
+  };
+}
+
 function validTurnInput(): GameplayRuntimeTurnInput {
   return gameplayRuntimeTurnInputSchema.parse({
     version: "gameplay-runtime.turn-input.v1",
@@ -692,7 +813,9 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(JSON.stringify(parsed)).not.toContain("requiredEffectKinds");
     expect(JSON.stringify(parsed)).not.toContain("oracleRequest");
     expect(JSON.stringify(parsed)).not.toContain("mutation");
-    expect(JSON.stringify(parsed)).not.toContain("receipt");
+    expect(JSON.stringify(parsed)).not.toContain("receiptId");
+    expect(JSON.stringify(parsed)).not.toContain("receipts");
+    expect(JSON.stringify(parsed)).not.toContain("receipt_ledger");
     expect(JSON.stringify(parsed)).not.toContain("narrativeText");
   });
 
@@ -943,6 +1066,48 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(result.status).toBe("accepted");
     expect(JSON.stringify(candidate)).not.toContain("toolId");
     expect(JSON.stringify(candidate)).not.toContain("effectKind");
+  });
+
+  it("rejects procedural GM Read that tries to settle backend consequences as no-roll narration", () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const candidate = validJudgeUncertainty(frame, gmRead);
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+  });
+
+  it("repairs procedural no-roll drift into backend action-plan admission", async () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const calls: string[] = [];
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async (request) => {
+        calls.push(request.repairOf ? "repair" : "initial");
+        if (!request.repairOf) {
+          return validJudgeUncertainty(frame, gmRead);
+        }
+        return actionPlanJudge(frame, gmRead);
+      },
+    });
+
+    expect(calls).toEqual(["initial", "repair"]);
+    expect(result.status).toBe("accepted");
+    expect(result.judgment.nextStep).toBe("action_plan");
+    expect(result.judgment.checkNeed).toBe("backend_action_plan_needed");
+    expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
   });
 
   it("accepts a true Oracle admission but does not include a roll or selected outcome", () => {
@@ -1244,6 +1409,443 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     }
 
     expect(order).toEqual(["scene-frame", "gm-read"]);
+  });
+});
+
+describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () => {
+  it("accepts a strict planning-only checklist for an accepted action-plan Judge branch", () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const checklist = validActionChecklist(frame, gmRead, judgment);
+
+    const parsed = gmActionChecklistSchema.parse(checklist);
+    const result = validateGmActionChecklistCandidate({
+      frame,
+      gmRead,
+      judgment,
+      candidate: checklist,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(parsed.authority.evidenceAuthority).toBe("planning_only");
+    expect(parsed.authority.mutationAuthority).toBe("none");
+    expect(parsed.authority.mayGenerateExecutableRequest).toBe(false);
+    expect(JSON.stringify(parsed)).not.toContain("candidateToolRequest");
+    expect(JSON.stringify(parsed)).not.toContain("toolInput");
+    expect(JSON.stringify(parsed)).not.toContain("receiptId");
+    expect(JSON.stringify(parsed)).not.toContain("receipts");
+    expect(JSON.stringify(parsed)).not.toContain("receipt_ledger");
+    expect(JSON.stringify(parsed)).not.toContain("narrativeText");
+    expect(JSON.stringify(parsed)).not.toContain("oracleResult");
+  });
+
+  it("keeps P60 production source free of LLM generation and repair ownership", () => {
+    const source = readFileSync(join(runtimeDir, "action-checklist.ts"), "utf8");
+
+    for (const forbidden of [
+      "safeGenerateObject",
+      "createModel",
+      "buildGmActionChecklistSystemPrompt",
+      "buildGmActionChecklistPrompt",
+      "buildRepairPrompt",
+      "GmActionChecklistCandidateGenerator",
+      "generateCandidate",
+      "repairOf",
+    ]) {
+      expect(source).not.toContain(forbidden);
+    }
+  });
+
+  it("rejects checklist generation outside the accepted action-plan branch", () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const directJudgment = validJudgeUncertainty(frame, {
+      ...gmRead,
+      path: "direct",
+    });
+
+    const result = validateGmActionChecklistCandidate({
+      frame,
+      gmRead: { ...gmRead, path: "direct" },
+      judgment: directJudgment,
+      candidate: validActionChecklist(frame, gmRead, actionPlanJudge(frame, gmRead)),
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "branch_mismatch")).toBe(true);
+  });
+
+  it.each([
+    "toolId",
+    "toolName",
+    "toolInput",
+    "toolCall",
+    "args",
+    "input",
+    "payload",
+    "candidateToolRequest",
+    "plannedTools",
+    "stateDelta",
+    "statePatch",
+    "worldDelta",
+    "receipt",
+    "receipts",
+    "narration",
+    "narrativeText",
+    "oracleResult",
+    "chance",
+    "roll",
+    "selectedOutcome",
+    "settledTurnPacket",
+    "resultWorldVersion",
+  ])("rejects recursive Stage 4 or settled-truth surface %s", (key) => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const candidate = {
+      ...validActionChecklist(frame, gmRead, judgment),
+      steps: [{
+        ...validActionChecklist(frame, gmRead, judgment).steps[0],
+        expectedVisibleEffect: {
+          ...validActionChecklist(frame, gmRead, judgment).steps[0]?.expectedVisibleEffect,
+          extra: { [key]: "smuggled" },
+        },
+      }],
+    };
+
+    const result = validateGmActionChecklistCandidate({
+      frame,
+      gmRead,
+      judgment,
+      candidate,
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "executable_payload")).toBe(true);
+  });
+
+  it("rejects refs outside SceneFrame and GM Read/Judge admission plus backend refs", () => {
+    const frame = actionPlanFrame({
+      citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const candidate: GmActionChecklist = {
+      ...validActionChecklist(frame, gmRead, judgment),
+      steps: [{
+        ...validActionChecklist(frame, gmRead, judgment).steps[0],
+        actorRef: "actor:raw",
+        targetRefs: ["Guide"],
+        evidenceRefs: ["invented"],
+      }],
+    };
+
+    const result = validateGmActionChecklistCandidate({
+      frame,
+      gmRead,
+      judgment,
+      candidate,
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "backend_ref")).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "uncited_ref")).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "unadmitted_ref")).toBe(true);
+  });
+
+  it("rejects private guard terms in checklist prose", () => {
+    const frame = actionPlanFrame({
+      privateGuards: {
+        forbiddenActorLabels: ["Hidden Watcher"],
+        forbiddenPrivateTerms: ["sealed patron"],
+      },
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const candidate: GmActionChecklist = {
+      ...validActionChecklist(frame, gmRead, judgment),
+      steps: [{
+        ...validActionChecklist(frame, gmRead, judgment).steps[0],
+        purpose: "Resolve what the Hidden Watcher sees.",
+      }],
+    };
+
+    const result = validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "private_term")).toBe(true);
+  });
+
+  it("rejects effect/capability mismatches and unavailable capabilities", () => {
+    const frame = actionPlanFrame({
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+        { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const candidate: GmActionChecklist = {
+      ...validActionChecklist(frame, gmRead, judgment),
+      steps: [{
+        ...validActionChecklist(frame, gmRead, judgment).steps[0],
+        intended: {
+          ...validActionChecklist(frame, gmRead, judgment).steps[0]!.intended,
+          requiredCapabilityId: "route_check",
+        },
+      }],
+    };
+
+    const result = validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.filter((issue) => issue.code === "capability_mismatch").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects invalid step ids, duplicate effects, and future dependencies", () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const base = validActionChecklist(frame, gmRead, judgment);
+    const candidate: GmActionChecklist = {
+      ...base,
+      steps: [
+        {
+          ...base.steps[0]!,
+          stepId: "step-2",
+          dependsOnStepIds: ["step-2"],
+        },
+        {
+          ...base.steps[0]!,
+          stepId: "step-2",
+        },
+      ],
+    };
+
+    const result = validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "step_invalid")).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "dependency_invalid")).toBe(true);
+  });
+
+  it("requires movement to a disconnected option to depend on a route_check for that target", () => {
+    const frame = actionPlanFrame({
+      movementOptions: [{
+        ref: "North Hall",
+        label: "North Hall",
+        connected: false,
+        travelCost: 1,
+      }],
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const result = validateGmActionChecklistCandidate({
+      frame,
+      gmRead,
+      judgment,
+      candidate: validActionChecklist(frame, gmRead, judgment),
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "dependency_invalid")).toBe(true);
+  });
+
+  it("builds P60 deterministically without model generation or repair", async () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-generated",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.repairAttempted).toBe(false);
+    expect(result.checklist.checklistId).toBe("gm-action-checklist-generated");
+    expect(gmActionChecklistSchema.safeParse(result.checklist).success).toBe(true);
+  });
+
+  it("deterministically inserts route_check before disconnected movement", async () => {
+    const frame = actionPlanFrame({
+      movementOptions: [{
+        ref: "North Hall",
+        label: "North Hall",
+        connected: false,
+        travelCost: 1,
+      }],
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-route",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual(["route_check", "movement"]);
+    expect(result.checklist.steps[1]?.dependsOnStepIds).toEqual(["step-1"]);
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("deterministically produces time_advance checklist when no admitted movement target exists", async () => {
+    const frame = actionPlanFrame({
+      movementOptions: [],
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+        { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player waits in the current scene.",
+        playerIntent: "Wait in the current scene for ten minutes.",
+        method: null,
+        targetRefs: ["Market"],
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Advancing time needs later backend receipt authority.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-wait",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      stepId: "step-1",
+      actorRef: "Player",
+      targetRefs: ["Market"],
+      intended: {
+        kind: "time_advance",
+        requiredCapabilityId: "time_advance",
+        stateOrEvidence: "state",
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(result.checklist.authority).toMatchObject({
+      evidenceAuthority: "planning_only",
+      mutationAuthority: "none",
+      mayAuthorizeMutation: false,
+      mayGenerateExecutableRequest: false,
+      maySupportNarrationClaim: false,
+      settledTruth: false,
+    });
+  });
+
+  it("falls back without repair when deterministic compile lacks a backend capability", async () => {
+    const frame = actionPlanFrame({
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+      ],
+    });
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-generated",
+    });
+
+    expect(result.status).toBe("fallback_no_mutation");
+    expect(result.checklist).toBeNull();
+    expect(result.repairAttempted).toBe(false);
+  });
+
+  it("is stable for identical inputs except backend-owned checklist id", async () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const first = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-a",
+    });
+    const second = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-b",
+    });
+
+    expect(first.status).toBe("accepted");
+    expect(second.status).toBe("accepted");
+    if (first.status !== "accepted" || second.status !== "accepted") throw new Error("expected accepted");
+    const normalize = (checklist: GmActionChecklist) => ({ ...checklist, checklistId: "<id>" });
+    expect(normalize(first.checklist)).toEqual(normalize(second.checklist));
+  });
+
+  it("composes action-plan branch through runtime without Oracle or tool execution", async () => {
+    const frame = actionPlanFrame();
+    const gmRead = actionPlanGmRead(frame);
+    const judgment = actionPlanJudge(frame, gmRead);
+    const stages: string[] = [];
+    const commits: Parameters<typeof fakeCommitTurn>[0][] = [];
+
+    for await (const event of processCleanGameplayTurnFromInput({
+      turn: validTurnInput(),
+      judgeProvider: provider,
+      buildFrame: async () => frame,
+      gmReadCandidateGenerator: async () => gmRead,
+      judgeUncertaintyCandidateGenerator: async () => judgment,
+      oracleAdapter: async () => {
+        throw new Error("Oracle must not run for action-plan branch");
+      },
+      commitTurn: async (input) => {
+        commits.push(input);
+        return fakeCommitTurn(input);
+      },
+    })) {
+      if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
+        const stage = (event.data as { stage?: unknown }).stage;
+        if (typeof stage === "string") stages.push(stage);
+      }
+      if (event.type === "oracle_result") {
+        throw new Error("oracle_result must not be emitted for action-plan branch");
+      }
+    }
+
+    expect(stages).toEqual([
+      "scene-frame",
+      "gm-read",
+      "judge-uncertainty",
+      "gm-action-checklist",
+    ]);
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.projection.mutationApplied).toBe(false);
+    const checklistEvidence = commits[0]?.evidenceRefs.find((ref) => ref.kind === "gm_action_checklist");
+    expect(checklistEvidence).toMatchObject({
+      kind: "gm_action_checklist",
+      authority: "planning_only",
+    });
+    expect(checklistEvidence?.ref).toMatch(/^gm-action-checklist-/u);
   });
 });
 

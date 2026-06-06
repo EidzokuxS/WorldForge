@@ -2457,3 +2457,106 @@ Session: `gm-v1-consequenc-slice`.
     - Public done boundary: `recordId="cgtr_d48b335439085c11a99b8558"`, `turnId="cgturn_73ca6bf523f08288a76a717c"`, `packetId="cgpacket_c06bd790572e704067148e0e"`, `chatHistoryLengthBeforeTurn=0`, `chatHistoryLengthAfterTurn=2`, `mutationApplied=false`, `settled=true`.
     - Postcheck: chat history length 2 with the exact user action and assistant narration; `clean_gameplay_turn_records=1`; old v2/saga/narrator/ledger/oracle/simulation tables remained 0; clock remained `0/0/0`; clean record hashes matched chat tail; record contained no old v2/saga/narrator/receipt-ledger surface.
     - Artifacts: `output/clean-runtime-p59-settled-live/{clone.json,load.json,world-before.json,precheck.json,action.sse,action-events.json,postcheck.json,backend.out.log,backend.err.log}`.
+
+- P60 clean gameplay runtime Primitive 6 GM Action Plan / Checklist:
+  - Status:
+    - [x] Resume from committed P59 baseline: worktree clean, branch ahead of origin, backend stopped, ports clear.
+    - [x] Start 6+1 read-only review lanes for source lock, current-state map, forensic contrast, protocol, verification, and migration risk.
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, P55-P59 clean runtime, current `action_plan` placeholder, focused tests, and forensic old checklist/tool surfaces as negative evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Implement only clean GM Action Checklist after Oracle review.
+    - [x] Add focused checklist contract tests and runtime composition tests.
+    - [x] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone with an action that truly admits backend consequence planning, without executing tools or mutating state.
+  - Primitive boundary draft:
+    - Owner: clean GM Action Checklist adapter and validator under `backend/src/engine/gameplay-cycle-runtime/`, not old `gameplay-cycle-v2/action-checklist.ts`, old `gm-action-checklist.ts`, old runtime tool schemas, old receipts, or old tool loops.
+    - Inputs: authoritative `SceneFrame`, accepted `gm-read.v1`, accepted `judge-uncertainty.v1` with `nextStep="action_plan"` and `checkNeed="backend_action_plan_needed"`, plus optional prior clean visible uncertainty evidence only if Oracle review approves that later branch.
+    - Output: `gm-action-checklist.v1`, a short ordered consequence plan. Each step has exactly one intended state/evidence effect, purpose, actor/target/evidence refs, expected visible effect, dependency on earlier steps only, required backend capability/disposition, and skip/failure rationale when not executable.
+    - Mutation authority: none. P60 is planning/admission only and must not apply DB writes, call tools, append chat, persist receipts, or advance clock.
+    - Evidence authority: checklist explains intended backend consequences only. It is not settled truth and cannot support narration of movement, discovery, item state, NPC knowledge, absence/no-change, or durable world facts.
+    - Stage fence: direct, continue, clarification, blocked, no-roll, and Oracle-visible-only turns skip P60 unless a later Oracle-approved primitive explicitly materializes follow-up mutation.
+    - Failure draft: invalid checklist should downgrade to no-mutation narration or clarification and still commit through P59 as a clean player-facing turn if the terminal projection is valid; it must not restore/replay after already-settled clean truth.
+  - Oracle question draft:
+    - Given committed P59, what should P60 GM Action Plan / Checklist own and output so it replaces old v2 checklist/tool-planning admission without importing or patching `gameplay-cycle-v2`? Decide whether P60 should run only for `judge-uncertainty.nextStep="action_plan"` or also after P58 Oracle settlement. Return schema shape, model prompt boundary, validator rules, failure behavior, runtime events, evidence authority, and focused contract/live tests.
+  - Oracle review:
+    - Session: `wf-clean-runtime-action-checklist`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`
+    - Bundle: one bundled text attachment, 13 files, about 58,614 input tokens; `output.log` records `Packed 13 files into 1 bundle`.
+    - Question artifact: `output/oracle/p60-clean-action-checklist-question.md`
+    - Context summary artifact: `output/oracle/p60-clean-runtime-context-summary.md`
+    - Answer artifact: `output/oracle/p60-clean-action-checklist-answer.md`
+    - Recommendation:
+      - P60 is a narrow planning-only admission primitive.
+      - P60 runs only after accepted `judge-uncertainty.v1` with `nextStep="action_plan"` and `checkNeed="backend_action_plan_needed"`.
+      - P60 does not run after current P58 Oracle settlement. P58 is visible-outcome-only and `requiresFollowupMutation=false`; post-Oracle mutation needs a future explicit contract.
+      - P60 owns the question: which bounded, grounded intended backend consequences would need later Stage 4 resolution, and why?
+      - P60 must not answer which tool call should run, what payload should be sent, what changed, or what should be narrated.
+      - Implement as new clean `backend/src/engine/gameplay-cycle-runtime/action-checklist.ts` plus clean schemas in `contracts.ts`.
+      - Do not import or patch old `gameplay-cycle-v2/action-checklist.ts`, root `gm-action-checklist.ts`, `runtime-tool-input-schemas`, old tool schemas, old receipts, or old scene planning.
+    - Accepted schema direction:
+      - `gm-action-checklist.v1` with checklist/campaign/turn/frame ids, source linkage to `scene-frame.v1`, `gm-read.v1`, and `judge-uncertainty.v1`.
+      - Source literals require `judgeCheckNeed="backend_action_plan_needed"`, `judgeNextStep="action_plan"`, and `judgeNoRollReasonCode="backend_receipt_required"`.
+      - Bounded steps `step-1` through `step-6`; each step has one intended effect, actor/target/evidence refs, purpose, disposition, dependencies to earlier steps only, and expected visible effect as expectation only.
+      - Allowed effect kinds mirror clean capabilities that can require backend resolution: route check, movement, dialogue record, world fact record, support actor create, entity tag, item transfer, condition set, time advance, quick action offer, scene beat record, location reveal, minor POI create.
+      - Exclude `observe_visible`, `oracle_roll`, and `route_options` from P60 v1.
+      - Authority block declares `evidenceAuthority="planning_only"`, `mutationAuthority="none"`, `mayAuthorizeMutation=false`, `mayGenerateExecutableRequest=false`, `maySupportNarrationClaim=false`, `settledTruth=false`, and `publicExposure="stage_summary_only"`.
+    - Accepted validator/runtime rules:
+      - Gate before generation: accepted GM Read, accepted Judge, action-plan next step, backend action-plan check need, backend receipt no-roll reason, no Oracle admission, no P58 settlement.
+      - Reject forbidden surfaces recursively before schema acceptance; normalize keys structurally, not with prose heuristics.
+      - Forbidden surfaces include tool/toolName/toolInput/toolCall/args/input/payload/candidateToolRequest/plannedTools/stateDelta/statePatch/worldDelta/receipt/receipts/narration/narrativeText/oracleResult/chance/roll/selectedOutcome/settledTurnPacket/resultWorldVersion and legacy v2 packet strings.
+      - Enforce exact linkage to SceneFrame, GM Read, Judge, and base clock.
+      - Enforce all refs from `SceneFrame.citableRefs`, no backend/UUID/private refs, and no private guard terms in public checklist strings.
+      - Enforce step refs drawn from GM Read/Judge admitted refs. If P60 needs more refs, widen earlier admission instead of letting P60 expand scope silently.
+      - Enforce fixed effect-to-capability mapping and exposed allowed capability.
+      - Enforce contiguous step ids, one intended effect per step, no duplicate effects, dependencies only to earlier non-skipped steps, no all-skip checklist.
+      - Invalid generation repairs once; if still invalid, downgrade to no-mutation/clarification and commit through P59 when terminal projection is valid. Route errors are only for deterministic runtime/commit failures.
+      - Public SSE should emit only `scene-settling` stage `gm-action-checklist` and optionally accepted `stepCount`; no checklist details leak to player stream.
+      - If P60 is added to P59 evidence refs, add only `{ kind: "gm_action_checklist", ref, authority: "planning_only" }`, not full checklist JSON.
+    - Rejected alternatives:
+      - Reject P60 after every Oracle settlement.
+      - Reject importing/patching old v2/root checklist code.
+      - Reject executable request fields in P60.
+      - Reject exposing checklist internals over public SSE.
+      - Reject hard route errors for bad model checklist output.
+      - Reject synthetic compiler fallbacks that invent checklists from Judge prose.
+  - Source-lock notes:
+    - Non-goals: no Stage 4 tool request generation, no tool execution, no mutation, no receipts, no settled packet, no narrator rewrite, no retry/undo implementation, no post-turn simulation, and no full v2-like packet store.
+    - Main trap: smuggling Stage 4 into Stage 3 through fields like `tool`, `toolInput`, `args`, `payload`, `stateDelta`, `receipt`, `worldDelta`, or prose narration.
+    - Final acceptance remains separate: multiple zero-turn campaigns/clones with about 60 clean manual turns each and zero failed/replayed/restored/invalid player-facing turns.
+  - Follow-up Oracle decision after live fallback diagnostics:
+    - Session: `p60-determinis-checklist`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one bundled attachment, about 44,722 input tokens.
+    - Bundle artifact: `output/oracle/p60-deterministic-checklist-bundle.md`.
+    - Answer artifact: `output/oracle/p60-deterministic-checklist-answer.md`.
+    - Diagnostic evidence prompting the question: r4 movement and r5 wait actions both reached `gm-action-checklist` but LLM generation/repair failed, producing fallback clarification and no `gm_action_checklist` evidence.
+    - Accepted decision: P60 is a backend-owned deterministic compiler from accepted `SceneFrame + GM Read + Judge/Uncertainty` into a planning-only checklist; production P60 must not call `safeGenerateObject`, build prompts, repair model output, or let the model own step ids/refs/dependencies/authority/checklist id.
+    - Rejected alternative: keep LLM-generated checklist and tune prompts/schemas. Oracle called this the wrong ownership boundary because P60 packet shape is mechanical and Stage 4 is the later execution owner.
+  - Implementation:
+    - Added `gm-action-checklist.v1` schemas/types/evidence ref authority in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`.
+    - Added clean P60 owner `backend/src/engine/gameplay-cycle-runtime/action-checklist.ts`.
+    - P60 validator rejects old v2/tool/request/receipt/mutation/narration/Oracle/settled-packet surfaces recursively, private terms, backend/UUID refs, uncited refs, unadmitted refs, branch mismatches, capability mismatches, invalid step ids/dependencies, duplicate effects, and disconnected movement without prior route check.
+    - P60 production path is deterministic: it compiles accepted movement refs into movement/route-check planning steps, falls back to time/dialogue/world-fact/scene-beat planning only from admitted refs/capabilities, and validates the compiled checklist before accepting it.
+    - Runtime now emits `scene-settling` stage `gm-action-checklist` only after accepted Judge `nextStep="action_plan"` and commits only planning-only checklist evidence through P59. It does not call old tools, execute Stage 4, mutate DB state, persist old packets, or queue post-turn simulation.
+    - Judge/Uncertainty admission was tightened so procedural GM Read with available backend consequence capabilities cannot settle as no-roll narration; it must repair/admit `backend_action_plan_needed` unless Oracle/combat/block/clarification applies.
+  - Contract verification:
+    - GitNexus impact before edits: `runCleanJudgeUncertainty` LOW; `narrativeFromFrame`, `cleanEvidenceRefs`, `buildFrozenProjection`, and `assertCleanPlayerFacingTurnRecord` were LOW in the prior P60 edit pass. New P60 symbols were not yet in the index.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 124 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- chat.test.ts --bail=1` passed with 63 tests.
+    - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+    - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts store-manifest.test.ts clone.test.ts --bail=1` passed with 409 tests.
+  - Live/manual `/api/chat/action` evidence:
+    - Diagnostics not counted as proof:
+      - `p60-action-checklist-aabdeac2`: movement settled no-roll and skipped P60.
+      - `p60-action-checklist-r2-3800fa4f`: item placement settled no-roll and skipped P60.
+      - `p60-action-checklist-r3-ebc23ac4`: movement reached P60 but LLM generation failed before validation.
+      - `p60-action-checklist-r4-90e0892e`: movement reached P60 but LLM repair failed.
+      - `p60-action-checklist-r5-14470c7d`: wait reached P60 but LLM repair failed.
+    - Accepted P60 live proof clone: `p60-action-checklist-r6-c16316f6` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `clean_gameplay_turn_records`, `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `authority_traces`, `turn_clock_ledger`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs` all 0; clock `0/0/0`; Mira Voss in Lowwater Bazaar with connected route to The Copper Tap.
+    - Manual action after inspecting actual current state: `I walk from Lowwater Bazaar toward The Copper Tap along the visible connected route.`
+    - Stable backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` on port `3226`, then stopped after verification; port `3226` was clear afterward.
+    - SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `narrative`, `finalizing_turn`, `done`.
+    - Player-facing narrative: `Действие требует дальнейшего разрешения последствий: зафиксирован план из 1 шаг(ов), но состояние мира ещё не изменено.`
+    - Postcheck: chat history length 2; clean record count 1; evidence refs include `{ kind: "gm_action_checklist", authority: "planning_only" }`; old v2/saga/narrator/ledger/oracle/simulation tables remained 0; clock remained `0/0/0`; player location/scene unchanged; no forbidden old tool/receipt/fallback strings in the record.
+    - Artifacts: `output/clean-runtime-p60-action-checklist-live-r6/*`.
