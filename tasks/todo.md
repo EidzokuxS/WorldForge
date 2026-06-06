@@ -2391,7 +2391,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
     - [x] Implement only the clean settled response / persistence boundary after Oracle review.
     - [x] Add focused contract tests for player-facing exit state, persisted chat messages, idempotency/snapshot cleanup, and no old v2/saga packet leakage.
-    - [ ] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone: response SSE reaches done, player-facing narration is persisted, next-turn entrypoint sees the frozen prior turn, old runtime tables remain untouched, backend stopped.
+    - [x] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone: response SSE reaches done, player-facing narration is persisted, next-turn entrypoint sees the frozen prior turn, old runtime tables remain untouched, backend stopped.
   - Primitive boundary draft:
     - Owner: clean runtime response/persistence adapter at the `/api/chat/action` boundary, not old `turn_sagas`, old `settled_turn_packets`, old v2 packet persistence, or old narrator attempts.
     - Inputs: accepted clean runtime terminal projection plus any accepted clean evidence packet produced by prior primitives (`SceneFrame`, GM Read, Judge/Uncertainty, optional Oracle Settlement).
@@ -2447,3 +2447,13 @@ Session: `gm-v1-consequenc-slice`.
     - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
     - `npm --prefix backend test -- store-manifest.test.ts clone.test.ts --bail=1` passed with 12 tests.
     - `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts store-manifest.test.ts clone.test.ts --bail=1` passed with 371 tests.
+    - Live-found migration/clone fix: the first P59 live load attempt proved `clean_gameplay_turn_records` could be created by clean-start clone before migrations ran, so `0020_clean_gameplay_turn_records.sql` was changed to `IF NOT EXISTS` for the table and indexes. Re-ran `store-manifest.test.ts clone.test.ts`, `gameplay-cycle-runtime-contracts.test.ts chat.test.ts`, and typecheck successfully.
+  - Live/manual `/api/chat/action` evidence:
+    - Fresh clean-start clone: `p59-settled-2f272645` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `clean_gameplay_turn_records`, `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `authority_traces`, `turn_clock_ledger`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs` all 0; clock `worldVersion=0/worldTimeMinutes=0/currentTick=0`; player Mira Voss in Lowwater Bazaar.
+    - Manual action after inspecting current state: `I remain in Lowwater Bazaar and calmly take in the visible scene without moving or touching anything.`
+    - Stable backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` on port `3225`, then stopped after verification; ports `3225` and `3001` were clear afterward.
+    - SSE order: `scene-settling(scene-frame)`, `scene-settling(gm-read)`, `scene-settling(judge-uncertainty)`, `narrative`, `finalizing_turn`, `done`.
+    - Public done boundary: `recordId="cgtr_d48b335439085c11a99b8558"`, `turnId="cgturn_73ca6bf523f08288a76a717c"`, `packetId="cgpacket_c06bd790572e704067148e0e"`, `chatHistoryLengthBeforeTurn=0`, `chatHistoryLengthAfterTurn=2`, `mutationApplied=false`, `settled=true`.
+    - Postcheck: chat history length 2 with the exact user action and assistant narration; `clean_gameplay_turn_records=1`; old v2/saga/narrator/ledger/oracle/simulation tables remained 0; clock remained `0/0/0`; clean record hashes matched chat tail; record contained no old v2/saga/narrator/receipt-ledger surface.
+    - Artifacts: `output/clean-runtime-p59-settled-live/{clone.json,load.json,world-before.json,precheck.json,action.sse,action-events.json,postcheck.json,backend.out.log,backend.err.log}`.
