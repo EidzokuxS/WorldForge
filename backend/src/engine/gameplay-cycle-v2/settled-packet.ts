@@ -7,6 +7,7 @@ import {
   type GmReadV2,
   type GmReadNoMutationV2,
   type GmJudgeV2,
+  type GameplayToolIdV2,
   type ModelFacingTurnPacketV2,
   type NarratorViewV2,
   type OracleSettlementV2,
@@ -24,6 +25,80 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
 
 function evidenceId(prefix: string, index: number): string {
   return `${prefix}-${index + 1}`;
+}
+
+const BASE_NARRATOR_FORBIDDEN_CLAIMS = [
+  "absence_or_no_change",
+  "movement_or_arrival_without_receipt",
+  "route_availability_without_receipt",
+  "discovery_or_search_result_without_receipt",
+  "item_state_without_receipt",
+  "npc_knowledge_or_response_without_receipt",
+  "condition_or_rest_benefit_without_receipt",
+  "hidden_or_offscreen_event_without_receipt",
+  "location_or_world_fact_change_without_receipt",
+] as const;
+
+function runtimeReceiptLimitForNarrator(
+  evidence: SettledEvidenceV2,
+): NarratorViewV2["evidenceContract"]["receiptLimits"][number] | null {
+  if (
+    evidence.authority !== "runtime_receipt"
+    || !evidence.sourceReceiptId
+    || !evidence.sourceToolId
+  ) {
+    return null;
+  }
+
+  const toolId = evidence.sourceToolId as GameplayToolIdV2;
+  switch (toolId) {
+    case "time.advance.v2":
+      return {
+        sourceReceiptId: evidence.sourceReceiptId,
+        toolId,
+        proves: [
+          "elapsed in-world time",
+          "updated world clock",
+        ],
+        doesNotProve: [
+          "nothing changed",
+          "everything stayed the same",
+          "no visible changes occurred",
+          "nothing happened",
+          "movement or arrival",
+          "route availability",
+          "rest benefits, healing, fatigue, or condition changes",
+          "hidden or offscreen events",
+          "discovery or search results",
+          "absence",
+          "NPC knowledge",
+          "item state",
+          "location state",
+          "world facts",
+        ],
+      };
+    case "route.check.v2":
+      return {
+        sourceReceiptId: evidence.sourceReceiptId,
+        toolId,
+        proves: ["route availability only"],
+        doesNotProve: ["movement", "arrival", "current-scene change"],
+      };
+    default:
+      return null;
+  }
+}
+
+function buildNarratorEvidenceContractV2(
+  packet: SettledTurnPacketV2,
+): NarratorViewV2["evidenceContract"] {
+  return {
+    authoritativeSource: "acceptedEvidence",
+    forbiddenClaimKinds: [...BASE_NARRATOR_FORBIDDEN_CLAIMS],
+    receiptLimits: packet.acceptedEvidence
+      .map(runtimeReceiptLimitForNarrator)
+      .filter((limit): limit is NarratorViewV2["evidenceContract"]["receiptLimits"][number] => Boolean(limit)),
+  };
 }
 
 export function currentSceneEvidence(packet: ModelFacingTurnPacketV2): SettledEvidenceV2[] {
@@ -264,5 +339,6 @@ export function buildNarratorViewV2(packet: SettledTurnPacketV2): NarratorViewV2
       mayCallTools: false,
       mayUseFailedOrSkippedAsTruth: false,
     },
+    evidenceContract: buildNarratorEvidenceContractV2(packet),
   });
 }

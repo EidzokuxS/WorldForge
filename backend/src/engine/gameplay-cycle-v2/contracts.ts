@@ -1503,6 +1503,7 @@ export const settledEvidenceV2Schema = z.object({
   text: z.string().trim().min(1).max(700),
   sourceRefs: z.array(modelSafeRefSchema).max(12).default([]),
   sourceReceiptId: idText.optional(),
+  sourceToolId: gameplayToolIdV2Schema.optional(),
 }).strict().superRefine((evidence, ctx) => {
   if (evidence.authority === "runtime_receipt" && !evidence.sourceReceiptId) {
     ctx.addIssue({
@@ -1516,6 +1517,13 @@ export const settledEvidenceV2Schema = z.object({
       code: "custom",
       path: ["sourceReceiptId"],
       message: "Only runtime receipt evidence may carry sourceReceiptId.",
+    });
+  }
+  if (evidence.sourceToolId && evidence.authority !== "runtime_receipt") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sourceToolId"],
+      message: "Only runtime receipt evidence may carry sourceToolId.",
     });
   }
 });
@@ -1743,6 +1751,50 @@ export const settledTurnPacketV2Schema = z.object({
 
 export type SettledTurnPacketV2 = z.infer<typeof settledTurnPacketV2Schema>;
 
+const narratorForbiddenClaimV2Schema = z.enum([
+  "absence_or_no_change",
+  "movement_or_arrival_without_receipt",
+  "route_availability_without_receipt",
+  "discovery_or_search_result_without_receipt",
+  "item_state_without_receipt",
+  "npc_knowledge_or_response_without_receipt",
+  "condition_or_rest_benefit_without_receipt",
+  "hidden_or_offscreen_event_without_receipt",
+  "location_or_world_fact_change_without_receipt",
+]);
+
+const defaultNarratorForbiddenClaimKindsV2 = [
+  "absence_or_no_change",
+  "movement_or_arrival_without_receipt",
+  "route_availability_without_receipt",
+  "discovery_or_search_result_without_receipt",
+  "item_state_without_receipt",
+  "npc_knowledge_or_response_without_receipt",
+  "condition_or_rest_benefit_without_receipt",
+  "hidden_or_offscreen_event_without_receipt",
+  "location_or_world_fact_change_without_receipt",
+] as const;
+
+const narratorReceiptEvidenceLimitV2Schema = z.object({
+  sourceReceiptId: idText,
+  toolId: gameplayToolIdV2Schema,
+  proves: z.array(z.string().trim().min(1).max(240)).min(1).max(8),
+  doesNotProve: z.array(z.string().trim().min(1).max(240)).min(1).max(24),
+}).strict();
+
+const narratorEvidenceContractV2Schema = z.object({
+  authoritativeSource: z.literal("acceptedEvidence"),
+  forbiddenClaimKinds: z.array(narratorForbiddenClaimV2Schema)
+    .min(1)
+    .max(defaultNarratorForbiddenClaimKindsV2.length)
+    .default([...defaultNarratorForbiddenClaimKindsV2]),
+  receiptLimits: z.array(narratorReceiptEvidenceLimitV2Schema).max(80).default([]),
+}).strict().default({
+  authoritativeSource: "acceptedEvidence",
+  forbiddenClaimKinds: [...defaultNarratorForbiddenClaimKindsV2],
+  receiptLimits: [],
+});
+
 export const narrationAttemptStatusV2Schema = z.enum([
   "not_started",
   "started",
@@ -1779,6 +1831,7 @@ export const narratorViewV2Schema = z.object({
     mayCallTools: z.literal(false),
     mayUseFailedOrSkippedAsTruth: z.literal(false),
   }).strict(),
+  evidenceContract: narratorEvidenceContractV2Schema,
 }).strict();
 
 export type NarratorViewV2 = z.infer<typeof narratorViewV2Schema>;

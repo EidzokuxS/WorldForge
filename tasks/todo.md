@@ -57,6 +57,34 @@ P35 route-check admission / deterministic simple tool-request checkpoint:
   - Artifacts: `output/p35-route-check-admission/*` for failed diagnostic and `output/p35-route-check-admission-r2/*` for clean proof.
 - Status: diagnostic slice complete, pending commit/push/reindex. This adds 0% to final acceptance until the multi-campaign ~60-turn clean lanes run.
 
+P36 time.advance narrator no-change evidence-contract checkpoint:
+- Failure discovered during adaptive P35 retry burn-in:
+  - Clean retry clone `p35-route-check-fresh-r2-9a0c3b11` reached turn 4 with accepted `time.advance.v2`, but player-facing narration added a broad no-change claim: `Всё остаётся как было.`
+  - The lane is diagnostic-invalid from turn 4. `time.advance.v2` proves elapsed time and clock advancement only; it does not prove absence, no visible changes, no hidden/offscreen events, no NPC/item/location/world-fact changes, rest benefits, or "everything remains" claims.
+- Oracle/GPT-5.5 Pro attempt:
+  - Dry-run succeeded with one bundled text attachment: 6 files, about 127.5k tokens.
+  - Real Oracle browser run `p36-time-narrator-contract` failed before context delivery with `connect ECONNREFUSED 127.0.0.1:61914`.
+  - This is invalid Oracle evidence and was not used as an architecture answer.
+- Boundary decision:
+  - Fix at narrator evidence-contract boundary, not with regex/text post-processing or deterministic special-case narration.
+  - Runtime receipt evidence now carries `sourceToolId`; `narrator-view.v2` carries `evidenceContract.authoritativeSource`, `forbiddenClaimKinds`, and per-receipt `receiptLimits`.
+  - `time.advance.v2` receipt limits explicitly say it proves only elapsed in-world time and updated world clock and does not prove no-change/no-event/absence/rest/condition/NPC/item/location/route/discovery/world-fact claims.
+  - Narrator prompt now treats `narratorView.evidenceContract` as hard limits and forbids `nothing changed`, `everything stayed the same`, `no visible changes occurred`, and `nothing happened` unless accepted evidence explicitly proves that exact fact.
+- Verification:
+  - GitNexus impact before edits: `buildNarratorSystemPrompt`, `buildNarratorViewV2`, `normalizeRuntimeReceiptEvidenceV2`, and `assertNarratorViewV2` all LOW risk; `narratorViewV2Schema` was not indexed as a direct target.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 163 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Fresh zero-turn clone `p36-time-narrator-clean-0e86cbce` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f` preflight: `gameplay_cycle_v2_packets=0`, `turn_clock_ledger=0`, `authority_traces=0`, legacy packet/saga/narrator/proposal rows 0, clock `0/0/0`, scene `Lowwater Bazaar`.
+  - Real `/api/chat/action`: `Я остаюсь в Lowwater Bazaar и жду ровно 10 минут, ничего не трогая и никуда не двигаясь.`
+  - Live result: HTTP 200, v2 `done`, `tick=10`, `worldVersion=1`, `worldTimeMinutes=10`, packet `v2packet-mq1qepzi-66a8a4b570e4`.
+  - DB result: one `gameplay_cycle_v2_packets` row, one `turn_clock_ledger` row with `delta_minutes=10/reason_kind=wait`, one `authority_traces` row with `gameplay-cycle-v2.time.advance.v2`, legacy rows stayed 0, current scene stayed `Lowwater Bazaar`.
+  - Narrator evidence contract included `forbiddenClaimKinds=["absence_or_no_change", ...]` and `receiptLimits[0].toolId="time.advance.v2"` with no-change/no-event/absence limitations.
+  - Player-facing narration: `Десять минут проходят в Lowwater Bazaar.` No broad no-change/no-event/absence claim.
+  - Artifacts: `output/p36-time-narrator-nochange/preflight.json`, `turn1-wait10.sse.txt`, `turn1-wait10.events.json`, `turn1-wait10.db.json`, `turn1-ledger-trace-raw.json`.
+  - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
+- Status: diagnostic slice complete. This adds 0% to final acceptance until several different zero-turn campaigns/clones reach about 60 clean manual turns each.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.

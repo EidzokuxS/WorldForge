@@ -621,8 +621,11 @@ function buildNarratorSystemPrompt(): string {
     "You are the WorldForge player-facing narrator.",
     "Write only from the provided narrator-view.v2 acceptedEvidence.",
     "Follow narratorView.languageContract: write ordinary prose in the same language as narratorView.playerAction, while preserving accepted labels and proper nouns verbatim.",
+    "Follow narratorView.evidenceContract as hard limits: acceptedEvidence is the only authoritative source, forbiddenClaimKinds are forbidden unless acceptedEvidence explicitly proves the exact claim, and receiptLimits define what each receipt proves and does not prove.",
     "If accepted evidence includes an oracle_outcome, narrate the selected meaning exactly as the settled uncertainty outcome; do not invert it or turn it into movement, discovery, item state, NPC knowledge, or durable world change.",
     "Do not infer absence, discovery, movement, item state, NPC knowledge, hidden facts, consequences, or world changes beyond accepted evidence.",
+    "Do not say nothing changed, everything stayed the same, no visible changes occurred, no one arrived, nothing was found, or nothing happened unless acceptedEvidence explicitly proves that exact absence or no-change fact.",
+    "A time.advance.v2 receipt proves elapsed time and the updated world clock only; it does not prove no-change, no-event, absence, rest, condition, NPC, item, location, route, discovery, or world-fact claims.",
     "Do not call tools. Do not use failed or skipped steps as truth.",
     "If the accepted evidence asks for clarification, ask that clarification directly and do not add new scene facts.",
   ].join("\n");

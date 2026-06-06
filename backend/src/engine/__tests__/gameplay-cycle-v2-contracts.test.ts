@@ -5595,6 +5595,84 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(normalized.evidence.text).toContain("rest benefits");
     expect(normalized.evidence.text).toContain("hidden/offscreen events");
     expect(normalized.evidence.text).toContain("absence");
+    expect(normalized.evidence.text).toContain("nothing changed");
+    expect(normalized.evidence.text).toContain("everything stayed the same");
+    expect(normalized.evidence.sourceToolId).toBe("time.advance.v2");
+  });
+
+  it("exposes time.advance.v2 no-change limits in the narrator evidence contract", async () => {
+    const { packet, gmRead, checklist } = timeAdvanceToolPlanFixture();
+    const execution = await executeGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      request: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-time-narrator-contract",
+        stepId: "step-1",
+        capabilityId: "time_advance",
+        toolId: "time.advance.v2",
+        effectBinding: {
+          actorRef: "Player",
+          anchorScope: "current_scene",
+          anchorRef: "Atrium Floor",
+          reasonKind: "wait",
+          elapsedMinutes: 15,
+          sourceAuthority: {
+            kind: "explicit_player_elapsed_time_intent",
+            actorRef: "Player",
+            anchorRef: "Atrium Floor",
+            sourceSummary: "The player explicitly waits exactly fifteen minutes.",
+          },
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        },
+      },
+      handlers: {
+        "time.advance.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "world",
+          resultWorldVersion: 8,
+          visibleSummary: "15 minutes pass in Atrium Floor.",
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          durableEventIds: [],
+        }),
+      },
+      receiptId: "receipt-time-narrator-contract",
+      emittedAt: 15,
+    });
+    const ledger = buildRuntimeReceiptLedgerV2({
+      ledgerId: "ledger-time-narrator-contract",
+      modelPacket: packet,
+      checklist,
+      receipts: [execution.receipt],
+    });
+    const settledPacket = buildRuntimeSettledTurnPacketV2({
+      packetId: "packet-time-narrator-contract",
+      modelPacket: packet,
+      gmRead,
+      checklist,
+      ledger,
+      receiptModelPackets: {
+        [execution.receipt.receiptId]: packet,
+      },
+    });
+
+    const narratorView = buildNarratorViewV2(settledPacket);
+    const timeLimit = narratorView.evidenceContract.receiptLimits.find((limit) =>
+      limit.sourceReceiptId === "receipt-time-narrator-contract");
+
+    expect(narratorView.evidenceContract.authoritativeSource).toBe("acceptedEvidence");
+    expect(narratorView.evidenceContract.forbiddenClaimKinds).toContain("absence_or_no_change");
+    expect(timeLimit).toMatchObject({
+      toolId: "time.advance.v2",
+      proves: ["elapsed in-world time", "updated world clock"],
+    });
+    expect(timeLimit?.doesNotProve).toContain("nothing changed");
+    expect(timeLimit?.doesNotProve).toContain("everything stayed the same");
+    expect(timeLimit?.doesNotProve).toContain("no visible changes occurred");
+    expect(timeLimit?.doesNotProve).toContain("nothing happened");
+    expect(timeLimit?.doesNotProve).toContain("hidden or offscreen events");
   });
 
   it("builds a runtime settled packet from accepted mutation receipts only", async () => {
@@ -11177,5 +11255,25 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(functionBody).toContain("evidenceRefs: input.consequence.evidenceRefs");
     expect(functionBody).not.toContain("safeGenerateObject");
     expect(functionBody).not.toContain("destinationRef");
+  });
+
+  it("keeps narrator no-change claims behind explicit accepted evidence", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/engine/gameplay-cycle-v2/runtime.ts"),
+      "utf-8",
+    );
+    const functionBody = source.slice(
+      source.indexOf("function buildNarratorSystemPrompt"),
+      source.indexOf("function buildNarratorPrompt"),
+    );
+
+    expect(functionBody).toContain("Follow narratorView.evidenceContract as hard limits");
+    expect(functionBody).toContain("forbiddenClaimKinds are forbidden unless acceptedEvidence explicitly proves the exact claim");
+    expect(functionBody).toContain("Do not say nothing changed");
+    expect(functionBody).toContain("everything stayed the same");
+    expect(functionBody).toContain("no visible changes occurred");
+    expect(functionBody).toContain("nothing happened");
+    expect(functionBody).toContain("A time.advance.v2 receipt proves elapsed time and the updated world clock only");
+    expect(functionBody).not.toContain("replace(");
   });
 });
