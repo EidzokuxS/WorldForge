@@ -67,6 +67,7 @@ import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
 import {
+  admitExplicitMovementGmJudgeV2,
   admitNoMutationMovementTargetRouteCheckV2,
   admitExplicitMovementV2,
   type ExplicitMovementAdmissionV2,
@@ -874,7 +875,15 @@ export async function* processGameplayTurnCycleV2(
       ).join("; ")}`,
     );
   }
-  const gmJudge = gmJudgeValidation.judge;
+  let gmJudge = gmJudgeValidation.judge;
+  const explicitMovementJudgeAdmission = admitExplicitMovementGmJudgeV2({
+    gmRead,
+    gmJudge,
+    movementAdmission: explicitMovementAdmission,
+  });
+  if (explicitMovementJudgeAdmission.status === "admitted") {
+    gmJudge = explicitMovementJudgeAdmission.gmJudge;
+  }
   let oracleResult: OracleResult | null = null;
   let settledPacket: SettledTurnPacketV2;
   if (gmJudge.lane === "roll_oracle") {

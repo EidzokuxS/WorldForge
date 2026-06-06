@@ -5,6 +5,7 @@ import {
   type GmJudgeV2,
   type GmReadChecklistV2,
   type GmReadNoMutationV2,
+  type GmReadV2,
   type ModelFacingTurnPacketV2,
 } from "./contracts.js";
 import type { GameplayRefRegistryV2 } from "./ref-registry.js";
@@ -197,5 +198,51 @@ export function admitNoMutationMovementTargetRouteCheckV2(input: {
     gmJudge,
     destinationRef: destination.ref,
     evidenceRefs,
+  };
+}
+
+export type ExplicitMovementJudgeAdmissionV2 =
+  | {
+    status: "admitted";
+    gmJudge: GmJudgeV2;
+  }
+  | {
+    status: "not_admitted";
+    reason: string;
+  };
+
+export function admitExplicitMovementGmJudgeV2(input: {
+  gmRead: GmReadV2;
+  gmJudge: GmJudgeV2;
+  movementAdmission: ExplicitMovementAdmissionV2;
+}): ExplicitMovementJudgeAdmissionV2 {
+  if (input.movementAdmission.status !== "admitted") {
+    return { status: "not_admitted", reason: input.movementAdmission.reason };
+  }
+  if (input.gmRead.path !== "tool_plan") {
+    return { status: "not_admitted", reason: "GM Read is not a tool_plan movement interpretation." };
+  }
+  if (input.gmJudge.lane !== "action_checklist") {
+    return { status: "not_admitted", reason: "GM Judge is not an action_checklist lane." };
+  }
+  const admittedKinds = input.gmJudge.checklistAdmission.requiredEffectKinds;
+  if (admittedKinds.length !== 1 || admittedKinds[0] !== "movement") {
+    return { status: "not_admitted", reason: "GM Judge did not admit exactly one movement effect." };
+  }
+
+  const checklistAdmission = input.movementAdmission.checklistAdmission;
+  return {
+    status: "admitted",
+    gmJudge: assertGmJudgeV2({
+      version: "gm-judge.v2",
+      lane: "action_checklist",
+      physicalPossibility: input.gmJudge.physicalPossibility,
+      checkNeed: "backend_action_checklist",
+      actorRefs: checklistAdmission.actorRefs,
+      targetRefs: checklistAdmission.targetRefs,
+      evidenceRefs: checklistAdmission.evidenceRefs,
+      rationale: "Exact connected movement was admitted by backend movement authority; movement refs are backend-owned.",
+      checklistAdmission,
+    }),
   };
 }

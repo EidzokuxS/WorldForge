@@ -26,6 +26,7 @@ import {
   buildApiResponseProjectionV2,
   assertTurnStartEnvelopeV2,
   admitNoMutationMovementTargetRouteCheckV2,
+  admitExplicitMovementGmJudgeV2,
   admitExplicitMovementV2,
   apiResponseProjectionV2Schema,
   buildNarratorViewV2,
@@ -2620,6 +2621,116 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(routeCheckResult.read)).not.toContain("checklistRequest");
     expect(admission.status === "admitted" ? admission.checklistAdmission.requiredEffectKinds : [])
       .toEqual(["movement"]);
+  });
+
+  it("overrides movement Judge ref drift with backend-owned exact movement admission", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I walk to North Hall after Clerk Mara points at it.",
+      frame: {
+        roster: {
+          active: [{
+            id: "npc-clerk-mara",
+            actorId: "npc-clerk-mara",
+            type: "npc",
+            label: "Clerk Mara",
+            locationId: "location-alpha",
+            sceneScopeId: "scene-alpha",
+            awareness: "clear",
+            awarenessHint: "pointing toward North Hall",
+          }],
+          support: [],
+          background: [],
+        },
+      },
+    });
+    const movementAdmission = admitExplicitMovementV2({
+      packet,
+      refRegistry: registry,
+    });
+    expect(movementAdmission.status).toBe("admitted");
+    const readResult = validateGmReadV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player follows Clerk Mara's visible advice toward North Hall.",
+        sceneQuestion: "What movement must be settled?",
+        focalActorRefs: ["Player", "Clerk Mara"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall", "Clerk Mara"],
+        actionInterpretation: {
+          intent: "Move to North Hall.",
+          method: "walk",
+          targetRefs: ["North Hall", "Clerk Mara"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Movement requires backend settlement; Clerk Mara is only context.",
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") throw new Error("Expected movement GM Read.");
+    const driftedJudge = validateGmJudgeV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: {
+        version: "gm-judge.v2",
+        lane: "action_checklist",
+        physicalPossibility: "possible",
+        checkNeed: "backend_action_checklist",
+        actorRefs: ["Player", "Clerk Mara"],
+        targetRefs: ["Clerk Mara"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall", "Clerk Mara"],
+        rationale: "The model admitted movement but kept the advisor as contextual target.",
+        checklistAdmission: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["movement"],
+          actorRefs: ["Player", "Clerk Mara"],
+          targetRefs: ["Clerk Mara"],
+          evidenceRefs: ["Player", "Atrium Floor", "North Hall", "Clerk Mara"],
+          checklistGoal: "Move to North Hall following Clerk Mara's advice.",
+        },
+      },
+    });
+    expect(driftedJudge.status).toBe("accepted");
+    if (driftedJudge.status !== "accepted") throw new Error("Expected drifted Judge to be structurally accepted.");
+
+    const deterministicJudge = admitExplicitMovementGmJudgeV2({
+      gmRead: readResult.read,
+      gmJudge: driftedJudge.judge,
+      movementAdmission,
+    });
+    expect(deterministicJudge.status).toBe("admitted");
+    if (deterministicJudge.status !== "admitted") throw new Error("Expected backend-owned movement Judge admission.");
+    expect(deterministicJudge.gmJudge).toMatchObject({
+      lane: "action_checklist",
+      checklistAdmission: {
+        requiredEffectKinds: ["movement"],
+        actorRefs: ["Player"],
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+      },
+    });
+
+    const checklist = compileSimpleGmActionChecklistV2({
+      packet,
+      gmRead: readResult.read,
+      gmJudge: deterministicJudge.gmJudge,
+    });
+    expect(checklist?.status).toBe("accepted");
+    if (!checklist || checklist.status !== "accepted") {
+      throw new Error("Expected deterministic movement checklist.");
+    }
+    const request = buildDeterministicSimpleToolRequestV2({
+      packet,
+      step: checklist.checklist.steps[0],
+    });
+    expect(request).toMatchObject({
+      toolId: "actor.move.v2",
+      effectBinding: {
+        actorRef: "Player",
+        destinationRef: "North Hall",
+      },
+    });
+    expect(JSON.stringify({ deterministicJudge, checklist, request })).not.toContain("Clerk Mara");
   });
 
   it("promotes no-mutation GM Reads that target movement options into route-check admission", () => {

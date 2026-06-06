@@ -1986,3 +1986,36 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/p33-dialogue-language-contract/pre-turn-scene-frame.json`, `turn3-ask-brost-russian-wait.*`, `turn3-retry-ask-brost-russian-wait.*`, `turn3-retry2-ask-brost-russian-wait.*`.
     - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
     - This remains diagnostic evidence only because restored attempts occurred before the successful retry.
+- P48/P49 explicit movement Judge ref ownership:
+  - Root failure from P48 diagnostic:
+    - Continued from P47 diagnostic clone `p47-compiled-support-dialogue-live-proof`.
+    - Manual movement action selected after inspecting current state: `Я иду из Lowwater Bazaar в The Copper Tap по видимому маршруту, следуя совету Local guide, и не делаю ничего другого.`
+    - `/api/chat/action` returned HTTP 200 but SSE emitted `error`: `Turn processing failed. The pre-turn state was restored; please retry.`
+    - Backend log root cause: `gameplay-cycle-v2 pre-settlement contract failed: Tool request cited ref "Local guide" outside the selected checklist step refs.`
+    - Restore evidence: world clock stayed `world_version=1/world_time_minutes=0/current_tick=1`, chat history stayed 2, `gameplay_cycle_v2_packets` stayed 1, legacy rows stayed 0, and `turn_clock_ledger` recorded a diagnostic `replay_restore`.
+    - P47/P48 lane is invalid for acceptance after this restored turn.
+  - Implemented contract-layer fix:
+    - `admitExplicitMovementGmJudgeV2` now converts an exact backend-admitted movement into backend-owned `gm-judge.v2` refs only when GM Read is `tool_plan`, GM Judge is `action_checklist`, and required effects are exactly `["movement"]`.
+    - The deterministic movement Judge admission owns `actorRefs=["Player"]`, `targetRefs=[destination]`, and `evidenceRefs=["Player", current scene, destination]`.
+    - Runtime applies this admission after GM Judge validation and before checklist compilation, so model-authored movement ref drift cannot enter `actor.move.v2` for exact connected movement.
+    - This is not a prompt guard; it moves ownership for exact movement refs to the backend movement authority.
+  - Verification:
+    - GitNexus impact before edits: `validateGameplayToolRequestV2`, `buildDeterministicSimpleToolRequestV2`, `generateToolRequestCandidateV2`, `compileSimpleGmActionChecklistV2`, `admitExplicitMovementV2`, and `buildGmJudgePromptV2` were LOW risk. `processGameplayTurnCycleV2` was not found by GitNexus.
+    - Focused contract test added: exact movement with an NPC mentioned in GM Read/Judge drift is rewritten to backend-owned `Player` + current scene + destination refs; deterministic checklist/tool request contains no NPC ref.
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 174 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - P49 live diagnostic proof from fresh zero-turn clone:
+    - Fresh clone `p49-explicit-movement-owned-refs-live-proof` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Preflight: `chat_history=0`, `gameplay_cycle_v2_packets=0`, `turn_clock_ledger=0`, `authority_traces=0`, legacy packet/saga/narrator/proposals all 0, clock `0/0/0`, player `Mira Voss` in `Lowwater Bazaar`, discovered route to `The Copper Tap`.
+    - Turn 1 action: `Я подхожу к ближайшему обычному местному проводнику в Lowwater Bazaar, прошу его назвать себя и подсказать безопасный путь к таверне, и не делаю ничего другого.`
+    - Turn 1 reached v2 `done`, packet `v2packet-mq1vvqz9-aed4bc235501`, `tick=1`, `worldVersion=1`, `worldTimeMinutes=0`; DB after turn had `gameplay_cycle_v2_packets=1`, `authority_traces=1`, legacy/proposals 0, restore ledger 0, and visible support actor `Местный проводник` in `Lowwater Bazaar`.
+    - Turn 2 action selected after inspecting actual post-turn state: `Я иду из Lowwater Bazaar в The Copper Tap по видимому маршруту, следуя совету Местный проводник, и не делаю ничего другого.`
+    - Turn 2 reached v2 `done`, packet `v2packet-mq1vym24-309f31bff512`, `tick=2`, `worldVersion=2`, `worldTimeMinutes=1`.
+    - DB after turn 2: player current scene is `The Copper Tap`, `gameplay_cycle_v2_packets=2`, `authority_traces=2`, `turn_clock_ledger=1` with `reason_kind="travel"`, legacy packet/saga/narrator/proposals all 0, chat history length 4.
+    - Persisted packet confirms the ref-ownership contract: `gmReadPublic` may cite `Местный проводник`, but `gmJudgePublic` for movement has `actorRefs=["Player"]`, `targetRefs=["The Copper Tap"]`, `evidenceRefs=["Player","Lowwater Bazaar","The Copper Tap"]`, and `requiredEffectKinds=["movement"]`.
+    - Accepted evidence includes `actor.move.v2` movement receipt with source refs `Player`, `The Copper Tap`, and `Lowwater Bazaar`, plus post-move visible actor scene beats for `Old Route Hand Sessik` and `Tap-Keeper Brost`.
+    - Player-facing narration: `Вы приходите в The Copper Tap. Здесь Old Route Hand Sessik и Tap-Keeper Brost.`
+    - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn1-guide-route.*`, `turn2-move-copper-tap.*`, and backend logs.
+    - Backend was stopped after verification; ports `3001` and `3101` were clear.
+    - This is a two-turn diagnostic proof only. It adds 0% to final acceptance until several different clean zero-turn campaigns each reach about 60 clean manual turns with zero failed/restored/replayed/invalid turns.
