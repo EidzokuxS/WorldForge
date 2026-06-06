@@ -2019,3 +2019,24 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn1-guide-route.*`, `turn2-move-copper-tap.*`, and backend logs.
     - Backend was stopped after verification; ports `3001` and `3101` were clear.
     - This is a two-turn diagnostic proof only. It adds 0% to final acceptance until several different clean zero-turn campaigns each reach about 60 clean manual turns with zero failed/restored/replayed/invalid turns.
+- P50 Stage 4 retry/skip gate and P49 turn-3 live evidence:
+  - Next architecture risk identified:
+    - `composeGameplayCycleMutatingTurnV2` currently executes each checklist step once.
+    - `executeGameplayToolRequestV2` can emit rejected/failed receipts, but the composer still blocks/restores on missing requests, local-consequence failure, or other composition-blocked paths instead of implementing the canonical per-step validation feedback/revision/skip settlement loop.
+    - Canonical Stage 4/5 expects one bounded revision opportunity and settled packets containing accepted receipts plus skipped/failed reasons; failed effects must not be narrated as happened.
+  - Oracle/GPT-5.5 Pro gate attempt:
+    - Dry-run used one bundled attachment with 10 files and about 151k tokens: canonical architecture doc plus `mutating-composer.ts`, `runtime-executor.ts`, `tool-request-planner.ts`, `receipt-ledger.ts`, `settled-packet.ts`, `contracts.ts`, `action-checklist.ts`, `runtime.ts`, and focused v2 contract tests.
+    - Real Oracle browser run `p50-stage4-retry-skip-review` failed before context delivery with `ECONNREFUSED 127.0.0.1:58243`.
+    - Tool discovery did not expose usable built-in Browser navigation tools in this session; it exposed only `node_repl` support for Browser integration. No auditable ChatGPT attachment/context delivery happened.
+    - Decision: do not implement the Stage 4 retry/skip architecture slice in this checkpoint without a valid Oracle/browser review. Continue collecting live evidence and keep the gate pending.
+  - P49 turn-3 live/manual evidence:
+    - Continued clean zero-turn clone `p49-explicit-movement-owned-refs-live-proof`, after two clean turns, from actual inspected state: player `Mira Voss` in `The Copper Tap`, visible `Old Route Hand Sessik` and `Tap-Keeper Brost`, routes to `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`.
+    - Manual action: `Я обращаюсь к Old Route Hand Sessik и спрашиваю, насколько безопасен путь через Silt Warrens сегодня. Я остаюсь в The Copper Tap и не иду по маршруту.`
+    - Stable backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped after verification; ports `3001` and `3101` were clear afterward.
+    - SSE reached v2 `done`, packet `v2packet-mq1wafrn-f4d3da18e7be`, `tick=3`, `worldVersion=2`, `worldTimeMinutes=1`.
+    - DB after turn 3: `gameplay_cycle_v2_packets=3`, `turn_clock_ledger=1`, `authority_traces=2`, legacy packet/saga/narrator/proposals all 0, chat history length 6, player still in `The Copper Tap`.
+    - Persisted packet: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["dialogue_outcome"]`; acceptedRuntimeReceiptIds `["receipt-step-1"]`; stepAudit skipped/failed counts 0.
+    - Accepted evidence: one `dialogue.record.v2` runtime receipt from `Old Route Hand Sessik`, source refs `Old Route Hand Sessik`, `Player`, `Silt Warrens`, `The Copper Tap`; no movement/current-scene mutation was claimed.
+    - Player-facing narration matched the accepted dialogue receipt and did not claim travel, route availability as backend truth, item state, hidden facts, or absence.
+    - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn3-ask-sessik-silt-safety.*` and `backend-p50-3101.*.log`.
+    - P49 is now 3 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
