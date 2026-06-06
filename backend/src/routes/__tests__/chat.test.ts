@@ -1514,6 +1514,7 @@ describe("Campaign-loaded gameplay transport", () => {
           },
         },
         { type: "state_update", data: { type: "raw_tool_result", id: "action-result:raw-1" } },
+        { type: "state_update", data: { type: "time_advance", elapsedMinutes: 5, reasonKind: "wait" } },
         {
           type: "state_update",
           data: {
@@ -1555,6 +1556,9 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: oracle_result");
     expect(body).toContain("event: turn_resolution");
     expect(body).toContain("event: state_update");
+    expect(body).toContain("time_advance");
+    expect(body).toContain("\"elapsedMinutes\":5");
+    expect(body).toContain("\"reasonKind\":\"wait\"");
     expect(body).toContain("status_read");
     expect(body).toContain("route-confirmation desk");
     expect(body).toContain("route-confirmation landing");

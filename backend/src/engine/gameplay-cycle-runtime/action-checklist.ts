@@ -46,6 +46,8 @@ const UUID_LIKE_REF = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world)[_:]/i;
 
 export const EFFECT_TO_CAPABILITY: Record<GmActionChecklistEffectKind, GameplayRuntimeCapabilityId> = {
+  observe_visible: "observe_visible",
+  route_options: "route_options",
   route_check: "route_check",
   movement: "movement",
   dialogue_record: "dialogue_record",
@@ -522,6 +524,33 @@ function allowedCapabilities(frame: AuthoritativeSceneFrame): Set<GameplayRuntim
   );
 }
 
+function playerActionText(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): string {
+  return [
+    input.frame.playerAction,
+    input.gmRead.actionInterpretation.playerIntent,
+    input.gmRead.actionInterpretation.summary,
+    input.gmRead.liveSceneQuestion,
+  ].join(" ").toLowerCase();
+}
+
+function wantsRouteOptions(text: string): boolean {
+  return /\b(where can i go|where to go|available routes|route options|exits|paths|ways out|directions)\b/u.test(text)
+    || /(?:куда|выход|выходы|маршрут|маршруты|пути|дорог[аи])/.test(text);
+}
+
+function wantsVisibleObservation(text: string): boolean {
+  return /\b(look around|look|observe|scan|inspect|examine|listen|take stock|what do i see|who is here|what is visible)\b/u.test(text)
+    || /(?:осмотр|осмотреть|смотрю|огляд|оглядеться|наблюда|слуша|кто здесь|что видно)/.test(text);
+}
+
+function wantsExplicitWait(text: string): boolean {
+  return /\b(wait|rest|watch|pass time|stand by|stay here|pause)\b/u.test(text)
+    || /(?:жду|подожд|отдых|стою|остаюсь|пауза)/.test(text);
+}
+
 function stepFor(input: {
   index: number;
   kind: GmActionChecklistEffectKind;
@@ -540,7 +569,7 @@ function stepFor(input: {
     evidenceRefs: uniqueStrings(input.evidenceRefs),
     intended: {
       kind: input.kind,
-      stateOrEvidence: "state",
+      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance" ? "state" : "evidence",
       requiredCapabilityId: capability,
       summary: `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
     },
@@ -593,6 +622,7 @@ export function buildDeterministicGmActionChecklist(input: {
       option.ref.toLowerCase() === targetRef.toLowerCase()
     ))
     .find((option) => option && citable.has(option.ref.toLowerCase()) && admitted.has(option.ref.toLowerCase()));
+  const actionText = playerActionText(input);
 
   if (movementTarget && allowed.has("movement")) {
     if (!movementTarget.connected && allowed.has("route_check")) {
@@ -612,7 +642,15 @@ export function buildDeterministicGmActionChecklist(input: {
       evidenceRefs: uniqueStrings([actorRef, movementTarget.ref, ...evidenceRefs]),
       dependsOnStepIds: movementTarget.connected ? [] : steps.map((step) => step.stepId),
     }));
-  } else if (allowed.has("time_advance") && sceneRef) {
+  } else if (allowed.has("route_options") && sceneRef && wantsRouteOptions(actionText)) {
+    steps.push(stepFor({
+      index: 1,
+      kind: "route_options",
+      actorRef,
+      targetRefs: [sceneRef],
+      evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
+    }));
+  } else if (allowed.has("time_advance") && sceneRef && wantsExplicitWait(actionText)) {
     steps.push(stepFor({
       index: 1,
       kind: "time_advance",
@@ -620,29 +658,10 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
-  } else if (allowed.has("dialogue_record")) {
-    const actorTarget = firstUsableRef({
-      candidates: [
-        ...input.gmRead.actionInterpretation.targetRefs,
-        ...input.judgment.targetRefs,
-        ...input.frame.actors.map((actor) => actor.ref),
-      ],
-      citable,
-      admitted,
-    });
-    if (actorTarget) {
-      steps.push(stepFor({
-        index: 1,
-        kind: "dialogue_record",
-        actorRef,
-        targetRefs: [actorTarget],
-        evidenceRefs: uniqueStrings([actorRef, actorTarget, ...evidenceRefs]),
-      }));
-    }
-  } else if (allowed.has("world_fact_record") && sceneRef) {
+  } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
     steps.push(stepFor({
       index: 1,
-      kind: "world_fact_record",
+      kind: "observe_visible",
       actorRef,
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
@@ -652,7 +671,9 @@ export function buildDeterministicGmActionChecklist(input: {
       index: 1,
       kind: "scene_beat_record",
       actorRef,
-      targetRefs: [sceneRef],
+      targetRefs: input.gmRead.actionInterpretation.targetRefs
+        .filter((ref) => citable.has(ref.toLowerCase()))
+        .slice(0, 4),
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
   }

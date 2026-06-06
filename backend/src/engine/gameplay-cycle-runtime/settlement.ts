@@ -48,6 +48,36 @@ const MOVEMENT_DOES_NOT_PROVE = [
   "no-change",
 ];
 
+const TIME_DOES_NOT_PROVE = [
+  "no-change",
+  "offscreen events",
+  "NPC action",
+  "discovery",
+  "item state",
+  "condition change",
+  "world fact",
+];
+
+const ROUTE_OPTIONS_DOES_NOT_PROVE = [
+  "full route topology",
+  "hidden routes",
+  "absence of other routes",
+  "movement",
+  "discovery",
+  "no-change",
+];
+
+const SCENE_BEAT_DOES_NOT_PROVE = [
+  "success",
+  "NPC response",
+  "dialogue content",
+  "world fact",
+  "item state",
+  "condition change",
+  "discovery",
+  "no-change",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -215,6 +245,109 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         limits: {
           proves: ["route status only"],
           doesNotProve: ROUTE_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "scene_observation_receipt" && receipt.publicResult.visibleObservation) {
+      const evidenceId = nextEvidenceId(evidence);
+      const observation = receipt.publicResult.visibleObservation;
+      const backendFacts = [
+        fact(evidenceId, 1, `Current scene is ${observation.currentScene}.`),
+        fact(evidenceId, 2, `Current place is ${observation.currentLocation}.`),
+        ...observation.visibleActors.slice(0, 6).map((label, index) =>
+          fact(evidenceId, index + 3, `Visible actor: ${label}.`)
+        ),
+        ...observation.visibleFacts.slice(0, 4).map((summary, index) =>
+          fact(evidenceId, index + 9, summary)
+        ),
+        ...observation.inventory.slice(0, 4).map((label, index) =>
+          fact(evidenceId, index + 13, `Inventory item: ${label}.`)
+        ),
+        ...observation.movementOptions.slice(0, 6).map((label, index) =>
+          fact(evidenceId, index + 17, `Movement option: ${label}.`)
+        ),
+      ];
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "scene_observation_receipt",
+        claimKinds: ["current_scene", "current_location", "visible_actor", "visible_fact", "inventory_status", "movement_option"],
+        text: receipt.publicResult.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts,
+        limits: {
+          proves: ["current visible SceneFrame snapshot entries"],
+          doesNotProve: SCENE_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "route_options_receipt" && receipt.publicResult.routeOptions) {
+      const evidenceId = nextEvidenceId(evidence);
+      const routeOptions = receipt.publicResult.routeOptions;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "route_options_receipt",
+        claimKinds: ["movement_option"],
+        text: receipt.publicResult.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: routeOptions.options.slice(0, 12).map((option, index) =>
+          fact(
+            evidenceId,
+            index + 1,
+            `Route option: ${option.label} (${option.connected ? "connected" : "not connected"}${option.travelCost === null ? "" : `, ${option.travelCost} minute(s)`}).`,
+          )
+        ),
+        limits: {
+          proves: ["route options exposed by current SceneFrame"],
+          doesNotProve: ROUTE_OPTIONS_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "scene_beat_receipt" && receipt.publicResult.sceneBeat) {
+      const evidenceId = nextEvidenceId(evidence);
+      const beat = receipt.publicResult.sceneBeat;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: beat.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, beat.summary),
+          ...beat.targetLabels.slice(0, 4).map((label, index) =>
+            fact(evidenceId, index + 2, `Visible target: ${label}.`)
+          ),
+        ],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: SCENE_BEAT_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "terminal_mutation_receipt" && receipt.publicResult.timeAdvance) {
+      const evidenceId = nextEvidenceId(evidence);
+      const time = receipt.publicResult.timeAdvance;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "terminal_mutation_receipt",
+        claimKinds: ["elapsed_time"],
+        text: `${time.elapsedMinutes} minute(s) pass.`,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [fact(evidenceId, 1, `${time.elapsedMinutes} minute(s) pass.`)],
+        limits: {
+          proves: ["elapsed world clock time"],
+          doesNotProve: TIME_DOES_NOT_PROVE,
         },
       });
     }

@@ -777,7 +777,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPlayerSafeStateUpdate(value: unknown): value is Record<string, unknown> {
-  return isRecord(value) && value.type === "location_change";
+  return isRecord(value) && (value.type === "location_change" || value.type === "time_advance");
 }
 
 function isUnsafeSseRefLike(value: string): boolean {
@@ -798,8 +798,32 @@ function playerSafeText(value: unknown): string | undefined {
   return sanitized === text ? sanitized : undefined;
 }
 
-function playerSafeLocationChange(value: unknown): Record<string, unknown> | null {
+function playerSafeStateUpdate(value: unknown): Record<string, unknown> | null {
   if (!isPlayerSafeStateUpdate(value)) return null;
+  if (value.type === "time_advance") {
+    const elapsedMinutes = value.elapsedMinutes;
+    const reasonKind = value.reasonKind;
+    if (
+      typeof elapsedMinutes !== "number"
+      || !Number.isInteger(elapsedMinutes)
+      || elapsedMinutes < 1
+      || elapsedMinutes > 60
+    ) {
+      return null;
+    }
+    if (
+      reasonKind !== "brief_local_action"
+      && reasonKind !== "wait"
+      && reasonKind !== "short_rest"
+    ) {
+      return null;
+    }
+    return {
+      type: "time_advance",
+      elapsedMinutes,
+      reasonKind,
+    };
+  }
   const locationName = playerSafeText(value.locationName);
   const path = Array.isArray(value.path)
     ? value.path.flatMap((entry) => {
@@ -966,7 +990,7 @@ function toPlayerFacingTurnEvent(
     };
   }
   if (event.type === "state_update") {
-    const data = playerSafeLocationChange(event.data);
+    const data = playerSafeStateUpdate(event.data);
     return data ? { ...event, data } : null;
   }
   if (event.type === "quick_actions") {

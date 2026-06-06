@@ -19,17 +19,8 @@ const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "route_options",
   "route_check",
   "movement",
-  "dialogue_record",
-  "world_fact_record",
-  "support_actor_create",
-  "entity_tag",
-  "item_transfer",
-  "condition_set",
   "time_advance",
-  "quick_action_offer",
   "scene_beat_record",
-  "location_reveal",
-  "minor_poi_create",
 ];
 
 function firstText(...values: unknown[]): string {

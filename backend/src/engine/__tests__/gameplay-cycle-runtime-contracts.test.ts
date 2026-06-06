@@ -652,11 +652,11 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
   return minimalFrame({
     capabilities: [
       { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+      { capabilityId: "route_options", evidenceAuthority: "observation_only", allowed: true },
       { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
-      { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
-      { capabilityId: "world_fact_record", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "scene_beat_record", evidenceAuthority: "observation_only", allowed: true },
     ],
     ...overrides,
   });
@@ -918,6 +918,10 @@ function acceptedMovementReceipt(
         travelCost: 1,
         path: ["Market", "North Hall"],
       },
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
     },
     privateResult: {
       playerId: "player-1",
@@ -956,6 +960,7 @@ function acceptedMovementExecution(
       summary: receipt.publicResult.summary,
       visibleRefs: receipt.publicResult.visibleRefs,
       locationChange: receipt.publicResult.locationChange,
+      timeAdvance: receipt.publicResult.timeAdvance,
     }],
   });
 }
@@ -1920,8 +1925,88 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
   });
 
+  it("deterministically produces route_options checklist from implemented clean capability only", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I check the available routes from here.",
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      liveSceneQuestion: "Which visible route options can the player inspect?",
+      actionInterpretation: {
+        summary: "The player asks which routes are available from the current scene.",
+        playerIntent: "Check visible route options.",
+        method: null,
+        targetRefs: ["Market"],
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-routes",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]?.intended).toMatchObject({
+      kind: "route_options",
+      requiredCapabilityId: "route_options",
+      stateOrEvidence: "evidence",
+    });
+    expect(result.checklist.steps[0]?.disposition.kind).toBe("stage4_backend_resolution_required");
+  });
+
+  it("deterministically produces observe_visible checklist without mutation authority", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I look around the current market.",
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      liveSceneQuestion: "What can the player see in the current scene?",
+      actionInterpretation: {
+        summary: "The player asks to observe the current visible scene.",
+        playerIntent: "Look around the current scene.",
+        method: null,
+        targetRefs: ["Market"],
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-observe",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]?.intended).toMatchObject({
+      kind: "observe_visible",
+      requiredCapabilityId: "observe_visible",
+      stateOrEvidence: "evidence",
+    });
+    expect(result.checklist.authority).toMatchObject({
+      mayAuthorizeMutation: false,
+      maySupportNarrationClaim: false,
+    });
+  });
+
   it("falls back without repair when deterministic compile lacks a backend capability", async () => {
     const frame = actionPlanFrame({
+      playerAction: "I move toward North Hall.",
       capabilities: [
         { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
       ],
@@ -2130,6 +2215,10 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
         visibleRefs: ["Player", "North Hall"],
         routeStatus: "connected",
         locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
       },
       privateResult: {
         playerId: "player-1",

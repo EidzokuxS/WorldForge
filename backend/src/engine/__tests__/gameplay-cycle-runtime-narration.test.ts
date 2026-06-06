@@ -99,6 +99,38 @@ function routeView(): CleanNarratorView {
   });
 }
 
+function timeView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "terminal_mutation_receipt",
+      claimKinds: ["elapsed_time"],
+      text: "5 minute(s) pass.",
+      backendFacts: [{ factRef: "e1.f1", text: "5 minute(s) pass.", exact: true }],
+      limits: {
+        proves: ["elapsed world clock time"],
+        doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
+      },
+    }],
+  });
+}
+
+function routeOptionsView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "route_options_receipt",
+      claimKinds: ["movement_option"],
+      text: "Visible route options: North Hall.",
+      backendFacts: [{ factRef: "e1.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      limits: {
+        proves: ["route options exposed by current SceneFrame"],
+        doesNotProve: ["hidden routes", "absence of other routes", "movement", "discovery", "no-change"],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -306,6 +338,20 @@ describe("clean Stage 6 narration contracts", () => {
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
     expect(renderCleanNarrationFallback(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
+  });
+
+  it("falls back from P64 elapsed-time evidence without no-change claims", () => {
+    const text = renderCleanNarrationFallback(timeView());
+
+    expect(text).toBe("5 minute(s) pass.");
+    expect(text).not.toMatch(/nothing changed|nothing happened|no visible changes|everything stayed/iu);
+  });
+
+  it("renders route-options evidence without converting options into movement", () => {
+    const text = renderCleanNarrationFallback(routeOptionsView());
+
+    expect(text).toBe("Route option: North Hall (connected, 1 minute(s)).");
+    expect(text).not.toMatch(/\b(move|arrive|travel to|you go)\b/iu);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

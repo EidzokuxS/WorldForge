@@ -209,6 +209,40 @@ function checklist(inputFrame = frame()): GmActionChecklist {
   };
 }
 
+function checklistForKind(
+  kind: GmActionChecklist["steps"][number]["intended"]["kind"],
+  inputFrame = frame(),
+): GmActionChecklist {
+  const base = checklist(inputFrame);
+  const capability = kind === "observe_visible"
+    ? "observe_visible"
+    : kind === "route_options"
+      ? "route_options"
+      : kind === "time_advance"
+        ? "time_advance"
+        : kind === "scene_beat_record"
+          ? "scene_beat_record"
+          : base.steps[0].intended.requiredCapabilityId;
+  return {
+    ...base,
+    steps: [{
+      ...base.steps[0],
+      targetRefs: kind === "movement" ? ["North Hall"] : ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...base.steps[0].intended,
+        kind,
+        requiredCapabilityId: capability,
+        stateOrEvidence: kind === "time_advance" || kind === "movement" ? "state" : "evidence",
+      },
+      expectedVisibleEffect: {
+        summary: `${kind} may be visible only after accepted receipt.`,
+        visibleRefs: ["Player", "Market"],
+      },
+    }],
+  };
+}
+
 describe("clean Stage 4 executor DB contracts", () => {
   beforeEach(() => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wf-stage4-"));
@@ -275,5 +309,171 @@ describe("clean Stage 4 executor DB contracts", () => {
       deltaMinutes: 3,
       resultWorldTimeMinutes: 3,
     });
+  });
+
+  it("applies accepted time advance as world-clock-only mutation", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I wait here for a few minutes.",
+    };
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("time_advance", inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.mutationApplied).toBe(true);
+    expect(result.publicEvents).toEqual([{
+      type: "state_update",
+      data: {
+        type: "time_advance",
+        elapsedMinutes: 5,
+        reasonKind: "wait",
+      },
+    }]);
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "time_advance",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "terminal_mutation_receipt",
+        mutationAuthority: "world_clock_only",
+        visibleResultAuthority: "may_claim_elapsed_time",
+      },
+      publicResult: {
+        timeAdvance: {
+          type: "time_advance",
+          elapsedMinutes: 5,
+          reasonKind: "wait",
+        },
+      },
+    });
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 1, worldTimeMinutes: 5, currentTick: 5 });
+    const ledger = getSqliteConnection()
+      .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
+    expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 5 });
+  });
+
+  it("accepts observation and route-options receipts without mutating world clock", async () => {
+    const inputFrame = {
+      ...frame(),
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support" as const,
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      scene: {
+        ...frame().scene,
+        visibleFacts: [{
+          factId: "fact-market",
+          summary: "Lanterns burn along the market stalls.",
+          source: "Market",
+          tick: 0,
+        }],
+      },
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "observe_visible" as const, evidenceAuthority: "observation_only" as const, allowed: true },
+        { capabilityId: "route_options" as const, evidenceAuthority: "observation_only" as const, allowed: true },
+      ],
+    };
+
+    const observation = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("observe_visible", inputFrame),
+    });
+    expect(observation.execution?.receipts[0]).toMatchObject({
+      capabilityId: "observe_visible",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "scene_observation_receipt",
+        mutationAuthority: "none",
+      },
+    });
+    expect(observation.execution?.receipts[0]?.publicResult.visibleObservation).toMatchObject({
+      currentScene: "Market",
+      visibleActors: ["Guide"],
+      visibleFacts: ["Lanterns burn along the market stalls."],
+    });
+
+    const routeFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-routes",
+      turnId: "clean-turn-stage4-routes",
+    };
+    const routes = await runCleanStage4Execution({
+      frame: routeFrame,
+      checklist: checklistForKind("route_options", routeFrame),
+    });
+    expect(routes.execution?.receipts[0]).toMatchObject({
+      capabilityId: "route_options",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "route_options_receipt",
+        mutationAuthority: "none",
+      },
+    });
+    expect(routes.execution?.receipts[0]?.publicResult.routeOptions?.options).toEqual([{
+      label: "North Hall",
+      connected: true,
+      travelCost: 3,
+    }]);
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("accepts scene-beat receipts as non-mutating visible acknowledgement", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I nod to the market crowd without leaving.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support" as const,
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "scene_beat_record" as const, evidenceAuthority: "observation_only" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("scene_beat_record", inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.publicEvents).toEqual([]);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "scene_beat_record",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "scene_beat_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_acknowledge_scene_beat",
+      },
+      publicResult: {
+        sceneBeat: {
+          beatKind: "generic_scene_beat",
+        },
+      },
+    });
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
   });
 });

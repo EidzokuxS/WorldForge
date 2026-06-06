@@ -63,6 +63,10 @@ export interface Stage4ExecutionEvent {
     locationName: string;
     travelCost: number;
     path: string[];
+  } | {
+    type: "time_advance";
+    elapsedMinutes: number;
+    reasonKind: "brief_local_action" | "wait" | "short_rest";
   };
 }
 
@@ -176,7 +180,8 @@ function requestForStep(input: {
   requiredRouteReceiptId: string | null;
 }): CleanStage4Request {
   const destinationRef = input.step.targetRefs[0] ?? "";
-  const capabilityId = input.step.intended.kind === "route_check" ? "route_check" : "movement";
+  const kind = input.step.intended.kind;
+  const capabilityId = cleanStage4CapabilityForKind(kind);
   return assertCleanStage4Request({
     version: "gameplay-runtime.stage4-request.v1",
     requestId: `stage4-request-${randomUUID()}`,
@@ -197,22 +202,85 @@ function requestForStep(input: {
     author: "backend_from_checklist",
     modelAuthored: false,
     capabilityId,
-    effect: capabilityId === "route_check"
-      ? {
-          kind: "route_check",
-          actorRef: "Player",
-          destinationRef,
-          evidenceRefs: input.step.evidenceRefs,
-        }
-      : {
-          kind: "movement",
-          actorRef: "Player",
-          destinationRef,
-          travelMode: "walk",
-          requiredRouteReceiptId: input.requiredRouteReceiptId,
-          evidenceRefs: input.step.evidenceRefs,
-        },
+    effect: requestEffectForStep({
+      frame: input.frame,
+      step: input.step,
+      capabilityId,
+      destinationRef,
+      requiredRouteReceiptId: input.requiredRouteReceiptId,
+    }),
   });
+}
+
+function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStage4Receipt["capabilityId"] {
+  if (kind === "observe_visible") return "observe_visible";
+  if (kind === "route_options") return "route_options";
+  if (kind === "route_check") return "route_check";
+  if (kind === "movement") return "movement";
+  if (kind === "time_advance") return "time_advance";
+  if (kind === "scene_beat_record") return "scene_beat_record";
+  return "scene_beat_record";
+}
+
+function requestEffectForStep(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+  capabilityId: CleanStage4Receipt["capabilityId"];
+  destinationRef: string;
+  requiredRouteReceiptId: string | null;
+}): CleanStage4Request["effect"] {
+  if (input.capabilityId === "observe_visible") {
+    return {
+      kind: "observe_visible",
+      actorRef: "Player",
+      scope: "current_scene",
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  if (input.capabilityId === "route_options") {
+    return {
+      kind: "route_options",
+      actorRef: "Player",
+      fromRef: input.frame.scene.currentLocation.ref,
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  if (input.capabilityId === "route_check") {
+    return {
+      kind: "route_check",
+      actorRef: "Player",
+      destinationRef: input.destinationRef,
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  if (input.capabilityId === "movement") {
+    return {
+      kind: "movement",
+      actorRef: "Player",
+      destinationRef: input.destinationRef,
+      travelMode: "walk",
+      requiredRouteReceiptId: input.requiredRouteReceiptId,
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  if (input.capabilityId === "time_advance") {
+    return {
+      kind: "time_advance",
+      actorRef: "Player",
+      sceneRef: input.frame.scene.currentScene.ref,
+      elapsedMinutes: 5,
+      reasonKind: "wait",
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  return {
+    kind: "scene_beat_record",
+    actorRef: "Player",
+    sceneRef: input.frame.scene.currentScene.ref,
+    targetRefs: input.step.targetRefs,
+    beatKind: "generic_scene_beat",
+    evidenceRefs: input.step.evidenceRefs,
+  };
 }
 
 function baseReceipt(input: {
@@ -221,11 +289,15 @@ function baseReceipt(input: {
   step: Step;
   request: CleanStage4Request;
   status: CleanStage4Receipt["status"];
-  capabilityId: "route_check" | "movement";
+  capabilityId: CleanStage4Receipt["capabilityId"];
   summary: string;
   visibleRefs: string[];
   routeStatus?: "connected" | "disconnected" | null;
+  routeOptions?: CleanStage4Receipt["publicResult"]["routeOptions"];
   locationChange?: CleanStage4Receipt["publicResult"]["locationChange"];
+  timeAdvance?: CleanStage4Receipt["publicResult"]["timeAdvance"];
+  visibleObservation?: CleanStage4Receipt["publicResult"]["visibleObservation"];
+  sceneBeat?: CleanStage4Receipt["publicResult"]["sceneBeat"];
   resultWorldVersion?: number;
   resultWorldTimeMinutes?: number;
   resultTick?: number;
@@ -241,6 +313,10 @@ function baseReceipt(input: {
 }): CleanStage4Receipt {
   const accepted = input.status === "accepted";
   const movementAccepted = accepted && input.capabilityId === "movement";
+  const timeAccepted = accepted && input.capabilityId === "time_advance";
+  const observationAccepted = accepted && input.capabilityId === "observe_visible";
+  const routeOptionsAccepted = accepted && input.capabilityId === "route_options";
+  const sceneBeatAccepted = accepted && input.capabilityId === "scene_beat_record";
   return assertCleanStage4Receipt({
     version: "gameplay-runtime.stage4-receipt.v1",
     receiptId: `stage4-receipt-${randomUUID()}`,
@@ -263,27 +339,51 @@ function baseReceipt(input: {
     authority: {
       evidenceAuthority: movementAccepted
         ? "terminal_mutation_receipt"
-        : accepted && input.capabilityId === "route_check"
-          ? "route_check_receipt"
-          : input.status === "skipped"
-            ? "skip_receipt"
-            : "failure_receipt",
-      mutationAuthority: movementAccepted ? "player_location_and_world_clock" : "none",
+        : timeAccepted
+          ? "terminal_mutation_receipt"
+          : observationAccepted
+            ? "scene_observation_receipt"
+            : routeOptionsAccepted
+              ? "route_options_receipt"
+              : accepted && input.capabilityId === "route_check"
+                ? "route_check_receipt"
+                : sceneBeatAccepted
+                  ? "scene_beat_receipt"
+                  : input.status === "skipped"
+                    ? "skip_receipt"
+                    : "failure_receipt",
+      mutationAuthority: movementAccepted
+        ? "player_location_and_world_clock"
+        : timeAccepted
+          ? "world_clock_only"
+          : "none",
       visibleResultAuthority: movementAccepted
         ? "may_claim_player_location_change"
-        : accepted && input.capabilityId === "route_check"
-          ? "may_explain_route_status"
-          : input.status === "failed"
-            ? "failure_only"
-            : "none",
+        : timeAccepted
+          ? "may_claim_elapsed_time"
+          : observationAccepted
+            ? "may_describe_visible_snapshot"
+            : routeOptionsAccepted
+              ? "may_list_route_options"
+              : accepted && input.capabilityId === "route_check"
+                ? "may_explain_route_status"
+                : sceneBeatAccepted
+                  ? "may_acknowledge_scene_beat"
+                  : input.status === "failed"
+                    ? "failure_only"
+                    : "none",
       maySupportNarrationClaim: accepted,
-      mayAuthorizeMutation: movementAccepted,
+      mayAuthorizeMutation: movementAccepted || timeAccepted,
     },
     publicResult: {
       summary: input.summary,
       visibleRefs: input.visibleRefs,
       routeStatus: input.routeStatus ?? null,
+      routeOptions: input.routeOptions ?? null,
       locationChange: input.locationChange ?? null,
+      timeAdvance: input.timeAdvance ?? null,
+      visibleObservation: input.visibleObservation ?? null,
+      sceneBeat: input.sceneBeat ?? null,
     },
     privateResult: {
       playerId: input.playerId ?? null,
@@ -303,7 +403,7 @@ function failReceipt(input: {
   checklist: GmActionChecklist;
   step: Step;
   request: CleanStage4Request;
-  capabilityId: "route_check" | "movement";
+  capabilityId: CleanStage4Receipt["capabilityId"];
   kind: NonNullable<CleanStage4Receipt["failure"]>["kind"];
   message: string;
 }): CleanStage4Receipt {
@@ -325,7 +425,7 @@ function skipReceipt(input: {
   checklist: GmActionChecklist;
   step: Step;
   request: CleanStage4Request;
-  capabilityId: "route_check" | "movement";
+  capabilityId: CleanStage4Receipt["capabilityId"];
   kind: NonNullable<CleanStage4Receipt["failure"]>["kind"];
   message: string;
 }): CleanStage4Receipt {
@@ -363,6 +463,304 @@ function validateFrameAndClock(input: {
   return { ok: true };
 }
 
+function labelForRef(frame: AuthoritativeSceneFrame, ref: string): string {
+  if (ref === frame.player.ref) return frame.player.label;
+  const actor = frame.actors.find((entry) => entry.ref.toLowerCase() === ref.toLowerCase());
+  if (actor) return actor.label;
+  const target = frame.targets.find((entry) => entry.ref.toLowerCase() === ref.toLowerCase());
+  if (target) return target.label;
+  const route = frame.movementOptions.find((entry) => entry.ref.toLowerCase() === ref.toLowerCase());
+  if (route) return route.label;
+  const item = frame.inventory.find((entry) => entry.ref.toLowerCase() === ref.toLowerCase());
+  if (item) return item.label;
+  if (ref.toLowerCase() === frame.scene.currentScene.ref.toLowerCase()) return frame.scene.currentScene.label;
+  if (ref.toLowerCase() === frame.scene.currentLocation.ref.toLowerCase()) return frame.scene.currentLocation.label;
+  return ref;
+}
+
+function clockLedgerReasonKind(reasonKind: "brief_local_action" | "wait" | "short_rest"): string {
+  if (reasonKind === "short_rest") return "rest";
+  if (reasonKind === "wait") return "wait";
+  return "other_elapsed_time";
+}
+
+function executeObserveVisible(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): CleanStage4Receipt {
+  const actors = input.frame.actors
+    .filter((actor) => actor.role !== "player")
+    .map((actor) => actor.label)
+    .slice(0, 12);
+  const visibleFacts = [
+    ...input.frame.scene.visibleFacts.map((fact) => fact.summary),
+    ...input.frame.scene.recentLocalFacts.map((fact) => fact.summary),
+  ].slice(0, 12);
+  const inventory = input.frame.inventory.map((item) => item.label).slice(0, 12);
+  const movementOptions = input.frame.movementOptions.map((option) => option.label).slice(0, 32);
+  const summary = [
+    `Current visible place is ${input.frame.scene.currentScene.label}.`,
+    actors.length > 0 ? `Visible actors include ${actors.join(", ")}.` : null,
+    movementOptions.length > 0 ? `Visible routes include ${movementOptions.join(", ")}.` : null,
+    inventory.length > 0 ? `Inventory includes ${inventory.join(", ")}.` : null,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+  const receipt = baseReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    status: "accepted",
+    capabilityId: "observe_visible",
+    summary,
+    visibleRefs: ["Player", input.frame.scene.currentScene.ref, ...input.frame.actors.map((actor) => actor.ref)].slice(0, 12),
+    visibleObservation: {
+      type: "visible_observation",
+      currentScene: input.frame.scene.currentScene.label,
+      currentLocation: input.frame.scene.currentLocation.label,
+      visibleActors: actors,
+      visibleFacts,
+      inventory,
+      movementOptions,
+    },
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+function executeRouteOptions(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): CleanStage4Receipt {
+  const options = input.frame.movementOptions.map((option) => ({
+    label: option.label,
+    connected: option.connected,
+    travelCost: option.travelCost,
+  }));
+  const summary = options.length > 0
+    ? `Visible route options from ${input.frame.scene.currentLocation.label} include ${options.map((option) => option.label).join(", ")}.`
+    : `No route options are exposed by the current scene frame for ${input.frame.scene.currentLocation.label}.`;
+  const receipt = baseReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    status: "accepted",
+    capabilityId: "route_options",
+    summary,
+    visibleRefs: ["Player", input.frame.scene.currentLocation.ref, ...input.frame.movementOptions.map((option) => option.ref)].slice(0, 12),
+    routeOptions: {
+      type: "route_options",
+      fromLabel: input.frame.scene.currentLocation.label,
+      options,
+    },
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+function executeSceneBeat(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): CleanStage4Receipt {
+  const targetLabels = input.step.targetRefs.map((ref) => labelForRef(input.frame, ref)).slice(0, 8);
+  const summary = targetLabels.length > 0
+    ? `Player's local visible beat is acknowledged in ${input.frame.scene.currentScene.label} with ${targetLabels.join(", ")}.`
+    : `Player's local visible beat is acknowledged in ${input.frame.scene.currentScene.label}.`;
+  const receipt = baseReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    status: "accepted",
+    capabilityId: "scene_beat_record",
+    summary,
+    visibleRefs: ["Player", input.frame.scene.currentScene.ref, ...input.step.targetRefs].slice(0, 12),
+    sceneBeat: {
+      type: "scene_beat",
+      beatKind: "generic_scene_beat",
+      summary,
+      targetLabels,
+    },
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+async function executeTimeAdvance(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const effect = input.request.effect;
+  if (effect.kind !== "time_advance") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "time_advance",
+      kind: "invalid_backend_request",
+      message: "Stage 4 time advance request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  return withSqliteWriteLock("clean-stage4-time-advance", () => {
+    const db = getSqliteConnection();
+    const transaction = db.transaction(() => {
+      const player = readPlayer(input.frame);
+      const clock = readClock(input.frame.campaignId);
+      const current = validateFrameAndClock({ frame: input.frame, player, clock });
+      if (!current.ok) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "time_advance",
+          kind: "stale_frame_or_clock",
+          message: current.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const elapsedMinutes = effect.elapsedMinutes;
+      const resultWorldVersion = clock.world_version + 1;
+      const resultWorldTimeMinutes = clock.world_time_minutes + elapsedMinutes;
+      const resultTick = Math.max(clock.current_tick, input.frame.base.tick) + elapsedMinutes;
+      const receiptId = `stage4-receipt-${randomUUID()}`;
+      const authorityTraceId = `stage4-authority-${randomUUID()}`;
+      const clockReceiptId = `stage4-clock-${randomUUID()}`;
+      const stateDeltaRefs = [`world_clock:${receiptId}`];
+      const update = db.prepare(`
+        UPDATE world_clocks
+        SET world_version = ?, world_time_minutes = ?, current_tick = ?, updated_at = ?
+        WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+      `).run(
+        resultWorldVersion,
+        resultWorldTimeMinutes,
+        resultTick,
+        Date.now(),
+        input.frame.campaignId,
+        clock.world_version,
+        clock.world_time_minutes,
+      );
+      if (update.changes !== 1) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "time_advance",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 time advance clock update found stale world clock state.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      db.prepare(`
+        INSERT INTO authority_traces (
+          id,
+          campaign_id,
+          operation,
+          source_entity_type,
+          source_entity_id,
+          base_world_version,
+          result_world_version,
+          world_time_minutes,
+          elapsed_world_time_minutes,
+          tool_result_id,
+          event_ids,
+          state_delta_refs,
+          witnesses,
+          metadata,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authorityTraceId,
+        input.frame.campaignId,
+        "gameplay-cycle-runtime.clock.advance.v1",
+        "clean_stage4_receipt",
+        receiptId,
+        clock.world_version,
+        resultWorldVersion,
+        resultWorldTimeMinutes,
+        elapsedMinutes,
+        receiptId,
+        "[]",
+        JSON.stringify(stateDeltaRefs),
+        JSON.stringify(["Player", input.frame.scene.currentScene.ref]),
+        JSON.stringify({
+          checklistId: input.checklist.checklistId,
+          stepId: input.step.stepId,
+          sceneRef: input.frame.scene.currentScene.ref,
+          reasonKind: effect.reasonKind,
+        }),
+        Date.now(),
+      );
+      db.prepare(`
+        INSERT INTO turn_clock_ledger (
+          clock_receipt_id,
+          campaign_id,
+          turn_id,
+          ui_turn_ordinal,
+          base_world_version,
+          result_world_version,
+          delta_minutes,
+          reason_kind,
+          source_receipt_ref,
+          result_world_time_minutes,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        clockReceiptId,
+        input.frame.campaignId,
+        input.frame.turnId,
+        input.frame.base.tick,
+        clock.world_version,
+        resultWorldVersion,
+        elapsedMinutes,
+        clockLedgerReasonKind(effect.reasonKind),
+        receiptId,
+        resultWorldTimeMinutes,
+        Date.now(),
+      );
+
+      const receipt = baseReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        status: "accepted",
+        capabilityId: "time_advance",
+        summary: `${elapsedMinutes} minute(s) pass in ${input.frame.scene.currentScene.label}.`,
+        visibleRefs: ["Player", input.frame.scene.currentScene.ref],
+        timeAdvance: {
+          type: "time_advance",
+          elapsedMinutes,
+          reasonKind: effect.reasonKind,
+        },
+        resultTick,
+        resultWorldVersion,
+        resultWorldTimeMinutes,
+        mutationApplied: true,
+        authorityTraceId,
+        clockReceiptId,
+        playerId: player?.id ?? null,
+        stateDeltaRefs,
+      });
+      const finalReceipt = assertCleanStage4Receipt({ ...receipt, receiptId });
+      input.store.insert(finalReceipt);
+      return finalReceipt;
+    });
+
+    return transaction();
+  });
+}
+
 function executeRouteCheck(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -370,7 +768,18 @@ function executeRouteCheck(input: {
   request: CleanStage4Request;
   store: CleanStage4ReceiptStore;
 }): CleanStage4Receipt {
-  const option = destinationOption(input.frame, input.request.effect.destinationRef);
+  const effect = input.request.effect;
+  if (effect.kind !== "route_check") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "route_check",
+      kind: "invalid_backend_request",
+      message: "Stage 4 route check request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  const option = destinationOption(input.frame, effect.destinationRef);
   if (!option) {
     const receipt = failReceipt({
       ...input,
@@ -445,7 +854,18 @@ async function executeMovement(input: {
   priorReceipts: readonly CleanStage4Receipt[];
   store: CleanStage4ReceiptStore;
 }): Promise<CleanStage4Receipt> {
-  const option = destinationOption(input.frame, input.request.effect.destinationRef);
+  const effect = input.request.effect;
+  if (effect.kind !== "movement") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "movement",
+      kind: "invalid_backend_request",
+      message: "Stage 4 movement request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  const option = destinationOption(input.frame, effect.destinationRef);
   if (!option) {
     const receipt = failReceipt({
       ...input,
@@ -733,15 +1153,23 @@ export async function runCleanStage4Execution(input: {
         checklist: input.checklist,
         step,
         request,
-        capabilityId: step.intended.kind === "route_check" ? "route_check" : "movement",
-        kind: "unsupported_capability_for_p61",
+        capabilityId: cleanStage4CapabilityForKind(step.intended.kind),
+        kind: "unsupported_clean_stage4_capability",
         message: "Stage 4 step is not marked for backend resolution.",
       });
       store.insert(receipt);
       receipts.push(receipt);
       continue;
     }
-    if (step.intended.kind !== "route_check" && step.intended.kind !== "movement") {
+    const implementedKinds: Array<Step["intended"]["kind"]> = [
+      "observe_visible",
+      "route_options",
+      "route_check",
+      "movement",
+      "time_advance",
+      "scene_beat_record",
+    ];
+    if (!implementedKinds.includes(step.intended.kind)) {
       const request = assertCleanStage4Request({
         version: "gameplay-runtime.stage4-request.v1",
         requestId: `stage4-request-${randomUUID()}`,
@@ -761,11 +1189,13 @@ export async function runCleanStage4Execution(input: {
         base: input.frame.base,
         author: "backend_from_checklist",
         modelAuthored: false,
-        capabilityId: "route_check",
+        capabilityId: "scene_beat_record",
         effect: {
-          kind: "route_check",
+          kind: "scene_beat_record",
           actorRef: "Player",
-          destinationRef: step.targetRefs[0] ?? input.frame.scene.currentLocation.ref,
+          sceneRef: input.frame.scene.currentScene.ref,
+          targetRefs: step.targetRefs,
+          beatKind: "generic_scene_beat",
           evidenceRefs: step.evidenceRefs,
         },
       });
@@ -774,9 +1204,9 @@ export async function runCleanStage4Execution(input: {
         checklist: input.checklist,
         step,
         request,
-        capabilityId: "route_check",
-        kind: "unsupported_capability_for_p61",
-        message: "This Stage 4 capability is not implemented in P61.",
+        capabilityId: "scene_beat_record",
+        kind: "unsupported_clean_stage4_capability",
+        message: "This Stage 4 capability is not implemented in the clean P64 executor.",
       });
       store.insert(receipt);
       receipts.push(receipt);
@@ -794,16 +1224,27 @@ export async function runCleanStage4Execution(input: {
       step,
       requiredRouteReceiptId: routeDependency?.receiptId ?? null,
     });
-    const receipt = step.intended.kind === "route_check"
-      ? executeRouteCheck({ frame: input.frame, checklist: input.checklist, step, request, store })
-      : await executeMovement({
-          frame: input.frame,
-          checklist: input.checklist,
-          step,
-          request,
-          priorReceipts: receipts,
-          store,
-        });
+    let receipt: CleanStage4Receipt;
+    if (step.intended.kind === "observe_visible") {
+      receipt = executeObserveVisible({ frame: input.frame, checklist: input.checklist, step, request, store });
+    } else if (step.intended.kind === "route_options") {
+      receipt = executeRouteOptions({ frame: input.frame, checklist: input.checklist, step, request, store });
+    } else if (step.intended.kind === "route_check") {
+      receipt = executeRouteCheck({ frame: input.frame, checklist: input.checklist, step, request, store });
+    } else if (step.intended.kind === "movement") {
+      receipt = await executeMovement({
+        frame: input.frame,
+        checklist: input.checklist,
+        step,
+        request,
+        priorReceipts: receipts,
+        store,
+      });
+    } else if (step.intended.kind === "time_advance") {
+      receipt = await executeTimeAdvance({ frame: input.frame, checklist: input.checklist, step, request, store });
+    } else {
+      receipt = executeSceneBeat({ frame: input.frame, checklist: input.checklist, step, request, store });
+    }
     receipts.push(receipt);
   }
 
@@ -826,6 +1267,7 @@ export async function runCleanStage4Execution(input: {
       summary: receipt.publicResult.summary,
       visibleRefs: receipt.publicResult.visibleRefs,
       locationChange: receipt.publicResult.locationChange,
+      timeAdvance: receipt.publicResult.timeAdvance,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -842,15 +1284,18 @@ export async function runCleanStage4Execution(input: {
     resultWorldVersion,
     visibleResults,
   });
+  const publicEvents: Stage4ExecutionEvent[] = [];
+  for (const result of visibleResults) {
+    if (result.locationChange) {
+      publicEvents.push({ type: "state_update", data: result.locationChange });
+    }
+    if (result.timeAdvance) {
+      publicEvents.push({ type: "state_update", data: result.timeAdvance });
+    }
+  }
   return {
     status: "executed",
     execution,
-    publicEvents: visibleResults
-      .map((result) => result.locationChange)
-      .filter((locationChange): locationChange is NonNullable<typeof locationChange> => locationChange !== null)
-      .map((locationChange) => ({
-        type: "state_update",
-        data: locationChange,
-      })),
+    publicEvents,
   };
 }

@@ -329,6 +329,34 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
       : `The settled route check confirms: ${routeText}`;
   }
 
+  const routeOptions = view.acceptedEvidence.find((evidence) =>
+    evidence.authority === "route_options_receipt"
+  );
+  if (routeOptions) {
+    return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const observation = view.acceptedEvidence.find((evidence) =>
+    evidence.authority === "scene_observation_receipt"
+  );
+  if (observation) {
+    return observation.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const elapsed = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("elapsed_time")
+  );
+  if (elapsed) {
+    return elapsed.backendFacts[0]?.text ?? elapsed.text;
+  }
+
+  const sceneBeat = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("scene_beat")
+  );
+  if (sceneBeat) {
+    return sceneBeat.backendFacts[0]?.text ?? sceneBeat.text;
+  }
+
   const failed = view.stepAuditForGrounding[0];
   if (failed) {
     return language === "ru"

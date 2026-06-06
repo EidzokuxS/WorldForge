@@ -459,6 +459,8 @@ export const gmActionChecklistStepIdSchema = z.enum([
 ]);
 
 export const gmActionChecklistEffectKindSchema = z.enum([
+  "observe_visible",
+  "route_options",
   "route_check",
   "movement",
   "dialogue_record",
@@ -558,8 +560,12 @@ export const frozenApiProjectionSchema = z.object({
 });
 
 export const cleanStage4CapabilityIdSchema = z.enum([
+  "observe_visible",
+  "route_options",
   "route_check",
   "movement",
+  "time_advance",
+  "scene_beat_record",
 ]);
 
 export const cleanStage4RequestSchema = z.object({
@@ -588,6 +594,18 @@ export const cleanStage4RequestSchema = z.object({
   capabilityId: cleanStage4CapabilityIdSchema,
   effect: z.discriminatedUnion("kind", [
     z.object({
+      kind: z.literal("observe_visible"),
+      actorRef: z.literal("Player"),
+      scope: z.literal("current_scene"),
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+    z.object({
+      kind: z.literal("route_options"),
+      actorRef: z.literal("Player"),
+      fromRef: modelSafeRef,
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+    z.object({
       kind: z.literal("route_check"),
       actorRef: z.literal("Player"),
       destinationRef: modelSafeRef,
@@ -599,6 +617,22 @@ export const cleanStage4RequestSchema = z.object({
       destinationRef: modelSafeRef,
       travelMode: z.literal("walk"),
       requiredRouteReceiptId: shortText.nullable(),
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+    z.object({
+      kind: z.literal("time_advance"),
+      actorRef: z.literal("Player"),
+      sceneRef: modelSafeRef,
+      elapsedMinutes: z.number().int().min(1).max(60),
+      reasonKind: z.enum(["brief_local_action", "wait", "short_rest"]),
+      evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+    }).strict(),
+    z.object({
+      kind: z.literal("scene_beat_record"),
+      actorRef: z.literal("Player"),
+      sceneRef: modelSafeRef,
+      targetRefs: z.array(modelSafeRef).max(8),
+      beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
       evidenceRefs: z.array(modelSafeRef).min(1).max(12),
     }).strict(),
   ]),
@@ -636,7 +670,10 @@ export const cleanStage4ReceiptSchema = z.object({
   }).strict(),
   authority: z.object({
     evidenceAuthority: z.enum([
+      "scene_observation_receipt",
+      "route_options_receipt",
       "route_check_receipt",
+      "scene_beat_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -644,10 +681,15 @@ export const cleanStage4ReceiptSchema = z.object({
     mutationAuthority: z.enum([
       "none",
       "player_location_and_world_clock",
+      "world_clock_only",
     ]),
     visibleResultAuthority: z.enum([
+      "may_describe_visible_snapshot",
+      "may_list_route_options",
       "may_explain_route_status",
       "may_claim_player_location_change",
+      "may_claim_elapsed_time",
+      "may_acknowledge_scene_beat",
       "failure_only",
       "none",
     ]),
@@ -658,11 +700,40 @@ export const cleanStage4ReceiptSchema = z.object({
     summary: shortText,
     visibleRefs: z.array(modelSafeRef).min(1).max(12),
     routeStatus: z.enum(["connected", "disconnected"]).nullable(),
+    routeOptions: z.object({
+      type: z.literal("route_options"),
+      fromLabel: shortText,
+      options: z.array(z.object({
+        label: shortText,
+        connected: z.boolean(),
+        travelCost: z.number().int().nonnegative().nullable(),
+      }).strict()).max(32),
+    }).strict().nullable(),
     locationChange: z.object({
       type: z.literal("location_change"),
       locationName: shortText,
       travelCost: z.number().int().nonnegative(),
       path: z.array(shortText).max(12),
+    }).strict().nullable(),
+    timeAdvance: z.object({
+      type: z.literal("time_advance"),
+      elapsedMinutes: z.number().int().min(1).max(60),
+      reasonKind: z.enum(["brief_local_action", "wait", "short_rest"]),
+    }).strict().nullable(),
+    visibleObservation: z.object({
+      type: z.literal("visible_observation"),
+      currentScene: shortText,
+      currentLocation: shortText,
+      visibleActors: z.array(shortText).max(12),
+      visibleFacts: z.array(shortText).max(12),
+      inventory: z.array(shortText).max(12),
+      movementOptions: z.array(shortText).max(32),
+    }).strict().nullable(),
+    sceneBeat: z.object({
+      type: z.literal("scene_beat"),
+      beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
+      summary: shortText,
+      targetLabels: z.array(shortText).max(8),
     }).strict().nullable(),
   }).strict(),
   privateResult: z.object({
@@ -678,6 +749,8 @@ export const cleanStage4ReceiptSchema = z.object({
     kind: z.enum([
       "invalid_backend_request",
       "unsupported_capability_for_p61",
+      "unsupported_clean_stage4_capability",
+      "insufficient_grounding",
       "frame_mismatch",
       "stale_frame_or_clock",
       "missing_or_ambiguous_destination",
@@ -718,6 +791,35 @@ export const cleanStage4ReceiptSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Route check mutation authority must be none." });
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "time_advance") {
+    if (!receipt.result.mutationApplied) {
+      ctx.addIssue({ code: "custom", path: ["result", "mutationApplied"], message: "Accepted time advance must apply clock mutation." });
+    }
+    if (receipt.result.worldVersion <= receipt.base.worldVersion || receipt.result.worldTimeMinutes <= receipt.base.worldTimeMinutes) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted time advance must advance world version and time." });
+    }
+    if (receipt.authority.mutationAuthority !== "world_clock_only") {
+      ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Accepted time advance must own world clock mutation only." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_elapsed_time") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted time advance must authorize elapsed-time narration." });
+    }
+    if (receipt.publicResult.timeAdvance === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "timeAdvance"], message: "Accepted time advance requires public elapsed-time result." });
+    }
+  }
+  for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
+    if (receipt.capabilityId !== capabilityId) continue;
+    if (receipt.result.mutationApplied) {
+      ctx.addIssue({ code: "custom", path: ["result", "mutationApplied"], message: `${capabilityId} must not mutate.` });
+    }
+    if (receipt.result.worldVersion !== receipt.base.worldVersion || receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: `${capabilityId} must not advance world state.` });
+    }
+    if (receipt.authority.mutationAuthority !== "none") {
+      ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: `${capabilityId} mutation authority must be none.` });
+    }
+  }
   if (receipt.status !== "accepted") {
     if (receipt.result.mutationApplied || receipt.result.worldVersion !== receipt.base.worldVersion) {
       ctx.addIssue({ code: "custom", path: ["result"], message: "Skipped/failed receipts must not advance world state." });
@@ -726,7 +828,12 @@ export const cleanStage4ReceiptSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["failure"], message: "Skipped/failed receipts require a failure reason." });
     }
   }
-  const publicJson = JSON.stringify(receipt.publicResult).replace(/location_change/g, "");
+  const publicJson = JSON.stringify(receipt.publicResult)
+    .replace(/location_change/g, "")
+    .replace(/route_options/g, "")
+    .replace(/time_advance/g, "")
+    .replace(/visible_observation/g, "")
+    .replace(/scene_beat/g, "");
   if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
     ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
   }
@@ -755,7 +862,10 @@ export const cleanStage4ExecutionResultSchema = z.object({
   visibleResults: z.array(z.object({
     receiptId: shortText,
     authority: z.enum([
+      "scene_observation_receipt",
+      "route_options_receipt",
       "route_check_receipt",
+      "scene_beat_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -768,6 +878,11 @@ export const cleanStage4ExecutionResultSchema = z.object({
       travelCost: z.number().int().nonnegative(),
       path: z.array(shortText).max(12),
     }).strict().nullable(),
+    timeAdvance: z.object({
+      type: z.literal("time_advance"),
+      elapsedMinutes: z.number().int().min(1).max(60),
+      reasonKind: z.enum(["brief_local_action", "wait", "short_rest"]),
+    }).strict().nullable(),
   }).strict()).max(6),
 }).strict();
 
@@ -779,6 +894,7 @@ const cleanSettledClaimKindSchema = z.enum([
   "inventory_status",
   "movement_option",
   "route_status",
+  "scene_beat",
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
@@ -786,7 +902,10 @@ const cleanSettledClaimKindSchema = z.enum([
 
 const cleanSettledEvidenceAuthoritySchema = z.enum([
   "scene_frame_snapshot",
+  "scene_observation_receipt",
+  "route_options_receipt",
   "route_check_receipt",
+  "scene_beat_receipt",
   "terminal_mutation_receipt",
   "oracle_visible_outcome",
 ]);
@@ -820,7 +939,10 @@ export const cleanSettledStepAuditSchema = z.object({
   status: z.enum(["accepted", "failed", "skipped", "not_run"]),
   receiptId: shortText.nullable(),
   authority: z.enum([
+    "scene_observation_receipt",
+    "route_options_receipt",
     "route_check_receipt",
+    "scene_beat_receipt",
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",

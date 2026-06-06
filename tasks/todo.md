@@ -2739,3 +2739,53 @@ Session: `gm-v1-consequenc-slice`.
     - Live narration: `You arrive at The Copper Tap. The journey took 1 minute.` It matched persisted `terminalProjection.narrativeText`, included accepted destination/time evidence, and did not copy the raw request wording.
     - Live DB proof: one clean turn record, one clean Stage 4 receipt, one authority trace, one travel clock ledger row; old v2/saga/narrator/oracle/simulation stores stayed 0; backend PID from harness was not running after shutdown.
     - Status: diagnostic slice complete for P63. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P64 clean gameplay runtime Primitive 10 Stage 4 non-movement receipts:
+  - Status:
+    - [x] Identify next primitive from canonical architecture after P63 narration.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 4 loop target, P60-P63 clean runtime, current non-movement checklist gaps, existing source adapter candidates, and old tool-loop files only as negative/forensic evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the clean non-movement Stage 4 primitive chosen by Oracle.
+    - [x] Add focused contract tests for request/receipt schemas, backend apply/fail behavior, settlement evidence mapping, narrator grounding, route SSE boundary, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone with at least one non-movement player action.
+  - Boundary draft:
+    - Owner: extend clean Stage 4 under `backend/src/engine/gameplay-cycle-runtime/`, not old `gm-tool-loop`, `gm-tool-step`, root `tool-executor`, old runtime tool schemas, or v2 executor/receipt ledger.
+    - Problem: P60 can currently plan `time_advance`, `dialogue_record`, `world_fact_record`, and `scene_beat_record`, but P61 `runCleanStage4Execution` only executes `route_check`/`movement`; other Stage 4-required steps become `unsupported_capability_for_p61` skip receipts and cannot support playable settled truth.
+    - Accepted capability set for P64: `time_advance`, `observe_visible`, `route_options`, and `scene_beat_record`.
+    - Deferred capabilities: `dialogue_record`, `world_fact_record`, `support_actor_create`, `entity_tag`, `item_transfer`, `condition_set`, `quick_action_offer`, `location_reveal`, and `minor_poi_create`.
+    - Input: accepted `SceneFrame + GM Read + Judge/Uncertainty + GM Action Checklist`; no model-authored executable payloads in P64.
+    - Output: clean Stage 4 requests/receipts with exact authority. Accepted non-movement receipts may support narration only for their exact result shape; failed/skipped receipts stay audit-only.
+    - Mutation authority: backend-owned only. `time_advance` mutates `world_clocks`, `turn_clock_ledger`, `authority_traces`, and clean Stage 4 receipt rows in one guarded SQLite write-lock transaction; `observe_visible`, `route_options`, and `scene_beat_record` persist only receipt evidence for this slice.
+    - Capability gating: broad `gameplayRuntimeCapabilityIdSchema` may remain the universe, but `SceneFrame.capabilities` must stop advertising deferred capabilities as `allowed=true`.
+    - Failure behavior: one deterministic attempt per checklist step, no restore/replay, unsupported or under-grounded capability becomes skipped/failed receipt and does not become narrator truth.
+  - Oracle question:
+    - Given committed P63, what should P64 implement next in clean Stage 4 so the runtime moves toward 60-turn manual play without reusing old gameplay tools? Choose the smallest complete non-movement receipt slice. Decide exact capability set, whether `time_advance` should mutate world clock now, whether observation/dialogue/scene-beat/world-fact receipts should persist durable DB rows or remain embedded receipt evidence for this slice, how settlement/narrator should map each receipt to accepted evidence, what old modules are forbidden, and what contract/live tests prove the boundary.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p64-nonmovemen`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one bundled text attachment, 15 files, usage `inputTokens=91709`, `outputTokens=4821`.
+    - Question artifact: `output/oracle/p64-clean-stage4-nonmovement-question.md`.
+    - Answer artifact: `output/oracle/p64-clean-stage4-nonmovement-answer.md`.
+    - Accepted decision: MODIFY -> GO. Implement P64 as deterministic backend-authored non-movement receipts, not as the first model-authored Stage 4 tool-request loop.
+    - Accepted settlement direction: map accepted P64 receipts to exact `CleanSettledTurnPacket.acceptedEvidence` claim kinds/limits; failed/skipped receipts remain audit-only and cannot support narration truth.
+    - Rejected alternatives: `dialogue_record`/`world_fact_record` in P64, model-authored Stage 4 request loop, advertising unimplemented future capabilities as allowed, audit-only `time_advance`, durable location/vector event writes for P64 scene beats, and using failed/skipped receipts as narration truth.
+  - Implementation review:
+    - Expanded clean Stage 4 schemas and receipt authority for `time_advance`, `observe_visible`, `route_options`, and `scene_beat_record`, with strict accepted-receipt invariants and nullable public result shapes.
+    - Narrowed live SceneFrame advertised capabilities to implemented clean capabilities only; deferred capabilities remain schema-universe ids but are no longer advertised as allowed in live frames.
+    - Updated the deterministic checklist compiler so explicit waits produce `time_advance`, route questions produce `route_options`, observation questions produce `observe_visible`, and deferred dialogue/world-fact planning is not compiled in P64.
+    - Implemented backend-authored Stage 4 execution for P64: `time_advance` mutates world clock, authority trace, clock ledger, and receipt in one guarded transaction; observation, route-options, and scene-beat persist accepted receipt evidence without world mutation.
+    - Extended settlement and narration mapping so accepted P64 receipts become exact evidence only: elapsed time, current visible snapshot, movement options, or scene beat; failed/skipped receipts remain audit-only.
+    - Extended route SSE player-boundary sanitizer to allow exact public `time_advance` state updates while continuing to reject raw state/tool payloads.
+  - Verification:
+    - GitNexus impact before edits was LOW for `runCleanStage4Execution`, `buildDeterministicGmActionChecklist`, `buildAuthoritativeSceneFrame`, `buildCleanSettledTurnPacket`, `renderCleanNarrationFallback`, and route SSE boundary symbols `toPlayerFacingTurnEvent`, `playerSafeLocationChange`, and `isPlayerSafeStateUpdate`; new helper symbols were not yet indexed.
+    - Executed `npm --prefix backend run typecheck`: passed.
+    - Executed `npm --prefix backend test -- gameplay-cycle-runtime-stage4.test.ts gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts gameplay-cycle-runtime-narration.test.ts chat.test.ts --bail=1`: 215 tests passed.
+    - Diagnostic live attempt `output/clean-runtime-p64-nonmovement-live-20260606160801/*` found the route SSE boundary skipped public `time_advance` as `player_boundary_private_payload`; fixed at the route sanitizer contract and did not count that attempt.
+    - Live `/api/chat/action` proof after fix: fresh zero-turn clone `p64-nonmovement-wait-445cbf52` from `30e161da-db4b-4d8c-ab93-154fab7aa03f`, action `I wait in Lowwater Bazaar for a few minutes without moving or touching anything.`
+    - Live SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, public `state_update: time_advance`, `settled-turn-packet`, `narrative`, `finalizing_turn`, `done`.
+    - Live DB proof: one clean turn record, one accepted `time_advance` Stage 4 receipt, one authority trace `gameplay-cycle-runtime.clock.advance.v1`, one `turn_clock_ledger` row with `reason_kind=wait` and `delta_minutes=5`; player remained at `Lowwater Bazaar`; clock/world became `world_version=1/world_time_minutes=5/current_tick=5`; old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live settlement/narration proof: accepted Stage 4 evidence is exactly elapsed-time receipt evidence with `doesNotProve` including no-change/offscreen/NPC/world-fact limits; narration included accepted visible SceneFrame facts plus `5 minute(s) pass` and did not infer no-change.
+    - Artifacts: `output/clean-runtime-p64-nonmovement-live-20260606161226/*`.
+    - Backend listener check after harness: port `3229` listener count was 0.
+  - Status: diagnostic slice complete for P64, pending commit/push/reindex. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

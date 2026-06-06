@@ -191,6 +191,10 @@ function movementReceipt(inputFrame = frame(), inputChecklist = checklist(inputF
         travelCost: 1,
         path: ["Market", "North Hall"],
       },
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
     },
     privateResult: {
       playerId: "player-1",
@@ -227,6 +231,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         summary: receipt.publicResult.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
         locationChange: receipt.publicResult.locationChange,
+        timeAdvance: receipt.publicResult.timeAdvance,
       })),
   });
 }
@@ -294,6 +299,10 @@ describe("clean Stage 5 settlement contracts", () => {
         visibleRefs: ["Player", "North Hall"],
         routeStatus: "connected",
         locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
       },
       privateResult: {
         playerId: "player-1",
@@ -317,6 +326,175 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(route?.limits.doesNotProve).toContain("current-scene change");
   });
 
+  it("settles P64 non-movement receipts into exact accepted evidence authorities", () => {
+    const inputFrame = frame({
+      playerAction: "I wait, look around, and check routes.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      scene: {
+        ...frame().scene,
+        visibleFacts: [{
+          factId: "fact-lanterns",
+          summary: "Lanterns burn along the market stalls.",
+          source: "Market",
+          tick: 0,
+        }],
+      },
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receiptBase = movementReceipt(inputFrame, inputChecklist);
+    const timeReceipt = cleanStage4ReceiptSchema.parse({
+      ...receiptBase,
+      receiptId: "stage4-receipt-time-1",
+      requestId: "stage4-request-time-1",
+      capabilityId: "time_advance",
+      result: { tick: 5, worldVersion: 1, worldTimeMinutes: 5, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "terminal_mutation_receipt",
+        mutationAuthority: "world_clock_only",
+        visibleResultAuthority: "may_claim_elapsed_time",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: true,
+      },
+      publicResult: {
+        summary: "5 minute(s) pass in Market.",
+        visibleRefs: ["Player", "Market"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: {
+          type: "time_advance",
+          elapsedMinutes: 5,
+          reasonKind: "wait",
+        },
+        visibleObservation: null,
+        sceneBeat: null,
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: "stage4-authority-time-1",
+        clockReceiptId: "stage4-clock-time-1",
+        stateDeltaRefs: ["world_clock:stage4-receipt-time-1"],
+      },
+    });
+    const observeReceipt = cleanStage4ReceiptSchema.parse({
+      ...receiptBase,
+      receiptId: "stage4-receipt-observe-1",
+      requestId: "stage4-request-observe-1",
+      capabilityId: "observe_visible",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "scene_observation_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_describe_visible_snapshot",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "The current visible scene is Market.",
+        visibleRefs: ["Player", "Market", "Guide", "North Hall"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: {
+          type: "visible_observation",
+          currentScene: "Market",
+          currentLocation: "Market",
+          visibleActors: ["Guide"],
+          visibleFacts: ["Lanterns burn along the market stalls."],
+          inventory: [],
+          movementOptions: ["North Hall"],
+        },
+        sceneBeat: null,
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+    });
+    const routeOptionsReceipt = cleanStage4ReceiptSchema.parse({
+      ...receiptBase,
+      receiptId: "stage4-receipt-route-options-1",
+      requestId: "stage4-request-route-options-1",
+      capabilityId: "route_options",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "route_options_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_list_route_options",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Visible route options: North Hall.",
+        visibleRefs: ["Player", "Market", "North Hall"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: {
+          type: "route_options",
+          fromLabel: "Market",
+          options: [{ label: "North Hall", connected: true, travelCost: 1 }],
+        },
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([timeReceipt, observeReceipt, routeOptionsReceipt], inputFrame),
+    });
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    const authorities = packet.acceptedEvidence
+      .filter((entry) => entry.sourceKind === "stage4_receipt")
+      .map((entry) => entry.authority);
+    expect(authorities).toEqual([
+      "terminal_mutation_receipt",
+      "scene_observation_receipt",
+      "route_options_receipt",
+    ]);
+    const elapsed = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("elapsed_time"));
+    expect(elapsed?.backendFacts[0]?.text).toBe("5 minute(s) pass.");
+    expect(elapsed?.limits.doesNotProve).toContain("offscreen events");
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "scene_observation_receipt");
+    expect(observation?.claimKinds).toEqual([
+      "current_scene",
+      "current_location",
+      "visible_actor",
+      "visible_fact",
+      "inventory_status",
+      "movement_option",
+    ]);
+    const routes = packet.acceptedEvidence.find((entry) => entry.authority === "route_options_receipt");
+    expect(routes?.backendFacts[0]?.text).toBe("Route option: North Hall (connected, 1 minute(s)).");
+    expect(routes?.limits.doesNotProve).toContain("hidden routes");
+  });
+
   it("excludes failed and skipped intended effects from accepted evidence", () => {
     const inputFrame = frame();
     const inputChecklist = checklist(inputFrame);
@@ -336,6 +514,10 @@ describe("clean Stage 5 settlement contracts", () => {
         visibleRefs: ["Player", "North Hall"],
         routeStatus: null,
         locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
       },
       privateResult: {
         playerId: null,
