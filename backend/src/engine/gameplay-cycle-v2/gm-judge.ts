@@ -297,6 +297,7 @@ export function buildGmJudgeSystemPromptV2(): string {
     "For explicit travel to a connected visible destination, use action_checklist with turnPath=mutating and requiredEffectKinds=[\"movement\"].",
     "For route availability checks without travel, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"route_check\"].",
     "For visible dialogue outcomes, use action_checklist with turnPath=procedural and requiredEffectKinds=[\"dialogue_outcome\"].",
+    "If a visible dialogue request also asks the Player to remember, note, record, preserve as evidence, use as a procedure, use as a route hint, or keep as a working clue, admit both effects with requiredEffectKinds=[\"dialogue_outcome\",\"world_fact\"]. The world_fact must be sourced only from the accepted dialogue receipt, not from playerAction or GM Read text.",
     "For temporary current-scene service/witness/helper/vendor/guard/attendant/crowd support actors, use requiredEffectKinds=[\"support_actor_create\"].",
     "When the player explicitly calls for, summons, requests, or introduces an ordinary unnamed current-scene guide/helper/witness/vendor/guard/attendant/crowd voice, use action_checklist with requiredEffectKinds=[\"support_actor_create\"], not roll_oracle.",
     "Do not use support_actor_create for player identity, already modeled scene actors, or questions about who is currently visible/nearby. Current visible actor roster questions are direct no-mutation observations from SceneFrame truth unless the player explicitly asks to introduce a new ordinary support NPC.",
@@ -340,6 +341,11 @@ export function buildGmJudgePromptV2(input: {
       actionChecklist: {
         requiredTopLevel: ["lane", "physicalPossibility", "checkNeed", "checklistAdmission"],
         exactCheckNeed: "backend_action_checklist",
+        dialogueMemoryPrecedence: {
+          when: "visible dialogue plus player-known memory/evidence/procedure/route-hint/working-clue intent",
+          requiredEffectKinds: ["dialogue_outcome", "world_fact"],
+          sourceRule: "world_fact must be sourced to the accepted dialogue receipt produced earlier in the checklist",
+        },
       },
     },
     packet: formatModelFacingTurnPacketForPromptV2(input.packet),

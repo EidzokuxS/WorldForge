@@ -2074,3 +2074,29 @@ Session: `gm-v1-consequenc-slice`.
   - Observed prose debt, not counted as gameplay truth failure: narrator rendered the label as `Лита Corsen`, mixing localized given name with the canonical visible label `Litha Corsen`.
   - Artifacts: `output/p49-explicit-movement-owned-refs-live-proof/turn6-ask-litha-berth-status.*` and `backend-p53-3101.*.log`.
   - P49 is now 6 clean manual turns from a zero-turn clone, but this remains 0% final acceptance until a full clean ~60-turn lane and multiple campaign lanes are completed.
+- P54 dialogue memory admission contract:
+  - Root failure:
+    - Continued P49 after six clean turns from inspected state `Slip Twelve Berth`, visible `Litha Corsen` and `Sigil Boss Torvin Kask`.
+    - Turn 7 action: `Я прошу Litha Corsen коротко повторить главное предупреждение про немаркированные каналистры, чтобы Мира запомнила это как рабочую зацепку. Я остаюсь в Slip Twelve Berth.`
+    - The turn reached v2 `done`, but GM Judge admitted only `requiredEffectKinds=["dialogue_outcome"]`; `actor_knowledge_records` stayed 0.
+    - This missed the player-requested durable player-known clue/memory effect, so P49 is invalid as a clean burn-in/acceptance lane after turn 7. It remains diagnostic evidence only.
+  - Implemented contract fix:
+    - Strengthened `buildGmJudgeSystemPromptV2` with explicit precedence: visible dialogue plus player intent to remember/note/record/preserve as evidence/use as procedure/use as route hint/keep as working clue must admit `requiredEffectKinds=["dialogue_outcome","world_fact"]`.
+    - Added the same `dialogueMemoryPrecedence` rule to the structured Judge prompt output contract.
+    - This is a Judge admission contract fix; no regex classifier, no guard pile, and no direct backend mutation from playerAction.
+  - Contract verification:
+    - GitNexus impact before edits: `buildGmJudgeSystemPromptV2` LOW, `buildGmJudgePromptV2` LOW, `compileSimpleGmActionChecklistV2` LOW, `buildToolRequestSystemPrompt` LOW.
+    - Added focused test that the GM Judge prompt exposes the dialogue-memory precedence and required `dialogue_outcome + world_fact` admission rule.
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 175 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - Live diagnostic proof after fix:
+    - Used P49 as diagnostic lane only, not clean acceptance evidence, because turn 7 already invalidated it.
+    - Turn 8 action: `Я прошу Litha Corsen повторить главное предупреждение о немаркированных каналистрах и явно записываю это как рабочую зацепку для Миры. Я остаюсь в Slip Twelve Berth.`
+    - Stable backend was started with `WORLDFORGE_GAMEPLAY_CYCLE_V2=1` on port `3101`, then stopped after verification; ports `3001` and `3101` were clear afterward.
+    - SSE reached v2 `done`, packet `v2packet-mq1x9hki-51d204ae6650`, `tick=8`, `worldVersion=4`, `worldTimeMinutes=2`.
+    - DB after turn 8: `gameplay_cycle_v2_packets=8`, `turn_clock_ledger=2`, `authority_traces=4`, legacy packet/saga/narrator/proposals all 0, chat history length 16, player still in `Slip Twelve Berth`, `actor_knowledge_records=1`.
+    - Persisted packet: `gmReadPublic.requiredEffectKinds=[]`; `gmJudgePublic.requiredEffectKinds=["dialogue_outcome","world_fact"]`; acceptedRuntimeReceiptIds `["receipt-step-1","receipt-step-2"]`; stepAudit skipped/failed counts 0.
+    - Accepted evidence: `dialogue.record.v2` receipt from `Litha Corsen`, then `world_fact.record.v2` private player-known knowledge receipt sourced to accepted dialogue receipt `receipt-step-1`.
+    - Player-facing narration stated the repeated warning and that the player recorded it as a working clue; this was grounded by the accepted dialogue and world_fact receipts.
+    - Artifacts: `output/p54-dialogue-memory-contract/turn8-repeat-warning-memory.*` and `backend-3101.*.log`.

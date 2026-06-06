@@ -3900,6 +3900,26 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(prompt).not.toContain("toolInput");
   });
 
+  it("tells GM Judge to admit dialogue plus player-known memory when the player asks to keep a clue", () => {
+    const { packet, gmRead } = dialogueToWorldFactToolPlanFixture();
+    const systemPrompt = buildGmJudgeSystemPromptV2();
+    const prompt = buildGmJudgePromptV2({
+      packet,
+      gmRead,
+      deterministicAdmission: null,
+    });
+
+    expect(systemPrompt).toContain("remember, note, record, preserve as evidence");
+    expect(systemPrompt).toContain("working clue");
+    expect(systemPrompt).toContain("requiredEffectKinds=[\"dialogue_outcome\",\"world_fact\"]");
+    expect(systemPrompt).toContain("world_fact must be sourced only from the accepted dialogue receipt");
+    expect(prompt).toContain('"dialogueMemoryPrecedence"');
+    expect(prompt).toContain('"requiredEffectKinds": [');
+    expect(prompt).toContain('"dialogue_outcome"');
+    expect(prompt).toContain('"world_fact"');
+    expect(prompt).not.toContain("toolInput");
+  });
+
   it("rejects roll_oracle Judge admissions that would require follow-up mutation ownership", () => {
     const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
       version: "scene-frame-envelope.v2",
