@@ -1,6 +1,7 @@
 import {
   type GameplayRuntimeReceiptLedgerV2,
   type GameplayRuntimeReceiptV2,
+  type GameplayToolRequestV2,
   type GmActionChecklistV2,
   type GmJudgeChecklistV2,
   type GmReadChecklistV2,
@@ -101,6 +102,31 @@ function acceptedReceiptForStep(
     receipt.stepId === stepId && receipt.status === "accepted");
 }
 
+function materializedRefsSinceInitial(input: {
+  initialPacket: ModelFacingTurnPacketV2;
+  latestPacket: ModelFacingTurnPacketV2;
+  receipts: readonly GameplayRuntimeReceiptV2[];
+  acceptedRequests: readonly GameplayToolRequestV2[];
+}): string[] {
+  if (!input.receipts.some((receipt) =>
+    receipt.status === "accepted" && receipt.mutationApplied)) {
+    return [];
+  }
+  const initialRefs = new Set(input.initialPacket.citableRefs.map((ref) => ref.trim().toLowerCase()));
+  return [
+    ...input.latestPacket.citableRefs
+      .map((ref) => ref.trim())
+      .filter((ref) => ref && !initialRefs.has(ref.toLowerCase())),
+    ...input.acceptedRequests.flatMap((request) => {
+      if (request.toolId !== "support_actor.create.v2") return [];
+      return [
+        request.effectBinding.displayName,
+        request.effectBinding.roleLabel,
+      ].filter((ref): ref is string => Boolean(ref?.trim()));
+    }),
+  ];
+}
+
 function buildLedger(input: {
   ledgerId: string;
   initialPacket: ModelFacingTurnPacketV2;
@@ -140,6 +166,7 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
 }): Promise<GameplayCycleCompositionResultV2> {
   let latestPacket = input.initialPacket;
   const receipts: GameplayRuntimeReceiptV2[] = [];
+  const acceptedRequests: GameplayToolRequestV2[] = [];
   const receiptModelPackets: Partial<Record<string, ModelFacingTurnPacketV2>> = {};
   const refreshes: FrameRefreshResultV2[] = [];
 
@@ -190,11 +217,18 @@ export async function composeGameplayCycleMutatingTurnV2(input: {
       handlers: input.handlers,
       refRegistry: refRegistry ?? undefined,
       priorReceipts: [...receipts],
+      additionalAllowedRefs: materializedRefsSinceInitial({
+        initialPacket: input.initialPacket,
+        latestPacket,
+        receipts,
+        acceptedRequests,
+      }),
       receiptId: input.receiptIdForStep?.(step.stepId, index) ?? defaultReceiptId(step.stepId),
       emittedAt: input.emittedAtForStep?.(step.stepId, index) ?? defaultEmittedAt(index),
     });
 
     receipts.push(execution.receipt);
+    if (execution.acceptedRequest) acceptedRequests.push(execution.acceptedRequest);
     receiptModelPackets[execution.receipt.receiptId] = latestPacket;
 
     const ledger = buildRuntimeReceiptLedgerV2({

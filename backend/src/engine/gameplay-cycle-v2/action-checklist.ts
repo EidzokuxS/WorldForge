@@ -389,6 +389,8 @@ function simpleEffectSortRank(kind: GmActionChecklistEffectKindV2): number {
       return 10;
     case "movement":
       return 20;
+    case "support_actor_create":
+      return 5;
     case "dialogue_outcome":
       return 10;
     case "world_fact":
@@ -406,6 +408,7 @@ function supportedSimpleEffectGraph(inputKinds: readonly GmActionChecklistEffect
   return signature === "movement+route_check"
     || signature === "dialogue_outcome+world_fact"
     || signature === "dialogue_outcome+scene_beat"
+    || signature === "dialogue_outcome+support_actor_create"
     || signature === "dialogue_outcome+time_advance"
     || signature === "dialogue_outcome+scene_beat+time_advance";
 }
@@ -431,6 +434,7 @@ export function compileSimpleGmActionChecklistV2(input: {
     .map((entry) => entry.kind);
   const routeCheckStepIndex = orderedKinds.findIndex((kind) => kind === "route_check");
   const dialogueStepIndex = orderedKinds.findIndex((kind) => kind === "dialogue_outcome");
+  const supportActorStepIndex = orderedKinds.findIndex((kind) => kind === "support_actor_create");
   const candidate: GmActionChecklistV2 = {
     version: "gm-action-checklist.v2",
     checklistId: `chk-${input.packet.turnId}-${orderedKinds.join("-")}`,
@@ -446,6 +450,9 @@ export function compileSimpleGmActionChecklistV2(input: {
       const dependsOnStepIds: Array<`step-${number}`> = [];
       if (kind === "world_fact" && dialogueStepIndex >= 0 && dialogueStepIndex < index) {
         dependsOnStepIds.push(`step-${dialogueStepIndex + 1}` as `step-${number}`);
+      }
+      if (kind === "dialogue_outcome" && supportActorStepIndex >= 0 && supportActorStepIndex < index) {
+        dependsOnStepIds.push(`step-${supportActorStepIndex + 1}` as `step-${number}`);
       }
       if (kind === "movement" && routeCheckStepIndex >= 0 && routeCheckStepIndex < index) {
         dependsOnStepIds.push(`step-${routeCheckStepIndex + 1}` as `step-${number}`);

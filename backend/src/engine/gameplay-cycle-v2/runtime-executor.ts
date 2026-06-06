@@ -41,6 +41,7 @@ export type GameplayToolHandlerRegistryV2 =
 export interface RuntimeExecutorResultV2 {
   status: GameplayRuntimeReceiptV2["status"];
   receipt: GameplayRuntimeReceiptV2;
+  acceptedRequest: GameplayToolRequestV2 | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -126,7 +127,7 @@ function rejectedReceipt(input: {
     source: input.source,
     emittedAt: input.emittedAt,
   });
-  return { status: receipt.status, receipt };
+  return { status: receipt.status, receipt, acceptedRequest: null };
 }
 
 function failedReceipt(input: {
@@ -149,7 +150,7 @@ function failedReceipt(input: {
     source: input.source,
     emittedAt: input.emittedAt,
   });
-  return { status: receipt.status, receipt };
+  return { status: receipt.status, receipt, acceptedRequest: null };
 }
 
 function validateOutcomeAgainstCapability(input: {
@@ -193,6 +194,7 @@ export async function executeGameplayToolRequestV2(input: {
   handlers: GameplayToolHandlerRegistryV2;
   refRegistry?: GameplayRefRegistryV2;
   priorReceipts?: readonly GameplayRuntimeReceiptV2[];
+  additionalAllowedRefs?: readonly string[];
   source?: GameplayRuntimeReceiptSourceV2;
   receiptId: string;
   emittedAt: number;
@@ -208,6 +210,7 @@ export async function executeGameplayToolRequestV2(input: {
     checklist: input.checklist,
     stepId: input.stepId,
     candidate: input.request,
+    additionalAllowedRefs: input.additionalAllowedRefs,
   });
 
   if (requestValidation.status !== "accepted") {
@@ -301,5 +304,5 @@ export async function executeGameplayToolRequestV2(input: {
     source: receiptSource,
     emittedAt: input.emittedAt,
   });
-  return { status: receipt.status, receipt };
+  return { status: receipt.status, receipt, acceptedRequest: request };
 }

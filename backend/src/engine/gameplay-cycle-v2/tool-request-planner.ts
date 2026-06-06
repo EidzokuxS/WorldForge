@@ -177,7 +177,7 @@ function withBackendOwnedEvidenceRefs(input: {
 }): unknown {
   if (!input.step || !isRecord(input.candidate)) return input.candidate;
   const effectBinding = input.candidate.effectBinding;
-  if (!isRecord(effectBinding) || "evidenceRefs" in effectBinding) return input.candidate;
+  if (!isRecord(effectBinding)) return input.candidate;
   return {
     ...input.candidate,
     effectBinding: {
@@ -273,6 +273,7 @@ export function validateGameplayToolRequestV2(input: {
   checklist: GmActionChecklistV2;
   stepId: string;
   candidate: unknown;
+  additionalAllowedRefs?: readonly string[];
 }): ToolRequestPlannerResultV2 {
   const issues: ToolRequestPlannerIssueV2[] = [];
 
@@ -385,10 +386,17 @@ export function validateGameplayToolRequestV2(input: {
     }
 
     const citableRefs = lowerSet(input.packet.citableRefs);
-    const allowedStepRefs = lowerSet(stepRefs(step));
+    const additionalAllowedRefs = lowerSet(input.additionalAllowedRefs ?? []);
+    const allowedStepRefs = lowerSet([
+      ...stepRefs(step),
+      ...(input.additionalAllowedRefs ?? []),
+    ]);
     for (const ref of collectModelRefs(request.effectBinding)) {
       const lowered = ref.toLowerCase();
-      if (!citableRefs.has(lowered) || !allowedStepRefs.has(lowered)) {
+      if (
+        (!citableRefs.has(lowered) && !additionalAllowedRefs.has(lowered))
+        || !allowedStepRefs.has(lowered)
+      ) {
         issues.push({
           code: "uncited_ref",
           path: "effectBinding",
@@ -397,7 +405,7 @@ export function validateGameplayToolRequestV2(input: {
       }
     }
 
-    const publicRequestText = JSON.stringify(request).toLowerCase();
+    const publicRequestText = `${JSON.stringify(input.candidate)} ${JSON.stringify(request)}`.toLowerCase();
     for (const term of input.packet.runtimePrivateGuardTerms) {
       if (term.trim() && publicRequestText.includes(term.trim().toLowerCase())) {
         issues.push({

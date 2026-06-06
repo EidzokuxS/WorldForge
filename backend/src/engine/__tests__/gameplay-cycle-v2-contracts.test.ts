@@ -925,7 +925,7 @@ function supportActorToolPlanFixture() {
     refs: {
       visibleRefs: ["Atrium", "Atrium Floor", "Player"],
       privateGuardTerms: [],
-      allowedCapabilityIds: ["observe_visible", "support_actor_create"],
+      allowedCapabilityIds: ["observe_visible", "support_actor_create", "dialogue_record"],
     },
   }));
   const readResult = validateGmReadChecklistV2({
@@ -2151,26 +2151,39 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(publicShape).not.toContain("effectBinding");
   });
 
-  it("does not compile unsupported mixed simple-effect graphs without an explicit dependency rule", () => {
-    const { packet, gmRead } = dialogueToolPlanFixture();
+  it("compiles support actor creation before dependent dialogue without LLM checklist planning", () => {
+    const { packet, gmRead } = supportActorToolPlanFixture();
     const judge = checklistJudgeFor({ gmRead });
-    const unsupportedJudge: GmJudgeChecklistV2 = {
+    const supportThenDialogueJudge: GmJudgeChecklistV2 = {
       ...judge,
       checklistAdmission: {
         ...judge.checklistAdmission,
         requiredEffectKinds: ["support_actor_create", "dialogue_outcome"],
-        actorRefs: ["Clerk Mara"],
-        targetRefs: ["Clerk Mara"],
-        evidenceRefs: ["Clerk Mara", "Player", "Atrium"],
-        checklistGoal: "Create a support actor and then use dialogue, which requires an explicit refresh graph.",
+        actorRefs: ["Player"],
+        targetRefs: ["Atrium Floor"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        checklistGoal: "Create a temporary support actor and then record the visible dialogue.",
       },
     };
 
-    expect(compileSimpleGmActionChecklistV2({
+    const compiled = compileSimpleGmActionChecklistV2({
       packet,
       gmRead,
-      gmJudge: unsupportedJudge,
-    })).toBeNull();
+      gmJudge: supportThenDialogueJudge,
+    });
+
+    expect(compiled?.status).toBe("accepted");
+    if (!compiled || compiled.status !== "accepted") {
+      throw new Error("Support actor plus dialogue checklist must compile.");
+    }
+    expect(compiled.checklist.steps.map((step) => ({
+      stepId: step.stepId,
+      capability: step.requiredCapabilityId,
+      dependsOnStepIds: step.dependsOnStepIds,
+    }))).toEqual([
+      { stepId: "step-1", capability: "support_actor_create", dependsOnStepIds: [] },
+      { stepId: "step-2", capability: "dialogue_record", dependsOnStepIds: ["step-1"] },
+    ]);
   });
 
   it("accepts a SceneFrame envelope only when frame and attempt authority match", () => {
@@ -5266,8 +5279,15 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
         },
       },
     });
-    expect(missingEvidence.status).toBe("rejected");
-    expect(missingEvidence.issues.some((issue) => issue.path.includes("evidenceRefs"))).toBe(true);
+    expect(missingEvidence.status).toBe("accepted");
+    if (missingEvidence.status !== "accepted") {
+      throw new Error(`Expected accepted backend-owned evidence refs, got ${JSON.stringify(missingEvidence.issues)}`);
+    }
+    expect(missingEvidence.request.effectBinding.evidenceRefs).toEqual([
+      "Player",
+      "Atrium Floor",
+      "Atrium",
+    ]);
   });
 
   it("rejects non-silence dialogue receipts that lack visible quoted speech content", () => {
@@ -5369,6 +5389,39 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(result.request.effectBinding.evidenceRefs).toEqual([
       "Clerk Mara",
       "Player",
+      "Atrium",
+    ]);
+  });
+
+  it("replaces model-authored tool request evidenceRefs with backend-owned checklist refs", () => {
+    const { packet, checklist } = movementToolPlanFixture();
+
+    const result = validateGameplayToolRequestV2({
+      packet,
+      checklist,
+      stepId: "step-1",
+      candidate: {
+        version: "gameplay-tool-request.v2",
+        requestId: "tool-request-movement-contextual-evidence",
+        stepId: "step-1",
+        capabilityId: "movement",
+        toolId: "actor.move.v2",
+        effectBinding: {
+          actorRef: "Player",
+          destinationRef: "North Hall",
+          travelMode: "walk",
+          evidenceRefs: ["Player", "North Hall", "Clerk Mara"],
+        },
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") {
+      throw new Error(`Expected accepted tool request, got ${JSON.stringify(result.issues)}`);
+    }
+    expect(result.request.effectBinding.evidenceRefs).toEqual([
+      "Player",
+      "North Hall",
       "Atrium",
     ]);
   });
@@ -7366,6 +7419,232 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(result.ledger.receipts.map((receipt) => receipt.toolId))
       .toEqual(["actor.move.v2", "scene_beat.record.v2"]);
     expect(result.settledPacket.resultWorldVersion).toBe(8);
+  });
+
+  it("allows dependent tool requests to cite refs materialized by accepted mutation refreshes", async () => {
+    const packet = buildModelFacingTurnPacketV2(assertSceneFrameEnvelopeV2({
+      version: "scene-frame-envelope.v2",
+      attempt: attemptContext(),
+      frame: sceneFrame(),
+      scopedForecastExcerpt: null,
+      refs: {
+        visibleRefs: ["Atrium", "Atrium Floor", "Player"],
+        privateGuardTerms: [],
+        allowedCapabilityIds: ["observe_visible", "support_actor_create", "dialogue_record"],
+      },
+    }));
+    const readResult = validateGmReadChecklistV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "tool_plan",
+        situationSummary: "The player asks an ordinary local guide for directions.",
+        sceneQuestion: "Which accepted runtime effects settle the guide appearing and replying?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+        actionInterpretation: {
+          intent: "Ask a local guide for a safe route.",
+          method: "speak politely",
+          targetRefs: ["Atrium Floor"],
+        },
+        turnNeed: "backend_action_checklist",
+        rationale: "Creating the support actor mutates actor state; recording the reply is terminal dialogue evidence.",
+        checklistRequest: {
+          turnPath: "mutating",
+          requiredEffectKinds: ["support_actor_create", "dialogue_outcome"],
+          actorRefs: ["Player"],
+          targetRefs: ["Atrium Floor", "Player"],
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          checklistGoal: "Create a temporary guide, refresh the scene, then record the visible reply.",
+        },
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") {
+      throw new Error("Materialized-ref GM Read fixture must be accepted.");
+    }
+    const checklistResult = validateGmActionChecklistV2({
+      packet,
+      gmRead: readResult.read,
+      candidate: {
+        version: "gm-action-checklist.v2",
+        checklistId: "checklist-materialized-ref-dialogue",
+        campaignId: packet.campaignId,
+        turnId: packet.turnId,
+        baseWorldVersion: packet.baseWorldVersion,
+        sourceGmReadPath: "tool_plan",
+        turnPath: "mutating",
+        turnIntent: "Create a temporary guide and record the guide's reply.",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Create one temporary local guide in the current scene.",
+          actorRef: "Player",
+          targetRefs: ["Atrium Floor"],
+          evidenceRefs: ["Player", "Atrium", "Atrium Floor"],
+          requiredCapabilityId: "support_actor_create",
+          intendedEffect: {
+            kind: "support_actor_create",
+            summary: "A temporary local guide becomes visible in the current scene.",
+            stateScope: "actor",
+          },
+          expectedVisibleEffect: "A temporary local guide appears in the current scene.",
+          dependsOnStepIds: [],
+        }, {
+          stepId: "step-2",
+          purpose: "Record the newly visible guide's spoken advice.",
+          actorRef: "Player",
+          targetRefs: ["Player"],
+          evidenceRefs: ["Player", "Atrium Floor"],
+          requiredCapabilityId: "dialogue_record",
+          intendedEffect: {
+            kind: "dialogue_outcome",
+            summary: "The local guide gives route advice.",
+            stateScope: "local_scene",
+          },
+          expectedVisibleEffect: "The local guide's reply is recorded.",
+          dependsOnStepIds: ["step-1"],
+        }],
+      },
+    });
+    expect(checklistResult.status).toBe("accepted");
+    if (checklistResult.status !== "accepted") {
+      throw new Error("Materialized-ref checklist fixture must be accepted.");
+    }
+    expect(checklistResult.checklist.steps.map((step) => ({
+      stepId: step.stepId,
+      capability: step.requiredCapabilityId,
+      dependencies: step.dependsOnStepIds,
+    }))).toEqual([
+      { stepId: "step-1", capability: "support_actor_create", dependencies: [] },
+      { stepId: "step-2", capability: "dialogue_record", dependencies: ["step-1"] },
+    ]);
+
+    const providerWorldVersions: number[] = [];
+    const result = await composeGameplayCycleMutatingTurnV2({
+      packetId: "packet-materialized-ref-dialogue",
+      ledgerId: "ledger-materialized-ref-dialogue",
+      scheduleId: "schedule-materialized-ref-dialogue",
+      initialPacket: packet,
+      gmRead: readResult.read,
+      checklist: checklistResult.checklist,
+      requestCandidateProvider: ({ packet: providerPacket, step }) => {
+        providerWorldVersions.push(providerPacket.baseWorldVersion);
+        if (step.stepId === "step-1") {
+          return {
+            version: "gameplay-tool-request.v2",
+            requestId: "tool-request-create-materialized-guide",
+            stepId: "step-1",
+            capabilityId: "support_actor_create",
+            toolId: "support_actor.create.v2",
+          effectBinding: {
+              anchorScope: "current_scene",
+              anchorRef: "Atrium Floor",
+              roleKind: "guide",
+              roleLabel: "local guide",
+              displayName: "Местный проводник",
+              persona: {
+                publicSummary: "An ordinary local guide available for simple directions.",
+                visibleCue: "keeps one hand near a route board",
+                voiceHint: "brief and practical",
+              },
+              tags: ["local-guide"],
+              identityBounds: {
+                tier: "temporary",
+                persistence: "current_scene",
+                significance: "minor_support",
+                agency: "reactive_only",
+                mayBecomePersistentHere: false,
+              },
+              reason: "The player asked an ordinary local guide for route advice.",
+              evidenceRefs: ["Player", "Atrium Floor"],
+            },
+          };
+        }
+        return {
+          version: "gameplay-tool-request.v2",
+          requestId: "tool-request-dialogue-materialized-guide",
+          stepId: "step-2",
+          capabilityId: "dialogue_record",
+          toolId: "dialogue.record.v2",
+          effectBinding: {
+            speakerRef: "Местный проводник",
+            addresseeRefs: ["Player"],
+            outcomeKind: "answer",
+            summary: "The local guide says The Copper Tap is the safest visible tavern route.",
+            quotedSpeech: "The Copper Tap is safest from here.",
+            languageBasis: {
+              responseLanguage: "match_player_action",
+              sourceField: "playerAction",
+            },
+            evidenceRefs: ["Player", "Atrium Floor"],
+          },
+        };
+      },
+      handlers: {
+        "support_actor.create.v2": () => ({
+          status: "accepted",
+          mutationApplied: true,
+          mutationAuthority: "actor",
+          resultWorldVersion: 8,
+          visibleSummary: "Местный проводник appears as a temporary local guide in Atrium Floor.",
+          evidenceRefs: ["Player", "Atrium Floor"],
+          durableEventIds: [],
+        }),
+        "dialogue.record.v2": ({ packet: handlerPacket }) => ({
+          status: "accepted",
+          mutationApplied: false,
+          mutationAuthority: "none",
+          resultWorldVersion: handlerPacket.baseWorldVersion,
+          visibleSummary: "Местный проводник dialogue outcome (answer): The local guide says The Copper Tap is the safest visible tavern route. Quote: The Copper Tap is safest from here.",
+          evidenceRefs: ["Местный проводник", "Player", "Atrium Floor"],
+          durableEventIds: [],
+        }),
+      },
+      refreshedFrameProvider: () => ({
+        version: "scene-frame-envelope.v2",
+        attempt: refreshedAttemptContext(),
+        frame: sceneFrame({
+          worldVersion: 8,
+          roster: {
+            active: [{
+              id: "actor-npc-1",
+              actorId: "actor-npc-1",
+              type: "npc",
+              label: "Clerk Mara",
+              locationId: "location-alpha",
+              sceneScopeId: "scene-alpha",
+              awareness: "clear",
+              awarenessHint: "watching the desk",
+            }],
+            support: [{
+              id: "support-guide-1",
+              actorId: "support-guide-1",
+              type: "npc",
+              label: "Местный проводник",
+              locationId: "location-alpha",
+              sceneScopeId: "scene-alpha",
+              awareness: "clear",
+              awarenessHint: "available for directions",
+            }],
+            background: [],
+          },
+        }),
+        scopedForecastExcerpt: null,
+        refs: {
+          visibleRefs: ["Atrium", "Atrium Floor", "Player", "Clerk Mara", "Местный проводник"],
+          privateGuardTerms: [],
+          allowedCapabilityIds: ["observe_visible", "dialogue_record"],
+        },
+      }),
+      maxRequiredLocalConsequenceEntries: 0,
+    });
+
+    expect(providerWorldVersions).toEqual([7, 8]);
+    const receipts = result.status === "settled" ? result.ledger.receipts : result.receipts;
+    expect(receipts.map((receipt) => receipt.toolId))
+      .toEqual(["support_actor.create.v2", "dialogue.record.v2"]);
+    expect(receipts.map((receipt) => receipt.status)).toEqual(["accepted", "accepted"]);
+    expect(receipts[1]?.evidenceRefs).toContain("Местный проводник");
   });
 
   it("executes required local consequence receipts before composing the settled packet", async () => {

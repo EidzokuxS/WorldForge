@@ -6,6 +6,44 @@ Working branch/worktree: `codex/rebuild-gm-turn-cycle` in normal worktree `R:\Pr
 Canonical architecture source: `docs/gm-turn-architecture-review-2026-05-03.md`.
 Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem_fixes_latency_memory_v5.md`.
 
+## Current Session Focus 2026-06-06
+
+User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.
+
+P42-P46 materialized support-actor/dialogue diagnostics:
+- P42 (`p42-guide-dialogue-clean-proof`) reached clean early turns, then failed/restored when movement dialogue context cited `Local guide` outside selected checklist refs.
+- P43 (`p43-movement-context-evidence-clean`) failed/restored on turn 1 when the tool request cited `Местный проводник` outside selected checklist refs.
+- P44 (`p44-materialized-ref-live-proof`) failed/restored on turn 1 when the tool request cited `Mira Voss` outside selected checklist refs.
+- P45 (`p45-materialized-receipt-ref-live-proof`) proved public receipt evidence must not include newly-created display names before packet refresh: accepted receipt normalization rejected `Bazaar guide` as not citable in the model-facing packet.
+- P46 (`p46-internal-materialized-ref-live-proof`) failed/restored before tool execution because the free-form checklist cited unadmitted actor/target refs for a support-actor plus dialogue turn.
+- Decision: do not loosen validators or add prompt guards. Backend owns evidence ref canonicalization, accepted mutation materialized-ref scope, and deterministic compilation for the explicitly supported `support_actor_create -> dialogue_outcome` graph.
+
+P47 compiled support-actor/dialogue live proof:
+- Implementation:
+  - `withBackendOwnedEvidenceRefs` now replaces model-authored tool request `effectBinding.evidenceRefs` with backend checklist refs whenever an `effectBinding` exists.
+  - `validateGameplayToolRequestV2` accepts explicit `additionalAllowedRefs` from the mutating composer for refs materialized by earlier accepted mutation steps.
+  - `executeGameplayToolRequestV2` returns the accepted request to the composer; rejected/failed executions return `acceptedRequest=null`.
+  - `composeGameplayCycleMutatingTurnV2` tracks accepted requests and supplies materialized refs after each refresh, including accepted support-actor `displayName`/`roleLabel` for dependent private validation only.
+  - `compileSimpleGmActionChecklistV2` now supports `support_actor_create + dialogue_outcome`, orders support actor creation first, and makes dialogue depend on that step.
+  - Public support actor receipts remain citable-packet bounded; newly-created names are not injected into public receipt evidence before refresh.
+- Contract verification:
+  - Oracle/GPT-5.5 Pro gate: single-attachment dry-run succeeded at about 41k tokens, but real browser run `p47-support-dialogue-review` failed before delivery with `connect ECONNREFUSED 127.0.0.1:49470`; no Oracle answer was received, so this is not review evidence.
+  - GitNexus impact before edits was LOW for `validateGameplayToolRequestV2`, `buildDeterministicSimpleToolRequestV2`, `withBackendOwnedEvidenceRefs`, `composeGameplayCycleMutatingTurnV2`, `generateActionChecklistCandidateV2`, `generateToolRequestCandidateV2`, `executeGameplayToolRequestV2`, `supportActorCreateHandler`, and `compileSimpleGmActionChecklistV2`.
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 173 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+- Live `/api/chat/action` evidence:
+  - Fresh clean-start clone `p47-compiled-support-dialogue-live-proof` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+  - Preflight: scene `Lowwater Bazaar`, player `Mira Voss`, clock `world_version=0/world_time_minutes=0/current_tick=0`, `chatHistory=0`, v2 packet/clock-ledger/authority-trace rows 0, legacy packet/saga/narrator/proposal rows 0.
+  - Real action: `Я подхожу к ближайшему обычному местному проводнику в Lowwater Bazaar, прошу его назвать себя и подсказать безопасный путь к таверне, и не делаю ничего другого.`
+  - Result: HTTP 200, v2 stages reached scene-frame, gm-read, gm-judge, action-checklist, tool-execution, narrator, narrative, finalizing_turn, done.
+  - Packet `v2packet-mq1v65tz-3b222e24ea2c` finalized with accepted receipts: `support_actor.create.v2`, dependent `dialogue.record.v2`, and local visibility `scene_beat.record.v2`; failed/skipped receipts empty.
+  - DB result: one v2 packet, one authority trace, no turn_clock_ledger row, no legacy `settled_turn_packets`, `turn_saga_events`, `narrator_attempts`, or `simulation_proposals`; current scene stayed `Lowwater Bazaar`; clock became `world_version=1/current_tick=1/world_time_minutes=0`.
+  - Player-facing narration was grounded in accepted support actor/dialogue evidence: the guide named himself and pointed to `The Copper Tap`.
+  - Artifacts: `output/p47-compiled-support-dialogue-live-proof/clone-direct.json`, `preflight-zero-state.json`, `turn1-request.json`, `turn1-guide-request.sse.txt`, `turn1-after-world.json`, backend logs.
+  - Backend was stopped after verification; ports `3001` and `3101` were clear.
+- Status: diagnostic primitive proof clean. This adds 0% to final acceptance until multiple 60-turn clean manual lanes are completed.
+
 ## Current Session Focus 2026-06-05
 
 User reminder accepted: final acceptance counts only as several different zero-turn campaigns/clones that each reach about 60 clean turns with zero failed, replayed, restored, or invalid player-facing turns. All shorter lanes below are diagnostic burn-ins only.
