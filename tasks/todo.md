@@ -85,6 +85,32 @@ P36 time.advance narrator no-change evidence-contract checkpoint:
   - Backend was stopped after verification; ports `3001`, `3101`, and `3208` were clear.
 - Status: diagnostic slice complete. This adds 0% to final acceptance until several different zero-turn campaigns/clones reach about 60 clean manual turns each.
 
+P36 continuation burn-in after no-change fix:
+- Scope: continue one-action-at-a-time manual live verification on clone `p36-time-narrator-clean-0e86cbce` after the fixed turn-1 wait. This is still diagnostic burn-in, not final acceptance credit.
+- Turn 2:
+  - Pre-turn SceneFrame at `Lowwater Bazaar`, clock/world `10/1`, movement candidates included `Anchor Chain Pylon`.
+  - Action: `Я иду из Lowwater Bazaar в Anchor Chain Pylon по видимому маршруту и не делаю ничего другого.`
+  - Result: HTTP 200, v2 `done`, packet `v2packet-mq1qn7gi-4ee3de2e0181`, `tick=11`, `worldVersion=2`, `worldTimeMinutes=11`.
+  - DB: `actor.move.v2` accepted, plus three local `scene_beat.record.v2` visibility receipts for `Undercurrent Courier Nisse`, `Dam-Speaker Yara`, and `Pike`; current scene `Anchor Chain Pylon`; legacy rows stayed 0.
+- Turn 3:
+  - Pre-turn SceneFrame at `Anchor Chain Pylon`, clear actors `Undercurrent Courier Nisse`, `Dam-Speaker Yara`, and `Pike`.
+  - Action: `Я остаюсь в Anchor Chain Pylon и спрашиваю Dam-Speaker Yara, какой уровень воды сейчас безопасен для ночного курьера.`
+  - Result: HTTP 200, v2 `done`, packet `v2packet-mq1qpknz-0fef1536e655`, `tick/worldVersion/worldTimeMinutes=11/2/11`.
+  - DB: one accepted `dialogue.record.v2` receipt, `mutationAuthority="none"`, no additional clock/authority trace, current scene stayed `Anchor Chain Pylon`, legacy rows stayed 0.
+- Turn 4:
+  - Pre-turn SceneFrame still at `Anchor Chain Pylon`, visible route `Upper Dam Ruins`.
+  - Action: `Я остаюсь в Anchor Chain Pylon и проверяю, открыт ли видимый маршрут к Upper Dam Ruins, но никуда не иду.`
+  - Result: HTTP 200, v2 `done`, packet `v2packet-mq1qs10m-c63b1c38f0ac`, `tick/worldVersion/worldTimeMinutes=11/2/11`.
+  - DB: one accepted `route.check.v2` receipt, `mutationAuthority="none"`, current scene stayed `Anchor Chain Pylon`, route receipt limits exposed `route availability only` and `doesNotProve=["movement","arrival","current-scene change"]`, legacy rows stayed 0.
+- Turn 5:
+  - Pre-turn SceneFrame still at `Anchor Chain Pylon`, visible route `Upper Dam Ruins`.
+  - Action: `Я иду из Anchor Chain Pylon в Upper Dam Ruins по видимому маршруту и не делаю ничего другого.`
+  - Result: HTTP 200, v2 `done`, packet `v2packet-mq1qvear-87e039062cf5`, `tick=12`, `worldVersion=3`, `worldTimeMinutes=12`.
+  - DB: one accepted `actor.move.v2` receipt, current scene `Upper Dam Ruins`, `turn_clock_ledger=3`, `authority_traces=3`, `gameplay_cycle_v2_packets=5`, legacy packet/saga/narrator/proposal rows stayed 0.
+- Artifacts: `output/p36-time-narrator-nochange/turn2-*`, `turn3-*`, `turn4-*`, `turn5-*`.
+- Backend cleanup: stable backend on `3101` was stopped after turn 5; ports `3001`, `3101`, and `3208` were clear.
+- Status: turns 1-5 clean as diagnostic burn-in. This remains 0% final acceptance until a full several-campaign 60-turn manual acceptance run is completed.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.
