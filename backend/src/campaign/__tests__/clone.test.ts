@@ -45,6 +45,7 @@ function seedSourceCampaign(options: { writeConfig?: boolean } = {}): void {
         nested: { sourceCampaignId: SOURCE_CAMPAIGN_ID },
         keyedByCampaign: { [SOURCE_CAMPAIGN_ID]: { marker: SOURCE_CAMPAIGN_ID } },
         generationComplete: true,
+        currentTick: 3,
         createdAt: NOW - 1000,
         updatedAt: NOW - 1000,
       }),
@@ -542,6 +543,51 @@ function seedSourceCampaign(options: { writeConfig?: boolean } = {}): void {
     NOW - 1000,
     NOW - 1000,
   );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gameplay_cycle_v2_packets (
+      packet_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      narrator_attempt_status TEXT NOT NULL,
+      packet_json TEXT NOT NULL,
+      persistence_json TEXT NOT NULL,
+      checklist_json TEXT,
+      gm_read_json TEXT,
+      receipt_ledger_json TEXT,
+      narrator_view_json TEXT,
+      api_projection_json TEXT,
+      base_world_version INTEGER NOT NULL,
+      result_world_version INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  db.prepare(
+    `INSERT INTO gameplay_cycle_v2_packets (
+      packet_id, campaign_id, turn_id, status, narrator_attempt_status, packet_json,
+      persistence_json, checklist_json, gm_read_json, receipt_ledger_json,
+      narrator_view_json, api_projection_json, base_world_version, result_world_version,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "v2packet-source",
+    SOURCE_CAMPAIGN_ID,
+    "v2turn-source",
+    "finalized",
+    "succeeded_projected",
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    JSON.stringify({ campaign: SOURCE_CAMPAIGN_ID }),
+    1,
+    2,
+    NOW - 1000,
+    NOW - 1000,
+  );
   closeDb();
 }
 
@@ -604,6 +650,9 @@ describe("clean-start campaign clone", () => {
     expect(result.rewrittenTables).toContain("locations");
     expect(result.purgedTables).toContain("quick_action_offers");
     expect(result.purgedTables).toContain("turn_sagas");
+    expect(result.purgedTables).toContain("turn_clock_ledger");
+    expect(result.purgedTables).toContain("authority_traces");
+    expect(result.purgedTables).toContain("gameplay_cycle_v2_packets");
     expect(result.purgedTables).toContain("simulation_jobs");
     expect(result.scrubbedTextColumns).toContain("locations.description");
     expect(result.filesystemActions).toEqual(
@@ -623,6 +672,7 @@ describe("clean-start campaign clone", () => {
       premise: `Premise names ${TARGET_CAMPAIGN_ID}`,
       createdAt: NOW,
       updatedAt: NOW,
+      currentTick: 0,
     });
     expect(JSON.stringify(targetConfig)).not.toContain(SOURCE_CAMPAIGN_ID);
     expect(targetConfig.keyedByCampaign).toHaveProperty(TARGET_CAMPAIGN_ID);
@@ -653,6 +703,19 @@ describe("clean-start campaign clone", () => {
           description: `Description contains ${TARGET_CAMPAIGN_ID}`,
         });
       expect(db.prepare("SELECT COUNT(*) AS count FROM quick_action_offers").get())
+        .toEqual({ count: 0 });
+      expect(db.prepare("SELECT campaign_id, world_version, world_time_minutes, current_tick FROM world_clocks").get())
+        .toEqual({
+          campaign_id: TARGET_CAMPAIGN_ID,
+          world_version: 0,
+          world_time_minutes: 0,
+          current_tick: 0,
+        });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger").get())
+        .toEqual({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM authority_traces").get())
+        .toEqual({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM gameplay_cycle_v2_packets").get())
         .toEqual({ count: 0 });
       expect(db.pragma("foreign_key_check")).toEqual([]);
     } finally {

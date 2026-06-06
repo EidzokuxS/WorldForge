@@ -131,6 +131,7 @@ function cloneCampaignConfig(input: {
   rewritten.name = input.name?.trim() || (
     input.nameSuffix ? `${baseName} ${input.nameSuffix}` : `${baseName} [clean clone]`
   );
+  rewritten.currentTick = 0;
   rewritten.createdAt = input.now;
   rewritten.updatedAt = input.now;
   fs.writeFileSync(input.targetConfigPath, `${JSON.stringify(rewritten, null, 2)}\n`, "utf-8");
@@ -139,6 +140,33 @@ function cloneCampaignConfig(input: {
 
 function sqliteStoreTable(step: CampaignStoreManifestOperationStep): string | null {
   return step.store.startsWith("sqlite:") ? step.store.slice("sqlite:".length) : null;
+}
+
+function ensureGameplayCycleV2PacketCloneTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gameplay_cycle_v2_packets (
+      packet_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      narrator_attempt_status TEXT NOT NULL,
+      packet_json TEXT NOT NULL,
+      persistence_json TEXT NOT NULL,
+      checklist_json TEXT,
+      gm_read_json TEXT,
+      receipt_ledger_json TEXT,
+      narrator_view_json TEXT,
+      api_projection_json TEXT,
+      base_world_version INTEGER NOT NULL,
+      result_world_version INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_gameplay_cycle_v2_packets_campaign_turn
+      ON gameplay_cycle_v2_packets (campaign_id, turn_id);
+    CREATE INDEX IF NOT EXISTS idx_gameplay_cycle_v2_packets_status
+      ON gameplay_cycle_v2_packets (campaign_id, status, narrator_attempt_status);
+  `);
 }
 
 function applySqliteClonePlan(input: {
@@ -161,6 +189,7 @@ function applySqliteClonePlan(input: {
 
   try {
     db.pragma("foreign_keys = OFF");
+    ensureGameplayCycleV2PacketCloneTable(db);
     const applyPlan = db.transaction(() => {
       for (const { step, tableName } of sqliteSteps) {
         if (!tableExists(db, tableName)) {
@@ -190,6 +219,15 @@ function applySqliteClonePlan(input: {
               input.now,
               input.sourceCampaignId,
             );
+          if (result.changes > 0) rewrittenTables.push(tableName);
+        } else if (tableName === "world_clocks") {
+          const result = db
+            .prepare(`
+              UPDATE world_clocks
+              SET campaign_id = ?, world_version = 0, world_time_minutes = 0, current_tick = 0, updated_at = ?
+              WHERE campaign_id = ?
+            `)
+            .run(input.targetCampaignId, input.now, input.sourceCampaignId);
           if (result.changes > 0) rewrittenTables.push(tableName);
         } else {
           requireCampaignIdColumn(columns, tableName);

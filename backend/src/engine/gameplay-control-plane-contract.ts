@@ -533,6 +533,7 @@ export const PHASE95_SQLITE_STORE_TABLES = [
   "oracle_decisions",
   "settled_turn_packets",
   "narrator_attempts",
+  "gameplay_cycle_v2_packets",
 ] as const;
 
 export const PHASE95_REQUIRED_STORE_KEYS = [
@@ -752,6 +753,16 @@ const PHASE95_STORE_MANIFEST_BASE = [
     requiresRowCount: true,
   },
   {
+    store: "sqlite:gameplay_cycle_v2_packets",
+    authorityLevel: "authoritative",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "recorded_reuse",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
     store: "sqlite:quick_action_offers",
     authorityLevel: "authoritative",
     clonePolicy: "purge",
@@ -774,10 +785,10 @@ const PHASE95_STORE_MANIFEST_BASE = [
   {
     store: "sqlite:turn_clock_ledger",
     authorityLevel: "authoritative",
-    clonePolicy: "rewrite",
+    clonePolicy: "purge",
     rollbackPolicy: "rewrite",
     replayPolicy: "deterministic",
-    sourceCampaignIdPolicy: "rewrite",
+    sourceCampaignIdPolicy: "purge",
     requiresHash: true,
     requiresRowCount: true,
   },
@@ -834,10 +845,10 @@ const PHASE95_STORE_MANIFEST_BASE = [
   {
     store: "sqlite:authority_traces",
     authorityLevel: "authoritative",
-    clonePolicy: "rewrite",
+    clonePolicy: "purge",
     rollbackPolicy: "rewrite",
     replayPolicy: "deterministic",
-    sourceCampaignIdPolicy: "rewrite",
+    sourceCampaignIdPolicy: "purge",
     requiresHash: true,
     requiresRowCount: true,
   },

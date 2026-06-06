@@ -35,6 +35,7 @@ export interface CampaignStoreBundleManifest {
 }
 
 const SQLITE_TABLES = new Set<string>(PHASE95_SQLITE_STORE_TABLES);
+const OPTIONAL_SQLITE_TABLES = new Set<string>(["gameplay_cycle_v2_packets"]);
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -96,6 +97,12 @@ function quoteSqlIdentifier(value: string): string {
 function readSqliteRowCountFromConnection(db: Database.Database, tableName: string): number {
   if (!SQLITE_TABLES.has(tableName)) {
     throw new Error(`Store manifest does not recognize sqlite table: ${tableName}`);
+  }
+  const table = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { name?: string } | undefined;
+  if (!table?.name && OPTIONAL_SQLITE_TABLES.has(tableName)) {
+    return 0;
   }
   const row = db
     .prepare(`SELECT COUNT(*) AS count FROM ${quoteSqlIdentifier(tableName)}`)

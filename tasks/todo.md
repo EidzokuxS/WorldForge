@@ -1670,3 +1670,17 @@ Session: `gm-v1-consequenc-slice`.
     - DB after live turn: `gameplay_cycle_v2_packets=1`; legacy `settled_turn_packets`, `turn_sagas`, `narrator_attempts` stayed 0; `simulation_proposals=0`; `turn_clock_ledger=1`.
     - Persisted packet: `status=finalized`, narrator status `succeeded_projected`, `gmReadPublic.requiredEffectKinds=[]`, `gmJudgePublic.requiredEffectKinds=["time_advance"]`, failed/skipped counts 0.
     - Accepted receipt ledger: one accepted `time.advance.v2` receipt, `capabilityId=time_advance`, `mutationAuthority=world`, `mutationApplied=true`, `visibleSummary="5 minutes pass in Lowwater Bazaar."`, evidence refs `Player` and `Lowwater Bazaar`.
+- P29 clean-start clone reset for v2 acceptance lanes:
+  - Root blocker: final acceptance requires fresh zero-turn clones, but clean-start clone preserved some v2 runtime evidence from v2-played sources.
+  - Implemented minimal clone/runtime-adapter fix:
+    - Store manifest now includes `sqlite:gameplay_cycle_v2_packets`.
+    - Clean-start clone purges `gameplay_cycle_v2_packets`, `turn_clock_ledger`, and `authority_traces`.
+    - Clean-start clone resets `config.currentTick` to `0`.
+    - Clean-start clone rewrites `world_clocks` to target campaign id with `world_version=0`, `world_time_minutes=0`, `current_tick=0`.
+    - Clone logic creates the optional lazy v2 packet table in clone targets if older source DBs do not have it yet; store-manifest row counts treat that optional table as 0 when absent.
+  - Verification:
+    - GitNexus impact before edits: `cloneCampaignConfig`, `applySqliteClonePlan`, `cloneCampaignCleanStart`, `planCampaignStoreManifestOperation`, `assertStoreManifestCoverage`, `assertCampaignStoreManifestOperationPlanClosed`, and `readSqliteRowCountFromConnection` all LOW risk.
+    - `npm --prefix backend test -- src/campaign/__tests__/clone.test.ts src/campaign/__tests__/store-manifest-executor.test.ts --bail=1` passed with 12 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 150 tests.
+    - Real clone smoke from played v2 source `p28-gmread-judge-6c5958d2` to `p29-clone-reset-b76ba090`: clone purged `gameplay_cycle_v2_packets`, `turn_clock_ledger`, `authority_traces`; target config/current clock are `0/0/0`; legacy packet/saga/narrator/proposals also 0.
