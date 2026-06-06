@@ -71,6 +71,10 @@ function lowerSet(values: readonly string[]): Set<string> {
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean));
 }
 
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
 function forbiddenPayloadPaths(value: unknown): string[] {
   const normalizedForbidden = new Set([...FORBIDDEN_TOOL_REQUEST_KEYS].map(normalizedKey));
   const paths: string[] = [];
@@ -197,6 +201,51 @@ export function toolIdForCapabilityV2(
   capabilityId: RuntimeCapabilityIdV2,
 ): GameplayToolIdV2 | null {
   return TOOL_BY_CAPABILITY[capabilityId] ?? null;
+}
+
+export function buildDeterministicSimpleToolRequestV2(input: {
+  packet: ModelFacingTurnPacketV2;
+  step: GmActionChecklistStepV2;
+}): GameplayToolRequestV2 | null {
+  const destinationRef = input.step.targetRefs[0];
+  const evidenceRefs = uniqueStrings([
+    input.step.actorRef,
+    ...input.step.evidenceRefs,
+    ...input.step.targetRefs,
+  ]);
+
+  if (input.step.requiredCapabilityId === "route_check" && destinationRef) {
+    return assertGameplayToolRequestV2({
+      version: "gameplay-tool-request.v2",
+      requestId: `req-${input.packet.turnId}-${input.step.stepId}`,
+      stepId: input.step.stepId,
+      capabilityId: "route_check",
+      toolId: "route.check.v2",
+      effectBinding: {
+        actorRef: input.step.actorRef,
+        destinationRef,
+        evidenceRefs,
+      },
+    });
+  }
+
+  if (input.step.requiredCapabilityId === "movement" && destinationRef) {
+    return assertGameplayToolRequestV2({
+      version: "gameplay-tool-request.v2",
+      requestId: `req-${input.packet.turnId}-${input.step.stepId}`,
+      stepId: input.step.stepId,
+      capabilityId: "movement",
+      toolId: "actor.move.v2",
+      effectBinding: {
+        actorRef: input.step.actorRef,
+        destinationRef,
+        travelMode: "walk",
+        evidenceRefs,
+      },
+    });
+  }
+
+  return null;
 }
 
 export function validateGameplayToolRequestV2(input: {

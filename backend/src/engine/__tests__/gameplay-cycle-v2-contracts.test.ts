@@ -25,6 +25,7 @@ import {
   assertTurnAttemptContextV2,
   buildApiResponseProjectionV2,
   assertTurnStartEnvelopeV2,
+  admitNoMutationMovementTargetRouteCheckV2,
   admitExplicitMovementV2,
   apiResponseProjectionV2Schema,
   buildNarratorViewV2,
@@ -46,6 +47,7 @@ import {
   executeGameplayToolRequestV2,
   gameplayRuntimeReceiptV2Schema,
   buildRuntimeReceiptLedgerV2,
+  buildDeterministicSimpleToolRequestV2,
   buildRuntimeSettledTurnPacketV2 as buildRuntimeSettledTurnPacketCoreV2,
   gmReadCandidateV2LooseSchema,
   createDbBackedGameplayToolHandlersV2,
@@ -2604,6 +2606,153 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(JSON.stringify(routeCheckResult.read)).not.toContain("checklistRequest");
     expect(admission.status === "admitted" ? admission.checklistAdmission.requiredEffectKinds : [])
       .toEqual(["movement"]);
+  });
+
+  it("promotes no-mutation GM Reads that target movement options into route-check admission", () => {
+    const { packet, registry } = movementAdmissionFixture({
+      playerAction: "I stay here and check whether North Hall is reachable.",
+    });
+    const readResult = validateGmReadV2({
+      packet,
+      candidate: {
+        version: "gm-read.v2",
+        path: "continue",
+        situationSummary: "The player is checking a visible route without moving.",
+        sceneQuestion: "Is North Hall reachable from here?",
+        focalActorRefs: ["Player"],
+        evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+        actionInterpretation: {
+          intent: "Check route availability without travel.",
+          method: "observe route",
+          targetRefs: ["North Hall"],
+        },
+        turnNeed: "none",
+        rationale: "The model incorrectly treated route availability as current settled truth.",
+        noMutationReason: "The player stays put and asks whether North Hall is reachable.",
+      },
+    });
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") throw new Error("Expected no-mutation GM Read fixture.");
+    if (readResult.read.path !== "continue") {
+      throw new Error("Expected continue GM Read fixture.");
+    }
+
+    const admission = admitNoMutationMovementTargetRouteCheckV2({
+      packet,
+      refRegistry: registry,
+      gmRead: readResult.read,
+    });
+
+    expect(admission.status).toBe("admitted");
+    if (admission.status !== "admitted") throw new Error("Expected route-check admission.");
+    expect(admission.gmRead.path).toBe("tool_plan");
+    expect(admission.gmRead.turnNeed).toBe("backend_action_checklist");
+    expect(admission.gmJudge).toMatchObject({
+      lane: "action_checklist",
+      checkNeed: "backend_action_checklist",
+      checklistAdmission: {
+        turnPath: "procedural",
+        requiredEffectKinds: ["route_check"],
+        actorRefs: ["Player"],
+        targetRefs: ["North Hall"],
+      },
+    });
+    expect(JSON.stringify(admission)).not.toMatch(/\bactor\.move\.v2\b|\bmove_actor\b|\btoolName\b|\binput\b/u);
+  });
+
+  it("builds deterministic simple movement and route-check tool requests without LLM payload drift", () => {
+    const { packet } = movementAdmissionFixture({
+      playerAction: "I move to or check North Hall.",
+    });
+    const baseStep = {
+      stepId: "step-1" as const,
+      purpose: "Settle the simple request.",
+      actorRef: "Player",
+      targetRefs: ["North Hall"],
+      evidenceRefs: ["Player", "Atrium Floor", "North Hall"],
+      expectedVisibleEffect: "Accepted receipt.",
+      dependsOnStepIds: [],
+      intendedEffect: {
+        summary: "Settle a simple route or movement request.",
+        stateScope: "location" as const,
+      },
+    };
+    const checklistBase = {
+      version: "gm-action-checklist.v2" as const,
+      checklistId: "chk-simple-deterministic",
+      campaignId: packet.campaignId,
+      turnId: packet.turnId,
+      baseWorldVersion: packet.baseWorldVersion,
+      sourceGmReadPath: "tool_plan" as const,
+      turnPath: "procedural" as const,
+      turnIntent: "simple deterministic tool request",
+    };
+
+    const routeStep = {
+      ...baseStep,
+      requiredCapabilityId: "route_check" as const,
+      intendedEffect: {
+        ...baseStep.intendedEffect,
+        kind: "route_check" as const,
+      },
+    };
+    const routeChecklist = {
+      ...checklistBase,
+      steps: [routeStep],
+    };
+    const routeRequest = buildDeterministicSimpleToolRequestV2({
+      packet,
+      step: routeStep,
+    });
+    expect(routeRequest).toMatchObject({
+      capabilityId: "route_check",
+      toolId: "route.check.v2",
+      effectBinding: {
+        actorRef: "Player",
+        destinationRef: "North Hall",
+      },
+    });
+    expect(validateGameplayToolRequestV2({
+      packet,
+      checklist: routeChecklist,
+      stepId: "step-1",
+      candidate: routeRequest,
+    })).toMatchObject({ status: "accepted" });
+
+    const movementStep = {
+      ...baseStep,
+      requiredCapabilityId: "movement" as const,
+      intendedEffect: {
+        ...baseStep.intendedEffect,
+        kind: "movement" as const,
+        stateScope: "actor" as const,
+      },
+    };
+    const movementChecklist = {
+      ...checklistBase,
+      turnPath: "mutating" as const,
+      steps: [movementStep],
+    };
+    const movementRequest = buildDeterministicSimpleToolRequestV2({
+      packet,
+      step: movementStep,
+    });
+    expect(movementRequest).toMatchObject({
+      capabilityId: "movement",
+      toolId: "actor.move.v2",
+      effectBinding: {
+        actorRef: "Player",
+        destinationRef: "North Hall",
+        travelMode: "walk",
+      },
+    });
+    expect(validateGameplayToolRequestV2({
+      packet,
+      checklist: movementChecklist,
+      stepId: "step-1",
+      candidate: movementRequest,
+    })).toMatchObject({ status: "accepted" });
+    expect(JSON.stringify({ routeRequest, movementRequest })).not.toMatch(/\bsourceRef\b|\bpayload\b|\btoolName\b/u);
   });
 
   it("rejects sidecars and executable payloads in explicit movement GM Read candidates", () => {
@@ -10856,6 +11005,9 @@ describe("gameplay-cycle-v2 primitive contracts", () => {
     expect(source).toContain("response-language and style directives inside playerAction");
     expect(source).toContain("UI/output language preference only, not settled in-world speech evidence");
     expect(source).toContain("never turn a response-language/style directive in packet.playerAction into an in-world language barrier");
+    expect(source).toContain("admitNoMutationMovementTargetRouteCheckV2");
+    expect(source).toContain("For route.check.v2, bind actorRef exactly to Player");
+    expect(source).toContain("route.check.v2 is terminal and non-mutating");
   });
 
   it("keeps gm-judge prompt from treating response-language directives as world truth", () => {

@@ -68,6 +68,7 @@ import { capabilityForEffectKindV2 } from "./capability-catalog.js";
 import { composeGameplayCycleMutatingTurnV2 } from "./mutating-composer.js";
 import { createDbBackedGameplayToolHandlersV2 } from "./db-handlers.js";
 import {
+  admitNoMutationMovementTargetRouteCheckV2,
   admitExplicitMovementV2,
   type ExplicitMovementAdmissionV2,
 } from "./explicit-movement-admission.js";
@@ -89,6 +90,7 @@ import {
   persistSettledTurnPacketV2,
   readGameplayCycleV2Packet,
 } from "./packet-store.js";
+import { buildDeterministicSimpleToolRequestV2 } from "./tool-request-planner.js";
 
 const LIVE_GAMEPLAY_CAPABILITIES: RuntimeCapabilityIdV2[] = [
   "observe_visible",
@@ -399,6 +401,9 @@ function buildToolRequestSystemPrompt(): string {
     "Return exactly one gameplay-tool-request.v2 JSON object for the selected checklist step.",
     "Use the current model-facing packet only; if this step follows a mutation, the packet already reflects that mutation.",
     "Use only clean v2 tool ids: route.check.v2, actor.move.v2, dialogue.record.v2, support_actor.create.v2, minor_poi.create.v2, location.reveal.v2, entity.tag.v2, item.transfer.v2, actor.condition_set.v2, time.advance.v2, world_fact.record.v2, or scene_beat.record.v2.",
+    "For route.check.v2, bind actorRef exactly to Player, destinationRef to the selected visible movement option, and evidenceRefs to Player plus the current scene/location and destination refs.",
+    'The exact required route.check.v2 effectBinding shape is: { "actorRef": "Player", "destinationRef": "<selected movement option ref>", "evidenceRefs": ["Player", "<current scene/location ref>", "<selected movement option ref>"] }.',
+    "route.check.v2 is terminal and non-mutating. It proves route availability only; it must never move the actor, change current scene, infer arrival, create route edges, create locations, or prove safety beyond the route check receipt.",
     "For dialogue.record.v2, bind speakerRef to the selected visible speaker, addresseeRefs to Player or visible addressees when cited by the step, outcomeKind to answer/refusal/warning/redirect/silence/other, summary to only the concrete visible response, quotedSpeech to the speaker's actual visible utterance unless outcomeKind is silence, and languageBasis to { responseLanguage: \"match_player_action\", sourceField: \"playerAction\" }.",
     "For dialogue.record.v2, write effectBinding.summary and effectBinding.quotedSpeech in the same ordinary language as packet.playerAction, while preserving accepted labels and proper nouns verbatim.",
     "For dialogue.record.v2, never turn a response-language/style directive in packet.playerAction into an in-world language barrier, foreign-language refusal, misunderstanding, translation issue, dialect claim, or NPC comprehension fact unless that barrier is explicit citable current-scene evidence.",
@@ -559,6 +564,12 @@ async function generateToolRequestCandidateV2(input: {
   step: GmActionChecklistStepV2;
   receipts: GameplayRuntimeReceiptLedgerV2["receipts"];
 }): Promise<unknown> {
+  const deterministicRequest = buildDeterministicSimpleToolRequestV2({
+    packet: input.packet,
+    step: input.step,
+  });
+  if (deterministicRequest) return deterministicRequest;
+
   return (await safeGenerateObject({
     model: createModel(input.options.judgeProvider, { role: "judge" }),
     schema: gameplayToolRequestV2Schema,
@@ -774,7 +785,20 @@ export async function* processGameplayTurnCycleV2(
       ).join("; ")}`,
     );
   }
-  const gmRead = gmReadValidation.read;
+  let gmRead = gmReadValidation.read;
+  const noMutationRouteAdmission = gmRead.path === "direct" || gmRead.path === "continue"
+    ? admitNoMutationMovementTargetRouteCheckV2({
+      packet: modelPacket,
+      refRegistry: initialFrameContext.refRegistry,
+      gmRead,
+    })
+    : { status: "not_admitted" as const, reason: "GM Read already requires runtime work or clarification." };
+  const deterministicGmJudge = noMutationRouteAdmission.status === "admitted"
+    ? noMutationRouteAdmission.gmJudge
+    : null;
+  if (noMutationRouteAdmission.status === "admitted") {
+    gmRead = noMutationRouteAdmission.gmRead;
+  }
   yield {
     type: "scene-settling",
     data: {
@@ -784,27 +808,31 @@ export async function* processGameplayTurnCycleV2(
     },
   };
   let gmJudgeCandidate: unknown;
-  try {
-    gmJudgeCandidate = (await safeGenerateObject({
-      model: createModel(options.judgeProvider, { role: "judge" }),
-      schema: gmJudgeV2Schema,
-      system: buildGmJudgeSystemPromptV2(),
-      prompt: buildGmJudgePromptV2({
-        packet: modelPacket,
-        gmRead,
-        deterministicAdmission: null,
-      }),
-      temperature: 0.1,
-      maxTokens: 1_600,
-      retries: 1,
-      strictSchema: false,
-    })).object;
-  } catch (error) {
-    throw runtimeContractError(
-      `GM Judge generation failed before settlement: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  if (deterministicGmJudge) {
+    gmJudgeCandidate = deterministicGmJudge;
+  } else {
+    try {
+      gmJudgeCandidate = (await safeGenerateObject({
+        model: createModel(options.judgeProvider, { role: "judge" }),
+        schema: gmJudgeV2Schema,
+        system: buildGmJudgeSystemPromptV2(),
+        prompt: buildGmJudgePromptV2({
+          packet: modelPacket,
+          gmRead,
+          deterministicAdmission: null,
+        }),
+        temperature: 0.1,
+        maxTokens: 1_600,
+        retries: 1,
+        strictSchema: false,
+      })).object;
+    } catch (error) {
+      throw runtimeContractError(
+        `GM Judge generation failed before settlement: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
   const gmJudgeValidation = validateGmJudgeV2({
     packet: modelPacket,

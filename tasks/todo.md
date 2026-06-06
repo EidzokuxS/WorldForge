@@ -28,6 +28,35 @@ P34 dialogue language-directive checkpoint:
   - Artifacts: `output/p34-v2-language-directive/*` for the failed/fixed diagnostic comparison and `output/p34-v2-language-clean-control/*` for the clean-control proof.
 - Status: diagnostic slice complete, pending commit/push/reindex. This adds 0% to final acceptance until the multi-campaign ~60-turn clean lanes run.
 
+P35 route-check admission / deterministic simple tool-request checkpoint:
+- Failure discovered during adaptive burn-in:
+  - Clean-control lane `p34-v2-language-clean-4d0b8f2c` reached a contract failure on turn 4: player asked from `Silt Warrens` whether the visible route to `Resonance Tower` was open while not moving.
+  - Runtime accepted GM Read `path="continue"` and GM Judge `lane="continue"`, then narrator stated route availability from SceneFrame/GM Read without any accepted `route.check.v2` receipt.
+  - That lane is diagnostic-invalid and cannot count toward acceptance.
+- Oracle/GPT-5.5 Pro attempt:
+  - Dry-run succeeded with one bundled attachment: 10 files, about 163k tokens.
+  - Real Oracle browser run `p35-route-check-admission` failed before context delivery with `connect ECONNREFUSED 127.0.0.1:63919`.
+  - Session transcript contains only prompt/error, not delivered bundle or review answer, so this is invalid Oracle evidence and was not used as an architecture answer.
+- Boundary decision:
+  - No-receipt `direct/continue` must not settle route truth when accepted GM Read targets a movement option.
+  - If an accepted no-mutation GM Read has exactly one model-facing movement option in `targetRefs`, runtime promotes that interpretation to a backend-owned procedural `route_check` admission before narration.
+  - This is structural target ownership, not a raw-text semantic regex: movement/route truth is owned by backend receipts, not no-receipt narrator evidence.
+  - Simple `movement` and `route_check` tool requests are now backend-constructed deterministically from accepted checklist refs before LLM Stage 4 fallback. This removes LLM payload drift such as invalid `effectBinding.sourceRef` from those primitives.
+- Implementation:
+  - Added `admitNoMutationMovementTargetRouteCheckV2` next to explicit movement admission.
+  - Runtime now applies that admission after GM Read validation and before GM Judge generation; deterministic route-check GM Judge admissions bypass the Judge LLM.
+  - Added `buildDeterministicSimpleToolRequestV2` for `movement` and `route_check`; runtime uses it before LLM tool-request generation.
+  - Added explicit `route.check.v2` effectBinding prompt contract for remaining LLM fallback context.
+- Verification:
+  - `npm --prefix backend test -- gameplay-cycle-v2-contracts.test.ts --bail=1` passed with 161 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend test -- chat.test.ts --bail=1` passed with 61 tests.
+  - First P35 fresh clone `p35-route-check-fresh-55ad2b07` failed/restored before the deterministic simple tool-request fix because Stage 4 produced invalid movement binding; diagnostic-invalid.
+  - Clean retry clone `p35-route-check-fresh-r2-9a0c3b11` started from zero v2/legacy/ledger rows, moved from `Lowwater Bazaar` to `Silt Warrens`, then checked the visible route to `Resonance Tower` without moving.
+  - Clean retry result: turn 1 accepted `actor.move.v2` with travel ledger; turn 2 accepted `route.check.v2` with `mutationAuthority="none"`, `mutationApplied=false`, `baseWorldVersion=resultWorldVersion=1`, current scene stayed `Silt Warrens`, no additional clock ledger row, legacy `settled_turn_packets`/`turn_sagas`/`narrator_attempts`/`simulation_proposals` stayed 0.
+  - Artifacts: `output/p35-route-check-admission/*` for failed diagnostic and `output/p35-route-check-admission-r2/*` for clean proof.
+- Status: diagnostic slice complete, pending commit/push/reindex. This adds 0% to final acceptance until the multi-campaign ~60-turn clean lanes run.
+
 6+1 canvas for the next v2 slice:
 - A1 Source/Request Lock — Status: complete. Scope: keep the runtime target on gameplay-cycle-v2, not v1 stabilization. Output: [inspected] `docs/gm-turn-architecture-review-2026-05-03.md` remains canonical; old v1/phase95 lanes are forensic lessons, not target architecture.
 - A2 Current-State Map — Status: complete. Scope: map current v2 entrypoint-to-exitpoint gaps after commit `60d6dda6`. Output: [inspected] current HEAD has live `tool_plan`, DB-backed handlers, pending narration packet store, receipt ledger, local consequence scheduling, public/private settled packet split, movement/dialogue/tag/support-actor/minor-POI/location-reveal/item-transfer/player-knowledge/actor-condition slices, and no legacy packet/saga/proposal writes in v2 diagnostics.
