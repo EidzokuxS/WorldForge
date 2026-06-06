@@ -1,0 +1,406 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  cleanNarratorViewSchema,
+  cleanSettledTurnPacketSchema,
+  cleanStage4ExecutionResultSchema,
+  cleanStage4ReceiptSchema,
+  type AuthoritativeSceneFrame,
+  type CleanStage4ExecutionResult,
+  type CleanStage4Receipt,
+  type GameplayRuntimeTurnInput,
+  type GmActionChecklist,
+} from "../gameplay-cycle-runtime/contracts.js";
+import {
+  buildCleanNarratorView,
+  buildCleanSettledTurnPacket,
+} from "../gameplay-cycle-runtime/settlement.js";
+import { buildCleanPublicTurnIds } from "../gameplay-cycle-runtime/turn-persistence.js";
+
+function turn(): GameplayRuntimeTurnInput {
+  return {
+    version: "gameplay-runtime.turn-input.v1",
+    route: "/api/chat/action",
+    campaignId: "campaign-1",
+    turnId: "clean-turn-1",
+    playerAction: {
+      submitted: "I walk to North Hall.",
+      normalized: "I walk to North Hall.",
+      source: "typed",
+    },
+    base: {
+      tick: 0,
+      worldVersion: 0,
+      worldTimeMinutes: 0,
+      chatHistoryLengthBeforeTurn: 0,
+      preTurnSnapshot: {
+        bundleDir: "snapshot-dir",
+        capturedAt: 1,
+      },
+    },
+    providers: {
+      judge: { id: "test", model: "test-model", baseUrl: null },
+      storyteller: { id: "test", model: "test-model", baseUrl: null },
+    },
+    idempotencyKey: "campaign-1:0:0:clean-turn-1",
+  };
+}
+
+function frame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  return {
+    version: "scene-frame.v1",
+    frameId: "frame-1",
+    campaignId: "campaign-1",
+    turnId: "clean-turn-1",
+    base: { tick: 0, worldVersion: 0, worldTimeMinutes: 0 },
+    playerAction: "I walk to North Hall.",
+    player: {
+      ref: "Player",
+      label: "Mira Voss",
+      visibleStatus: { hp: 5, conditions: [] },
+    },
+    scene: {
+      currentLocation: { ref: "Market", label: "Market", description: null },
+      currentScene: { ref: "Market", label: "Market", description: null },
+      visibleFacts: [],
+      recentLocalFacts: [],
+    },
+    actors: [],
+    movementOptions: [{
+      ref: "North Hall",
+      label: "North Hall",
+      connected: true,
+      travelCost: 1,
+    }],
+    targets: [],
+    inventory: [],
+    capabilities: [
+      { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "North Hall"],
+    privateGuards: {
+      forbiddenActorLabels: [],
+      forbiddenPrivateTerms: [],
+    },
+    forecast: {
+      version: "scoped-forecast.v1",
+      advisoryOnly: true,
+      sourceStatus: "empty_missing",
+      mayAuthorizeMutation: false,
+      maySupportNarrationClaim: false,
+      entries: [],
+      forbiddenPrivateTerms: [],
+    },
+    ...overrides,
+  };
+}
+
+function checklist(inputFrame = frame()): GmActionChecklist {
+  return {
+    version: "gm-action-checklist.v1",
+    checklistId: "gm-action-checklist-1",
+    campaignId: inputFrame.campaignId,
+    turnId: inputFrame.turnId,
+    frameId: inputFrame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      gmReadPath: "procedural",
+      judgmentId: "judge-1",
+      judgeCheckNeed: "backend_action_plan_needed",
+      judgeNextStep: "action_plan",
+      judgeNoRollReasonCode: "backend_receipt_required",
+    },
+    base: inputFrame.base,
+    turnIntent: {
+      playerIntent: "Move to North Hall.",
+      admittedConsequenceNeed: "Movement needs backend receipt authority.",
+    },
+    steps: [{
+      stepId: "step-1",
+      purpose: "Resolve movement.",
+      actorRef: "Player",
+      targetRefs: ["North Hall"],
+      evidenceRefs: ["Player", "North Hall"],
+      intended: {
+        kind: "movement",
+        stateOrEvidence: "state",
+        requiredCapabilityId: "movement",
+        summary: "Move the player to North Hall.",
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+        reason: "Movement requires backend authority.",
+      },
+      dependsOnStepIds: [],
+      expectedVisibleEffect: {
+        summary: "The player may arrive after accepted receipt.",
+        visibleRefs: ["Player", "North Hall"],
+      },
+    }],
+    authority: {
+      evidenceAuthority: "planning_only",
+      mutationAuthority: "none",
+      mayAuthorizeMutation: false,
+      mayGenerateExecutableRequest: false,
+      maySupportNarrationClaim: false,
+      settledTruth: false,
+      publicExposure: "stage_summary_only",
+    },
+  };
+}
+
+function movementReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    version: "gameplay-runtime.stage4-receipt.v1",
+    receiptId: "stage4-receipt-movement-1",
+    requestId: "stage4-request-movement-1",
+    campaignId: inputFrame.campaignId,
+    turnId: inputFrame.turnId,
+    frameId: inputFrame.frameId,
+    checklistId: inputChecklist.checklistId,
+    stepId: "step-1",
+    capabilityId: "movement",
+    status: "accepted",
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      checklistVersion: "gm-action-checklist.v1",
+      checklistId: inputChecklist.checklistId,
+      checklistStepId: "step-1",
+    },
+    base: inputFrame.base,
+    result: { tick: 1, worldVersion: 1, worldTimeMinutes: 1, mutationApplied: true },
+    authority: {
+      evidenceAuthority: "terminal_mutation_receipt",
+      mutationAuthority: "player_location_and_world_clock",
+      visibleResultAuthority: "may_claim_player_location_change",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: true,
+    },
+    publicResult: {
+      summary: "You move to North Hall.",
+      visibleRefs: ["Player", "North Hall"],
+      routeStatus: null,
+      locationChange: {
+        type: "location_change",
+        locationName: "North Hall",
+        travelCost: 1,
+        path: ["Market", "North Hall"],
+      },
+    },
+    privateResult: {
+      playerId: "player-1",
+      fromLocationId: "loc-market",
+      destinationLocationId: "loc-north",
+      edgeIds: ["edge-market-north"],
+      authorityTraceId: "stage4-authority-1",
+      clockReceiptId: "stage4-clock-1",
+      stateDeltaRefs: ["player-location-stage4-receipt-movement-1"],
+    },
+    failure: null,
+  });
+}
+
+function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStage4ExecutionResult {
+  return cleanStage4ExecutionResultSchema.parse({
+    version: "gameplay-runtime.stage4-execution-result.v1",
+    campaignId: inputFrame.campaignId,
+    turnId: inputFrame.turnId,
+    frameId: inputFrame.frameId,
+    checklistId: "gm-action-checklist-1",
+    base: inputFrame.base,
+    receipts,
+    acceptedReceiptIds: receipts.filter((receipt) => receipt.status === "accepted").map((receipt) => receipt.receiptId),
+    skippedStepIds: receipts.filter((receipt) => receipt.status === "skipped").map((receipt) => receipt.stepId),
+    failedStepIds: receipts.filter((receipt) => receipt.status === "failed").map((receipt) => receipt.stepId),
+    mutationApplied: receipts.some((receipt) => receipt.result.mutationApplied),
+    resultWorldVersion: Math.max(...receipts.map((receipt) => receipt.result.worldVersion), inputFrame.base.worldVersion),
+    visibleResults: receipts
+      .filter((receipt) => receipt.status === "accepted" || receipt.status === "failed")
+      .map((receipt) => ({
+        receiptId: receipt.receiptId,
+        authority: receipt.authority.evidenceAuthority,
+        summary: receipt.publicResult.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        locationChange: receipt.publicResult.locationChange,
+      })),
+  });
+}
+
+function buildPacket(input: {
+  frame?: AuthoritativeSceneFrame;
+  checklist?: GmActionChecklist | null;
+  execution?: CleanStage4ExecutionResult | null;
+} = {}) {
+  const inputTurn = turn();
+  const inputFrame = input.frame ?? frame();
+  return buildCleanSettledTurnPacket({
+    turn: inputTurn,
+    publicPacketId: buildCleanPublicTurnIds(inputTurn).publicPacketId,
+    frame: inputFrame,
+    gmRead: null,
+    judgment: null,
+    oracleSettlement: null,
+    actionChecklist: input.checklist ?? null,
+    stage4Execution: input.execution ?? null,
+  });
+}
+
+describe("clean Stage 5 settlement contracts", () => {
+  it("settles accepted movement into terminal mutation evidence only", () => {
+    const inputFrame = frame();
+    const inputChecklist = checklist(inputFrame);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([movementReceipt(inputFrame, inputChecklist)], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    expect(packet.acceptedEvidence).toHaveLength(1);
+    expect(packet.acceptedEvidence[0]).toMatchObject({
+      authority: "terminal_mutation_receipt",
+      claimKinds: ["player_location_change", "elapsed_time"],
+    });
+    expect(JSON.stringify(view)).not.toContain("player-1");
+    expect(JSON.stringify(view)).not.toContain("edge-market-north");
+    expect(JSON.stringify(view)).not.toContain("privateResult");
+    expect(packet.acceptedEvidence[0]?.limits.doesNotProve).toContain("no-change");
+  });
+
+  it("settles route_check into route status only", () => {
+    const inputFrame = frame();
+    const inputChecklist = checklist(inputFrame);
+    const routeReceipt = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      receiptId: "stage4-receipt-route-1",
+      capabilityId: "route_check",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "route_check_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_explain_route_status",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "North Hall is reachable from Market.",
+        visibleRefs: ["Player", "North Hall"],
+        routeStatus: "connected",
+        locationChange: null,
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: "loc-market",
+        destinationLocationId: "loc-north",
+        edgeIds: ["edge-market-north"],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([routeReceipt], inputFrame),
+    });
+
+    const route = packet.acceptedEvidence.find((entry) => entry.authority === "route_check_receipt");
+    expect(route?.claimKinds).toEqual(["route_status"]);
+    expect(route?.limits.doesNotProve).toContain("movement");
+    expect(route?.limits.doesNotProve).toContain("current-scene change");
+  });
+
+  it("excludes failed and skipped intended effects from accepted evidence", () => {
+    const inputFrame = frame();
+    const inputChecklist = checklist(inputFrame);
+    const failed = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      status: "failed",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "failure_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "failure_only",
+        maySupportNarrationClaim: false,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Stage 4 movement destination is stale.",
+        visibleRefs: ["Player", "North Hall"],
+        routeStatus: null,
+        locationChange: null,
+      },
+      privateResult: {
+        playerId: null,
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+      failure: {
+        kind: "stale_frame_or_clock",
+        message: "Stage 4 frame clock is stale.",
+        hiddenMutationApplied: false,
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([failed], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    expect(packet.stepAudit).toContainEqual(expect.objectContaining({
+      stepId: "step-1",
+      status: "failed",
+      maySupportWorldClaim: false,
+    }));
+    expect(packet.acceptedEvidence.some((entry) => entry.claimKinds.includes("player_location_change"))).toBe(false);
+    expect(view.stepAuditForGrounding[0]).toMatchObject({
+      stepId: "step-1",
+      status: "failed",
+      mayUseAsWorldTruth: false,
+    });
+  });
+
+  it("rejects private guard leaks in accepted evidence", () => {
+    const inputFrame = frame({
+      scene: {
+        ...frame().scene,
+        visibleFacts: [{
+          factId: "visible-fact-1",
+          summary: "Hidden Watcher stands openly here.",
+          source: "Market",
+          tick: null,
+        }],
+      },
+      privateGuards: {
+        forbiddenActorLabels: ["Hidden Watcher"],
+        forbiddenPrivateTerms: [],
+      },
+    });
+
+    expect(() => buildPacket({ frame: inputFrame })).toThrow(/private guard/u);
+  });
+
+  it("does not invent absence or no-change evidence for direct no-receipt packets", () => {
+    const packet = buildPacket();
+    const serialized = JSON.stringify(packet);
+
+    expect(packet.settlementKind).toBe("minimal_safe");
+    expect(serialized).not.toMatch(/none are present|nothing changed|no routes|no one is there/iu);
+    expect(packet.acceptedEvidence.some((entry) =>
+      entry.claimKinds.includes("player_location_change")
+      || entry.claimKinds.includes("route_status")
+    )).toBe(false);
+  });
+});

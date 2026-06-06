@@ -6,9 +6,11 @@ import { getSqliteConnection } from "../../db/index.js";
 import { withSqliteWriteLock } from "../../db/sqlite-write-lock.js";
 import {
   assertCleanPlayerFacingTurnRecord,
+  type CleanNarratorView,
   type CleanPlayerFacingTurnDoneBoundary,
   type CleanPlayerFacingTurnEvidenceRef,
   type CleanPlayerFacingTurnRecord,
+  type CleanSettledTurnPacket,
   type FrozenApiProjection,
   type GameplayRuntimeTurnInput,
 } from "./contracts.js";
@@ -27,6 +29,10 @@ export interface CleanPlayerFacingTurnChatAdapter {
 export interface CommitCleanPlayerFacingTurnInput {
   turn: GameplayRuntimeTurnInput;
   projection: FrozenApiProjection;
+  settlement: {
+    settledPacket: CleanSettledTurnPacket;
+    narratorView: CleanNarratorView;
+  };
   evidenceRefs: CleanPlayerFacingTurnEvidenceRef[];
   now?: number;
   chat?: CleanPlayerFacingTurnChatAdapter;
@@ -49,6 +55,19 @@ function sha256(value: string): string {
 
 function publicId(prefix: "cgtr" | "cgturn" | "cgpacket", value: string): string {
   return `${prefix}_${sha256(value).slice(0, 24)}`;
+}
+
+export function buildCleanPublicTurnIds(turn: GameplayRuntimeTurnInput): {
+  recordId: string;
+  publicTurnId: string;
+  publicPacketId: string;
+} {
+  const stableSeed = `${turn.campaignId}:${turn.turnId}:${turn.idempotencyKey}`;
+  return {
+    recordId: publicId("cgtr", stableSeed),
+    publicTurnId: publicId("cgturn", `${stableSeed}:turn`),
+    publicPacketId: publicId("cgpacket", `${stableSeed}:packet`),
+  };
 }
 
 function parseStoredRecord(raw: unknown): CleanPlayerFacingTurnRecord | null {
@@ -142,6 +161,10 @@ function assertExistingRecordTail(input: {
 function buildRecord(input: {
   turn: GameplayRuntimeTurnInput;
   projection: FrozenApiProjection;
+  settlement: {
+    settledPacket: CleanSettledTurnPacket;
+    narratorView: CleanNarratorView;
+  };
   evidenceRefs: CleanPlayerFacingTurnEvidenceRef[];
   beforeLength: number;
   afterHistory: ChatMessage[];
@@ -154,10 +177,7 @@ function buildRecord(input: {
   if (user?.role !== "user" || assistant?.role !== "assistant") {
     throw new Error("Clean turn commit expected a user/assistant chat tail.");
   }
-  const stableSeed = `${input.turn.campaignId}:${input.turn.turnId}:${input.turn.idempotencyKey}`;
-  const recordId = publicId("cgtr", stableSeed);
-  const publicTurnId = publicId("cgturn", `${stableSeed}:turn`);
-  const publicPacketId = publicId("cgpacket", `${stableSeed}:packet`);
+  const { recordId, publicTurnId, publicPacketId } = buildCleanPublicTurnIds(input.turn);
   const userMessageSha256 = sha256(user.content);
   const assistantMessageSha256 = sha256(assistant.content);
 
@@ -191,6 +211,7 @@ function buildRecord(input: {
       assistantMessageSha256,
     },
     terminalProjection: input.projection,
+    settlement: input.settlement,
     evidenceRefs: input.evidenceRefs,
     durableEventIds: {
       accepted: [],
@@ -259,6 +280,7 @@ export async function commitCleanPlayerFacingTurn(
     const record = buildRecord({
       turn: input.turn,
       projection: input.projection,
+      settlement: input.settlement,
       evidenceRefs: input.evidenceRefs,
       beforeLength: expectedBefore,
       afterHistory,

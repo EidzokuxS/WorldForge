@@ -35,15 +35,22 @@ import {
   type AuthoritativeSceneFrame,
   type CleanPlayerFacingTurnEvidenceRef,
   type CleanStage4ExecutionResult,
+  type CleanSettledTurnPacket,
   type FrozenApiProjection,
   type GameplayRuntimeProviderSummary,
   type GameplayRuntimeTurnInput,
 } from "./contracts.js";
 import {
+  buildCleanPublicTurnIds,
   commitCleanPlayerFacingTurn,
   type CommitCleanPlayerFacingTurnInput,
   type CleanPlayerFacingTurnCommitResult,
 } from "./turn-persistence.js";
+import {
+  buildCleanNarratorView,
+  buildCleanSettledTurnPacket,
+  deterministicSettlementBridge,
+} from "./settlement.js";
 
 export type CleanGameplayRuntimeEvent = {
   type:
@@ -164,73 +171,6 @@ export function buildGameplayRuntimeTurnInput(
   });
 }
 
-function narrativeFromFrame(
-  frame: AuthoritativeSceneFrame,
-  gmRead: GmReadRunResult,
-  judgeUncertainty?: JudgeUncertaintyRunResult,
-  oracleSettlement?: OracleSettlementRunResult,
-  actionChecklist?: GmActionChecklistRunResult,
-  stage4Execution?: CleanStage4ExecutionRunResult,
-): string {
-  if (gmRead.read.path === "clarification") {
-    return `Нужно уточнение: ${gmRead.read.liveSceneQuestion}`;
-  }
-  if (oracleSettlement?.status === "settled" || oracleSettlement?.status === "settled_with_fallback") {
-    return `Проверка неопределённости разрешена: ${oracleSettlement.settlement.visibleOutcome.selectedMeaning}`;
-  }
-  if (judgeUncertainty?.judgment.nextStep === "ask_clarification") {
-    return `Нужно уточнение: ${judgeUncertainty.judgment.noRollReason?.explanation ?? gmRead.read.liveSceneQuestion}`;
-  }
-  if (judgeUncertainty?.judgment.nextStep === "block_no_mutation") {
-    return `Это действие сейчас нельзя подтвердить: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
-  }
-  if (judgeUncertainty?.judgment.nextStep === "oracle_roll") {
-    return `Нужна проверка неопределённости: ${judgeUncertainty.judgment.oracleAdmission?.question ?? judgeUncertainty.judgment.checkRationale}`;
-  }
-  if (actionChecklist?.status === "accepted") {
-    const execution = stage4Execution?.execution;
-    const movement = execution?.visibleResults.find((result) =>
-      result.locationChange !== null
-      && result.authority === "terminal_mutation_receipt"
-    );
-    if (movement?.locationChange) {
-      return `Вы перемещаетесь в ${movement.locationChange.locationName}.`;
-    }
-    const route = execution?.visibleResults.find((result) =>
-      result.authority === "route_check_receipt"
-    );
-    if (route) {
-      return route.summary;
-    }
-    const failure = execution?.visibleResults.find((result) =>
-      result.authority === "failure_receipt"
-    );
-    if (failure) {
-      return `Это действие сейчас нельзя подтвердить: ${failure.summary}`;
-    }
-    return `Действие требует дальнейшего разрешения последствий: зафиксирован план из ${actionChecklist.checklist.steps.length} шаг(ов), но состояние мира ещё не изменено.`;
-  }
-  if (actionChecklist?.status === "fallback_no_mutation") {
-    return `Нужно уточнение: ${actionChecklist.fallbackReason}`;
-  }
-  if (judgeUncertainty?.judgment.nextStep === "action_plan") {
-    return `Действие требует разрешения последствий: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
-  }
-  if (judgeUncertainty?.judgment.nextStep === "combat_boundary") {
-    return `Сцена требует боевого разрешения: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
-  }
-  const scene = frame.scene.currentScene.label;
-  const location = frame.scene.currentLocation.label;
-  const actors = frame.actors
-    .filter((actor) => actor.role !== "player")
-    .slice(0, 4)
-    .map((actor) => actor.label);
-  const actorText = actors.length > 0
-    ? ` Видимые участники: ${actors.join(", ")}.`
-    : "";
-  return `Текущая сцена: ${scene} (${location}).${actorText}`;
-}
-
 function buildFrozenProjection(input: {
   turn: GameplayRuntimeTurnInput;
   frame: AuthoritativeSceneFrame;
@@ -256,6 +196,7 @@ function cleanEvidenceRefs(input: {
   oracleSettlement?: OracleSettlementRunResult;
   actionChecklist?: GmActionChecklistRunResult;
   stage4Execution?: CleanStage4ExecutionResult | null;
+  settledPacket?: CleanSettledTurnPacket | null;
 }): CleanPlayerFacingTurnEvidenceRef[] {
   const refs: CleanPlayerFacingTurnEvidenceRef[] = [
     {
@@ -300,6 +241,13 @@ function cleanEvidenceRefs(input: {
       kind: "stage4_execution",
       ref: input.stage4Execution.checklistId,
       authority: "stage4_execution_result",
+    });
+  }
+  if (input.settledPacket) {
+    refs.push({
+      kind: "settled_packet",
+      ref: input.settledPacket.packetId,
+      authority: "settled_truth_packet",
     });
   }
   return refs;
@@ -411,19 +359,33 @@ export async function* processCleanGameplayTurnFromInput(
       }
     }
   }
-  const narrativeText = narrativeFromFrame(
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "settled-turn-packet",
+      phase: "gameplay-cycle-runtime",
+    },
+  };
+  const publicIds = buildCleanPublicTurnIds(turn);
+  const settledPacket = buildCleanSettledTurnPacket({
+    turn,
+    publicPacketId: publicIds.publicPacketId,
     frame,
-    gmRead,
-    judgeUncertainty,
-    oracleSettlement,
-    actionChecklist,
-    stage4Execution,
-  );
+    gmRead: gmRead.read,
+    judgment: judgeUncertainty?.judgment ?? null,
+    oracleSettlement: oracleSettlement?.status === "settled" || oracleSettlement?.status === "settled_with_fallback"
+      ? oracleSettlement.settlement
+      : null,
+    actionChecklist: actionChecklist?.status === "accepted" ? actionChecklist.checklist : null,
+    stage4Execution: stage4Execution?.execution ?? null,
+  });
+  const narratorView = buildCleanNarratorView(settledPacket);
+  const narrativeText = deterministicSettlementBridge(narratorView);
   const projection = buildFrozenProjection({
     turn,
     frame,
     narrativeText,
-    mutationApplied: stage4Execution?.execution?.mutationApplied ?? false,
+    mutationApplied: settledPacket.result.mutationApplied,
   });
   yield {
     type: "narrative",
@@ -447,7 +409,12 @@ export async function* processCleanGameplayTurnFromInput(
       oracleSettlement,
       actionChecklist,
       stage4Execution: stage4Execution?.execution ?? null,
+      settledPacket,
     }),
+    settlement: {
+      settledPacket,
+      narratorView,
+    },
   });
   yield {
     type: "done",

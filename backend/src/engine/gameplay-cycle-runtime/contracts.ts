@@ -771,6 +771,203 @@ export const cleanStage4ExecutionResultSchema = z.object({
   }).strict()).max(6),
 }).strict();
 
+const cleanSettledClaimKindSchema = z.enum([
+  "current_scene",
+  "current_location",
+  "visible_fact",
+  "visible_actor",
+  "inventory_status",
+  "movement_option",
+  "route_status",
+  "player_location_change",
+  "elapsed_time",
+  "oracle_outcome",
+]);
+
+const cleanSettledEvidenceAuthoritySchema = z.enum([
+  "scene_frame_snapshot",
+  "route_check_receipt",
+  "terminal_mutation_receipt",
+  "oracle_visible_outcome",
+]);
+
+const cleanEvidenceLimitSchema = z.object({
+  proves: z.array(shortText).max(12),
+  doesNotProve: z.array(shortText).max(16),
+}).strict();
+
+const cleanSettledBackendFactSchema = z.object({
+  factRef: shortText,
+  text: shortText,
+  exact: z.boolean(),
+}).strict();
+
+export const cleanSettledEvidenceSchema = z.object({
+  evidenceId: shortText,
+  sourceKind: z.enum(["scene_frame", "stage4_receipt", "oracle_settlement"]),
+  sourceRef: shortText,
+  authority: cleanSettledEvidenceAuthoritySchema,
+  claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+  text: shortText,
+  visibleRefs: z.array(modelSafeRef).min(1).max(16),
+  backendFacts: z.array(cleanSettledBackendFactSchema).min(1).max(8),
+  limits: cleanEvidenceLimitSchema,
+}).strict();
+
+export const cleanSettledStepAuditSchema = z.object({
+  stepId: gmActionChecklistStepIdSchema,
+  intendedKind: gmActionChecklistEffectKindSchema.nullable(),
+  status: z.enum(["accepted", "failed", "skipped", "not_run"]),
+  receiptId: shortText.nullable(),
+  authority: z.enum([
+    "route_check_receipt",
+    "terminal_mutation_receipt",
+    "failure_receipt",
+    "skip_receipt",
+  ]).nullable(),
+  publicReason: shortText.nullable(),
+  maySupportWorldClaim: z.literal(false),
+}).strict();
+
+const cleanNarrationContractSchema = z.object({
+  acceptedEvidenceOnly: z.literal(true),
+  mayCallTools: z.literal(false),
+  mayInferNewFacts: z.literal(false),
+  mayUseFailedOrSkippedAsTruth: z.literal(false),
+  mayNarrateNoChangeWithoutExplicitEvidence: z.literal(false),
+  preserveLabelsVerbatim: z.literal(true),
+  forbiddenClaimKindsWithoutAcceptedEvidence: z.array(z.enum([
+    "absence_or_no_change",
+    "movement",
+    "discovery",
+    "item_state",
+    "npc_private_knowledge",
+    "location_reveal",
+    "condition_or_hp_change",
+    "world_fact",
+  ])).min(8).max(8),
+}).strict();
+
+export const cleanSettledTurnPacketSchema = z.object({
+  version: z.literal("gameplay-runtime.settled-turn-packet.v1"),
+  packetId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1").nullable(),
+    judgeVersion: z.literal("judge-uncertainty.v1").nullable(),
+    oracleSettlementVersion: z.literal("oracle-settlement.v1").nullable(),
+    checklistVersion: z.literal("gm-action-checklist.v1").nullable(),
+    stage4ExecutionVersion: z.literal("gameplay-runtime.stage4-execution-result.v1").nullable(),
+  }).strict(),
+  input: z.object({
+    submittedPlayerAction: shortText,
+    normalizedPlayerAction: shortText,
+    source: z.enum(["typed", "quick_action"]),
+  }).strict(),
+  base: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+  }).strict(),
+  result: z.object({
+    tick: z.number().int().nonnegative(),
+    worldVersion: z.number().int().nonnegative(),
+    worldTimeMinutes: z.number().int().nonnegative(),
+    mutationApplied: z.boolean(),
+  }).strict(),
+  settlementKind: z.enum([
+    "direct_scene",
+    "continue_scene",
+    "clarification",
+    "blocked_no_mutation",
+    "oracle_visible_outcome",
+    "stage4_execution",
+    "stage4_failed_or_skipped",
+    "minimal_safe",
+  ]),
+  acceptedEvidence: z.array(cleanSettledEvidenceSchema).max(24),
+  stepAudit: z.array(cleanSettledStepAuditSchema).max(6),
+  nonAuthoritativeContext: z.object({
+    gmReadPath: gmReadPathSchema.nullable(),
+    gmReadIntent: shortText.nullable(),
+    judgeNextStep: judgeNextStepSchema.nullable(),
+    checklistId: shortText.nullable(),
+    checklistPlanningOnly: z.boolean(),
+  }).strict(),
+  privateGuards: z.object({
+    forbiddenActorLabels: z.array(shortText).max(64),
+    forbiddenPrivateTerms: z.array(shortText).max(128),
+    forecastForbiddenPrivateTerms: z.array(shortText).max(128),
+  }).strict(),
+  narrationContract: cleanNarrationContractSchema,
+}).strict().superRefine((packet, ctx) => {
+  const privateTerms = [
+    ...packet.privateGuards.forbiddenActorLabels,
+    ...packet.privateGuards.forbiddenPrivateTerms,
+    ...packet.privateGuards.forecastForbiddenPrivateTerms,
+  ].map((term) => term.trim()).filter((term) => term.length > 0);
+  const publicEvidenceText = JSON.stringify(packet.acceptedEvidence);
+  for (const term of privateTerms) {
+    if (publicEvidenceText.toLowerCase().includes(term.toLowerCase())) {
+      ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Settled evidence must not expose private guard terms." });
+      break;
+    }
+  }
+  if (packet.stepAudit.some((step) => step.status !== "accepted" && step.maySupportWorldClaim !== false)) {
+    ctx.addIssue({ code: "custom", path: ["stepAudit"], message: "Failed/skipped steps cannot support world claims." });
+  }
+});
+
+export const cleanNarratorViewSchema = z.object({
+  version: z.literal("gameplay-runtime.narrator-view.v1"),
+  packetId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  playerAction: shortText,
+  responseLanguage: z.literal("match_player_action"),
+  preserveLabelsVerbatim: z.literal(true),
+  acceptedEvidence: z.array(z.object({
+    ref: shortText,
+    authority: cleanSettledEvidenceAuthoritySchema,
+    claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+    text: shortText,
+    backendFacts: z.array(cleanSettledBackendFactSchema).min(1).max(8),
+    limits: cleanEvidenceLimitSchema,
+  }).strict()).max(24),
+  stepAuditForGrounding: z.array(z.object({
+    stepId: gmActionChecklistStepIdSchema,
+    status: z.enum(["failed", "skipped"]),
+    publicReason: shortText,
+    mayUseAsWorldTruth: z.literal(false),
+  }).strict()).max(6),
+  guard: z.object({
+    mayCallTools: z.literal(false),
+    mayInferNewFacts: z.literal(false),
+    mayUseFailedOrSkippedAsTruth: z.literal(false),
+    mayNarrateNoChangeWithoutExplicitEvidence: z.literal(false),
+  }).strict(),
+  privateGuardSidecar: z.object({
+    forbiddenActorLabels: z.array(shortText).max(64),
+    forbiddenPrivateTerms: z.array(shortText).max(128),
+  }).strict(),
+}).strict().superRefine((view, ctx) => {
+  const visibleJson = JSON.stringify({
+    acceptedEvidence: view.acceptedEvidence,
+    stepAuditForGrounding: view.stepAuditForGrounding,
+    guard: view.guard,
+  });
+  if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(visibleJson)) {
+    ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose UUID-like backend ids." });
+  }
+  if (/\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|route|scene|turn|world|loc|player):[^\s",.]+/i.test(visibleJson)
+    || /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|route|scene|turn|world|loc|player)-[a-z0-9][a-z0-9-]*\b/i.test(visibleJson)) {
+    ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose backend refs." });
+  }
+});
+
 const publicSafeRuntimeId = z.string().trim().regex(
   /^[a-z][a-z0-9_]{7,96}$/u,
   "Clean runtime public ids must be stable public-safe tokens.",
@@ -785,6 +982,7 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "oracle_settlement",
     "gm_action_checklist",
     "stage4_execution",
+    "settled_packet",
   ]),
   ref: shortText,
   authority: z.enum([
@@ -798,6 +996,7 @@ export const cleanPlayerFacingTurnEvidenceRefSchema = z.object({
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",
+    "settled_truth_packet",
   ]),
 }).strict();
 
@@ -844,6 +1043,10 @@ export const cleanPlayerFacingTurnRecordSchema = z.object({
     assistantMessageSha256: sha256Hex,
   }).strict(),
   terminalProjection: frozenApiProjectionSchema,
+  settlement: z.object({
+    settledPacket: cleanSettledTurnPacketSchema,
+    narratorView: cleanNarratorViewSchema,
+  }).strict(),
   evidenceRefs: z.array(cleanPlayerFacingTurnEvidenceRefSchema).min(1).max(8),
   durableEventIds: z.object({
     accepted: z.array(shortText).max(0),
@@ -865,6 +1068,18 @@ export const cleanPlayerFacingTurnRecordSchema = z.object({
   }
   if (record.internalFrameId !== record.terminalProjection.frameId) {
     ctx.addIssue({ code: "custom", path: ["terminalProjection", "frameId"], message: "terminalProjection.frameId must match internalFrameId." });
+  }
+  if (record.publicPacketId !== record.settlement.settledPacket.packetId) {
+    ctx.addIssue({ code: "custom", path: ["settlement", "settledPacket", "packetId"], message: "settled packet id must match publicPacketId." });
+  }
+  if (record.publicPacketId !== record.settlement.narratorView.packetId) {
+    ctx.addIssue({ code: "custom", path: ["settlement", "narratorView", "packetId"], message: "narrator view packet id must match publicPacketId." });
+  }
+  if (record.internalTurnId !== record.settlement.settledPacket.turnId) {
+    ctx.addIssue({ code: "custom", path: ["settlement", "settledPacket", "turnId"], message: "settled packet turn id must match internalTurnId." });
+  }
+  if (record.internalFrameId !== record.settlement.settledPacket.frameId) {
+    ctx.addIssue({ code: "custom", path: ["settlement", "settledPacket", "frameId"], message: "settled packet frame id must match internalFrameId." });
   }
   if (record.chat.userMessageIndex !== record.base.chatHistoryLengthBeforeTurn) {
     ctx.addIssue({ code: "custom", path: ["chat", "userMessageIndex"], message: "user message index must equal base chat length." });
@@ -919,6 +1134,10 @@ export type GmActionChecklist = z.infer<typeof gmActionChecklistSchema>;
 export type CleanStage4Request = z.infer<typeof cleanStage4RequestSchema>;
 export type CleanStage4Receipt = z.infer<typeof cleanStage4ReceiptSchema>;
 export type CleanStage4ExecutionResult = z.infer<typeof cleanStage4ExecutionResultSchema>;
+export type CleanSettledEvidence = z.infer<typeof cleanSettledEvidenceSchema>;
+export type CleanSettledStepAudit = z.infer<typeof cleanSettledStepAuditSchema>;
+export type CleanSettledTurnPacket = z.infer<typeof cleanSettledTurnPacketSchema>;
+export type CleanNarratorView = z.infer<typeof cleanNarratorViewSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
 export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;
@@ -958,6 +1177,14 @@ export function assertCleanStage4Receipt(value: unknown): CleanStage4Receipt {
 
 export function assertCleanStage4ExecutionResult(value: unknown): CleanStage4ExecutionResult {
   return cleanStage4ExecutionResultSchema.parse(value);
+}
+
+export function assertCleanSettledTurnPacket(value: unknown): CleanSettledTurnPacket {
+  return cleanSettledTurnPacketSchema.parse(value);
+}
+
+export function assertCleanNarratorView(value: unknown): CleanNarratorView {
+  return cleanNarratorViewSchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {

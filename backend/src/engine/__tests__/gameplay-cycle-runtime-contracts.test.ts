@@ -14,6 +14,8 @@ import {
   type JudgeUncertainty,
   judgeUncertaintySchema,
   cleanPlayerFacingTurnRecordSchema,
+  cleanNarratorViewSchema,
+  cleanSettledTurnPacketSchema,
   cleanStage4ExecutionResultSchema,
   cleanStage4ReceiptSchema,
   type CleanStage4ExecutionResult,
@@ -47,9 +49,14 @@ import {
 } from "../gameplay-cycle-runtime/action-checklist.js";
 import type { Stage4ExecutionEvent } from "../gameplay-cycle-runtime/stage4-execution.js";
 import {
+  buildCleanPublicTurnIds,
   commitCleanPlayerFacingTurn,
   type CleanPlayerFacingTurnRecordStore,
 } from "../gameplay-cycle-runtime/turn-persistence.js";
+import {
+  buildCleanNarratorView,
+  buildCleanSettledTurnPacket,
+} from "../gameplay-cycle-runtime/settlement.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -281,6 +288,28 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     };
   }
 
+  function settlementFor(turn = validTurnInput(), frame = minimalFrame()) {
+    const ids = buildCleanPublicTurnIds(turn);
+    const settledPacket = buildCleanSettledTurnPacket({
+      turn,
+      publicPacketId: ids.publicPacketId,
+      frame: {
+        ...frame,
+        campaignId: turn.campaignId,
+        turnId: turn.turnId,
+      },
+      gmRead: null,
+      judgment: null,
+      oracleSettlement: null,
+      actionChecklist: null,
+      stage4Execution: null,
+    });
+    return {
+      settledPacket,
+      narratorView: buildCleanNarratorView(settledPacket),
+    };
+  }
+
   const evidenceRefs = [{
     kind: "scene_frame" as const,
     ref: "frame-1",
@@ -295,6 +324,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     const result = await commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs,
       now: 42,
       chat: chat.adapter,
@@ -318,6 +348,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     const result = await commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs: [
         ...evidenceRefs,
         {
@@ -347,6 +378,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     const { record } = await commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs,
       now: 42,
       chat: chat.adapter,
@@ -372,6 +404,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     await expect(commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs,
       now: 42,
       chat: chat.adapter,
@@ -389,6 +422,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     const first = await commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs,
       now: 42,
       chat: chat.adapter,
@@ -397,6 +431,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     const second = await commitCleanPlayerFacingTurn({
       turn,
       projection: projectionFor(turn),
+      settlement: settlementFor(turn),
       evidenceRefs,
       now: 43,
       chat: chat.adapter,
@@ -427,14 +462,14 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
       events.push(event);
     }
 
-    expect(order).toEqual(["commit:Текущая сцена: Market (Market). Видимые участники: Guide.", "done"]);
+    expect(order).toEqual(["commit:Current scene is Market.", "done"]);
     const done = events.at(-1);
     expect(done?.type).toBe("done");
     expect(done?.data).toMatchObject({
       runtime: "gameplay-cycle-runtime",
       turnId: "cgturn_fakecommit0000000000",
-      packetId: "cgpacket_fakecommit00000000",
     });
+    expect((done?.data as { packetId?: string }).packetId).toMatch(/^cgpacket_/u);
     expect(JSON.stringify(done?.data)).not.toContain("clean-turn-1");
     expect(JSON.stringify(done?.data)).not.toContain("frame-1");
   });
@@ -756,7 +791,7 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
       campaignId: input.turn.campaignId,
       recordId: "cgtr_fakecommit000000000000",
       publicTurnId: "cgturn_fakecommit0000000000",
-      publicPacketId: "cgpacket_fakecommit00000000",
+      publicPacketId: input.settlement.settledPacket.packetId,
       internalTurnId: input.turn.turnId,
       internalFrameId: input.projection.frameId,
       idempotencyKey: input.turn.idempotencyKey,
@@ -779,13 +814,14 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
         assistantMessageSha256,
       },
       terminalProjection: input.projection,
+      settlement: input.settlement,
       evidenceRefs: input.evidenceRefs,
       durableEventIds: { accepted: [], produced: [] },
       doneBoundary: {
         runtime: "gameplay-cycle-runtime",
         recordId: "cgtr_fakecommit000000000000",
         turnId: "cgturn_fakecommit0000000000",
-        packetId: "cgpacket_fakecommit00000000",
+        packetId: input.settlement.settledPacket.packetId,
         mutationApplied: input.projection.mutationApplied,
         settled: true,
         chatHistoryLengthBeforeTurn: 0,
@@ -798,7 +834,7 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
       runtime: "gameplay-cycle-runtime" as const,
       recordId: "cgtr_fakecommit000000000000",
       turnId: "cgturn_fakecommit0000000000",
-      packetId: "cgpacket_fakecommit00000000",
+      packetId: input.settlement.settledPacket.packetId,
       mutationApplied: input.projection.mutationApplied,
       settled: true as const,
       chatHistoryLengthBeforeTurn: 0,
@@ -1094,6 +1130,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         if (stage === "scene-frame") order.push("scene-frame-progress");
         if (stage === "gm-read") order.push("gm-read-progress");
         if (stage === "judge-uncertainty") order.push("judge-uncertainty-progress");
+        if (stage === "settled-turn-packet") order.push("settled-turn-packet-progress");
       }
     }
 
@@ -1104,8 +1141,10 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       "gm-read",
       "judge-uncertainty-progress",
       "judge-uncertainty",
+      "settled-turn-packet-progress",
     ]);
     expect(events.map((event) => event.type)).toEqual([
+      "scene-settling",
       "scene-settling",
       "scene-settling",
       "scene-settling",
@@ -1502,7 +1541,8 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
       }
     }
 
-    expect(order).toEqual(["scene-frame", "gm-read"]);
+    expect(order).toEqual(["scene-frame", "gm-read", "settled-turn-packet"]);
+    expect(order).not.toContain("judge-called");
   });
 });
 
@@ -1951,6 +1991,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       "judge-uncertainty",
       "gm-action-checklist",
       "stage4-execution",
+      "settled-turn-packet",
     ]);
     expect(eventTypes).toEqual([
       "scene-settling",
@@ -1959,6 +2000,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       "scene-settling",
       "scene-settling",
       "state_update",
+      "scene-settling",
       "narrative",
       "finalizing_turn",
       "done",
@@ -1977,6 +2019,13 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       ref: checklistEvidence?.ref,
       authority: "stage4_execution_result",
     });
+    expect(commits[0]?.evidenceRefs).toContainEqual({
+      kind: "settled_packet",
+      ref: commits[0]?.settlement.settledPacket.packetId,
+      authority: "settled_truth_packet",
+    });
+    expect(commits[0]?.settlement.settledPacket.version).toBe("gameplay-runtime.settled-turn-packet.v1");
+    expect(commits[0]?.settlement.narratorView.version).toBe("gameplay-runtime.narrator-view.v1");
   });
 });
 
@@ -2376,6 +2425,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       "oracle-adapter",
       "oracle_result",
       "oracle-settlement-progress",
+      "settled-turn-packet-progress",
     ]);
     expect(events.map((event) => event.type)).toEqual([
       "scene-settling",
@@ -2383,6 +2433,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       "scene-settling",
       "scene-settling",
       "oracle_result",
+      "scene-settling",
       "scene-settling",
       "narrative",
       "finalizing_turn",

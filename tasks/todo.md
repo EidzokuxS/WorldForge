@@ -2643,4 +2643,52 @@ Session: `gm-v1-consequenc-slice`.
     - Old runtime stores remained 0: `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs`.
     - Player-facing narrative was receipt-derived: `Вы перемещаетесь в The Copper Tap.`
     - Artifacts: `output/clean-runtime-p61-stage4-live-20260606140110/*`.
-  - Status: diagnostic slice complete, pending GitNexus detect_changes, commit, push, and `npx gitnexus analyze --embeddings`. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+  - Status: diagnostic slice complete and committed/pushed as `94d0112d Add clean Stage 4 movement execution`; GitNexus `detect_changes(scope=all)` reported low risk/no affected processes, and `npx gitnexus analyze --embeddings` completed with index metadata showing `lastCommit=94d0112d` and `embeddings=5406`. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P62 clean gameplay runtime Primitive 8 Settled Turn Packet:
+  - Status:
+    - [x] Identify next primitive from canonical architecture after P61 Stage 4.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 5 target, current P55-P61 clean runtime contracts, current minimal P59 player-facing record, Stage 4 receipts, and old packet/narrator files as negative/forensic evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols where indexed symbols existed; new P62 schema/assert symbols were not yet in the index before commit.
+    - [x] Implement only the clean settled packet / narrator-packet primitive.
+    - [x] Add focused contract tests for settled packet schemas, receipt filtering, failed/skipped exclusion, private guard handling, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where accepted Stage 4 movement produces a clean settled packet and player-facing state remains receipt-derived.
+    - [x] Commit, push, and re-run `npx gitnexus analyze --embeddings`.
+  - Primitive boundary draft:
+    - Owner: new clean settlement builder under `backend/src/engine/gameplay-cycle-runtime/`, not old `gameplay-cycle-v2/settled-packet.ts`, old `receipt-ledger.ts`, old packet store, old narrator packet, or old grounding guards.
+    - Inputs: authoritative `SceneFrame`, accepted GM Read, accepted Judge/Uncertainty, optional Oracle settlement, optional accepted GM Action Checklist, and optional Stage 4 execution result with accepted/skipped/failed receipts.
+    - Output: clean settled turn packet / narrator packet and API settlement metadata. It should contain only settled truth: accepted receipt visible results, Oracle visible outcome with predeclared meaning, visible current facts, skipped/failed reasons, and explicit private guard terms.
+    - Mutation authority: none. P62 must not mutate DB, call tools, call narrator, append chat, or advance clocks.
+    - Evidence authority: settled truth only. Accepted movement receipt may authorize arrival; route-check receipt may authorize route status only; failed/skipped receipts may authorize only failure/skip reasons; P60 checklist remains planning-only.
+    - Failure mode: build a minimal safe packet from current SceneFrame and player action metadata when no Stage 4/Oracle truth exists; do not invent prose or treat player text/planned effects as truth.
+    - Initial implementation scope candidate: in-memory clean packet passed through runtime and persisted inside the existing clean player-facing turn record. Do not add a new packet store until Oracle approves whether P59 record is sufficient for this slice or P62 needs a separate table.
+  - Oracle question draft:
+    - Given committed P61, what exactly should P62 Stage 5 Settled Turn Packet own now so it replaces old settled packet/receipt-ledger/narrator evidence semantics without reusing the v2 packet stack? Decide whether to add a separate clean packet table now or keep the packet embedded in the P59 clean player-facing record for this slice. Return schema shape, visible/private split, receipt authority mapping, failure behavior, runtime event order, handoff to Stage 6 narrator, and focused contract/live tests.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p62-settled-packet`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one bundled attachment, 15 files, usage `inputTokens=112258`, `outputTokens=5521`.
+    - Question artifact: `output/oracle/p62-clean-settled-packet-question.md`.
+    - Answer artifact: `output/oracle/p62-clean-settled-packet-answer.md`.
+    - Accepted decision: MODIFY -> GO. Do not add a separate `clean_gameplay_settled_packets` table in P62; embed `settlement: { settledPacket, narratorView }` inside the existing P59 clean player-facing record.
+    - Accepted Stage 5 event order: after Oracle/Stage4 and public `state_update`, before `narrative`, emit `scene-settling` stage `settled-turn-packet`.
+    - Accepted evidence direction: accepted movement receipt proves only player location change and elapsed travel time; route-check proves only route status; Oracle proves only visible selected outcome; failed/skipped receipts live in `stepAudit` and cannot support world claims; P60 checklist stays planning-only.
+    - Accepted Stage 6 handoff: future narrator gets only `CleanNarratorView`, not raw SceneFrame, raw receipts, checklist, or Oracle adapter internals.
+  - Implemented P62:
+    - Added `cleanSettledTurnPacketSchema`, `cleanNarratorViewSchema`, settlement evidence/audit schemas, and `settled_packet` evidence refs with `settled_truth_packet` authority.
+    - Added pure `backend/src/engine/gameplay-cycle-runtime/settlement.ts`; it imports clean contracts only and has no DB/tool/narrator side effects.
+    - Added `buildCleanSettledTurnPacket`, `buildCleanNarratorView`, and a tiny deterministic bridge for this pre-Stage6 slice.
+    - Embedded settlement in `clean_gameplay_turn_records.record_json` through the P59 commit adapter and tied packet ids to public done ids.
+    - Runtime now emits `settled-turn-packet`, builds settlement before projection/narrative, and includes settled-packet evidence in the clean record.
+  - Verification:
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts --bail=1` passed: 134 tests.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts gameplay-cycle-runtime-stage4.test.ts --bail=1` passed: 135 tests.
+    - Live `/api/chat/action` proof: fresh zero-turn clone `p62-settlement-movement-4f40243f` from `30e161da-db4b-4d8c-ab93-154fab7aa03f`, action `I walk from Lowwater Bazaar toward The Copper Tap along the visible connected route.`
+    - Live SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, public `state_update: location_change`, `settled-turn-packet`, `narrative`, `finalizing_turn`, `done`.
+    - Live DB proof: one clean turn record, one accepted Stage 4 movement receipt, one authority trace, one travel clock ledger row, player now at `The Copper Tap`, clock/world `1/1/1`, old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live record proof: `record_json.settlement.settledPacket.version="gameplay-runtime.settled-turn-packet.v1"`, `narratorView.version="gameplay-runtime.narrator-view.v1"`, evidence refs include `settled_packet` with `settled_truth_packet`, accepted evidence is exactly terminal mutation receipt `player_location_change`/`elapsed_time`, narrator view exposes only `e1` evidence and no backend edge/location refs.
+    - Artifacts: `output/clean-runtime-p62-settlement-live-20260606143641/*`.
+    - Backend listener check after harness: port `3227` listener count was 0.
+  - Status: diagnostic slice complete for P62; source commit/push/reindex completed in the P62 delivery step. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
