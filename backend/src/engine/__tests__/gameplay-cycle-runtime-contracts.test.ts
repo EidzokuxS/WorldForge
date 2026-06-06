@@ -9,6 +9,8 @@ import {
   type GmRead,
   gmReadSchema,
   gameplayRuntimeTurnInputSchema,
+  type JudgeUncertainty,
+  judgeUncertaintySchema,
   scopedForecastEnvelopeSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
@@ -20,6 +22,11 @@ import {
   runCleanGmRead,
   validateGmReadCandidate,
 } from "../gameplay-cycle-runtime/gm-read.js";
+import {
+  buildJudgeUncertaintySystemPrompt,
+  runCleanJudgeUncertainty,
+  validateJudgeUncertaintyCandidate,
+} from "../gameplay-cycle-runtime/judge-uncertainty.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -266,6 +273,79 @@ function validGmRead(frame = minimalFrame()): GmRead {
   };
 }
 
+function validJudgeUncertainty(
+  frame = minimalFrame(),
+  gmRead = validGmRead(frame),
+): JudgeUncertainty {
+  return {
+    version: "judge-uncertainty.v1",
+    judgmentId: "judge-1",
+    campaignId: frame.campaignId,
+    turnId: frame.turnId,
+    frameId: frame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      gmReadPath: gmRead.path,
+    },
+    physicalPossibility: "possible",
+    checkNeed: "no_roll_needed",
+    nextStep: "settle_no_roll",
+    actorRefs: ["Player"],
+    targetRefs: ["Market"],
+    evidenceRefs: ["Player", "Market"],
+    possibilityRationale: "The player can observe the current scene.",
+    checkRationale: "Current visible observation does not require a random outcome.",
+    difficulty: null,
+    oracleAdmission: null,
+    noRollReason: {
+      code: "deterministic_scene_truth",
+      explanation: "The action asks for current visible scene truth.",
+      evidenceRefs: ["Player", "Market"],
+    },
+  };
+}
+
+function validOracleJudgeUncertainty(
+  frame = minimalFrame(),
+  gmRead = validGmRead(frame),
+): JudgeUncertainty {
+  return {
+    ...validJudgeUncertainty(frame, gmRead),
+    physicalPossibility: "possible_but_uncertain",
+    checkNeed: "oracle_roll_needed",
+    nextStep: "oracle_roll",
+    actorRefs: ["Player"],
+    targetRefs: ["Guide"],
+    evidenceRefs: ["Player", "Guide", "Market"],
+    possibilityRationale: "The player can attempt the risky read.",
+    checkRationale: "The visible actor's reaction under pressure is genuinely uncertain.",
+    difficulty: {
+      tier: "standard",
+      basis: "The player is reading a visible actor under pressure.",
+      evidenceRefs: ["Player", "Guide"],
+    },
+    oracleAdmission: {
+      admissionId: "oracle-admission-1",
+      question: "Does Guide notice the player's subtle action?",
+      uncertaintyKind: "perception_under_pressure",
+      actorRef: "Player",
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Guide"],
+      stakes: "The response determines whether the visible actor reacts now.",
+      difficultyTier: "standard",
+      outcomeMeanings: {
+        strong_hit: "The player acts without Guide noticing.",
+        weak_hit: "Guide notices something but does not fully understand it.",
+        miss: "Guide notices and reacts immediately.",
+      },
+      settlementScope: "visible_outcome_only",
+      requiresFollowupMutation: false,
+    },
+    noRollReason: null,
+  };
+}
+
 function validTurnInput(): GameplayRuntimeTurnInput {
   return gameplayRuntimeTurnInputSchema.parse({
     version: "gameplay-runtime.turn-input.v1",
@@ -461,7 +541,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.frameId).toBe(frame.frameId);
   });
 
-  it("runs GM Read after SceneFrame and before frozen projection events", async () => {
+  it("runs GM Read after SceneFrame and before Judge/Uncertainty events", async () => {
     const order: string[] = [];
     const frame = minimalFrame();
     const events = [];
@@ -477,12 +557,17 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         order.push("gm-read");
         return validGmRead(frame);
       },
+      judgeUncertaintyCandidateGenerator: async () => {
+        order.push("judge-uncertainty");
+        return validJudgeUncertainty(frame);
+      },
     })) {
       events.push(event);
       if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
         const stage = (event.data as { stage?: unknown }).stage;
         if (stage === "scene-frame") order.push("scene-frame-progress");
         if (stage === "gm-read") order.push("gm-read-progress");
+        if (stage === "judge-uncertainty") order.push("judge-uncertainty-progress");
       }
     }
 
@@ -491,13 +576,346 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       "frame",
       "gm-read-progress",
       "gm-read",
+      "judge-uncertainty-progress",
+      "judge-uncertainty",
     ]);
     expect(events.map((event) => event.type)).toEqual([
+      "scene-settling",
       "scene-settling",
       "scene-settling",
       "narrative",
       "finalizing_turn",
       "done",
     ]);
+  });
+});
+
+describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () => {
+  it("accepts a strict no-roll admission without tools, checklist, receipts, mutation, narration, or Oracle result", () => {
+    const parsed = judgeUncertaintySchema.parse(validJudgeUncertainty());
+
+    expect(parsed.version).toBe("judge-uncertainty.v1");
+    expect(parsed.nextStep).toBe("settle_no_roll");
+    expect(parsed.oracleAdmission).toBeNull();
+    expect(parsed.noRollReason?.code).toBe("deterministic_scene_truth");
+    expect(JSON.stringify(parsed)).not.toContain("toolName");
+    expect(JSON.stringify(parsed)).not.toContain("requiredEffectKinds");
+    expect(JSON.stringify(parsed)).not.toContain("oracleResult");
+    expect(JSON.stringify(parsed)).not.toContain("mutation");
+    expect(JSON.stringify(parsed)).not.toContain("receipt");
+    expect(JSON.stringify(parsed)).not.toContain("narrativeText");
+  });
+
+  it("accepts backend action-plan admission without importing effect or tool payload ownership", () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "procedural" as const,
+    };
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "procedural",
+      },
+      checkNeed: "backend_action_plan_needed",
+      nextStep: "action_plan",
+      checkRationale: "The action needs backend-owned receipts later, not a roll.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Consequences need later action planning.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("accepted");
+    expect(JSON.stringify(candidate)).not.toContain("toolId");
+    expect(JSON.stringify(candidate)).not.toContain("effectKind");
+  });
+
+  it("accepts a true Oracle admission but does not include a roll or selected outcome", () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const candidate = validOracleJudgeUncertainty(frame, gmRead);
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("accepted");
+    expect(candidate.oracleAdmission?.outcomeMeanings.strong_hit).toContain("without Guide noticing");
+    expect(JSON.stringify(candidate)).not.toContain("selectedOutcome");
+    expect(JSON.stringify(candidate)).not.toContain("outcomeTier");
+  });
+
+  it("accepts gm-read uncertain as a signal without forcing an Oracle admission", () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+      uncertainty: {
+        present: true,
+        question: "Is anything uncertain?",
+        basis: "The interpreter was not certain.",
+      },
+    };
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "uncertain",
+      },
+      noRollReason: {
+        code: "gm_read_uncertain_signal_only",
+        explanation: "The Judge found no true rollable uncertainty in the current frame.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate }).status).toBe("accepted");
+  });
+
+  it("rejects unknown root fields in Primitive 3 Judge/Uncertainty candidates", () => {
+    const candidate = {
+      ...validJudgeUncertainty(),
+      hiddenPlan: "smuggled",
+    };
+
+    expect(judgeUncertaintySchema.safeParse(candidate).success).toBe(false);
+  });
+
+  it.each([
+    "toolId",
+    "toolName",
+    "toolInput",
+    "payload",
+    "args",
+    "toolCall",
+    "plannedTools",
+    "candidateToolRequest",
+    "requiredEffectKinds",
+    "checklist",
+    "checklistAdmission",
+    "lane",
+    "stateDelta",
+    "mutation",
+    "receipt",
+    "narrativeText",
+    "oracleResult",
+    "roll",
+    "chance",
+    "selectedOutcome",
+  ])("rejects recursive settlement/executable key %s before accepting Judge/Uncertainty", (key) => {
+    const candidate = {
+      ...validJudgeUncertainty(),
+      noRollReason: {
+        ...validJudgeUncertainty().noRollReason,
+        extra: [{ [key]: "smuggled" }],
+      },
+    };
+
+    const result = validateJudgeUncertaintyCandidate({
+      frame: minimalFrame(),
+      gmRead: validGmRead(),
+      candidate,
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "settlement_payload")).toBe(true);
+  });
+
+  it("allows Judge/Uncertainty refs only from SceneFrame.citableRefs and rejects backend refs", () => {
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(),
+      actorRefs: ["actor:abc"],
+      targetRefs: ["invented gate"],
+      evidenceRefs: ["Hidden Watcher"],
+    };
+
+    const result = validateJudgeUncertaintyCandidate({
+      frame: minimalFrame(),
+      gmRead: validGmRead(),
+      candidate,
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.filter((issue) => issue.code === "uncited_ref")).toHaveLength(3);
+    expect(result.issues.some((issue) => issue.code === "backend_ref")).toBe(true);
+  });
+
+  it("rejects private guard terms in public Judge/Uncertainty fields", () => {
+    const frame = minimalFrame({
+      privateGuards: {
+        forbiddenActorLabels: ["Hidden Watcher"],
+        forbiddenPrivateTerms: ["sealed patron"],
+      },
+    });
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame),
+      possibilityRationale: "Hidden Watcher is relevant.",
+      checkRationale: "The sealed patron would know.",
+    };
+
+    const result = validateJudgeUncertaintyCandidate({
+      frame,
+      gmRead: validGmRead(frame),
+      candidate,
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "private_term")).toBe(true);
+  });
+
+  it("rejects frame, turn, and GM Read linkage mismatches", () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      frameId: "other-frame",
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "procedural",
+      },
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.filter((issue) => issue.code === "frame_mismatch").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("rejects Oracle branch without full Oracle admission and difficulty invariants", () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      checkNeed: "oracle_roll_needed",
+      nextStep: "oracle_roll",
+      physicalPossibility: "possible_but_uncertain",
+      noRollReason: null,
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.path === "difficulty")).toBe(true);
+    expect(result.issues.some((issue) => issue.path === "oracleAdmission")).toBe(true);
+  });
+
+  it("rejects non-Oracle branches that smuggle Oracle admission or difficulty", () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const oracle = validOracleJudgeUncertainty(frame, gmRead);
+    const candidate: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      oracleAdmission: oracle.oracleAdmission,
+      difficulty: oracle.difficulty,
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.path === "oracleAdmission")).toBe(true);
+    expect(result.issues.some((issue) => issue.path === "difficulty")).toBe(true);
+  });
+
+  it("rejects impossible actions that try to roll or action-plan", () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const candidate: JudgeUncertainty = {
+      ...validOracleJudgeUncertainty(frame, gmRead),
+      physicalPossibility: "impossible",
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) => issue.code === "branch_invalid")).toBe(true);
+  });
+
+  it("keeps the Judge/Uncertainty prompt admission-only and non-settling", () => {
+    const prompt = buildJudgeUncertaintySystemPrompt();
+
+    expect(prompt).toContain("admission layer");
+    expect(prompt).toContain("must not narrate");
+    expect(prompt).toContain("mutate state");
+    expect(prompt).toContain("roll dice");
+    expect(prompt).toContain("gm-read uncertain is a signal");
+    expect(prompt).toContain("backend-owned consequences");
+  });
+
+  it("repairs once locally, then accepts only a validated Judge/Uncertainty packet", async () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const calls: string[] = [];
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async (request) => {
+        calls.push(request.repairOf ? "repair" : "initial");
+        if (!request.repairOf) {
+          return {
+            ...validJudgeUncertainty(frame, gmRead),
+            toolInput: { effect: "smuggled" },
+          };
+        }
+        return validJudgeUncertainty(frame, gmRead);
+      },
+    });
+
+    expect(calls).toEqual(["initial", "repair"]);
+    expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(true);
+  });
+
+  it("falls back to a no-mutation clarification when generation and repair stay invalid", async () => {
+    const frame = minimalFrame();
+    const gmRead = validGmRead(frame);
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async () => ({
+        ...validJudgeUncertainty(frame, gmRead),
+        oracleResult: { tier: "strong_hit" },
+      }),
+    });
+
+    expect(result.status).toBe("fallback_clarification");
+    expect(result.judgment.nextStep).toBe("ask_clarification");
+    expect(result.judgment.oracleAdmission).toBeNull();
+  });
+
+  it("skips Judge/Uncertainty when GM Read falls back before admission", async () => {
+    const order: string[] = [];
+    const frame = minimalFrame();
+
+    for await (const event of processCleanGameplayTurnFromInput({
+      turn: validTurnInput(),
+      judgeProvider: provider,
+      buildFrame: async () => frame,
+      gmReadCandidateGenerator: async () => ({
+        ...validGmRead(frame),
+        toolInput: { effect: "invalid" },
+      }),
+      judgeUncertaintyCandidateGenerator: async () => {
+        order.push("judge-called");
+        return validJudgeUncertainty(frame);
+      },
+    })) {
+      if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
+        const stage = (event.data as { stage?: unknown }).stage;
+        if (typeof stage === "string") order.push(stage);
+      }
+    }
+
+    expect(order).toEqual(["scene-frame", "gm-read"]);
   });
 });

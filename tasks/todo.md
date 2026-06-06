@@ -2231,3 +2231,78 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts: `output/clean-runtime-p56-gm-read-live/fresh-5476b525-398a-4eea-a65b-437b3a2d3805/*`.
   - Transport note:
     - Clean runtime `done` data includes internal `turnId`, but current route player-facing projection did not expose it in the P56 SSE. This is transport adapter debt for a later API-boundary primitive, not a P56 GM Read contract failure.
+
+- P57 clean gameplay runtime Primitive 3 Judge/Uncertainty:
+  - Status:
+    - [x] Resume from clean P56 baseline: worktree clean, backend stopped, ports `3001`, `3101`, and `3219` clear.
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, current clean runtime contracts/runtime/GM Read, tests, and forensic old judge/oracle evidence.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Implement only the new clean Judge/Uncertainty primitive after Oracle review.
+    - [x] Add focused Judge/Uncertainty contract tests.
+    - [x] Compose SceneFrame + GM Read + Judge/Uncertainty through `/api/chat/action`.
+    - [x] Verify one-action-at-a-time live `/api/chat/action` evidence on a fresh zero-turn clone before moving to Action Plan/Checklist.
+  - Primitive boundary draft:
+    - Owner: clean Judge/Uncertainty LLM adapter plus backend validator, not old `gameplay-cycle-v2` judge, old `gm-turn-decision`, old tool schemas, or old oracle settlement.
+    - Inputs: authoritative `SceneFrame`, validated `gm-read.v1`, and normalized player action from `gameplay-runtime.turn-input.v1`.
+    - Output: one validated uncertainty judgment packet: physical possibility classification, whether a check/roll is needed, difficulty/stakes when a true check is needed, and explicit reason for no roll when no roll is needed.
+    - Mutation authority: none.
+    - Evidence authority: admission only for downstream Oracle/checklist; it is not settled narration truth and not a receipt.
+    - Forbidden: executable tool payloads, checklist steps, state deltas, receipts, narration, hidden mutation, or treating `gm-read.path="uncertain"` as automatic Oracle authorization.
+    - Open Oracle decision: whether P57 should only produce Oracle admission intent, or should also invoke the Oracle roll for true uncertainty in the same primitive. The user target groups Judge/Oracle together, while the primitive-by-primitive process may warrant splitting admission and roll into adjacent primitives.
+  - Oracle question draft:
+    - Given the clean P56 runtime, what should Primitive 3 Judge/Uncertainty own and output so it replaces old GM Judge/Oracle admission without importing/patching `gameplay-cycle-v2`? Decide whether optional Oracle rolling belongs in P57 or should be a separate P58 primitive. Return schema shape, prompt boundary, validator rules, failure behavior, runtime ordering, and contract/live tests.
+  - Oracle review:
+    - Session: `wf-clean-runtime-judge-uncertaint`
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`
+    - Bundle: one bundled text attachment, 13 files, about 117,902 input tokens; `output.log` records `Packed 13 files into 1 bundle`.
+    - Answer artifact: `output/oracle/p57-clean-judge-uncertainty-answer.md`
+    - Recommendation:
+      - P57 is Judge/Uncertainty admission only. It must not invoke Oracle or bind a random outcome.
+      - P58 is Oracle Roll/Settlement. It consumes only an accepted P57 Oracle admission, calls the Oracle/probability adapter, binds the outcome tier, selects the predeclared meaning, and emits `oracle-settlement.v1` with evidence authority but no mutation authority.
+      - Use conservative no-roll/no-mutation at P57 failure. Conservative miss/uncertain-result belongs only to P58 after a valid P57 Oracle admission exists and the Oracle adapter fails.
+      - `gm-read.path="uncertain"` remains only an interpretive signal; it must never automatically authorize a roll.
+    - Accepted P57 schema direction:
+      - `version: "judge-uncertainty.v1"`, `judgmentId`, campaign/turn/frame linkage, source linkage to `gm-read.v1`.
+      - `physicalPossibility`: `possible | possible_but_uncertain | impossible | underspecified | unsupported_by_runtime`.
+      - `checkNeed`: `no_roll_needed | clarification_needed | blocked_impossible | blocked_unsupported | backend_action_plan_needed | oracle_roll_needed | combat_judge_needed`.
+      - `nextStep`: `settle_no_roll | ask_clarification | block_no_mutation | action_plan | oracle_roll | combat_boundary`.
+      - Citable `actorRefs`, `targetRefs`, `evidenceRefs`, rationale fields, optional `difficulty`, optional `oracleAdmission`, mandatory `noRollReason` on non-Oracle branches.
+      - Oracle admission includes question, uncertainty kind, actor/target/evidence refs, stakes, difficulty tier, strong/weak/miss outcome meanings, `settlementScope="visible_outcome_only"`, and `requiresFollowupMutation=false`.
+    - Accepted validator rules:
+      - Strict schema and recursive rejection of executable/settlement keys: tool payloads, checklist/steps, receipts, mutation/state deltas, narration, oracle result/roll/chance, old v2 surfaces.
+      - `turnId`/`frameId` must match SceneFrame and GM Read; source GM Read path must equal the accepted read path, but path does not mechanically dictate next step.
+      - All refs must come from `SceneFrame.citableRefs`; reject UUID/backend refs and private guard terms in public strings.
+      - Non-Oracle branches require `noRollReason` and null `oracleAdmission`.
+      - `nextStep="oracle_roll"` requires `checkNeed="oracle_roll_needed"`, possible/possible-but-uncertain physical possibility, present `difficulty`, complete `oracleAdmission`, null `noRollReason`, `visible_outcome_only`, and `requiresFollowupMutation=false`.
+      - Impossible/underspecified/unsupported branches must block or clarify; they cannot roll or action-plan.
+      - Backend-owned consequences may route to `action_plan`, but P57 must not include effect kinds, checklist steps, tool ids, or payloads.
+    - Accepted tests:
+      - Direct observation no-roll, backend action-plan admission, true visible uncertainty with complete Oracle admission, clarification, impossible action.
+      - Negative tests for unknown fields, recursive executable/checklist/mutation/receipt/narration/oracle-result smuggling, illegal refs/private terms, linkage mismatch, bad Oracle branch invariants, and old v2 field surfaces.
+      - Composition: `scene-frame` -> `gm-read` -> `judge-uncertainty` -> current no-mutation projection; GM Read fallback must skip Judge; Judge failure must skip Oracle/action-plan/tools.
+  - Implementation:
+    - Added clean P57 schemas/types/assertion in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`.
+    - Added `backend/src/engine/gameplay-cycle-runtime/judge-uncertainty.ts` as a new clean runtime admission adapter and validator.
+    - Judge generation uses infrastructure only: `safeGenerateObject` plus `createModel(..., { role: "judge", reasoningMode: "bypass" })`, native JSON requested, text fallback disabled, built-in repair disabled, and one local validation-reprompt repair.
+    - Validator recursively rejects tool/checklist/mutation/receipt/narration/roll/chance/oracle-result/old-v2 fields, validates frame/turn/GM Read linkage, validates citable refs/private terms, and enforces branch invariants.
+    - Runtime now emits `judge-uncertainty` after accepted GM Read and before frozen projection.
+    - GM Read fallback still skips Judge entirely.
+    - P57 does not call Oracle, produce `oracle_result`, create action checklist, execute tools, persist receipts, append chat, or mutate state.
+  - Contract verification:
+    - GitNexus impact before edits: `buildFrozenProjection` LOW, `runCleanGmRead` LOW, `assertGmRead` LOW, `assertFrozenApiProjection` LOW; `processCleanGameplayTurnFromInput` was not found by GitNexus index as a target.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts --bail=1` passed with 68 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- schemas.test.ts --bail=1` passed with 210 tests.
+    - `NODE_OPTIONS=--max-old-space-size=4096 npm --prefix backend test -- chat.test.ts --bail=1` passed with 62 tests.
+    - `NODE_OPTIONS=--max-old-space-size=4096 npm --prefix backend test -- gameplay-cycle-runtime-contracts.test.ts schemas.test.ts chat.test.ts --bail=1` passed with 340 tests.
+  - Live/manual `/api/chat/action` evidence:
+    - Fresh clean-start clone: `c24f047f-512e-4b6e-8cf6-c2929d6a9228` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Precheck: chat history 0; `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `authority_traces`, `turn_clock_ledger`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs` all 0; clock `world_version=0/world_time_minutes=0/current_tick=0`; player Mira Voss at Lowwater Bazaar.
+    - Manual action after inspecting actual current world: `Я стою в Lowwater Bazaar и внимательно осматриваю текущую сцену, не двигаясь и ничего не трогая.`
+    - Stable backend started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1` on port `3219`, then stopped after verification; ports `3219`, `3001`, and `3101` were clear afterward.
+    - SSE order: `scene-settling(stage="scene-frame")`, `scene-settling(stage="gm-read")`, `scene-settling(stage="judge-uncertainty")`, `narrative`, `finalizing_turn`, `done`.
+    - SSE exclusions: no `oracle_result`, no `action-checklist`, no `tool-execution`, no old runtime `gameplay-cycle-v2`, no `v2packet-*`.
+    - Postcheck matched precheck: chat history 0, all legacy/v2/ledger/oracle/simulation rows 0, clock remained `0/0/0`, and player location/scene unchanged.
+    - Artifacts: `output/clean-runtime-p57-judge-live/*`.
+  - Decision for next primitive:
+    - P58 is Oracle Roll/Settlement only, consuming accepted P57 `nextStep="oracle_roll"` judgments and producing binding `oracle-settlement.v1` evidence with no mutation authority.

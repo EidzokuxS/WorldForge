@@ -12,6 +12,11 @@ import {
   type GmReadRunResult,
 } from "./gm-read.js";
 import {
+  runCleanJudgeUncertainty,
+  type JudgeUncertaintyCandidateGenerator,
+  type JudgeUncertaintyRunResult,
+} from "./judge-uncertainty.js";
+import {
   assertFrozenApiProjection,
   assertGameplayRuntimeTurnInput,
   type AuthoritativeSceneFrame,
@@ -48,6 +53,7 @@ export interface CleanGameplayRuntimeOptions {
     capturedAt: number;
   };
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
+  judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
 }
 
 export interface CleanGameplayRuntimeCoreOptions {
@@ -55,6 +61,7 @@ export interface CleanGameplayRuntimeCoreOptions {
   judgeProvider: ProviderConfig;
   buildFrame?: (turn: GameplayRuntimeTurnInput) => Promise<AuthoritativeSceneFrame>;
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
+  judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
 }
 
 function envFlagEnabled(name: string): boolean {
@@ -126,9 +133,28 @@ export function buildGameplayRuntimeTurnInput(
   });
 }
 
-function narrativeFromFrame(frame: AuthoritativeSceneFrame, gmRead: GmReadRunResult): string {
+function narrativeFromFrame(
+  frame: AuthoritativeSceneFrame,
+  gmRead: GmReadRunResult,
+  judgeUncertainty?: JudgeUncertaintyRunResult,
+): string {
   if (gmRead.read.path === "clarification") {
     return `Нужно уточнение: ${gmRead.read.liveSceneQuestion}`;
+  }
+  if (judgeUncertainty?.judgment.nextStep === "ask_clarification") {
+    return `Нужно уточнение: ${judgeUncertainty.judgment.noRollReason?.explanation ?? gmRead.read.liveSceneQuestion}`;
+  }
+  if (judgeUncertainty?.judgment.nextStep === "block_no_mutation") {
+    return `Это действие сейчас нельзя подтвердить: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
+  }
+  if (judgeUncertainty?.judgment.nextStep === "oracle_roll") {
+    return `Нужна проверка неопределённости: ${judgeUncertainty.judgment.oracleAdmission?.question ?? judgeUncertainty.judgment.checkRationale}`;
+  }
+  if (judgeUncertainty?.judgment.nextStep === "action_plan") {
+    return `Действие требует разрешения последствий: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
+  }
+  if (judgeUncertainty?.judgment.nextStep === "combat_boundary") {
+    return `Сцена требует боевого разрешения: ${judgeUncertainty.judgment.noRollReason?.explanation ?? judgeUncertainty.judgment.checkRationale}`;
   }
   const scene = frame.scene.currentScene.label;
   const location = frame.scene.currentLocation.label;
@@ -183,7 +209,23 @@ export async function* processCleanGameplayTurnFromInput(
     provider: options.judgeProvider,
     generateCandidate: options.gmReadCandidateGenerator,
   });
-  const narrativeText = narrativeFromFrame(frame, gmRead);
+  let judgeUncertainty: JudgeUncertaintyRunResult | undefined;
+  if (gmRead.status === "accepted") {
+    yield {
+      type: "scene-settling",
+      data: {
+        stage: "judge-uncertainty",
+        phase: "gameplay-cycle-runtime",
+      },
+    };
+    judgeUncertainty = await runCleanJudgeUncertainty({
+      frame,
+      gmRead: gmRead.read,
+      provider: options.judgeProvider,
+      generateCandidate: options.judgeUncertaintyCandidateGenerator,
+    });
+  }
+  const narrativeText = narrativeFromFrame(frame, gmRead, judgeUncertainty);
   const projection = buildFrozenProjection({ turn, frame, narrativeText });
   yield {
     type: "narrative",
@@ -215,5 +257,6 @@ export async function* processCleanGameplayTurn(
     turn,
     judgeProvider: options.judgeProvider,
     gmReadCandidateGenerator: options.gmReadCandidateGenerator,
+    judgeUncertaintyCandidateGenerator: options.judgeUncertaintyCandidateGenerator,
   });
 }

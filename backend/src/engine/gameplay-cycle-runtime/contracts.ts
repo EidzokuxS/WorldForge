@@ -207,6 +207,114 @@ export const gmReadSchema = z.object({
   interpretationRationale: shortText,
 }).strict();
 
+export const judgePhysicalPossibilitySchema = z.enum([
+  "possible",
+  "possible_but_uncertain",
+  "impossible",
+  "underspecified",
+  "unsupported_by_runtime",
+]);
+
+export const judgeCheckNeedSchema = z.enum([
+  "no_roll_needed",
+  "clarification_needed",
+  "blocked_impossible",
+  "blocked_unsupported",
+  "backend_action_plan_needed",
+  "oracle_roll_needed",
+  "combat_judge_needed",
+]);
+
+export const judgeNextStepSchema = z.enum([
+  "settle_no_roll",
+  "ask_clarification",
+  "block_no_mutation",
+  "action_plan",
+  "oracle_roll",
+  "combat_boundary",
+]);
+
+export const judgeDifficultyTierSchema = z.enum([
+  "trivial",
+  "easy",
+  "standard",
+  "hard",
+  "extreme",
+]);
+
+export const judgeUncertaintyKindSchema = z.enum([
+  "physical_risk",
+  "perception_under_pressure",
+  "social_opposition",
+  "opposition_resistance",
+  "chance_under_pressure",
+]);
+
+export const judgeNoRollReasonCodeSchema = z.enum([
+  "deterministic_scene_truth",
+  "not_true_uncertainty",
+  "backend_receipt_required",
+  "insufficient_specificity",
+  "physically_impossible",
+  "unsupported_runtime_scope",
+  "combat_boundary",
+  "gm_read_uncertain_signal_only",
+]);
+
+export const judgeDifficultySchema = z.object({
+  tier: judgeDifficultyTierSchema,
+  basis: shortText,
+  evidenceRefs: z.array(modelSafeRef).min(1).max(16),
+}).strict();
+
+export const judgeOracleAdmissionSchema = z.object({
+  admissionId: shortText,
+  question: shortText,
+  uncertaintyKind: judgeUncertaintyKindSchema,
+  actorRef: modelSafeRef,
+  targetRefs: z.array(modelSafeRef).max(16),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(16),
+  stakes: shortText,
+  difficultyTier: judgeDifficultyTierSchema,
+  outcomeMeanings: z.object({
+    strong_hit: shortText,
+    weak_hit: shortText,
+    miss: shortText,
+  }).strict(),
+  settlementScope: z.literal("visible_outcome_only"),
+  requiresFollowupMutation: z.literal(false),
+}).strict();
+
+export const judgeNoRollReasonSchema = z.object({
+  code: judgeNoRollReasonCodeSchema,
+  explanation: shortText,
+  evidenceRefs: z.array(modelSafeRef).max(16),
+}).strict();
+
+export const judgeUncertaintySchema = z.object({
+  version: z.literal("judge-uncertainty.v1"),
+  judgmentId: shortText,
+  campaignId: shortText,
+  turnId: shortText,
+  frameId: shortText,
+  source: z.object({
+    sceneFrameVersion: z.literal("scene-frame.v1"),
+    gmReadVersion: z.literal("gm-read.v1"),
+    gmReadPath: gmReadPathSchema,
+  }).strict(),
+  physicalPossibility: judgePhysicalPossibilitySchema,
+  checkNeed: judgeCheckNeedSchema,
+  nextStep: judgeNextStepSchema,
+  actorRefs: z.array(modelSafeRef).max(16),
+  targetRefs: z.array(modelSafeRef).max(16),
+  evidenceRefs: z.array(modelSafeRef).max(16),
+  possibilityRationale: shortText,
+  checkRationale: shortText,
+  difficulty: judgeDifficultySchema.nullable(),
+  oracleAdmission: judgeOracleAdmissionSchema.nullable(),
+  noRollReason: judgeNoRollReasonSchema.nullable(),
+}).strict();
+
 export const frozenApiProjectionSchema = z.object({
   version: z.literal("gameplay-runtime.frozen-api-projection.v1"),
   runtime: z.literal("gameplay-cycle-runtime"),
@@ -225,6 +333,11 @@ export type ScopedForecastEnvelope = z.infer<typeof scopedForecastEnvelopeSchema
 export type AuthoritativeSceneFrame = z.infer<typeof authoritativeSceneFrameSchema>;
 export type GmReadPath = z.infer<typeof gmReadPathSchema>;
 export type GmRead = z.infer<typeof gmReadSchema>;
+export type JudgePhysicalPossibility = z.infer<typeof judgePhysicalPossibilitySchema>;
+export type JudgeCheckNeed = z.infer<typeof judgeCheckNeedSchema>;
+export type JudgeNextStep = z.infer<typeof judgeNextStepSchema>;
+export type JudgeDifficultyTier = z.infer<typeof judgeDifficultyTierSchema>;
+export type JudgeUncertainty = z.infer<typeof judgeUncertaintySchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 
 export function assertGameplayRuntimeTurnInput(value: unknown): GameplayRuntimeTurnInput {
@@ -237,6 +350,10 @@ export function assertAuthoritativeSceneFrame(value: unknown): AuthoritativeScen
 
 export function assertGmRead(value: unknown): GmRead {
   return gmReadSchema.parse(value);
+}
+
+export function assertJudgeUncertainty(value: unknown): JudgeUncertainty {
+  return judgeUncertaintySchema.parse(value);
 }
 
 export function assertFrozenApiProjection(value: unknown): FrozenApiProjection {
