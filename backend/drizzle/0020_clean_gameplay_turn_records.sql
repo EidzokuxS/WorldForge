@@ -1,4 +1,4 @@
-CREATE TABLE `clean_gameplay_turn_records` (
+CREATE TABLE IF NOT EXISTS `clean_gameplay_turn_records` (
   `record_id` text PRIMARY KEY NOT NULL,
   `campaign_id` text NOT NULL,
   `internal_turn_id` text NOT NULL,
@@ -15,8 +15,8 @@ CREATE TABLE `clean_gameplay_turn_records` (
   FOREIGN KEY (`campaign_id`) REFERENCES `campaigns`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `clean_gameplay_turn_records_campaign_turn_unique` ON `clean_gameplay_turn_records` (`campaign_id`, `internal_turn_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `clean_gameplay_turn_records_campaign_turn_unique` ON `clean_gameplay_turn_records` (`campaign_id`, `internal_turn_id`);
 --> statement-breakpoint
-CREATE UNIQUE INDEX `clean_gameplay_turn_records_campaign_idempotency_unique` ON `clean_gameplay_turn_records` (`campaign_id`, `idempotency_key`);
+CREATE UNIQUE INDEX IF NOT EXISTS `clean_gameplay_turn_records_campaign_idempotency_unique` ON `clean_gameplay_turn_records` (`campaign_id`, `idempotency_key`);
 --> statement-breakpoint
-CREATE INDEX `idx_clean_gameplay_turn_records_campaign_public` ON `clean_gameplay_turn_records` (`campaign_id`, `public_turn_id`, `public_packet_id`);
+CREATE INDEX IF NOT EXISTS `idx_clean_gameplay_turn_records_campaign_public` ON `clean_gameplay_turn_records` (`campaign_id`, `public_turn_id`, `public_packet_id`);
