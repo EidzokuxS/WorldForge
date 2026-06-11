@@ -28,6 +28,7 @@ import {
 import {
   runCleanStage4Execution,
   type CleanStage4ExecutionRunResult,
+  type Stage4FrameRefresh,
   type Stage4DialogueRequestGenerator,
   type Stage4SupportActorRequestGenerator,
 } from "./stage4-execution.js";
@@ -110,6 +111,7 @@ export interface CleanGameplayRuntimeCoreOptions {
     generateDialogueRequest?: Stage4DialogueRequestGenerator;
     supportActorProvider?: ProviderConfig;
     generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
+    refreshFrameAfterReceipt?: Stage4FrameRefresh;
   }) => Promise<CleanStage4ExecutionRunResult>;
   commitTurn?: (
     input: Omit<CommitCleanPlayerFacingTurnInput, "chat" | "store">,
@@ -374,6 +376,18 @@ export async function* processCleanGameplayTurnFromInput(
           generateDialogueRequest: options.stage4DialogueRequestGenerator,
           supportActorProvider: options.storytellerProvider ?? options.judgeProvider,
           generateSupportActorRequest: options.stage4SupportActorRequestGenerator,
+          refreshFrameAfterReceipt: async ({ receipt }) => {
+            const buildFrame = options.buildFrame ?? buildAuthoritativeSceneFrame;
+            return buildFrame({
+              ...turn,
+              base: {
+                ...turn.base,
+                tick: receipt.result.tick,
+                worldVersion: receipt.result.worldVersion,
+                worldTimeMinutes: receipt.result.worldTimeMinutes,
+              },
+            });
+          },
         });
         for (const event of stage4Execution.publicEvents) {
           yield event;

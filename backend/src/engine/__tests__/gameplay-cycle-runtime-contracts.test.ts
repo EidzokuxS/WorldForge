@@ -2303,6 +2303,86 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     expect(result.checklist.steps[0]?.intended.summary).toContain("roleKind=vendor");
   });
 
+  it("deterministically composes support actor materialization into refreshed dependent dialogue planning", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+        { capabilityId: "support_actor_create", evidenceAuthority: "terminal_receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player"],
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "Can one ordinary local vendor be materialized, then answer after refresh?",
+      actionInterpretation: {
+        summary: "The player asks an ordinary local vendor a question, but no vendor is visible yet.",
+        playerIntent: "Ask a local vendor what changed today.",
+        method: "ask",
+        targetRefs: ["Market"],
+        interactionKind: "ordinary_support_actor_needed",
+        supportActorNeed: {
+          roleKind: "vendor",
+          requestedRoleText: "local vendor",
+          currentScenePlausibility: "ordinary_local_role",
+          intendedUse: "dialogue_requested_but_not_yet_recorded",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Support actor materialization and dependent dialogue require backend receipts.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-support-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "support_actor_create",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      actorRef: "Player",
+      targetRefs: ["Market"],
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "materialized_speaker",
+        fromStepId: "step-1",
+        requiredCapabilityId: "support_actor_create",
+        requiredReceiptAuthority: "support_actor_materialization_receipt",
+        sourcePath: "publicResult.supportActor.actorRef",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "actors_and_citableRefs",
+      }],
+      intended: {
+        kind: "dialogue_record",
+        requiredCapabilityId: "dialogue_record",
+        stateOrEvidence: "terminal_player_visible",
+      },
+    });
+    expect(result.checklist.steps[1]?.targetRefs).not.toContain("Local Vendor");
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("falls back without repair when deterministic compile lacks a backend capability", async () => {
     const frame = actionPlanFrame({
       playerAction: "I move toward North Hall.",

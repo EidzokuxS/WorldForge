@@ -9,6 +9,7 @@ import { buildAuthoritativeSceneFrame } from "../gameplay-cycle-runtime/frame.js
 import { runCleanStage4Execution } from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
   AuthoritativeSceneFrame,
+  CleanStage4Receipt,
   GmActionChecklist,
 } from "../gameplay-cycle-runtime/contracts.js";
 
@@ -265,6 +266,48 @@ function checklistForKind(
   };
 }
 
+function supportThenDialogueChecklist(inputFrame = frame()): GmActionChecklist {
+  const base = checklistForKind("support_actor_create", inputFrame);
+  const supportStep = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Ask a local vendor what changed today.",
+      admittedConsequenceNeed: "Support actor materialization must refresh SceneFrame before dialogue.",
+    },
+    steps: [
+      supportStep,
+      {
+        ...supportStep,
+        stepId: "step-2",
+        purpose: "Record dependent support actor dialogue only after post-materialization SceneFrame refresh.",
+        targetRefs: ["Market"],
+        evidenceRefs: ["Player", "Market"],
+        intended: {
+          kind: "dialogue_record",
+          stateOrEvidence: "terminal_player_visible",
+          requiredCapabilityId: "dialogue_record",
+          summary: "Stage 4 may record dialogue only from the freshly materialized support actor after a post-dependency authoritative SceneFrame contains that actor.",
+        },
+        dependsOnStepIds: ["step-1"],
+        dependencyBindings: [{
+          bindingId: "materialized_speaker",
+          fromStepId: "step-1",
+          requiredCapabilityId: "support_actor_create",
+          requiredReceiptAuthority: "support_actor_materialization_receipt",
+          sourcePath: "publicResult.supportActor.actorRef",
+          resolveIn: "post_dependency_scene_frame",
+          requiredFramePresence: "actors_and_citableRefs",
+        }],
+        expectedVisibleEffect: {
+          summary: "If support materialization is accepted and refreshed into SceneFrame actors/citableRefs, one visible support actor response may be recorded.",
+          visibleRefs: ["Player", "Market"],
+        },
+      },
+    ],
+  };
+}
+
 function supportActorEffect(roleKind: "vendor" | "guide" = "vendor") {
   return {
     kind: "support_actor_create" as const,
@@ -296,6 +339,39 @@ function supportActorEffect(roleKind: "vendor" | "guide" = "vendor") {
       routeTruth: false as const,
       futureRelevance: false as const,
       privateKnowledge: false as const,
+    },
+  };
+}
+
+function refreshedTurnInput(input: {
+  receipt: CleanStage4Receipt;
+  playerAction?: string;
+}) {
+  const { receipt } = input;
+  return {
+    version: "gameplay-runtime.turn-input.v1" as const,
+    route: "/api/chat/action" as const,
+    campaignId: CAMPAIGN_ID,
+    turnId: "clean-turn-stage4-1",
+    idempotencyKey: `refresh-${Date.now()}`,
+    playerAction: {
+      submitted: input.playerAction ?? "I ask the vendor what changed today.",
+      normalized: input.playerAction ?? "I ask the vendor what changed today.",
+      source: "typed" as const,
+    },
+    base: {
+      tick: receipt.result.tick,
+      worldVersion: receipt.result.worldVersion,
+      worldTimeMinutes: receipt.result.worldTimeMinutes,
+      chatHistoryLengthBeforeTurn: 0,
+      preTurnSnapshot: {
+        bundleDir: path.join(tempRoot, "snapshot-refresh"),
+        capturedAt: Date.now(),
+      },
+    },
+    providers: {
+      judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
     },
   };
 }
@@ -1059,6 +1135,191 @@ describe("clean Stage 4 executor DB contracts", () => {
       `)
       .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
     expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("executes support_actor_create then dialogue_record only after an authoritative refreshed SceneFrame contains the actor", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+        { capabilityId: "dialogue_record" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: supportThenDialogueChecklist(inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+      refreshFrameAfterReceipt: async ({ receipt }) => buildAuthoritativeSceneFrame(refreshedTurnInput({ receipt })),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Local Vendor",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "The morning crowd is thinner than usual.",
+          summary: "Local Vendor says the morning crowd is thinner than usual.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Market", "Local Vendor"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    const receipts = result.execution?.receipts ?? [];
+    expect(receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["support_actor_create", "accepted"],
+      ["dialogue_record", "accepted"],
+    ]);
+    const supportReceipt = receipts[0]!;
+    const dialogueReceipt = receipts[1]!;
+    expect(result.execution?.frameChain).toHaveLength(2);
+    expect(result.execution?.frameChain?.[1]).toMatchObject({
+      source: "post_dependency_scene_frame",
+      afterReceiptId: supportReceipt.receiptId,
+      base: { tick: 0, worldVersion: 1, worldTimeMinutes: 0 },
+    });
+    expect(dialogueReceipt.frameId).toBe(result.execution?.frameChain?.[1]?.frameId);
+    expect(dialogueReceipt.base.worldVersion).toBe(1);
+    expect(dialogueReceipt.result).toMatchObject({ worldVersion: 1, mutationApplied: false });
+    expect(dialogueReceipt.publicResult.dialogue).toMatchObject({
+      speakerLabel: "Local Vendor",
+      quotedSpeech: "The morning crowd is thinner than usual.",
+      claimStatus: "visible_speaker_response_only",
+    });
+  });
+
+  it("skips dependent support-actor dialogue instead of using the stale pre-mutation frame when no refresh is available", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+        { capabilityId: "dialogue_record" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    let dialogueGeneratorCalled = false;
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: supportThenDialogueChecklist(inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+      generateDialogueRequest: async () => {
+        dialogueGeneratorCalled = true;
+        return {};
+      },
+    });
+
+    expect(dialogueGeneratorCalled).toBe(false);
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["support_actor_create", "accepted"],
+      ["dialogue_record", "skipped"],
+    ]);
+    expect(result.execution?.receipts[1]).toMatchObject({
+      failure: {
+        kind: "dependency_not_accepted",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(result.execution?.frameChain).toHaveLength(1);
+  });
+
+  it("skips dependent dialogue when support actor materialization fails", async () => {
+    insertNpc({
+      id: "npc-persistent-vendor-before-dialogue",
+      name: "Local Vendor",
+      tier: "persistent",
+      tags: [],
+      persona: "A persistent collision should not be exposed.",
+    });
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+        { capabilityId: "dialogue_record" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    let refreshed = false;
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: supportThenDialogueChecklist(inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+      refreshFrameAfterReceipt: async ({ receipt }) => {
+        refreshed = true;
+        return buildAuthoritativeSceneFrame(refreshedTurnInput({ receipt }));
+      },
+    });
+
+    expect(refreshed).toBe(false);
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["support_actor_create", "failed"],
+      ["dialogue_record", "skipped"],
+    ]);
+    expect(result.execution?.receipts[1]).toMatchObject({
+      failure: {
+        kind: "dependency_not_accepted",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(JSON.stringify(result.execution?.receipts[1])).not.toContain("persistent");
+  });
+
+  it("skips dependent dialogue when the refreshed SceneFrame does not expose the materialized actor as citable", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+        { capabilityId: "dialogue_record" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: supportThenDialogueChecklist(inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+      refreshFrameAfterReceipt: async ({ receipt }) => ({
+        ...inputFrame,
+        frameId: "frame-refresh-without-support-actor",
+        base: {
+          tick: receipt.result.tick,
+          worldVersion: receipt.result.worldVersion,
+          worldTimeMinutes: receipt.result.worldTimeMinutes,
+        },
+      }),
+    });
+
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["support_actor_create", "accepted"],
+      ["dialogue_record", "skipped"],
+    ]);
+    expect(result.execution?.receipts[1]).toMatchObject({
+      frameId: "frame-refresh-without-support-actor",
+      base: { worldVersion: 1 },
+      failure: {
+        kind: "dependency_not_accepted",
+        hiddenMutationApplied: false,
+      },
+    });
   });
 
   it("accepts scene-beat receipts as non-mutating visible acknowledgement", async () => {

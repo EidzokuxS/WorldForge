@@ -94,6 +94,31 @@ export interface CleanStage4ExecutionRunResult {
   publicEvents: Stage4ExecutionEvent[];
 }
 
+export interface Stage4FrameRefreshRequest {
+  initialFrame: AuthoritativeSceneFrame;
+  currentFrame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: GmActionChecklist["steps"][number];
+  receipt: CleanStage4Receipt;
+}
+
+export type Stage4FrameRefresh = (request: Stage4FrameRefreshRequest) => Promise<AuthoritativeSceneFrame>;
+
+type MaterializedSpeakerBinding = NonNullable<Step["dependencyBindings"]>[number];
+
+type Stage4MaterializedSpeakerResolution = {
+  bindingId: "materialized_speaker";
+  fromStepId: string;
+  receiptId: string;
+  actorRef: string;
+  actorLabel: string;
+  refreshedFrameId: string;
+};
+
+type Stage4DialogueDependencyResolution = {
+  materializedSpeaker: Stage4MaterializedSpeakerResolution | null;
+};
+
 export interface Stage4DialogueRequestCandidateRequest {
   system: string;
   prompt: string;
@@ -617,6 +642,7 @@ export function validateDialogueRequestEffectCandidate(input: {
   frame: AuthoritativeSceneFrame;
   step: Step;
   candidate: unknown;
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
 }): { status: "accepted"; effect: Extract<CleanStage4Request["effect"], { kind: "dialogue_record" }>; issues: [] } | {
   status: "rejected";
   issues: Stage4DialogueRequestValidationIssue[];
@@ -639,6 +665,9 @@ export function validateDialogueRequestEffectCandidate(input: {
     input.frame.player.ref,
     ...input.step.targetRefs,
     ...input.step.evidenceRefs,
+    ...(input.dependencyResolution?.materializedSpeaker
+      ? [input.dependencyResolution.materializedSpeaker.actorRef]
+      : []),
   ].map(normalizedRef));
   const refs = uniqueStrings([
     effect.speakerRef,
@@ -678,6 +707,16 @@ export function validateDialogueRequestEffectCandidate(input: {
       code: "speaker_invalid",
       path: "speakerRef",
       message: "Dialogue request speakerRef must be exactly one already-visible non-player SceneFrame actor.",
+    });
+  }
+  if (
+    input.dependencyResolution?.materializedSpeaker
+    && normalizedRef(effect.speakerRef) !== normalizedRef(input.dependencyResolution.materializedSpeaker.actorRef)
+  ) {
+    issues.push({
+      code: "speaker_invalid",
+      path: "speakerRef",
+      message: "Dependent support-actor dialogue must use the actorRef resolved from the post-dependency SceneFrame.",
     });
   }
   if (!effect.addresseeRefs.some((ref) => normalizedRef(ref) === normalizedRef(input.frame.player.ref))) {
@@ -731,11 +770,19 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
 export function buildStage4DialogueRequestPrompt(input: {
   frame: AuthoritativeSceneFrame;
   step: Step;
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
 }): string {
   return [
     "Produce one dialogue_record effect for this accepted checklist step.",
     "Required effect shape:",
     "{ kind, authorityKind, speakerRef, addresseeRefs, outcomeKind, response, languageBasis, evidenceRefs, stateEffects }",
+    input.dependencyResolution?.materializedSpeaker
+      ? [
+        "Resolved materialized-speaker dependency:",
+        JSON.stringify(input.dependencyResolution.materializedSpeaker, null, 2),
+        "The speakerRef must be exactly the resolved actorRef above, and that actor must appear in the authoritative SceneFrame below.",
+      ].join("\n")
+      : "No materialized-speaker dependency is active for this dialogue step.",
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
     "Authoritative SceneFrame:",
@@ -748,10 +795,14 @@ function buildStage4DialogueRepairPrompt(input: {
   step: Step;
   candidate: unknown;
   issues: Stage4DialogueRequestValidationIssue[];
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
 }): string {
   return [
     "Repair the dialogue_record effect so it satisfies the clean P65 dialogue contract.",
     "Do not add unsupported fields, old tool ids, backend refs, mutations, world facts, memory, or state deltas.",
+    input.dependencyResolution?.materializedSpeaker
+      ? `This is dependent support-actor dialogue; speakerRef must be ${input.dependencyResolution.materializedSpeaker.actorRef}.`
+      : "This dialogue step has no materialized-speaker dependency.",
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
     "Original candidate:",
@@ -852,6 +903,7 @@ async function buildDialogueRequest(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
   step: Step;
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
   provider?: ProviderConfig;
   generateDialogueRequest?: Stage4DialogueRequestGenerator;
 }): Promise<{ status: "accepted"; request: CleanStage4Request; issues: [] } | {
@@ -863,6 +915,7 @@ async function buildDialogueRequest(input: {
   const prompt = buildStage4DialogueRequestPrompt({
     frame: input.frame,
     step: input.step,
+    dependencyResolution: input.dependencyResolution,
   });
   const generator = input.generateDialogueRequest
     ?? (input.provider
@@ -902,6 +955,7 @@ async function buildDialogueRequest(input: {
     frame: input.frame,
     step: input.step,
     candidate: firstCandidate,
+    dependencyResolution: input.dependencyResolution,
   });
   if (firstValidation.status === "accepted") {
     return {
@@ -924,6 +978,7 @@ async function buildDialogueRequest(input: {
         step: input.step,
         candidate: firstCandidate,
         issues: firstValidation.issues,
+        dependencyResolution: input.dependencyResolution,
       }),
       repairOf: {
         candidate: firstCandidate,
@@ -934,6 +989,7 @@ async function buildDialogueRequest(input: {
       frame: input.frame,
       step: input.step,
       candidate: repairCandidate,
+      dependencyResolution: input.dependencyResolution,
     });
     if (repairValidation.status === "accepted") {
       return {
@@ -1542,6 +1598,7 @@ async function executeDialogueRecord(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
   step: Step;
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
   provider?: ProviderConfig;
   generateDialogueRequest?: Stage4DialogueRequestGenerator;
   store: CleanStage4ReceiptStore;
@@ -1550,6 +1607,7 @@ async function executeDialogueRecord(input: {
     frame: input.frame,
     checklist: input.checklist,
     step: input.step,
+    dependencyResolution: input.dependencyResolution,
     provider: input.provider,
     generateDialogueRequest: input.generateDialogueRequest,
   });
@@ -2656,6 +2714,149 @@ function branchEligible(frame: AuthoritativeSceneFrame, checklist: GmActionCheck
     && checklist.source.judgeCheckNeed === "backend_action_plan_needed";
 }
 
+function materializedSpeakerBinding(step: Step): MaterializedSpeakerBinding | null {
+  return (step.dependencyBindings ?? []).find((binding) =>
+    binding.bindingId === "materialized_speaker"
+    && binding.requiredCapabilityId === "support_actor_create"
+    && binding.requiredReceiptAuthority === "support_actor_materialization_receipt"
+    && binding.sourcePath === "publicResult.supportActor.actorRef"
+    && binding.resolveIn === "post_dependency_scene_frame"
+    && binding.requiredFramePresence === "actors_and_citableRefs"
+  ) ?? null;
+}
+
+function refreshedActorForMaterializedSpeaker(input: {
+  frame: AuthoritativeSceneFrame;
+  actorRef: string;
+}): AuthoritativeSceneFrame["actors"][number] | null {
+  const citable = new Set(input.frame.citableRefs.map(normalizedRef));
+  if (!citable.has(normalizedRef(input.actorRef))) return null;
+  const matches = input.frame.actors.filter((actor) =>
+    actor.role !== "player"
+    && normalizedRef(actor.ref) === normalizedRef(input.actorRef)
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function resolveDialogueDependencies(input: {
+  initialFrame: AuthoritativeSceneFrame;
+  currentFrame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  receipts: readonly CleanStage4Receipt[];
+  refreshFrameAfterReceipt?: Stage4FrameRefresh;
+}): Promise<{
+  status: "ready";
+  frame: AuthoritativeSceneFrame;
+  resolution: Stage4DialogueDependencyResolution | null;
+  refreshed: boolean;
+  afterReceiptId: string | null;
+} | {
+  status: "skip";
+  receipt: CleanStage4Receipt;
+}> {
+  const binding = materializedSpeakerBinding(input.step);
+  if (!binding) {
+    return {
+      status: "ready",
+      frame: input.currentFrame,
+      resolution: null,
+      refreshed: false,
+      afterReceiptId: null,
+    };
+  }
+
+  const placeholderRequest = () => placeholderDialogueRequest({
+    frame: input.currentFrame,
+    checklist: input.checklist,
+    step: input.step,
+  });
+  const skipDependency = (message: string): { status: "skip"; receipt: CleanStage4Receipt } => ({
+    status: "skip",
+    receipt: skipReceipt({
+      frame: input.currentFrame,
+      checklist: input.checklist,
+      step: input.step,
+      request: placeholderRequest(),
+      capabilityId: "dialogue_record",
+      kind: "dependency_not_accepted",
+      message,
+    }),
+  });
+
+  const sourceReceipt = input.receipts.find((receipt) =>
+    receipt.stepId === binding.fromStepId
+    && receipt.capabilityId === "support_actor_create"
+  );
+  if (
+    !sourceReceipt
+    || sourceReceipt.status !== "accepted"
+    || sourceReceipt.authority.evidenceAuthority !== "support_actor_materialization_receipt"
+    || !sourceReceipt.publicResult.supportActor
+  ) {
+    return skipDependency("Dependent dialogue was skipped because support actor materialization was not accepted.");
+  }
+
+  const actorRef = sourceReceipt.publicResult.supportActor.actorRef;
+  if (!input.refreshFrameAfterReceipt) {
+    return skipDependency("Dependent dialogue was skipped because no post-dependency SceneFrame refresh was available.");
+  }
+
+  let refreshedFrame: AuthoritativeSceneFrame;
+  try {
+    refreshedFrame = await input.refreshFrameAfterReceipt({
+      initialFrame: input.initialFrame,
+      currentFrame: input.currentFrame,
+      checklist: input.checklist,
+      step: input.step,
+      receipt: sourceReceipt,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return skipDependency(`Dependent dialogue was skipped because post-dependency SceneFrame refresh failed: ${message}`);
+  }
+
+  const actor = refreshedActorForMaterializedSpeaker({
+    frame: refreshedFrame,
+    actorRef,
+  });
+  if (!actor) {
+    return {
+      status: "skip",
+      receipt: skipReceipt({
+        frame: refreshedFrame,
+        checklist: input.checklist,
+        step: input.step,
+        request: placeholderDialogueRequest({
+          frame: refreshedFrame,
+          checklist: input.checklist,
+          step: input.step,
+        }),
+        capabilityId: "dialogue_record",
+        kind: "dependency_not_accepted",
+        message: "Dependent dialogue was skipped because the materialized support actor was not present in the refreshed SceneFrame actors and citableRefs.",
+      }),
+    };
+  }
+
+  return {
+    status: "ready",
+    frame: refreshedFrame,
+    refreshed: true,
+    afterReceiptId: sourceReceipt.receiptId,
+    resolution: {
+      materializedSpeaker: {
+        bindingId: "materialized_speaker",
+        fromStepId: binding.fromStepId,
+        receiptId: sourceReceipt.receiptId,
+        actorRef: actor.ref,
+        actorLabel: actor.label,
+        refreshedFrameId: refreshedFrame.frameId,
+      },
+    },
+  };
+}
+
 export async function runCleanStage4Execution(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -2663,6 +2864,7 @@ export async function runCleanStage4Execution(input: {
   generateDialogueRequest?: Stage4DialogueRequestGenerator;
   supportActorProvider?: ProviderConfig;
   generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
+  refreshFrameAfterReceipt?: Stage4FrameRefresh;
   store?: CleanStage4ReceiptStore;
 }): Promise<CleanStage4ExecutionRunResult> {
   if (!branchEligible(input.frame, input.checklist)) {
@@ -2670,17 +2872,25 @@ export async function runCleanStage4Execution(input: {
   }
   const store = input.store ?? sqliteCleanStage4ReceiptStore;
   const receipts: CleanStage4Receipt[] = [];
+  const initialFrame = input.frame;
+  let currentFrame = input.frame;
+  const frameChain: NonNullable<CleanStage4ExecutionResult["frameChain"]> = [{
+    frameId: initialFrame.frameId,
+    base: initialFrame.base,
+    source: "initial",
+    afterReceiptId: null,
+  }];
 
   for (const step of input.checklist.steps) {
     if (step.disposition.kind !== "stage4_backend_resolution_required") {
       const request = requestForStep({
-        frame: input.frame,
+        frame: currentFrame,
         checklist: input.checklist,
         step,
         requiredRouteReceiptId: null,
       });
       const receipt = skipReceipt({
-        frame: input.frame,
+        frame: currentFrame,
         checklist: input.checklist,
         step,
         request,
@@ -2706,9 +2916,9 @@ export async function runCleanStage4Execution(input: {
       const request = assertCleanStage4Request({
         version: "gameplay-runtime.stage4-request.v1",
         requestId: `stage4-request-${randomUUID()}`,
-        campaignId: input.frame.campaignId,
-        turnId: input.frame.turnId,
-        frameId: input.frame.frameId,
+        campaignId: currentFrame.campaignId,
+        turnId: currentFrame.turnId,
+        frameId: currentFrame.frameId,
         checklistId: input.checklist.checklistId,
         stepId: step.stepId,
         source: {
@@ -2719,21 +2929,21 @@ export async function runCleanStage4Execution(input: {
           checklistId: input.checklist.checklistId,
           checklistStepId: step.stepId,
         },
-        base: input.frame.base,
+        base: currentFrame.base,
         author: "backend_from_checklist",
         modelAuthored: false,
         capabilityId: "scene_beat_record",
         effect: {
           kind: "scene_beat_record",
           actorRef: "Player",
-          sceneRef: input.frame.scene.currentScene.ref,
+          sceneRef: currentFrame.scene.currentScene.ref,
           targetRefs: step.targetRefs,
           beatKind: "generic_scene_beat",
           evidenceRefs: step.evidenceRefs,
         },
       });
       const receipt = skipReceipt({
-        frame: input.frame,
+        frame: currentFrame,
         checklist: input.checklist,
         step,
         request,
@@ -2747,10 +2957,33 @@ export async function runCleanStage4Execution(input: {
     }
 
     if (step.intended.kind === "dialogue_record") {
-      const receipt = await executeDialogueRecord({
-        frame: input.frame,
+      const dependency = await resolveDialogueDependencies({
+        initialFrame,
+        currentFrame,
         checklist: input.checklist,
         step,
+        receipts,
+        refreshFrameAfterReceipt: input.refreshFrameAfterReceipt,
+      });
+      if (dependency.status === "skip") {
+        store.insert(dependency.receipt);
+        receipts.push(dependency.receipt);
+        continue;
+      }
+      if (dependency.refreshed) {
+        currentFrame = dependency.frame;
+        frameChain.push({
+          frameId: currentFrame.frameId,
+          base: currentFrame.base,
+          source: "post_dependency_scene_frame",
+          afterReceiptId: dependency.afterReceiptId,
+        });
+      }
+      const receipt = await executeDialogueRecord({
+        frame: dependency.frame,
+        checklist: input.checklist,
+        step,
+        dependencyResolution: dependency.resolution,
         provider: input.dialogueProvider,
         generateDialogueRequest: input.generateDialogueRequest,
         store,
@@ -2761,7 +2994,7 @@ export async function runCleanStage4Execution(input: {
 
     if (step.intended.kind === "support_actor_create") {
       const receipt = await executeSupportActorCreate({
-        frame: input.frame,
+        frame: currentFrame,
         checklist: input.checklist,
         step,
         provider: input.supportActorProvider,
@@ -2778,21 +3011,21 @@ export async function runCleanStage4Execution(input: {
       && receipt.status === "accepted"
     );
     const request = requestForStep({
-      frame: input.frame,
+      frame: currentFrame,
       checklist: input.checklist,
       step,
       requiredRouteReceiptId: routeDependency?.receiptId ?? null,
     });
     let receipt: CleanStage4Receipt;
     if (step.intended.kind === "observe_visible") {
-      receipt = executeObserveVisible({ frame: input.frame, checklist: input.checklist, step, request, store });
+      receipt = executeObserveVisible({ frame: currentFrame, checklist: input.checklist, step, request, store });
     } else if (step.intended.kind === "route_options") {
-      receipt = executeRouteOptions({ frame: input.frame, checklist: input.checklist, step, request, store });
+      receipt = executeRouteOptions({ frame: currentFrame, checklist: input.checklist, step, request, store });
     } else if (step.intended.kind === "route_check") {
-      receipt = executeRouteCheck({ frame: input.frame, checklist: input.checklist, step, request, store });
+      receipt = executeRouteCheck({ frame: currentFrame, checklist: input.checklist, step, request, store });
     } else if (step.intended.kind === "movement") {
       receipt = await executeMovement({
-        frame: input.frame,
+        frame: currentFrame,
         checklist: input.checklist,
         step,
         request,
@@ -2800,9 +3033,9 @@ export async function runCleanStage4Execution(input: {
         store,
       });
     } else if (step.intended.kind === "time_advance") {
-      receipt = await executeTimeAdvance({ frame: input.frame, checklist: input.checklist, step, request, store });
+      receipt = await executeTimeAdvance({ frame: currentFrame, checklist: input.checklist, step, request, store });
     } else {
-      receipt = executeSceneBeat({ frame: input.frame, checklist: input.checklist, step, request, store });
+      receipt = executeSceneBeat({ frame: currentFrame, checklist: input.checklist, step, request, store });
     }
     receipts.push(receipt);
   }
@@ -2843,6 +3076,7 @@ export async function runCleanStage4Execution(input: {
     failedStepIds,
     mutationApplied,
     resultWorldVersion,
+    frameChain,
     visibleResults,
   });
   const publicEvents: Stage4ExecutionEvent[] = [];

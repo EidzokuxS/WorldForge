@@ -525,6 +525,16 @@ export const gmActionChecklistStateOrEvidenceSchema = z.enum([
   "terminal_player_visible",
 ]);
 
+export const gmActionChecklistDependencyBindingSchema = z.object({
+  bindingId: z.literal("materialized_speaker"),
+  fromStepId: gmActionChecklistStepIdSchema,
+  requiredCapabilityId: z.literal("support_actor_create"),
+  requiredReceiptAuthority: z.literal("support_actor_materialization_receipt"),
+  sourcePath: z.literal("publicResult.supportActor.actorRef"),
+  resolveIn: z.literal("post_dependency_scene_frame"),
+  requiredFramePresence: z.literal("actors_and_citableRefs"),
+}).strict();
+
 export const gmActionChecklistStepSchema = z.object({
   stepId: gmActionChecklistStepIdSchema,
   purpose: shortText,
@@ -542,6 +552,7 @@ export const gmActionChecklistStepSchema = z.object({
     reason: shortText,
   }).strict(),
   dependsOnStepIds: z.array(gmActionChecklistStepIdSchema).max(5),
+  dependencyBindings: z.array(gmActionChecklistDependencyBindingSchema).max(3).optional(),
   expectedVisibleEffect: z.object({
     summary: shortText,
     visibleRefs: z.array(modelSafeRef).min(1).max(8),
@@ -1100,6 +1111,16 @@ export const cleanStage4ExecutionResultSchema = z.object({
   failedStepIds: z.array(gmActionChecklistStepIdSchema).max(6),
   mutationApplied: z.boolean(),
   resultWorldVersion: z.number().int().nonnegative(),
+  frameChain: z.array(z.object({
+    frameId: shortText,
+    base: z.object({
+      tick: z.number().int().nonnegative(),
+      worldVersion: z.number().int().nonnegative(),
+      worldTimeMinutes: z.number().int().nonnegative(),
+    }).strict(),
+    source: z.enum(["initial", "post_dependency_scene_frame"]),
+    afterReceiptId: shortText.nullable(),
+  }).strict()).min(1).max(6).optional(),
   visibleResults: z.array(z.object({
     receiptId: shortText,
     authority: z.enum([

@@ -2841,13 +2841,13 @@ Session: `gm-v1-consequenc-slice`.
 
 - P66 clean gameplay runtime Primitive 12 Support Actor Materialization:
   - Status:
-    - [ ] Identify the smallest complete support-actor primitive needed after P65.
-    - [ ] Prepare one Oracle/GPT context bundle with canonical Stage 4 target, P60-P65 clean runtime, current SceneFrame actor visibility/ref contracts, old v2 support actor files only as negative/forensic evidence, and current live-proof artifacts.
-    - [ ] Record Oracle question, answer, accepted decision, and rejected alternatives.
-    - [ ] Run GitNexus impact before editing indexed symbols.
-    - [ ] Implement only the clean support-actor primitive approved by Oracle.
-    - [ ] Add focused contract tests for GM Read admission, Judge decision, checklist compilation, request/receipt schemas, backend guarded mutation, settlement/narrator evidence mapping, duplicate/player/hidden-actor rejection, and no old-runtime leakage.
-    - [ ] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where the next player action genuinely needs an ordinary current-scene support actor absent from SceneFrame.
+    - [x] Identify the smallest complete support-actor primitive needed after P65.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 4 target, P60-P65 clean runtime, current SceneFrame actor visibility/ref contracts, old v2 support actor files only as negative/forensic evidence, and current live-proof artifacts.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the clean support-actor primitive approved by Oracle.
+    - [x] Add focused contract tests for GM Read admission, Judge decision, checklist compilation, request/receipt schemas, backend guarded mutation, settlement/narrator evidence mapping, duplicate/player/hidden-actor rejection, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where the next player action genuinely needs an ordinary current-scene support actor absent from SceneFrame.
   - Boundary draft:
     - Owner: clean Stage 4 under `backend/src/engine/gameplay-cycle-runtime/`; no production imports/wrapping from `gameplay-cycle-v2/runtime-executor.ts`, `receipt-ledger.ts`, `db-handlers.ts`, root `tool-executor`, `create_scene_extra`, `spawn_npc`, or old support actor receipt semantics.
     - Candidate scope: backend-owned materialization of one temporary, current-scene, non-player support actor when the player addresses/needs an ordinary local role that is plausible from the current SceneFrame but no already-visible actor can own the response. Dialogue after creation should be included only if Oracle says P66 should prove the dependent multi-step chain now; otherwise P66 should stop at materialized visible actor receipt and leave dialogue composition to the next primitive.
@@ -2886,3 +2886,61 @@ Session: `gm-v1-consequenc-slice`.
     - Live DB postcheck: one clean turn record, one accepted `support_actor_create` receipt, one temporary `Local Vendor` NPC with tags `temporary-support`, `clean-runtime-support`, `support-role:vendor`, `current-scene`, `minor-support`, `reactive-only`; one authority trace `gameplay-cycle-runtime.support_actor.materialize.v1` with source `npc`, actor/scene state deltas, witnesses `Player` + `Lowwater Bazaar`; no old v2/saga/narrator/oracle/simulation/actor-knowledge/clock-ledger rows.
     - Live settled evidence contains authority `support_actor_materialization_receipt`, claimKinds `visible_actor + support_actor_materialization`, backend facts for visible actor/role/anchor/result, and limits against dialogue, NPC private knowledge, relationship, future relevance, durable world fact, item state, route truth, movement, absence/no-change. Narration only claimed presence; fresh post-turn SceneFrame includes `Local Vendor` in actors/citableRefs.
     - GitNexus `detect_changes(scope=all)` before commit: risk `medium`, affected processes `RunCleanStage4Execution -> AssertCleanStage4Receipt` and `ExecuteMovement -> AssertCleanStage4Receipt` through shared receipt construction; covered by the focused Stage4/contract/settlement/narration and chat route tests above.
+    - Status: diagnostic slice complete for P66 and committed/pushed as `4232fc45 Add clean support actor materialization`; `npx gitnexus analyze --embeddings` completed after commit with Ladybug lock/vector-extension warnings but successful index rebuild. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P67 clean gameplay runtime Primitive 13 Post-Mutation Refresh + Dependent Support Dialogue:
+  - Status:
+    - [x] Identify the next primitive after P66.
+    - [x] Prepare one Oracle/GPT context bundle with canonical architecture, P65/P66 contracts, clean runtime Stage 4/checklist/runtime/settlement/narration files, tests, and lessons.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the whitelisted `support_actor_create -> refreshed SceneFrame -> dialogue_record` chain.
+    - [x] Add focused contract tests for checklist dependency binding, frame refresh ownership, stale-frame dialogue rejection, refreshed-frame dialogue acceptance, failure/skipped audit semantics, settlement/narrator limits, and import fences.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone where the next player action genuinely requests an absent ordinary support actor's dialogue.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p67-refresh-dialogue`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Pro Extended`.
+    - Bundle: one bundled text attachment, 16 files, usage `inputTokens=129412`, `outputTokens=4180`, `totalTokens=133592`.
+    - Question artifact: `output/oracle/p67-clean-refresh-dialogue-question.md`.
+    - Answer artifact: `output/oracle/p67-clean-refresh-dialogue-answer.md`.
+    - Delivery verification: session meta has `promptSubmitted=true`, `browserBundleFiles=true`, `browserBundleFormat="text"`, all 16 intended files in `options.file`, transcript at `C:\Users\robra\.oracle\sessions\wf-clean-p67-refresh-dialogue\artifacts\transcript.md`, and model selection verified as `Pro Extended`.
+    - Accepted decision: MODIFY -> GO. Implement the concrete same-turn chain `support_actor_create -> authoritative SceneFrame refresh -> dialogue_record`, but only for this narrowly bounded dependency pattern.
+  - Accepted P67 scope:
+    - Prove exactly one chain: `ordinary_support_actor_needed` with `supportActorNeed.intendedUse="dialogue_requested_but_not_yet_recorded"` -> `support_actor_create` -> accepted materialization receipt -> rebuild authoritative SceneFrame from DB/result worldVersion -> verify materialized actor in refreshed `actors` and `citableRefs` -> generate/validate/execute `dialogue_record` against refreshed frame -> settle both receipts separately.
+    - Do not implement a generic refresh-only primitive without the dependent dialogue use case, and do not broaden to arbitrary multi-step mutation chaining.
+    - Whitelist only `support_actor_create.accepted` with authority `support_actor_materialization_receipt` enabling exactly one dependent `dialogue_record` whose speaker is the materialized actor after refresh.
+  - Layer contracts:
+    - GM Read may admit dependent dialogue need through `ordinary_support_actor_needed.supportActorNeed.intendedUse="dialogue_requested_but_not_yet_recorded"`, but it must not invent the future actor ref or put `Local Vendor`/future labels into `targetRefs`.
+    - Judge remains `backend_action_plan_needed` / `backend_receipt_required`; no Oracle for ordinary support actor availability or pre-refresh dialogue.
+    - Checklist should emit two explicit steps with dependency: step 1 `support_actor_create`; step 2 `dialogue_record` with scope-only target refs and a dependency binding from step 1's `publicResult.supportActor.actorRef`, resolved only in a post-dependency SceneFrame.
+    - Stage 4 should become a sequential frame-aware loop while preserving one public runtime call. It owns step ordering, dependency checks, authoritative frame rebuild, and per-step frame selection. The initial frame object remains immutable.
+    - Existing `visibleRefs`/support receipt/public result plus refreshed frame are nearly sufficient for execution, but P67 should add minimal dependency provenance/bindings for auditability; never add a materialized actor alias that bypasses refreshed `actors`/`citableRefs`.
+  - Failure semantics:
+    - If support actor materialization fails, skip dependent dialogue audit-only; narrator cannot imply actor appeared or answered.
+    - If support actor is accepted but refresh fails, settle the accepted support actor receipt and skip dependent dialogue with refresh/dependency audit; do not hard-error after committed accepted mutation unless settlement itself is impossible.
+    - If refresh succeeds but the materialized actor is not exactly one visible non-player actor in refreshed `actors`/`citableRefs`, settle support evidence only and skip dialogue.
+    - If dialogue generation/repair fails after accepted support, settle support actor presence plus failed dialogue audit; no invented speech.
+    - If dialogue validates/executes, settle support materialization and terminal dialogue as separate evidence authorities with separate limits. Dialogue still proves only visible response content, not truth-of-claim.
+  - Rejected alternatives:
+    - Generic refresh-only P67, runtime-generated hidden follow-up dialogue, in-memory SceneFrame patching, materialized actor aliases bypassing citable refs, open-ended multi-step mutation chaining, old v2 `support_actor.create.v2`, `create_scene_extra`, `spawn_npc`, old frame-refresh/mutating-composer/local-consequence scheduler, saga/restore/replay/narrator-attempt paths, vector/episodic memory writes, backend/narrator-authored speech.
+  - Implementation review:
+    - Added explicit `materialized_speaker` checklist dependency binding metadata. The dependent `dialogue_record` step cites only scope/current-scene refs up front and does not invent the future support actor ref.
+    - Updated deterministic checklist compilation so `ordinary_support_actor_needed` with `intendedUse=presence_only` still emits only `support_actor_create`, while `intendedUse=dialogue_requested_but_not_yet_recorded` emits exactly two steps: `support_actor_create` then dependent `dialogue_record`.
+    - Updated clean Stage 4 execution into a narrow sequential frame-aware loop for this dependency. It resolves only accepted `support_actor_create` receipts with authority `support_actor_materialization_receipt`, calls a runtime-owned authoritative SceneFrame refresh callback, verifies the materialized actor exists in refreshed `actors` and `citableRefs`, and only then permits model-authored `dialogue_record`.
+    - Added Stage 4 `frameChain` provenance for successful post-dependency refreshes.
+    - Updated the runtime adapter so `/api/chat/action` rebuilds the post-receipt SceneFrame from the original turn input plus the accepted receipt's result clock/worldVersion, without changing the public route/API boundary.
+    - Dialogue validation now allows the resolved support actor ref only when it comes from the dependency resolution and still requires it to be in the refreshed SceneFrame/checklist execution scope. The narrator/settlement boundary remains unchanged: accepted support materialization and dialogue are separate evidence authorities.
+  - Verification so far:
+    - GitNexus impact before edits: LOW for `buildDeterministicGmActionChecklist`, `validateGmActionChecklistCandidate`, `runCleanStage4Execution`, `buildAuthoritativeSceneFrame`, `validateDialogueRequestEffectCandidate`, `buildStage4DialogueRequestPrompt`, `buildDialogueRequest`, and `executeDialogueRecord`. Schema constants and exported runtime generator were not indexed as direct GitNexus targets; edits there were kept to adjacent contract/runtime adapters.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend test -- gameplay-cycle-runtime-stage4.test.ts gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts gameplay-cycle-runtime-narration.test.ts --bail=1` passed: 4 files, 179 tests.
+    - `npm --prefix backend test -- chat.test.ts --bail=1` passed: 63 route tests.
+    - Added focused tests for two-step checklist binding without future actor refs, accepted support->refresh->dialogue execution, no-refresh stale-frame skip, support-failure dependent skip, refreshed-frame-without-actor skip, and separate support/dialogue settled evidence authorities.
+    - Live `/api/chat/action` proof: fresh zero-turn clone `p67-refresh-dialogue-4f099b71` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; precheck clean turns/receipts/v2 packets/settled packets/sagas/authority traces/clock ledger/oracle/simulation all 0, clock 0/0/0, player at Lowwater Bazaar, no `Local Vendor` in pre-action SceneFrame, and both `support_actor_create` plus `dialogue_record` capabilities allowed.
+    - Live action chosen after SceneFrame inspection: `I ask a local vendor in Lowwater Bazaar what changed today. I do not move or touch anything.` SSE order: `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> settled-turn-packet -> narrative -> finalizing_turn -> done`; done reported `worldVersion=1`, `worldTimeMinutes=0`, `mutationApplied=true`, `settled=true`.
+    - Live DB proof: one clean turn record, two accepted Stage 4 receipts, one temporary `Local Vendor` NPC with clean support tags, one authority trace `gameplay-cycle-runtime.support_actor.materialize.v1`, no clock ledger row, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live frame proof: support receipt used pre-mutation frame `frame-e62cc078b9b7-b1f8bf00` with base worldVersion 0/result worldVersion 1; dialogue receipt used refreshed frame `frame-b6a0fb36915f-4e624418` with base/result worldVersion 1 and mutationApplied false.
+    - Live settled evidence proof: accepted evidence includes separate `support_actor_materialization_receipt` and `terminal_dialogue_receipt`. Support limits reject dialogue content; dialogue limits reject truth-of-speaker-claim/durable-world-fact/private-knowledge/etc. Step audit has both accepted steps.
+    - Live narration proof: player-facing narration quotes `Local Vendor` from the accepted dialogue receipt and does not expose backend refs. Fresh post-turn SceneFrame includes `Local Vendor` in actors and citableRefs.
+    - Artifacts: `output/clean-runtime-p67-refresh-dialogue-live-20260611134514/*`. Backend listener check after harness: ports `3231` and `3001` had no listeners.
+    - GitNexus `detect_changes(scope=all)` before commit: risk `medium`; affected process `RunCleanStage4Execution -> AssertCleanStage4Receipt` through the changed clean Stage 4 execution path. Covered by focused Stage4/contract/settlement/narration tests, route tests, and live P67 proof above.

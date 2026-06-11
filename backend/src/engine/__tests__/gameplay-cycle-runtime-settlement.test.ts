@@ -478,6 +478,156 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(support?.limits.doesNotProve).toContain("durable world fact");
   });
 
+  it("settles support materialization and dependent dialogue as separate evidence authorities", () => {
+    const inputFrame = frame({
+      playerAction: "I ask a local vendor what changed today.",
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const supportReceipt = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      receiptId: "stage4-receipt-support-actor-1",
+      requestId: "stage4-request-support-actor-1",
+      capabilityId: "support_actor_create",
+      result: { ...inputFrame.base, worldVersion: 1, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "support_actor_materialization_receipt",
+        mutationAuthority: "current_scene_support_actor",
+        visibleResultAuthority: "may_claim_visible_support_actor_materialized",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: true,
+      },
+      publicResult: {
+        summary: "Local Vendor is materialized as a vendor in Market.",
+        visibleRefs: ["Player", "Market", "Local Vendor"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: null,
+        supportActor: {
+          type: "support_actor_materialization",
+          resultKind: "created",
+          actorRef: "Local Vendor",
+          actorLabel: "Local Vendor",
+          roleKind: "vendor",
+          roleLabel: "vendor",
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          publicSummary: "An ordinary local vendor is available in the market.",
+          visibleCue: null,
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+          },
+          claimStatus: "visible_support_actor_materialization_only",
+        },
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        supportActorId: "npc-local-vendor",
+        supportActorOperation: "inserted",
+        anchorLocationId: "loc-market",
+        anchorSceneLocationId: "loc-market",
+        edgeIds: [],
+        authorityTraceId: "stage4-authority-support",
+        clockReceiptId: null,
+        stateDeltaRefs: ["npc:npc-local-vendor:created", "scene:loc-market:support_actors"],
+      },
+    });
+    const refreshedFrame = frame({
+      frameId: "frame-refreshed-local-vendor",
+      base: { tick: 0, worldVersion: 1, worldTimeMinutes: 0 },
+      actors: [{
+        ref: "Local Vendor",
+        label: "Local Vendor",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      citableRefs: ["Player", "Market", "North Hall", "Local Vendor"],
+    });
+    const dialogueReceipt = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      receiptId: "stage4-receipt-dialogue-1",
+      requestId: "stage4-request-dialogue-1",
+      frameId: refreshedFrame.frameId,
+      stepId: "step-2",
+      capabilityId: "dialogue_record",
+      source: {
+        ...movementReceipt(inputFrame, inputChecklist).source,
+        checklistStepId: "step-2",
+      },
+      base: refreshedFrame.base,
+      result: { ...refreshedFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "terminal_dialogue_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_quote_visible_dialogue_response",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Local Vendor dialogue response recorded (answer).",
+        visibleRefs: ["Player", "Local Vendor"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: {
+          type: "dialogue_response",
+          authorityKind: "existing_visible_actor",
+          speakerLabel: "Local Vendor",
+          addresseeLabels: ["Mira Voss"],
+          outcomeKind: "answer",
+          quotedSpeech: "The morning crowd is thinner than usual.",
+          summary: "Local Vendor says the morning crowd is thinner than usual.",
+          responseLanguage: "match_player_action",
+          claimStatus: "visible_speaker_response_only",
+        },
+        supportActor: null,
+      },
+      privateResult: {
+        playerId: null,
+        fromLocationId: null,
+        destinationLocationId: null,
+        supportActorId: null,
+        supportActorOperation: null,
+        anchorLocationId: null,
+        anchorSceneLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+    });
+
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([supportReceipt, dialogueReceipt], inputFrame),
+    });
+
+    const authorities = packet.acceptedEvidence
+      .filter((entry) => entry.sourceKind === "stage4_receipt")
+      .map((entry) => entry.authority);
+    expect(authorities).toContain("support_actor_materialization_receipt");
+    expect(authorities).toContain("terminal_dialogue_receipt");
+    const support = packet.acceptedEvidence.find((entry) => entry.authority === "support_actor_materialization_receipt");
+    const dialogue = packet.acceptedEvidence.find((entry) => entry.authority === "terminal_dialogue_receipt");
+    expect(support?.claimKinds).toEqual(["visible_actor", "support_actor_materialization"]);
+    expect(dialogue?.claimKinds).toEqual(["dialogue_response"]);
+    expect(support?.limits.doesNotProve).toContain("dialogue content");
+    expect(dialogue?.limits.doesNotProve).toContain("truth of speaker claim");
+  });
+
   it("settles P64 non-movement receipts into exact accepted evidence authorities", () => {
     const inputFrame = frame({
       playerAction: "I wait, look around, and check routes.",

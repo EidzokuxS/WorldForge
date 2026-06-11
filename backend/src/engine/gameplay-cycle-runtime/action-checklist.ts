@@ -409,6 +409,50 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         });
       }
     }
+    const bindingIds = new Set<string>();
+    for (const binding of step.dependencyBindings ?? []) {
+      if (step.intended.kind !== "dialogue_record") {
+        issues.push({
+          code: "dependency_invalid",
+          path: `steps.${index}.dependencyBindings`,
+          message: "Only dialogue_record steps may bind a materialized speaker dependency.",
+        });
+      }
+      if (bindingIds.has(binding.bindingId)) {
+        issues.push({
+          code: "dependency_invalid",
+          path: `steps.${index}.dependencyBindings`,
+          message: "Checklist dependency binding ids cannot repeat on one step.",
+        });
+      }
+      bindingIds.add(binding.bindingId);
+      if (!step.dependsOnStepIds.includes(binding.fromStepId)) {
+        issues.push({
+          code: "dependency_invalid",
+          path: `steps.${index}.dependencyBindings`,
+          message: "Dependency bindings must cite a step listed in dependsOnStepIds.",
+        });
+      }
+      const dependencyNumber = Number(binding.fromStepId.replace("step-", ""));
+      if (dependencyNumber >= index + 1) {
+        issues.push({
+          code: "dependency_invalid",
+          path: `steps.${index}.dependencyBindings`,
+          message: "Dependency bindings may reference only earlier steps.",
+        });
+      }
+      const dependencyStep = checklist.steps.find((candidate) => candidate.stepId === binding.fromStepId);
+      if (
+        dependencyStep?.intended.kind !== "support_actor_create"
+        || dependencyStep.intended.requiredCapabilityId !== "support_actor_create"
+      ) {
+        issues.push({
+          code: "dependency_invalid",
+          path: `steps.${index}.dependencyBindings`,
+          message: "materialized_speaker bindings must depend on an earlier support_actor_create step.",
+        });
+      }
+    }
   });
 
   if (stage4RequiredCount === 0) {
@@ -558,13 +602,14 @@ function stepFor(input: {
   targetRefs: readonly string[];
   evidenceRefs: readonly string[];
   dependsOnStepIds?: readonly GmActionChecklistStepId[];
+  dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
   purpose?: string;
   intendedSummary?: string;
   expectedVisibleSummary?: string;
 }): GmActionChecklist["steps"][number] {
   const visibleRefs = uniqueStrings([input.actorRef, ...input.targetRefs]);
   const capability = EFFECT_TO_CAPABILITY[input.kind];
-  return {
+  const step: GmActionChecklist["steps"][number] = {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
     purpose: input.purpose ?? `Plan ${input.kind} for later backend resolution.`,
     actorRef: input.actorRef,
@@ -590,6 +635,10 @@ function stepFor(input: {
       visibleRefs,
     },
   };
+  if (input.dependencyBindings && input.dependencyBindings.length > 0) {
+    step.dependencyBindings = [...input.dependencyBindings];
+  }
+  return step;
 }
 
 export function buildDeterministicGmActionChecklist(input: {
@@ -687,22 +736,46 @@ export function buildDeterministicGmActionChecklist(input: {
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
     }));
   } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {
+    const supportEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...supportActorNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
     steps.push(stepFor({
       index: 1,
       kind: "support_actor_create",
       actorRef,
       targetRefs: [sceneRef],
-      evidenceRefs: uniqueStrings([
-        actorRef,
-        sceneRef,
-        input.frame.scene.currentLocation.ref,
-        ...supportActorNeed.evidenceRefs,
-        ...evidenceRefs,
-      ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase())),
+      evidenceRefs: supportEvidenceRefs,
       purpose: `Plan ordinary current-scene support actor materialization for ${supportActorNeed.roleKind}.`,
-      intendedSummary: `Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=${supportActorNeed.roleKind}; requested role text: ${supportActorNeed.requestedRoleText}. It must not record dialogue or other consequences in this step.`,
+      intendedSummary: `Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=${supportActorNeed.roleKind}; requested role text: ${supportActorNeed.requestedRoleText}. This step must not record dialogue or other consequences.`,
       expectedVisibleSummary: `If accepted, one visible temporary ${supportActorNeed.roleKind} may be materialized in the current scene only.`,
     }));
+    if (supportActorNeed.intendedUse === "dialogue_requested_but_not_yet_recorded" && allowed.has("dialogue_record")) {
+      const supportStepId = steps[steps.length - 1]?.stepId ?? "step-1";
+      steps.push(stepFor({
+        index: 2,
+        kind: "dialogue_record",
+        actorRef,
+        targetRefs: [sceneRef],
+        evidenceRefs: supportEvidenceRefs,
+        dependsOnStepIds: [supportStepId],
+        dependencyBindings: [{
+          bindingId: "materialized_speaker",
+          fromStepId: supportStepId,
+          requiredCapabilityId: "support_actor_create",
+          requiredReceiptAuthority: "support_actor_materialization_receipt",
+          sourcePath: "publicResult.supportActor.actorRef",
+          resolveIn: "post_dependency_scene_frame",
+          requiredFramePresence: "actors_and_citableRefs",
+        }],
+        purpose: `Record one visible response only after the ${supportActorNeed.roleKind} is materialized and the SceneFrame is refreshed.`,
+        intendedSummary: "Stage 4 may record dialogue only from the freshly materialized support actor after a post-dependency authoritative SceneFrame contains that actor.",
+        expectedVisibleSummary: "If support materialization is accepted and refreshed into SceneFrame actors/citableRefs, one visible support actor response may be recorded; the response does not prove world facts.",
+      }));
+    }
   } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
     steps.push(stepFor({
       index: 1,
