@@ -78,6 +78,19 @@ const SCENE_BEAT_DOES_NOT_PROVE = [
   "no-change",
 ];
 
+const DIALOGUE_DOES_NOT_PROVE = [
+  "truth of speaker claim",
+  "durable world fact",
+  "NPC private knowledge beyond the utterance",
+  "relationship change",
+  "future commitment",
+  "movement",
+  "item state",
+  "condition or HP change",
+  "location reveal",
+  "absence or no-change",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -329,6 +342,36 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         limits: {
           proves: ["local visible scene beat acknowledgement"],
           doesNotProve: SCENE_BEAT_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "terminal_dialogue_receipt" && receipt.publicResult.dialogue) {
+      const evidenceId = nextEvidenceId(evidence);
+      const dialogue = receipt.publicResult.dialogue;
+      const quoteFact = dialogue.quotedSpeech
+        ? `${dialogue.speakerLabel} says: "${dialogue.quotedSpeech}".`
+        : `${dialogue.speakerLabel} has a ${dialogue.outcomeKind} dialogue response.`;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "terminal_dialogue_receipt",
+        claimKinds: ["dialogue_response"],
+        text: quoteFact,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, `Speaker: ${dialogue.speakerLabel}.`),
+          fact(evidenceId, 2, quoteFact),
+          fact(evidenceId, 3, `Dialogue summary: ${dialogue.summary}`),
+        ],
+        limits: {
+          proves: [
+            "visible speaker identity",
+            "visible response content",
+            "speaker response happened this turn",
+          ],
+          doesNotProve: DIALOGUE_DOES_NOT_PROVE,
         },
       });
       continue;

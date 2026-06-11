@@ -402,6 +402,16 @@ function branchIssues(input: {
     );
   }
   if (
+    gmRead.actionInterpretation.interactionKind === "visible_actor_dialogue"
+    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
+    && judgment.checkNeed === "no_roll_needed"
+  ) {
+    add(
+      "checkNeed",
+      "Visible actor dialogue requires backend_action_plan_needed so Stage 4 can record the speaker response before narration.",
+    );
+  }
+  if (
     judgment.checkNeed === "backend_action_plan_needed"
     && judgment.noRollReason?.code !== "backend_receipt_required"
   ) {
@@ -547,6 +557,7 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "Use nextStep=oracle_roll only for true visible uncertainty that needs a random outcome before downstream consequences.",
     "Use nextStep=action_plan for backend-owned consequences; do not include effect kinds, tool names, checklist steps, or payloads.",
     "When GM Read path is procedural and SceneFrame shows allowed receipt-required backend capabilities, do not use settle_no_roll; admit backend_action_plan_needed with noRollReason.code=backend_receipt_required unless a true Oracle roll or combat boundary is required.",
+    "When GM Read actionInterpretation.interactionKind is visible_actor_dialogue, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible speaker response receipt.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",
     "For non-Oracle branches, oracleAdmission and difficulty must be null and noRollReason must be present.",
     "For Oracle branches, include difficulty plus oracleAdmission with strong_hit, weak_hit, and miss meanings; do not include noRollReason.",

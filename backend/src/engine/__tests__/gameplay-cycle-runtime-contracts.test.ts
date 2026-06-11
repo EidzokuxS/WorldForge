@@ -24,6 +24,7 @@ import {
   type CleanNarratorView,
   oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
+  cleanStage4DialogueRequestEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -565,6 +566,7 @@ function validGmRead(frame = minimalFrame()): GmRead {
       playerIntent: "Observe the scene.",
       method: null,
       targetRefs: ["Market"],
+      interactionKind: "current_scene_observation",
     },
     uncertainty: {
       present: false,
@@ -655,6 +657,7 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
       { capabilityId: "route_options", evidenceAuthority: "observation_only", allowed: true },
       { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
       { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "scene_beat_record", evidenceAuthority: "observation_only", allowed: true },
     ],
@@ -674,6 +677,7 @@ function actionPlanGmRead(frame = actionPlanFrame()): GmRead {
       playerIntent: "Move toward North Hall.",
       method: "walk",
       targetRefs: ["North Hall"],
+      interactionKind: "movement_intent",
     },
     interpretationRationale: "The action requests a world-state consequence.",
   };
@@ -922,6 +926,7 @@ function acceptedMovementReceipt(
       timeAdvance: null,
       visibleObservation: null,
       sceneBeat: null,
+      dialogue: null,
     },
     privateResult: {
       playerId: "player-1",
@@ -961,6 +966,7 @@ function acceptedMovementExecution(
       visibleRefs: receipt.publicResult.visibleRefs,
       locationChange: receipt.publicResult.locationChange,
       timeAdvance: receipt.publicResult.timeAdvance,
+      dialogue: receipt.publicResult.dialogue,
     }],
   });
 }
@@ -987,6 +993,50 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     };
 
     expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+  });
+
+  it("requires visible_actor_dialogue to target exactly one visible non-player actor", () => {
+    const frame = minimalFrame({
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      citableRefs: ["Player", "Market", "Guide"],
+    });
+    const accepted = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player asks Guide a question.",
+          playerIntent: "Ask Guide what happened.",
+          method: "ask",
+          targetRefs: ["Guide"],
+          interactionKind: "visible_actor_dialogue",
+        },
+      },
+    });
+    expect(accepted.status).toBe("accepted");
+
+    const rejected = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player asks an unseen guard a question.",
+          playerIntent: "Ask a guard what happened.",
+          method: "ask",
+          targetRefs: ["Market"],
+          interactionKind: "visible_actor_dialogue",
+        },
+      },
+    });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
   it.each([
@@ -1879,6 +1929,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         playerIntent: "Wait in the current scene for ten minutes.",
         method: null,
         targetRefs: ["Market"],
+        interactionKind: "time_passage",
       },
     };
     const judgment: JudgeUncertainty = {
@@ -1937,6 +1988,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         playerIntent: "Check visible route options.",
         method: null,
         targetRefs: ["Market"],
+        interactionKind: "route_inquiry",
       },
     };
     const judgment: JudgeUncertainty = {
@@ -1975,6 +2027,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         playerIntent: "Look around the current scene.",
         method: null,
         targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
       },
     };
     const judgment: JudgeUncertainty = {
@@ -2001,6 +2054,67 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     expect(result.checklist.authority).toMatchObject({
       mayAuthorizeMutation: false,
       maySupportNarrationClaim: false,
+    });
+  });
+
+  it("deterministically produces dialogue_record checklist only for accepted visible actor dialogue", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I ask Guide what happened.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      liveSceneQuestion: "How does Guide visibly respond?",
+      actionInterpretation: {
+        summary: "The player asks Guide a question.",
+        playerIntent: "Ask Guide what happened.",
+        method: "ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Visible dialogue needs a terminal dialogue receipt before narration.",
+        evidenceRefs: ["Player", "Guide"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      actorRef: "Player",
+      targetRefs: ["Guide"],
+      intended: {
+        kind: "dialogue_record",
+        requiredCapabilityId: "dialogue_record",
+        stateOrEvidence: "terminal_player_visible",
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
     });
   });
 
@@ -2144,6 +2258,113 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
 });
 
 describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () => {
+  it("requires P65 dialogue effects to record visible response content exactly", () => {
+    const base = {
+      kind: "dialogue_record" as const,
+      authorityKind: "existing_visible_actor" as const,
+      speakerRef: "Guide",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answer" as const,
+      response: {
+        kind: "speech" as const,
+        quotedSpeech: "The north stairs are flooded.",
+        summary: "Guide says the north stairs are flooded.",
+      },
+      languageBasis: {
+        responseLanguage: "match_player_action" as const,
+        source: "turn_language_profile" as const,
+      },
+      evidenceRefs: ["Player", "Guide"],
+      stateEffects: { appliesState: false as const },
+    };
+
+    expect(cleanStage4DialogueRequestEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4DialogueRequestEffectSchema.safeParse({
+      ...base,
+      response: { ...base.response, quotedSpeech: null },
+    }).success).toBe(false);
+    expect(cleanStage4DialogueRequestEffectSchema.safeParse({
+      ...base,
+      outcomeKind: "silence",
+      response: { kind: "silence", quotedSpeech: "No.", summary: "Guide stays silent." },
+    }).success).toBe(false);
+  });
+
+  it("accepts non-mutating terminal dialogue receipts with quote-only authority", () => {
+    const frame = actionPlanFrame({
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    });
+    const checklist = {
+      ...validActionChecklist(frame),
+      steps: [{
+        ...validActionChecklist(frame).steps[0],
+        targetRefs: ["Guide"],
+        evidenceRefs: ["Player", "Guide"],
+        intended: {
+          ...validActionChecklist(frame).steps[0].intended,
+          kind: "dialogue_record" as const,
+          requiredCapabilityId: "dialogue_record" as const,
+          stateOrEvidence: "terminal_player_visible" as const,
+        },
+      }],
+    };
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...acceptedMovementReceipt(frame, checklist),
+      receiptId: "stage4-receipt-dialogue",
+      requestId: "stage4-request-dialogue",
+      capabilityId: "dialogue_record",
+      result: { ...frame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "terminal_dialogue_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_quote_visible_dialogue_response",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Guide dialogue response (answer): Guide says the north stairs are flooded. Quote: The north stairs are flooded.",
+        visibleRefs: ["Player", "Guide"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: {
+          type: "dialogue_response",
+          authorityKind: "existing_visible_actor",
+          speakerLabel: "Guide",
+          addresseeLabels: ["Mira Voss"],
+          outcomeKind: "answer",
+          quotedSpeech: "The north stairs are flooded.",
+          summary: "Guide says the north stairs are flooded.",
+          responseLanguage: "match_player_action",
+          claimStatus: "visible_speaker_response_only",
+        },
+      },
+      privateResult: {
+        playerId: null,
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+      failure: null,
+    });
+
+    expect(receipt.authority.evidenceAuthority).toBe("terminal_dialogue_receipt");
+    expect(receipt.result).toMatchObject({ ...frame.base, mutationApplied: false });
+    expect(receipt.publicResult.dialogue?.claimStatus).toBe("visible_speaker_response_only");
+  });
+
   it("accepts a terminal movement receipt that owns player location and clock mutation", () => {
     const receipt = acceptedMovementReceipt();
 
@@ -2219,6 +2440,7 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
         timeAdvance: null,
         visibleObservation: null,
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: "player-1",

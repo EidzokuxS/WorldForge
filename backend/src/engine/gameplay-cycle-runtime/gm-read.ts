@@ -60,6 +60,7 @@ export interface GmReadValidationIssue {
     | "backend_ref"
     | "execution_payload"
     | "frame_mismatch"
+    | "interaction_invalid"
     | "private_term"
     | "schema_invalid"
     | "uncited_ref";
@@ -224,6 +225,30 @@ function frameMismatchIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
   return issues;
 }
 
+function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmReadValidationIssue[] {
+  if (read.actionInterpretation.interactionKind !== "visible_actor_dialogue") return [];
+  const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
+  const speakerTargets = frame.actors.filter((actor) =>
+    actor.role !== "player" && loweredTargets.includes(actor.ref.toLowerCase())
+  );
+  const issues: GmReadValidationIssue[] = [];
+  if (speakerTargets.length !== 1) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.targetRefs",
+      message: "visible_actor_dialogue requires exactly one already-visible non-player speaker ref from SceneFrame.actors.",
+    });
+  }
+  if (loweredTargets.includes(frame.player.ref.toLowerCase())) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.targetRefs",
+      message: "visible_actor_dialogue speaker target must not be Player.",
+    });
+  }
+  return issues;
+}
+
 export function validateGmReadCandidate(input: {
   frame: AuthoritativeSceneFrame;
   candidate: unknown;
@@ -249,6 +274,7 @@ export function validateGmReadCandidate(input: {
     parsedRead = parsed.data;
     issues.push(...frameMismatchIssues(parsed.data, input.frame));
     issues.push(...refValidationIssues(parsed.data, input.frame));
+    issues.push(...interactionIssues(parsed.data, input.frame));
   }
 
   if (issues.length > 0) {
@@ -286,6 +312,7 @@ export function buildFallbackClarificationGmRead(input: {
       playerIntent: input.frame.playerAction,
       method: null,
       targetRefs: [],
+      interactionKind: "unsupported_or_unclear",
     },
     uncertainty: {
       present: false,
@@ -349,6 +376,9 @@ export function buildGmReadSystemPrompt(): string {
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, unsupported_or_unclear.",
+    "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
+    "Do not use visible_actor_dialogue for unseen roles such as an unnamed guard/vendor/guide/helper; that is unsupported or unclear until a later support-actor primitive exists.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",

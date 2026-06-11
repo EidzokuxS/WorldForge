@@ -143,6 +143,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For route_status, narrate route status only; never travel, arrival, current-scene change, or clock advance.",
     "For player_location_change, narrate only the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, narrate only the selected visible meaning; never add movement, discovery, mutation, or hidden facts.",
+    "For dialogue_response, narrate only that the visible speaker responded and what the accepted quote/summary says; never promote the speaker's claim into objective world truth.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -348,6 +349,16 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (elapsed) {
     return elapsed.backendFacts[0]?.text ?? elapsed.text;
+  }
+
+  const dialogue = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("dialogue_response")
+  );
+  if (dialogue) {
+    const quoteFact = dialogue.backendFacts.find((entry) =>
+      entry.text.includes(" says: ") || entry.text.includes("dialogue response")
+    );
+    return quoteFact?.text ?? dialogue.text;
   }
 
   const sceneBeat = view.acceptedEvidence.find((evidence) =>

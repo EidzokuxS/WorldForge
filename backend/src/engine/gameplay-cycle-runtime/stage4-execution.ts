@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { safeGenerateObject } from "../../ai/generate-object-safe.js";
+import { createModel, type ProviderConfig } from "../../ai/provider-registry.js";
 import { getSqliteConnection } from "../../db/index.js";
 import { withSqliteWriteLock } from "../../db/sqlite-write-lock.js";
 import {
@@ -13,6 +15,7 @@ import {
 } from "../location-graph.js";
 import {
   assertCleanStage4ExecutionResult,
+  cleanStage4DialogueRequestEffectSchema,
   assertCleanStage4Receipt,
   assertCleanStage4Request,
   type AuthoritativeSceneFrame,
@@ -74,6 +77,30 @@ export interface CleanStage4ExecutionRunResult {
   status: "executed" | "skipped";
   execution: CleanStage4ExecutionResult | null;
   publicEvents: Stage4ExecutionEvent[];
+}
+
+export interface Stage4DialogueRequestCandidateRequest {
+  system: string;
+  prompt: string;
+  repairOf?: {
+    candidate: unknown;
+    issues: Stage4DialogueRequestValidationIssue[];
+  };
+}
+
+export type Stage4DialogueRequestGenerator =
+  (request: Stage4DialogueRequestCandidateRequest) => Promise<unknown>;
+
+export interface Stage4DialogueRequestValidationIssue {
+  code:
+    | "backend_ref"
+    | "private_term"
+    | "schema_invalid"
+    | "speaker_invalid"
+    | "uncited_ref"
+    | "unplanned_ref";
+  path: string;
+  message: string;
 }
 
 export const sqliteCleanStage4ReceiptStore: CleanStage4ReceiptStore = {
@@ -217,6 +244,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "route_options") return "route_options";
   if (kind === "route_check") return "route_check";
   if (kind === "movement") return "movement";
+  if (kind === "dialogue_record") return "dialogue_record";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
   return "scene_beat_record";
@@ -298,6 +326,7 @@ function baseReceipt(input: {
   timeAdvance?: CleanStage4Receipt["publicResult"]["timeAdvance"];
   visibleObservation?: CleanStage4Receipt["publicResult"]["visibleObservation"];
   sceneBeat?: CleanStage4Receipt["publicResult"]["sceneBeat"];
+  dialogue?: CleanStage4Receipt["publicResult"]["dialogue"];
   resultWorldVersion?: number;
   resultWorldTimeMinutes?: number;
   resultTick?: number;
@@ -317,6 +346,7 @@ function baseReceipt(input: {
   const observationAccepted = accepted && input.capabilityId === "observe_visible";
   const routeOptionsAccepted = accepted && input.capabilityId === "route_options";
   const sceneBeatAccepted = accepted && input.capabilityId === "scene_beat_record";
+  const dialogueAccepted = accepted && input.capabilityId === "dialogue_record";
   return assertCleanStage4Receipt({
     version: "gameplay-runtime.stage4-receipt.v1",
     receiptId: `stage4-receipt-${randomUUID()}`,
@@ -349,9 +379,11 @@ function baseReceipt(input: {
                 ? "route_check_receipt"
                 : sceneBeatAccepted
                   ? "scene_beat_receipt"
-                  : input.status === "skipped"
-                    ? "skip_receipt"
-                    : "failure_receipt",
+                  : dialogueAccepted
+                    ? "terminal_dialogue_receipt"
+                    : input.status === "skipped"
+                      ? "skip_receipt"
+                      : "failure_receipt",
       mutationAuthority: movementAccepted
         ? "player_location_and_world_clock"
         : timeAccepted
@@ -369,9 +401,11 @@ function baseReceipt(input: {
                 ? "may_explain_route_status"
                 : sceneBeatAccepted
                   ? "may_acknowledge_scene_beat"
-                  : input.status === "failed"
-                    ? "failure_only"
-                    : "none",
+                  : dialogueAccepted
+                    ? "may_quote_visible_dialogue_response"
+                    : input.status === "failed"
+                      ? "failure_only"
+                      : "none",
       maySupportNarrationClaim: accepted,
       mayAuthorizeMutation: movementAccepted || timeAccepted,
     },
@@ -384,6 +418,7 @@ function baseReceipt(input: {
       timeAdvance: input.timeAdvance ?? null,
       visibleObservation: input.visibleObservation ?? null,
       sceneBeat: input.sceneBeat ?? null,
+      dialogue: input.dialogue ?? null,
     },
     privateResult: {
       playerId: input.playerId ?? null,
@@ -476,6 +511,402 @@ function labelForRef(frame: AuthoritativeSceneFrame, ref: string): string {
   if (ref.toLowerCase() === frame.scene.currentScene.ref.toLowerCase()) return frame.scene.currentScene.label;
   if (ref.toLowerCase() === frame.scene.currentLocation.ref.toLowerCase()) return frame.scene.currentLocation.label;
   return ref;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function normalizedRef(ref: string): string {
+  return ref.trim().toLowerCase();
+}
+
+function zodIssue(issue: { path: PropertyKey[]; message: string }): Stage4DialogueRequestValidationIssue {
+  return {
+    code: "schema_invalid",
+    path: issue.path.map(String).join(".") || "<root>",
+    message: issue.message,
+  };
+}
+
+function backendRefIssue(ref: string): boolean {
+  return /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(ref)
+    || /^(actor|campaign|edge|fact|item|knowledge|location|npc|packet|receipt|route|scene|turn|world)[_:]/i.test(ref);
+}
+
+function collectDialoguePrivateTermIssues(input: {
+  frame: AuthoritativeSceneFrame;
+  candidate: unknown;
+}): Stage4DialogueRequestValidationIssue[] {
+  const terms = uniqueStrings([
+    ...input.frame.privateGuards.forbiddenActorLabels,
+    ...input.frame.privateGuards.forbiddenPrivateTerms,
+    ...input.frame.forecast.forbiddenPrivateTerms,
+  ]);
+  if (terms.length === 0) return [];
+  const text = JSON.stringify(input.candidate).toLowerCase();
+  return terms.some((term) => text.includes(term.toLowerCase()))
+    ? [{
+      code: "private_term",
+      path: "<root>",
+      message: "Dialogue request effect must not leak private frame guard terms.",
+    }]
+    : [];
+}
+
+export function validateDialogueRequestEffectCandidate(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+  candidate: unknown;
+}): { status: "accepted"; effect: Extract<CleanStage4Request["effect"], { kind: "dialogue_record" }>; issues: [] } | {
+  status: "rejected";
+  issues: Stage4DialogueRequestValidationIssue[];
+} {
+  const issues = collectDialoguePrivateTermIssues({
+    frame: input.frame,
+    candidate: input.candidate,
+  });
+  const parsed = cleanStage4DialogueRequestEffectSchema.safeParse(input.candidate);
+  if (!parsed.success) {
+    return {
+      status: "rejected",
+      issues: [...issues, ...parsed.error.issues.map(zodIssue)],
+    };
+  }
+
+  const effect = parsed.data;
+  const citable = new Set(input.frame.citableRefs.map(normalizedRef));
+  const planned = new Set([
+    input.frame.player.ref,
+    ...input.step.targetRefs,
+    ...input.step.evidenceRefs,
+  ].map(normalizedRef));
+  const refs = uniqueStrings([
+    effect.speakerRef,
+    ...effect.addresseeRefs,
+    ...effect.evidenceRefs,
+  ]);
+
+  for (const ref of refs) {
+    if (!citable.has(normalizedRef(ref))) {
+      issues.push({
+        code: "uncited_ref",
+        path: "refs",
+        message: `Dialogue request cited ref "${ref}" outside SceneFrame.citableRefs.`,
+      });
+    }
+    if (!planned.has(normalizedRef(ref))) {
+      issues.push({
+        code: "unplanned_ref",
+        path: "refs",
+        message: `Dialogue request cited ref "${ref}" outside the accepted checklist step scope.`,
+      });
+    }
+    if (backendRefIssue(ref)) {
+      issues.push({
+        code: "backend_ref",
+        path: "refs",
+        message: `Dialogue request cited backend-looking ref "${ref}".`,
+      });
+    }
+  }
+
+  const speaker = input.frame.actors.find((actor) =>
+    actor.role !== "player" && normalizedRef(actor.ref) === normalizedRef(effect.speakerRef)
+  );
+  if (!speaker) {
+    issues.push({
+      code: "speaker_invalid",
+      path: "speakerRef",
+      message: "Dialogue request speakerRef must be exactly one already-visible non-player SceneFrame actor.",
+    });
+  }
+  if (!effect.addresseeRefs.some((ref) => normalizedRef(ref) === normalizedRef(input.frame.player.ref))) {
+    issues.push({
+      code: "speaker_invalid",
+      path: "addresseeRefs",
+      message: "Dialogue request must include Player as an addressee in P65.",
+    });
+  }
+
+  if (issues.length > 0) {
+    return { status: "rejected", issues };
+  }
+  return { status: "accepted", effect, issues: [] };
+}
+
+function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
+  return {
+    version: frame.version,
+    frameId: frame.frameId,
+    turnId: frame.turnId,
+    base: frame.base,
+    playerAction: frame.playerAction,
+    scene: frame.scene,
+    player: frame.player,
+    actors: frame.actors.map((actor) => ({
+      ref: actor.ref,
+      label: actor.label,
+      role: actor.role,
+      visibleStatus: actor.visibleStatus,
+    })),
+    citableRefs: frame.citableRefs,
+  };
+}
+
+export function buildStage4DialogueRequestSystemPrompt(): string {
+  return [
+    "You are WorldForge clean Stage 4 Dialogue Request.",
+    "Return only JSON matching the dialogue_record effect schema.",
+    "This is not narration. It creates exactly one visible speaker-response payload for backend validation.",
+    "The speaker must be one already-visible non-player actor from SceneFrame.actors and the addressee must include Player.",
+    "For non-silence outcomes, response.kind must be speech and quotedSpeech is required.",
+    "For silence outcomes, response.kind must be silence and quotedSpeech must be null.",
+    "Do not include state deltas, world facts, relationship changes, item/condition/location/movement effects, memory, durable events, old tool ids, or backend refs.",
+    "The response authorizes only what the visible speaker visibly says or does in this turn; it does not prove the speaker's claim is true.",
+    "Response-language directives in the player action are UI preferences, not in-world language barriers unless explicit citable scene evidence says otherwise.",
+    "Use only refs from the accepted checklist step and SceneFrame.citableRefs.",
+  ].join("\n");
+}
+
+export function buildStage4DialogueRequestPrompt(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+}): string {
+  return [
+    "Produce one dialogue_record effect for this accepted checklist step.",
+    "Required effect shape:",
+    "{ kind, authorityKind, speakerRef, addresseeRefs, outcomeKind, response, languageBasis, evidenceRefs, stateEffects }",
+    "Accepted checklist step:",
+    JSON.stringify(input.step, null, 2),
+    "Authoritative SceneFrame:",
+    JSON.stringify(promptFrameForDialogue(input.frame), null, 2),
+  ].join("\n\n");
+}
+
+function buildStage4DialogueRepairPrompt(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+  candidate: unknown;
+  issues: Stage4DialogueRequestValidationIssue[];
+}): string {
+  return [
+    "Repair the dialogue_record effect so it satisfies the clean P65 dialogue contract.",
+    "Do not add unsupported fields, old tool ids, backend refs, mutations, world facts, memory, or state deltas.",
+    "Validation issues:",
+    JSON.stringify(input.issues, null, 2),
+    "Original candidate:",
+    JSON.stringify(input.candidate, null, 2),
+    "Accepted checklist step:",
+    JSON.stringify(input.step, null, 2),
+    "Authoritative SceneFrame:",
+    JSON.stringify(promptFrameForDialogue(input.frame), null, 2),
+  ].join("\n\n");
+}
+
+async function generateDialogueEffectCandidate(input: {
+  provider: ProviderConfig;
+  request: Stage4DialogueRequestCandidateRequest;
+}): Promise<unknown> {
+  const generated = await safeGenerateObject({
+    model: createModel(input.provider, { role: "storyteller", reasoningMode: "bypass" }),
+    schema: cleanStage4DialogueRequestEffectSchema,
+    system: input.request.system,
+    prompt: input.request.prompt,
+    temperature: 0.2,
+    maxOutputTokens: 1000,
+    mode: "native_json",
+    retries: 1,
+    allowTextFallback: false,
+    allowRepair: false,
+    strictSchema: true,
+  });
+  return generated.object;
+}
+
+function dialogueRequestFromEffect(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  effect: Extract<CleanStage4Request["effect"], { kind: "dialogue_record" }>;
+}): CleanStage4Request {
+  return assertCleanStage4Request({
+    version: "gameplay-runtime.stage4-request.v1",
+    requestId: `stage4-request-${randomUUID()}`,
+    campaignId: input.frame.campaignId,
+    turnId: input.frame.turnId,
+    frameId: input.frame.frameId,
+    checklistId: input.checklist.checklistId,
+    stepId: input.step.stepId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      checklistVersion: "gm-action-checklist.v1",
+      checklistId: input.checklist.checklistId,
+      checklistStepId: input.step.stepId,
+    },
+    base: input.frame.base,
+    author: "model_from_stage4_dialogue_request",
+    modelAuthored: true,
+    capabilityId: "dialogue_record",
+    effect: input.effect,
+  });
+}
+
+function placeholderDialogueRequest(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+}): CleanStage4Request {
+  const speakerRef = input.step.targetRefs.find((ref) =>
+    input.frame.actors.some((actor) =>
+      actor.role !== "player" && normalizedRef(actor.ref) === normalizedRef(ref)
+    )
+  ) ?? input.step.targetRefs[0] ?? input.frame.scene.currentScene.ref;
+  return dialogueRequestFromEffect({
+    ...input,
+    effect: {
+      kind: "dialogue_record",
+      authorityKind: "existing_visible_actor",
+      speakerRef,
+      addresseeRefs: ["Player"],
+      outcomeKind: "silence",
+      response: {
+        kind: "silence",
+        quotedSpeech: null,
+        summary: "No accepted dialogue response was generated.",
+      },
+      languageBasis: {
+        responseLanguage: "match_player_action",
+        source: "turn_language_profile",
+      },
+      evidenceRefs: uniqueStrings(["Player", speakerRef, ...input.step.evidenceRefs]).slice(0, 12),
+      stateEffects: {
+        appliesState: false,
+      },
+    },
+  });
+}
+
+async function buildDialogueRequest(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  provider?: ProviderConfig;
+  generateDialogueRequest?: Stage4DialogueRequestGenerator;
+}): Promise<{ status: "accepted"; request: CleanStage4Request; issues: [] } | {
+  status: "failed";
+  request: CleanStage4Request;
+  issues: Stage4DialogueRequestValidationIssue[];
+}> {
+  const system = buildStage4DialogueRequestSystemPrompt();
+  const prompt = buildStage4DialogueRequestPrompt({
+    frame: input.frame,
+    step: input.step,
+  });
+  const generator = input.generateDialogueRequest
+    ?? (input.provider
+      ? ((request: Stage4DialogueRequestCandidateRequest) => generateDialogueEffectCandidate({
+        provider: input.provider as ProviderConfig,
+        request,
+      }))
+      : null);
+  if (!generator) {
+    return {
+      status: "failed",
+      request: placeholderDialogueRequest(input),
+      issues: [{
+        code: "schema_invalid",
+        path: "<generation>",
+        message: "P65 dialogue execution requires a Stage 4 dialogue request generator.",
+      }],
+    };
+  }
+
+  let firstCandidate: unknown;
+  try {
+    firstCandidate = await generator({ system, prompt });
+  } catch (error) {
+    return {
+      status: "failed",
+      request: placeholderDialogueRequest(input),
+      issues: [{
+        code: "schema_invalid",
+        path: "<generation>",
+        message: error instanceof Error ? error.message : String(error),
+      }],
+    };
+  }
+
+  const firstValidation = validateDialogueRequestEffectCandidate({
+    frame: input.frame,
+    step: input.step,
+    candidate: firstCandidate,
+  });
+  if (firstValidation.status === "accepted") {
+    return {
+      status: "accepted",
+      request: dialogueRequestFromEffect({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        effect: firstValidation.effect,
+      }),
+      issues: [],
+    };
+  }
+
+  try {
+    const repairCandidate = await generator({
+      system,
+      prompt: buildStage4DialogueRepairPrompt({
+        frame: input.frame,
+        step: input.step,
+        candidate: firstCandidate,
+        issues: firstValidation.issues,
+      }),
+      repairOf: {
+        candidate: firstCandidate,
+        issues: firstValidation.issues,
+      },
+    });
+    const repairValidation = validateDialogueRequestEffectCandidate({
+      frame: input.frame,
+      step: input.step,
+      candidate: repairCandidate,
+    });
+    if (repairValidation.status === "accepted") {
+      return {
+        status: "accepted",
+        request: dialogueRequestFromEffect({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          effect: repairValidation.effect,
+        }),
+        issues: [],
+      };
+    }
+    return {
+      status: "failed",
+      request: placeholderDialogueRequest(input),
+      issues: [...firstValidation.issues, ...repairValidation.issues],
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      request: placeholderDialogueRequest(input),
+      issues: [
+        ...firstValidation.issues,
+        {
+          code: "schema_invalid",
+          path: "<repair>",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
 }
 
 function clockLedgerReasonKind(reasonKind: "brief_local_action" | "wait" | "short_rest"): string {
@@ -590,6 +1021,94 @@ function executeSceneBeat(input: {
       summary,
       targetLabels,
     },
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+async function executeDialogueRecord(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  provider?: ProviderConfig;
+  generateDialogueRequest?: Stage4DialogueRequestGenerator;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const builtRequest = await buildDialogueRequest({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    provider: input.provider,
+    generateDialogueRequest: input.generateDialogueRequest,
+  });
+  if (builtRequest.status === "failed") {
+    const receipt = failReceipt({
+      frame: input.frame,
+      checklist: input.checklist,
+      step: input.step,
+      request: builtRequest.request,
+      capabilityId: "dialogue_record",
+      kind: "invalid_backend_request",
+      message: `Stage 4 dialogue request was not accepted: ${builtRequest.issues[0]?.message ?? "invalid dialogue request"}`,
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const effect = builtRequest.request.effect;
+  if (effect.kind !== "dialogue_record") {
+    const receipt = failReceipt({
+      frame: input.frame,
+      checklist: input.checklist,
+      step: input.step,
+      request: builtRequest.request,
+      capabilityId: "dialogue_record",
+      kind: "invalid_backend_request",
+      message: "Stage 4 dialogue request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const speaker = input.frame.actors.find((actor) =>
+    actor.role !== "player" && normalizedRef(actor.ref) === normalizedRef(effect.speakerRef)
+  );
+  if (!speaker) {
+    const receipt = failReceipt({
+      frame: input.frame,
+      checklist: input.checklist,
+      step: input.step,
+      request: builtRequest.request,
+      capabilityId: "dialogue_record",
+      kind: "insufficient_grounding",
+      message: "Stage 4 dialogue speaker is not an already-visible non-player actor.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const addresseeLabels = effect.addresseeRefs.map((ref) => labelForRef(input.frame, ref)).slice(0, 8);
+  const dialogue = {
+    type: "dialogue_response" as const,
+    authorityKind: "existing_visible_actor" as const,
+    speakerLabel: speaker.label,
+    addresseeLabels,
+    outcomeKind: effect.outcomeKind,
+    quotedSpeech: effect.response.quotedSpeech,
+    summary: effect.response.summary,
+    responseLanguage: "match_player_action" as const,
+    claimStatus: "visible_speaker_response_only" as const,
+  };
+  const receipt = baseReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: builtRequest.request,
+    status: "accepted",
+    capabilityId: "dialogue_record",
+    summary: `${speaker.label} dialogue response recorded (${dialogue.outcomeKind}).`,
+    visibleRefs: uniqueStrings(["Player", speaker.ref, ...effect.addresseeRefs]).slice(0, 12),
+    dialogue,
   });
   input.store.insert(receipt);
   return receipt;
@@ -1132,6 +1651,8 @@ function branchEligible(frame: AuthoritativeSceneFrame, checklist: GmActionCheck
 export async function runCleanStage4Execution(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
+  dialogueProvider?: ProviderConfig;
+  generateDialogueRequest?: Stage4DialogueRequestGenerator;
   store?: CleanStage4ReceiptStore;
 }): Promise<CleanStage4ExecutionRunResult> {
   if (!branchEligible(input.frame, input.checklist)) {
@@ -1166,6 +1687,7 @@ export async function runCleanStage4Execution(input: {
       "route_options",
       "route_check",
       "movement",
+      "dialogue_record",
       "time_advance",
       "scene_beat_record",
     ];
@@ -1209,6 +1731,19 @@ export async function runCleanStage4Execution(input: {
         message: "This Stage 4 capability is not implemented in the clean P64 executor.",
       });
       store.insert(receipt);
+      receipts.push(receipt);
+      continue;
+    }
+
+    if (step.intended.kind === "dialogue_record") {
+      const receipt = await executeDialogueRecord({
+        frame: input.frame,
+        checklist: input.checklist,
+        step,
+        provider: input.dialogueProvider,
+        generateDialogueRequest: input.generateDialogueRequest,
+        store,
+      });
       receipts.push(receipt);
       continue;
     }
@@ -1268,6 +1803,7 @@ export async function runCleanStage4Execution(input: {
       visibleRefs: receipt.publicResult.visibleRefs,
       locationChange: receipt.publicResult.locationChange,
       timeAdvance: receipt.publicResult.timeAdvance,
+      dialogue: receipt.publicResult.dialogue,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",

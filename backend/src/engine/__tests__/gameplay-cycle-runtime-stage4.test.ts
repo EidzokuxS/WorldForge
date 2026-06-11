@@ -222,22 +222,28 @@ function checklistForKind(
         ? "time_advance"
         : kind === "scene_beat_record"
           ? "scene_beat_record"
-          : base.steps[0].intended.requiredCapabilityId;
+          : kind === "dialogue_record"
+            ? "dialogue_record"
+            : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
     steps: [{
       ...base.steps[0],
-      targetRefs: kind === "movement" ? ["North Hall"] : ["Market"],
-      evidenceRefs: ["Player", "Market"],
+      targetRefs: kind === "movement" ? ["North Hall"] : kind === "dialogue_record" ? ["Guide"] : ["Market"],
+      evidenceRefs: kind === "dialogue_record" ? ["Player", "Guide", "Market"] : ["Player", "Market"],
       intended: {
         ...base.steps[0].intended,
         kind,
         requiredCapabilityId: capability,
-        stateOrEvidence: kind === "time_advance" || kind === "movement" ? "state" : "evidence",
+        stateOrEvidence: kind === "time_advance" || kind === "movement"
+          ? "state"
+          : kind === "dialogue_record"
+            ? "terminal_player_visible"
+            : "evidence",
       },
       expectedVisibleEffect: {
         summary: `${kind} may be visible only after accepted receipt.`,
-        visibleRefs: ["Player", "Market"],
+        visibleRefs: kind === "dialogue_record" ? ["Player", "Guide"] : ["Player", "Market"],
       },
     }],
   };
@@ -429,6 +435,88 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
     expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("accepts existing-visible actor dialogue as terminal non-mutating evidence", async () => {
+    const longQuote = `The north stairs flooded before dawn. ${Array.from({ length: 70 }, () => "water").join(" ")}`.slice(0, 480);
+    const longSummary = `Guide gives a long visible answer about the north stairs. ${Array.from({ length: 70 }, () => "detail").join(" ")}`.slice(0, 480);
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask Guide what happened here.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support" as const,
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" as const }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "dialogue_record" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("dialogue_record", inputFrame),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: longQuote,
+          summary: longSummary,
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.publicEvents).toEqual([]);
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "dialogue_record",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 0, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "terminal_dialogue_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_quote_visible_dialogue_response",
+      },
+      publicResult: {
+        dialogue: {
+          type: "dialogue_response",
+          speakerLabel: "Guide",
+          quotedSpeech: longQuote,
+          summary: longSummary,
+          claimStatus: "visible_speaker_response_only",
+        },
+      },
+    });
+    expect(result.execution?.receipts[0]?.publicResult.summary).toBe("Guide dialogue response recorded (answer).");
+    expect((result.execution?.receipts[0]?.publicResult.summary ?? "").length).toBeLessThanOrEqual(500);
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+
+    const sideEffects = {
+      traces: (getSqliteConnection().prepare("SELECT COUNT(*) AS count FROM authority_traces WHERE campaign_id = ?").get(CAMPAIGN_ID) as { count: number }).count,
+      ledger: (getSqliteConnection().prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger WHERE campaign_id = ?").get(CAMPAIGN_ID) as { count: number }).count,
+    };
+    expect(sideEffects).toEqual({ traces: 0, ledger: 0 });
   });
 
   it("accepts scene-beat receipts as non-mutating visible acknowledgement", async () => {

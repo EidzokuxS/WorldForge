@@ -2788,4 +2788,53 @@ Session: `gm-v1-consequenc-slice`.
     - Live settlement/narration proof: accepted Stage 4 evidence is exactly elapsed-time receipt evidence with `doesNotProve` including no-change/offscreen/NPC/world-fact limits; narration included accepted visible SceneFrame facts plus `5 minute(s) pass` and did not infer no-change.
     - Artifacts: `output/clean-runtime-p64-nonmovement-live-20260606161226/*`.
     - Backend listener check after harness: port `3229` listener count was 0.
-  - Status: diagnostic slice complete for P64, pending commit/push/reindex. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+  - Status: diagnostic slice complete for P64 and committed/pushed as `7c8f787f Add clean non-movement Stage 4 receipts`; `npx gitnexus analyze --embeddings` completed after commit. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P65 clean gameplay runtime Primitive 11 Dialogue / Support Actor receipts:
+  - Status:
+    - [x] Identify the smallest complete dialogue/support-actor primitive needed after P64.
+    - [x] Prepare one Oracle/GPT context bundle with canonical Stage 4 target, P60-P64 clean runtime, current SceneFrame actor visibility data, old v2 support/dialogue files only as negative/forensic evidence, and current live-proof artifacts.
+    - [x] Record Oracle question, answer, accepted decision, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the clean dialogue/support-actor primitive approved by Oracle.
+    - [x] Add focused contract tests for checklist compilation, request/receipt schemas, backend validation/apply/fail behavior, settlement/narrator evidence mapping, and no old-runtime leakage.
+    - [x] Verify composition through one-at-a-time live `/api/chat/action` on a fresh zero-turn clone with at least one dialogue action chosen after inspecting actual current state.
+  - Boundary draft:
+    - Owner: extend clean Stage 4 under `backend/src/engine/gameplay-cycle-runtime/`; do not import or wrap `gameplay-cycle-v2/runtime-executor.ts`, `receipt-ledger.ts`, `db-handlers.ts`, old root tool executor, old tool schemas, or old dialogue/support actor receipt semantics.
+    - Candidate scope: existing-visible actor dialogue first; support actor creation only if Oracle says dialogue playability requires deterministic backend materialization for ordinary visible local roles.
+    - Input: accepted `SceneFrame + GM Read + Judge/Uncertainty + GM Action Checklist`; no model-authored executable world deltas.
+    - Output: accepted/skipped/failed clean receipts with exact evidence authority. A dialogue receipt may authorize only the concrete visible response/claim it records; support actor creation may authorize only the materialized visible actor identity/role/location if backend actually persists it.
+    - Mutation authority: existing-visible dialogue is evidence-only unless a later approved primitive introduces durable NPC memory/state. Support actor creation, if included, must be a backend-owned mutation with one guarded transaction and materialized refs available only after acceptance.
+    - Settlement/narrator direction: accepted dialogue/support receipts become exact settled evidence; failed/skipped receipts remain audit-only. Narrator cannot invent NPC knowledge, route truth, item state, absence, attitude, or future promise beyond the accepted receipt payload.
+    - Failure behavior: one deterministic/backend-owned attempt per checklist step for this slice; no restore/replay; unsupported or under-grounded dialogue/support creation becomes skipped/failed receipt and cannot become narrator truth.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p65-dialogue`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Extended Pro`.
+    - Bundle: one bundled text attachment, 22 files, usage `inputTokens=132631`, `outputTokens=5357`.
+    - Question artifact: `output/oracle/p65-clean-dialogue-question.md`.
+    - Answer artifact: `output/oracle/p65-clean-dialogue-answer.md`.
+    - Delivery verification: session meta had all 22 intended files in `options.file`, `promptSubmitted=true`, `browserBundleFiles=true`, `browserBundleFormat="text"`, and verified `Extended Pro`.
+    - Accepted decision: MODIFY -> GO. P65 is existing-visible actor dialogue only; defer `support_actor_create` to P66.
+    - Accepted Stage 4 direction: add the first narrow model-authored Stage 4 request path only for `dialogue_record`; backend validates and accepts/fails it, with no world deltas.
+    - Accepted evidence direction: accepted dialogue is a non-mutating terminal evidence receipt. Settlement/narrator may quote the visible response, but must not promote the speaker's claim into truth, world fact, NPC knowledge, movement, item state, absence, relationship, route truth, or future promise.
+    - Rejected alternatives: using old v2 `dialogue.record.v2`/`support_actor.create.v2`, mutating NPC memory/state in P65, creating unseen support actors in this slice, and keeping broad old tool schemas as a compatibility layer.
+  - Implementation review:
+    - Extended clean contracts with `visible_actor_dialogue` GM Read classification, `dialogue_record` Stage 4 request/effect/receipt schemas, `terminal_dialogue_receipt` evidence authority, and `dialogue_response` settled claim kind.
+    - Updated SceneFrame capabilities to advertise `dialogue_record` while keeping support actor creation unadvertised.
+    - Updated GM Read validation so visible dialogue requires exactly one already-visible non-player SceneFrame actor target; unseen roles remain unsupported until the support-actor primitive.
+    - Updated Judge/Uncertainty so admitted visible dialogue must go through backend action planning, not roll/oracle/no-op.
+    - Updated deterministic checklist compilation to emit one `dialogue_record` step only for accepted visible actor dialogue.
+    - Implemented clean Stage 4 dialogue execution with one model-authored `dialogue_record` effect candidate plus one repair attempt, backend validation against SceneFrame/checklist scope, non-mutating receipt persistence, and no public `state_update`.
+    - Extended settlement and narration so accepted dialogue becomes exact `dialogue_response` evidence with quote-only authority and explicit `doesNotProve` limits.
+    - Live defect caught: first P65 run `output/clean-runtime-p65-dialogue-live-20260611114908/*` restored pre-turn because the receipt summary tried to carry the full generated quote/summary and exceeded the 500-char contract. Fixed ownership by making receipt `publicResult.summary` a short backend summary and keeping full response content only in `publicResult.dialogue`; added a regression test with long quote/summary.
+  - Verification:
+    - GitNexus impact before edits was LOW for `buildAuthoritativeSceneFrame`, `buildDeterministicGmActionChecklist`, `validateGmActionChecklistCandidate`, `runCleanStage4Execution`, `buildCleanSettledTurnPacket`, `renderCleanNarrationFallback`, `runCleanGmRead`, `validateGmReadCandidate`, and `runCleanJudgeUncertainty`; `executeDialogueRecord` was new/unindexed, so the later repair rechecked indexed boundary `runCleanStage4Execution` as LOW.
+    - Executed `npm --prefix backend run typecheck`: passed.
+    - Executed `npm --prefix backend test -- gameplay-cycle-runtime-stage4.test.ts gameplay-cycle-runtime-contracts.test.ts gameplay-cycle-runtime-settlement.test.ts gameplay-cycle-runtime-narration.test.ts chat.test.ts --bail=1`: 222 tests passed.
+    - Live `/api/chat/action` proof after fix: fresh zero-turn clone `p65-dialogue-51bf9bc4` from `30e161da-db4b-4d8c-ab93-154fab7aa03f`; precheck SceneFrame visible actors were `Sigil Boss Torvin Kask` and `Litha Corsen`; action chosen after precheck was `I ask Sigil Boss Torvin Kask, "What changed in Lowwater Bazaar today?" and I do nothing else.`
+    - Live SSE order: `scene-frame`, `gm-read`, `judge-uncertainty`, `gm-action-checklist`, `stage4-execution`, `settled-turn-packet`, `narrative`, `finalizing_turn`, `done`; no `state_update`.
+    - Live DB proof: one clean turn record, one accepted `dialogue_record` Stage 4 receipt, `mutation_applied=0`, authority `terminal_dialogue_receipt`, mutation authority `none`, visible result authority `may_quote_visible_dialogue_response`; old v2/saga/narrator/oracle/simulation stores stayed 0; `authority_traces` and `turn_clock_ledger` stayed 0.
+    - Live settlement/narration proof: accepted evidence includes one `dialogue_response` item with speaker quote and limits rejecting truth-of-claim/durable-world-fact/NPC-private-knowledge/etc.; narration matched persisted `terminalProjection.narrativeText` and named/quoted only the accepted visible speaker response.
+    - Artifacts: `output/clean-runtime-p65-dialogue-live-20260611115158/*`.
+    - Backend listener check after harness: port `3230` listener count was 0.
+  - Status: diagnostic slice complete for P65. This adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

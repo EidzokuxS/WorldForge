@@ -131,6 +131,26 @@ function routeOptionsView(): CleanNarratorView {
   });
 }
 
+function dialogueView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "terminal_dialogue_receipt",
+      claimKinds: ["dialogue_response"],
+      text: 'Guide says: "The north stairs flooded before dawn."',
+      backendFacts: [
+        { factRef: "e1.f1", text: "Speaker: Guide.", exact: true },
+        { factRef: "e1.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+        { factRef: "e1.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+      ],
+      limits: {
+        proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+        doesNotProve: ["truth of speaker claim", "durable world fact", "NPC private knowledge beyond the utterance"],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -210,6 +230,7 @@ function gmRead(inputFrame = frame()): GmRead {
       playerIntent: "Observe the scene.",
       method: null,
       targetRefs: ["Market"],
+      interactionKind: "current_scene_observation",
     },
     uncertainty: { present: false, question: null, basis: null },
     interpretationRationale: "Observation of current visible truth.",
@@ -352,6 +373,30 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(text).toBe("Route option: North Hall (connected, 1 minute(s)).");
     expect(text).not.toMatch(/\b(move|arrive|travel to|you go)\b/iu);
+  });
+
+  it("renders dialogue response evidence without promoting the quote to world truth", () => {
+    const text = renderCleanNarrationFallback(dialogueView());
+
+    expect(text).toBe('Guide says: "The north stairs flooded before dawn."');
+    const promotedTruth = validateCleanNarrationCandidate({
+      view: dialogueView(),
+      candidate: {
+        ...movementCandidate("The north stairs flooded before dawn."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "The north stairs flooded before dawn.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2"],
+          claimKinds: ["visible_fact"],
+          auditStepIds: [],
+        }],
+        finalText: "The north stairs flooded before dawn.",
+      },
+    });
+    expect(promotedTruth.status).toBe("rejected");
+    if (promotedTruth.status !== "rejected") throw new Error("expected rejected");
+    expect(promotedTruth.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

@@ -195,6 +195,7 @@ function movementReceipt(inputFrame = frame(), inputChecklist = checklist(inputF
       timeAdvance: null,
       visibleObservation: null,
       sceneBeat: null,
+      dialogue: null,
     },
     privateResult: {
       playerId: "player-1",
@@ -232,6 +233,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         visibleRefs: receipt.publicResult.visibleRefs,
         locationChange: receipt.publicResult.locationChange,
         timeAdvance: receipt.publicResult.timeAdvance,
+        dialogue: receipt.publicResult.dialogue,
       })),
   });
 }
@@ -303,6 +305,7 @@ describe("clean Stage 5 settlement contracts", () => {
         timeAdvance: null,
         visibleObservation: null,
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: "player-1",
@@ -324,6 +327,76 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(route?.claimKinds).toEqual(["route_status"]);
     expect(route?.limits.doesNotProve).toContain("movement");
     expect(route?.limits.doesNotProve).toContain("current-scene change");
+  });
+
+  it("settles accepted dialogue as speaker response without promoting quote to world fact", () => {
+    const inputFrame = frame({
+      playerAction: "I ask Guide what happened.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const dialogueReceipt = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      receiptId: "stage4-receipt-dialogue-1",
+      requestId: "stage4-request-dialogue-1",
+      capabilityId: "dialogue_record",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "terminal_dialogue_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_quote_visible_dialogue_response",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Guide dialogue response (answer): Guide says the north stairs flooded before dawn. Quote: The north stairs flooded before dawn.",
+        visibleRefs: ["Player", "Guide"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: {
+          type: "dialogue_response",
+          authorityKind: "existing_visible_actor",
+          speakerLabel: "Guide",
+          addresseeLabels: ["Mira Voss"],
+          outcomeKind: "answer",
+          quotedSpeech: "The north stairs flooded before dawn.",
+          summary: "Guide says the north stairs flooded before dawn.",
+          responseLanguage: "match_player_action",
+          claimStatus: "visible_speaker_response_only",
+        },
+      },
+      privateResult: {
+        playerId: null,
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+    });
+
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([dialogueReceipt], inputFrame),
+    });
+
+    const dialogue = packet.acceptedEvidence.find((entry) => entry.authority === "terminal_dialogue_receipt");
+    expect(dialogue?.claimKinds).toEqual(["dialogue_response"]);
+    expect(dialogue?.backendFacts[1]?.text).toBe('Guide says: "The north stairs flooded before dawn.".');
+    expect(dialogue?.limits.doesNotProve).toContain("truth of speaker claim");
+    expect(dialogue?.limits.doesNotProve).toContain("durable world fact");
   });
 
   it("settles P64 non-movement receipts into exact accepted evidence authorities", () => {
@@ -374,6 +447,7 @@ describe("clean Stage 5 settlement contracts", () => {
         },
         visibleObservation: null,
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: "player-1",
@@ -415,6 +489,7 @@ describe("clean Stage 5 settlement contracts", () => {
           movementOptions: ["North Hall"],
         },
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: "player-1",
@@ -452,6 +527,7 @@ describe("clean Stage 5 settlement contracts", () => {
         timeAdvance: null,
         visibleObservation: null,
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: "player-1",
@@ -518,6 +594,7 @@ describe("clean Stage 5 settlement contracts", () => {
         timeAdvance: null,
         visibleObservation: null,
         sceneBeat: null,
+        dialogue: null,
       },
       privateResult: {
         playerId: null,

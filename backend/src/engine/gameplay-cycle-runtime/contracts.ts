@@ -221,6 +221,15 @@ export const gmReadActionInterpretationSchema = z.object({
   playerIntent: shortText,
   method: z.string().trim().max(500).nullable(),
   targetRefs: z.array(modelSafeRef).max(16),
+  interactionKind: z.enum([
+    "current_scene_observation",
+    "route_inquiry",
+    "movement_intent",
+    "time_passage",
+    "scene_local_beat",
+    "visible_actor_dialogue",
+    "unsupported_or_unclear",
+  ]).default("unsupported_or_unclear"),
 }).strict();
 
 export const gmReadUncertaintySchema = z.object({
@@ -564,9 +573,56 @@ export const cleanStage4CapabilityIdSchema = z.enum([
   "route_options",
   "route_check",
   "movement",
+  "dialogue_record",
   "time_advance",
   "scene_beat_record",
 ]);
+
+export const cleanStage4DialogueOutcomeKindSchema = z.enum([
+  "answer",
+  "refusal",
+  "warning",
+  "redirect",
+  "silence",
+  "other",
+]);
+
+export const cleanStage4DialogueRequestEffectSchema = z.object({
+  kind: z.literal("dialogue_record"),
+  authorityKind: z.literal("existing_visible_actor"),
+  speakerRef: modelSafeRef,
+  addresseeRefs: z.array(modelSafeRef).min(1).max(8),
+  outcomeKind: cleanStage4DialogueOutcomeKindSchema,
+  response: z.object({
+    kind: z.enum(["speech", "silence"]),
+    quotedSpeech: z.string().trim().min(1).max(700).nullable(),
+    summary: shortText,
+  }).strict(),
+  languageBasis: z.object({
+    responseLanguage: z.literal("match_player_action"),
+    source: z.literal("turn_language_profile"),
+  }).strict(),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  stateEffects: z.object({
+    appliesState: z.literal(false),
+  }).strict(),
+}).strict().superRefine((effect, ctx) => {
+  if (effect.outcomeKind === "silence") {
+    if (effect.response.kind !== "silence") {
+      ctx.addIssue({ code: "custom", path: ["response", "kind"], message: "Silence dialogue outcomes must use response.kind=silence." });
+    }
+    if (effect.response.quotedSpeech !== null) {
+      ctx.addIssue({ code: "custom", path: ["response", "quotedSpeech"], message: "Silence dialogue outcomes must not include quoted speech." });
+    }
+    return;
+  }
+  if (effect.response.kind !== "speech") {
+    ctx.addIssue({ code: "custom", path: ["response", "kind"], message: "Non-silence dialogue outcomes must use response.kind=speech." });
+  }
+  if (effect.response.quotedSpeech === null) {
+    ctx.addIssue({ code: "custom", path: ["response", "quotedSpeech"], message: "Non-silence dialogue outcomes require quoted speech." });
+  }
+});
 
 export const cleanStage4RequestSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-request.v1"),
@@ -589,8 +645,8 @@ export const cleanStage4RequestSchema = z.object({
     worldVersion: z.number().int().nonnegative(),
     worldTimeMinutes: z.number().int().nonnegative(),
   }).strict(),
-  author: z.literal("backend_from_checklist"),
-  modelAuthored: z.literal(false),
+  author: z.enum(["backend_from_checklist", "model_from_stage4_dialogue_request"]),
+  modelAuthored: z.boolean(),
   capabilityId: cleanStage4CapabilityIdSchema,
   effect: z.discriminatedUnion("kind", [
     z.object({
@@ -635,8 +691,22 @@ export const cleanStage4RequestSchema = z.object({
       beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
       evidenceRefs: z.array(modelSafeRef).min(1).max(12),
     }).strict(),
+    cleanStage4DialogueRequestEffectSchema,
   ]),
-}).strict();
+}).strict().superRefine((request, ctx) => {
+  if (request.effect.kind !== request.capabilityId) {
+    ctx.addIssue({ code: "custom", path: ["capabilityId"], message: "Stage 4 request capabilityId must match effect kind." });
+  }
+  if (request.effect.kind === "dialogue_record") {
+    if (request.author !== "model_from_stage4_dialogue_request" || request.modelAuthored !== true) {
+      ctx.addIssue({ code: "custom", path: ["author"], message: "P65 dialogue requests must be model-authored Stage 4 requests." });
+    }
+    return;
+  }
+  if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
+    ctx.addIssue({ code: "custom", path: ["author"], message: "Only dialogue_record may be model-authored in P65." });
+  }
+});
 
 export const cleanStage4ReceiptSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-receipt.v1"),
@@ -674,6 +744,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
+      "terminal_dialogue_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -690,6 +761,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "may_claim_player_location_change",
       "may_claim_elapsed_time",
       "may_acknowledge_scene_beat",
+      "may_quote_visible_dialogue_response",
       "failure_only",
       "none",
     ]),
@@ -734,6 +806,17 @@ export const cleanStage4ReceiptSchema = z.object({
       beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
       summary: shortText,
       targetLabels: z.array(shortText).max(8),
+    }).strict().nullable(),
+    dialogue: z.object({
+      type: z.literal("dialogue_response"),
+      authorityKind: z.literal("existing_visible_actor"),
+      speakerLabel: shortText,
+      addresseeLabels: z.array(shortText).min(1).max(8),
+      outcomeKind: cleanStage4DialogueOutcomeKindSchema,
+      quotedSpeech: z.string().trim().min(1).max(700).nullable(),
+      summary: shortText,
+      responseLanguage: z.literal("match_player_action"),
+      claimStatus: z.literal("visible_speaker_response_only"),
     }).strict().nullable(),
   }).strict(),
   privateResult: z.object({
@@ -808,6 +891,30 @@ export const cleanStage4ReceiptSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["publicResult", "timeAdvance"], message: "Accepted time advance requires public elapsed-time result." });
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "dialogue_record") {
+    if (receipt.result.mutationApplied) {
+      ctx.addIssue({ code: "custom", path: ["result", "mutationApplied"], message: "Accepted dialogue must not mutate." });
+    }
+    if (
+      receipt.result.worldVersion !== receipt.base.worldVersion
+      || receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes
+      || receipt.result.tick !== receipt.base.tick
+    ) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted dialogue must not advance world state or tick." });
+    }
+    if (receipt.authority.evidenceAuthority !== "terminal_dialogue_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted dialogue must use terminal dialogue evidence authority." });
+    }
+    if (receipt.authority.mutationAuthority !== "none") {
+      ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Accepted dialogue mutation authority must be none." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_quote_visible_dialogue_response") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted dialogue must authorize quoting visible response only." });
+    }
+    if (receipt.publicResult.dialogue === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "dialogue"], message: "Accepted dialogue requires public dialogue result." });
+    }
+  }
   for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
     if (receipt.capabilityId !== capabilityId) continue;
     if (receipt.result.mutationApplied) {
@@ -833,7 +940,8 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/route_options/g, "")
     .replace(/time_advance/g, "")
     .replace(/visible_observation/g, "")
-    .replace(/scene_beat/g, "");
+    .replace(/scene_beat/g, "")
+    .replace(/dialogue_response/g, "");
   if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
     ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
   }
@@ -866,6 +974,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
+      "terminal_dialogue_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -883,6 +992,17 @@ export const cleanStage4ExecutionResultSchema = z.object({
       elapsedMinutes: z.number().int().min(1).max(60),
       reasonKind: z.enum(["brief_local_action", "wait", "short_rest"]),
     }).strict().nullable(),
+    dialogue: z.object({
+      type: z.literal("dialogue_response"),
+      authorityKind: z.literal("existing_visible_actor"),
+      speakerLabel: shortText,
+      addresseeLabels: z.array(shortText).min(1).max(8),
+      outcomeKind: cleanStage4DialogueOutcomeKindSchema,
+      quotedSpeech: z.string().trim().min(1).max(700).nullable(),
+      summary: shortText,
+      responseLanguage: z.literal("match_player_action"),
+      claimStatus: z.literal("visible_speaker_response_only"),
+    }).strict().nullable(),
   }).strict()).max(6),
 }).strict();
 
@@ -895,6 +1015,7 @@ const cleanSettledClaimKindSchema = z.enum([
   "movement_option",
   "route_status",
   "scene_beat",
+  "dialogue_response",
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
@@ -906,6 +1027,7 @@ const cleanSettledEvidenceAuthoritySchema = z.enum([
   "route_options_receipt",
   "route_check_receipt",
   "scene_beat_receipt",
+  "terminal_dialogue_receipt",
   "terminal_mutation_receipt",
   "oracle_visible_outcome",
 ]);
@@ -943,6 +1065,7 @@ export const cleanSettledStepAuditSchema = z.object({
     "route_options_receipt",
     "route_check_receipt",
     "scene_beat_receipt",
+    "terminal_dialogue_receipt",
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",

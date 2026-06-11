@@ -28,6 +28,7 @@ import {
 import {
   runCleanStage4Execution,
   type CleanStage4ExecutionRunResult,
+  type Stage4DialogueRequestGenerator,
 } from "./stage4-execution.js";
 import {
   assertFrozenApiProjection,
@@ -87,6 +88,7 @@ export interface CleanGameplayRuntimeOptions {
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
   oracleAdapter?: OracleAdapter;
+  stage4DialogueRequestGenerator?: Stage4DialogueRequestGenerator;
 }
 
 export interface CleanGameplayRuntimeCoreOptions {
@@ -97,9 +99,12 @@ export interface CleanGameplayRuntimeCoreOptions {
   gmReadCandidateGenerator?: GmReadCandidateGenerator;
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
   oracleAdapter?: OracleAdapter;
+  stage4DialogueRequestGenerator?: Stage4DialogueRequestGenerator;
   runStage4Execution?: (input: {
     frame: AuthoritativeSceneFrame;
     checklist: NonNullable<GmActionChecklistRunResult["checklist"]>;
+    dialogueProvider?: ProviderConfig;
+    generateDialogueRequest?: Stage4DialogueRequestGenerator;
   }) => Promise<CleanStage4ExecutionRunResult>;
   commitTurn?: (
     input: Omit<CommitCleanPlayerFacingTurnInput, "chat" | "store">,
@@ -360,6 +365,8 @@ export async function* processCleanGameplayTurnFromInput(
         stage4Execution = await (options.runStage4Execution ?? runCleanStage4Execution)({
           frame,
           checklist: actionChecklist.checklist,
+          dialogueProvider: options.storytellerProvider ?? options.judgeProvider,
+          generateDialogueRequest: options.stage4DialogueRequestGenerator,
         });
         for (const event of stage4Execution.publicEvents) {
           yield event;
@@ -445,5 +452,6 @@ export async function* processCleanGameplayTurn(
     gmReadCandidateGenerator: options.gmReadCandidateGenerator,
     judgeUncertaintyCandidateGenerator: options.judgeUncertaintyCandidateGenerator,
     oracleAdapter: options.oracleAdapter,
+    stage4DialogueRequestGenerator: options.stage4DialogueRequestGenerator,
   });
 }

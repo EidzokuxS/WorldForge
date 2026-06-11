@@ -569,7 +569,11 @@ function stepFor(input: {
     evidenceRefs: uniqueStrings(input.evidenceRefs),
     intended: {
       kind: input.kind,
-      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance" ? "state" : "evidence",
+      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance"
+        ? "state"
+        : input.kind === "dialogue_record"
+          ? "terminal_player_visible"
+          : "evidence",
       requiredCapabilityId: capability,
       summary: `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
     },
@@ -622,6 +626,16 @@ export function buildDeterministicGmActionChecklist(input: {
       option.ref.toLowerCase() === targetRef.toLowerCase()
     ))
     .find((option) => option && citable.has(option.ref.toLowerCase()) && admitted.has(option.ref.toLowerCase()));
+  const dialogueSpeaker = input.gmRead.actionInterpretation.interactionKind === "visible_actor_dialogue"
+    ? input.gmRead.actionInterpretation.targetRefs
+      .map((targetRef) => input.frame.actors.find((actor) =>
+        actor.role !== "player"
+        && actor.ref.toLowerCase() === targetRef.toLowerCase()
+        && citable.has(actor.ref.toLowerCase())
+        && admitted.has(actor.ref.toLowerCase())
+      ))
+      .find((actor) => Boolean(actor)) ?? null
+    : null;
   const actionText = playerActionText(input);
 
   if (movementTarget && allowed.has("movement")) {
@@ -665,6 +679,14 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
+    }));
+  } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
+    steps.push(stepFor({
+      index: 1,
+      kind: "dialogue_record",
+      actorRef,
+      targetRefs: [dialogueSpeaker.ref],
+      evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
     }));
   } else if (allowed.has("scene_beat_record") && sceneRef) {
     steps.push(stepFor({
