@@ -184,6 +184,10 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...read.evidenceRefs,
     ...read.actionInterpretation.targetRefs,
     ...(read.actionInterpretation.supportActorNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.localConditionNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.localConditionNeed?.targetRef
+      ? [read.actionInterpretation.localConditionNeed.targetRef]
+      : []),
   ]);
   const issues: GmReadValidationIssue[] = [];
 
@@ -230,6 +234,48 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const issues: GmReadValidationIssue[] = [];
   const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
   const visibleActorRefs = new Set(frame.actors.map((actor) => actor.ref.toLowerCase()));
+  const inventoryRefs = new Set(frame.inventory.map((item) => item.ref.toLowerCase()));
+  const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
+
+  if (localConditionNeed) {
+    const targetRef = localConditionNeed.targetRef?.toLowerCase() ?? null;
+    if (localConditionNeed.targetKind === "inventory_item_readiness") {
+      if (!targetRef || !inventoryRefs.has(targetRef)) {
+        issues.push({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localConditionNeed.targetRef",
+          message: "inventory_item_readiness local conditions require one visible SceneFrame.inventory ref.",
+        });
+      }
+    } else if (localConditionNeed.targetKind === "visible_actor_distance") {
+      if (!targetRef || !visibleActorRefs.has(targetRef)) {
+        issues.push({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localConditionNeed.targetRef",
+          message: "visible_actor_distance local conditions require one already-visible non-player actor ref.",
+        });
+      }
+    } else if (localConditionNeed.targetKind === "current_scene") {
+      const sceneRefs = new Set([
+        frame.scene.currentScene.ref.toLowerCase(),
+        frame.scene.currentLocation.ref.toLowerCase(),
+      ]);
+      if (targetRef && !sceneRefs.has(targetRef)) {
+        issues.push({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localConditionNeed.targetRef",
+          message: "current_scene local conditions may target only the current scene/location ref or null.",
+        });
+      }
+    }
+    if (localConditionNeed.conditionKey === "gripping_held_item" && localConditionNeed.targetKind !== "inventory_item_readiness") {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed.targetKind",
+        message: "gripping_held_item requires targetKind=inventory_item_readiness.",
+      });
+    }
+  }
 
   if (read.actionInterpretation.interactionKind === "visible_actor_dialogue") {
     const speakerTargets = frame.actors.filter((actor) =>
@@ -259,12 +305,37 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     return issues;
   }
 
+  if (read.actionInterpretation.interactionKind === "player_local_condition") {
+    if (read.actionInterpretation.localConditionNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "player_local_condition requires localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "player_local_condition must not include supportActorNeed.",
+      });
+    }
+    return issues;
+  }
+
   if (read.actionInterpretation.interactionKind === "ordinary_support_actor_needed") {
     if (read.actionInterpretation.supportActorNeed == null) {
       issues.push({
         code: "interaction_invalid",
         path: "actionInterpretation.supportActorNeed",
         message: "ordinary_support_actor_needed requires supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "ordinary_support_actor_needed must not include localConditionNeed in P68.",
       });
     }
     const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
@@ -283,6 +354,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       code: "interaction_invalid",
       path: "actionInterpretation.supportActorNeed",
       message: "supportActorNeed is allowed only for ordinary_support_actor_needed.",
+    });
+  }
+  if (read.actionInterpretation.localConditionNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.localConditionNeed",
+      message: "localConditionNeed is allowed only for player_local_condition or visible_actor_dialogue compound actions.",
     });
   }
   return issues;
@@ -353,6 +431,7 @@ export function buildFallbackClarificationGmRead(input: {
       targetRefs: [],
       interactionKind: "unsupported_or_unclear",
       supportActorNeed: null,
+      localConditionNeed: null,
     },
     uncertainty: {
       present: false,
@@ -416,13 +495,18 @@ export function buildGmReadSystemPrompt(): string {
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
-    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, unsupported_or_unclear.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, player_local_condition, unsupported_or_unclear.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
+    "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
     "Use ordinary_support_actor_needed only when the player needs one ordinary local current-scene role absent from SceneFrame.actors, with roleKind in the schema and supportActorNeed filled. Do not target an invented actor ref.",
     "ordinary_support_actor_needed may cover ordinary local roles like vendor, guard, clerk, dockhand, guide, porter, witness, helper, laborer, courier, attendant, bystander, or crowd voice. It does not authorize dialogue content.",
     "Do not use ordinary_support_actor_needed for named people, key NPCs, faction leaders, secret contacts, remote actors, persistent actors, hidden actors, family members, campaign-critical roles, or broad world creation; use clarification or unsupported_or_unclear instead.",
+    "Use player_local_condition only for uncontested first-person current-scene Player posture/readiness such as kneeling, crouched, prone, taking_cover as posture only, keeping_distance, stepped_back, braced, hands_visible, hands_raised, or gripping_held_item for an already-inventory item.",
+    "localConditionNeed does not authorize HP, damage, healing, injuries, combat status, NPC conditions, stealth success, cover effectiveness, movement, item custody/location/equip changes, tags, discovery, world facts, relationship, absence, no-change, or dialogue content.",
+    "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory. For visible_actor_distance, targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
     "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
+    "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",
     "Keep arrays short and omit all fields not defined by the schema.",

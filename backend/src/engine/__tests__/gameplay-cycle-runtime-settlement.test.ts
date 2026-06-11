@@ -210,6 +210,67 @@ function movementReceipt(inputFrame = frame(), inputChecklist = checklist(inputF
   });
 }
 
+function playerLocalConditionReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    ...movementReceipt(inputFrame, inputChecklist),
+    receiptId: "stage4-receipt-condition-1",
+    requestId: "stage4-request-condition-1",
+    capabilityId: "condition_set",
+    result: { ...inputFrame.base, worldVersion: inputFrame.base.worldVersion + 1, mutationApplied: true },
+    authority: {
+      evidenceAuthority: "player_local_condition_receipt",
+      mutationAuthority: "player_local_condition_state",
+      visibleResultAuthority: "may_claim_player_local_condition",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: true,
+    },
+    publicResult: {
+      summary: "Player is kneeling in Market.",
+      visibleRefs: ["Player", "Market"],
+      routeStatus: null,
+      locationChange: null,
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: {
+        type: "player_local_condition",
+        resultKind: "applied",
+        actorLabel: "Player",
+        operation: "apply",
+        conditionKey: "kneeling",
+        conditionLabel: "kneeling",
+        conditionScope: "current_scene",
+        anchorSceneLabel: "Market",
+        anchorLocationLabel: "Market",
+        targetKind: "current_scene",
+        targetLabel: "Market",
+        claimStatus: "visible_player_local_condition_only",
+      },
+    },
+    privateResult: {
+      playerId: "player-1",
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: "condition-1",
+      conditionOperation: "applied",
+      previousConditionKeys: [],
+      nextConditionKeys: ["kneeling"],
+      anchorLocationId: "loc-market",
+      anchorSceneLocationId: "loc-market",
+      edgeIds: [],
+      authorityTraceId: "stage4-authority-condition",
+      clockReceiptId: null,
+      stateDeltaRefs: ["player:player-1:condition:kneeling:applied"],
+    },
+    failure: null,
+  });
+}
+
 function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStage4ExecutionResult {
   return cleanStage4ExecutionResultSchema.parse({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -235,6 +296,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         timeAdvance: receipt.publicResult.timeAdvance,
         dialogue: receipt.publicResult.dialogue,
         supportActor: receipt.publicResult.supportActor,
+        condition: receipt.publicResult.condition,
       })),
   });
 }
@@ -398,6 +460,36 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(dialogue?.backendFacts[1]?.text).toBe('Guide says: "The north stairs flooded before dawn.".');
     expect(dialogue?.limits.doesNotProve).toContain("truth of speaker claim");
     expect(dialogue?.limits.doesNotProve).toContain("durable world fact");
+  });
+
+  it("settles Player local condition as posture/readiness evidence only", () => {
+    const inputFrame = frame({
+      playerAction: "I kneel near the stall.",
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = playerLocalConditionReceipt(inputFrame, inputChecklist);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    const condition = packet.acceptedEvidence.find((entry) => entry.authority === "player_local_condition_receipt");
+    expect(condition?.claimKinds).toEqual(["player_local_condition"]);
+    expect(condition?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Player is kneeling.",
+      "Condition key: kneeling.",
+      "Current scene anchor: Market.",
+      "Condition result: applied.",
+      "Condition target: Market.",
+    ]);
+    expect(condition?.limits.doesNotProve).toContain("HP change");
+    expect(condition?.limits.doesNotProve).toContain("movement");
+    expect(condition?.limits.doesNotProve).toContain("dialogue content");
+    expect(JSON.stringify(view)).not.toContain("condition-1");
+    expect(JSON.stringify(view)).not.toContain("player-1");
   });
 
   it("settles support actor materialization as visible actor presence only", () => {

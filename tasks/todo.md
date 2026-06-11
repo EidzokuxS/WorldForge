@@ -2944,3 +2944,78 @@ Session: `gm-v1-consequenc-slice`.
     - Live narration proof: player-facing narration quotes `Local Vendor` from the accepted dialogue receipt and does not expose backend refs. Fresh post-turn SceneFrame includes `Local Vendor` in actors and citableRefs.
     - Artifacts: `output/clean-runtime-p67-refresh-dialogue-live-20260611134514/*`. Backend listener check after harness: ports `3231` and `3001` had no listeners.
     - GitNexus `detect_changes(scope=all)` before commit: risk `medium`; affected process `RunCleanStage4Execution -> AssertCleanStage4Receipt` through the changed clean Stage 4 execution path. Covered by focused Stage4/contract/settlement/narration tests, route tests, and live P67 proof above.
+
+- P68 clean gameplay runtime Primitive 14 Local Player Condition:
+  - Status:
+    - [x] Read user-attached P66 decision text and confirm current branch keeps P66/P67 split: P66 materialization-only, P67 composition only through refreshed SceneFrame.
+    - [x] Map current clean runtime capability surface after P67.
+    - [x] Prepare and run Oracle/GPT-5.5 Pro review with one bundled text attachment.
+    - [x] Record accepted P68 decision and implementation contract.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement the narrow clean `condition_set` primitive.
+    - [x] Add focused contract tests for schemas, GM Read/Judge/Checklist, Stage 4 DB behavior, settlement/narration limits, SceneFrame visibility, and import fences.
+    - [x] Verify with typecheck, focused tests, route tests, and one live zero-turn `/api/chat/action` proof.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p68-next-primitive`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Pro Extended`.
+    - Bundle: one bundled text attachment, 17 files, usage `inputTokens=140465`, `outputTokens=7349`, `totalTokens=147814`.
+    - Question artifact: `output/oracle/p68-clean-next-primitive-question.md`.
+    - Answer artifact: `output/oracle/p68-clean-next-primitive-answer.md`.
+    - Delivery verification: `C:\Users\robra\.oracle\sessions\wf-clean-p68-next-primitive\meta.json` has `status=completed`, `promptSubmitted=true`, model selection `resolvedLabel=Pro Extended`, transcript at `C:\Users\robra\.oracle\sessions\wf-clean-p68-next-primitive\artifacts\transcript.md`, output log says `Packed 17 files into 1 bundle`, and the answer references the uploaded bundle/P66 boundary.
+    - Accepted decision: MODIFY -> GO.
+  - Accepted P68 scope:
+    - Chosen primitive: `condition_set`.
+    - Implement only current-scene Player local posture/readiness condition authority.
+    - Covered examples: `kneeling`, `crouched`, `prone`, `taking_cover` as posture only, `keeping_distance`, `stepped_back`, `braced`, `hands_visible`, `hands_raised`, and `gripping_held_item` for an already-inventory item readiness condition.
+    - Non-goals: HP, damage, healing, injuries, combat conditions, NPC conditions, stealth success, cover effectiveness, movement/current-scene change, route truth, item custody/location/equip changes, entity tags, POI/location reveal, durable world facts, dialogue, relationships, absence, or no-change.
+  - Ownership contract:
+    - GM Read classifies a bounded `player_local_condition` / `localConditionNeed`; it does not emit Stage 4 payloads.
+    - Judge admits `backend_action_plan_needed` with `backend_receipt_required`; no Oracle is needed for ordinary uncontested posture/readiness.
+    - Checklist emits one backend-owned `condition_set` state step for simple posture actions. Compound posture + dialogue actions must split into separate steps rather than folding posture into `dialogue_record`.
+    - Stage 4 request is backend-authored from accepted checklist, not model-authored.
+  - Runtime contract:
+    - Add a clean current-scene Player local-condition state owner/table, e.g. `clean_gameplay_actor_conditions`, and merge active rows into `SceneFrame.player.visibleStatus.conditions`.
+    - Mutating apply/clear/replace uses one `withSqliteWriteLock` + SQLite transaction, advances `worldVersion` by 1, does not advance tick/time, writes `authority_traces` operation `gameplay-cycle-runtime.player.condition_set.v1`, and persists the clean Stage 4 receipt atomically.
+    - Already-present is an accepted no-op with `mutationApplied=false`, no worldVersion advance, and no authority trace.
+    - Failed/skipped receipts have no accepted evidence and cannot authorize narration claims.
+    - Pre-mutation SceneFrame remains immutable; any later dependent step that needs the updated condition must use a real post-mutation SceneFrame refresh or skip.
+  - Receipt/narration contract:
+    - Receipt authority: `player_local_condition_receipt`.
+    - Mutation authority: `player_local_condition_state` for mutating accepted operations, otherwise `none`.
+    - Visible result authority: `may_claim_player_local_condition`.
+    - Accepted evidence claim kind: `player_local_condition`.
+    - Accepted receipt proves only Player local posture/readiness condition, current-scene anchor, operation result, and optional citable target label.
+    - It explicitly does not prove HP/damage/healing, combat status, cover effectiveness, stealth success, movement, item custody/location/equip state, NPC reaction/condition, dialogue, truth of NPC claims, world fact, relationship/faction status, discovery, hidden facts, absence, or no-change.
+  - Rejected alternatives for P68:
+    - `item_transfer`: broader and riskier custody/equip/location semantics; should come after posture so held-item micro-actions stop being misrouted.
+    - `entity_tag`: needs visible-entity tag taxonomy/reversibility/query semantics.
+    - `minor_poi_create` and `location_reveal`: require local POI/reveal/search/following ownership and movement dependency rules.
+    - `world_fact_record`: high-risk durable truth authority; dialogue still proves response content only.
+    - `quick_action_offer`: UI/projection lane, not core state authority for current manual blockers.
+  - Planned verification:
+    - Schema tests reject old `actor.condition_set.v2`, `condition_set.v2`, `toolId`, `effectBinding`, backend refs, UUIDs, `knowledge:*`, arbitrary labels, non-current-scene anchors, HP/damage/healing/combat/item/movement/route/world-fact/dialogue/NPC/absence payloads.
+    - GM Read/Judge/Checklist tests cover kneel, step back + dialogue split, grip already-held inventory item, reject give-item/mark-wall/poison-HP as non-P68.
+    - Stage 4 tests cover apply, clear, replace, already-present, absent-clear, stale clock/frame, duplicate corruption, rollback, authority trace, no tick/time/clock ledger, and no old v2/saga/narrator/vector/episodic writes.
+    - Settlement/narrator tests allow only accepted posture/readiness narration and forbid cover effectiveness, stealth, HP, movement, item state, NPC reaction, world fact, absence, and no-change.
+    - SceneFrame tests prove fresh post-turn frame exposes the active condition in `player.visibleStatus.conditions`.
+    - Live proof action after inspecting a fresh zero-turn clone: `I kneel in the current scene and do nothing else.`
+  - Implementation evidence:
+    - Added clean SQLite state owner `clean_gameplay_actor_conditions` with migration `0022_clean_gameplay_actor_conditions`, Drizzle schema, clone-table creation, and Phase 95 manifest coverage.
+    - Added `condition_set` capability, backend-owned request effect, `localConditionPlan`, `player_local_condition` dependency binding, clean receipt authority, private result fields, execution visible result, settled claim kind, and narrator prompt/fallback contract.
+    - Stage 4 executor now applies, clears, replaces, and no-ops already-present Player current-scene posture/readiness conditions in one SQLite write-lock transaction. Mutating operations advance worldVersion only, do not advance tick/time, write `gameplay-cycle-runtime.player.condition_set.v1` authority traces, and persist clean receipts atomically. Raw mutation errors are not copied into public failed receipts.
+    - SceneFrame clean wrapper merges active current-scene rows into `player.visibleStatus.conditions` and advertises `condition_set` only after executor/settlement/narrator support exists.
+    - Dependent same-turn dialogue with `player_local_condition` binding requires a real post-condition SceneFrame refresh and skips if the refreshed Player visibleStatus does not reflect the accepted operation.
+    - Added a narrow `/api/chat/action` player-facing SSE adapter for `state_update.data.type="player_local_condition"` so the public event exposes only the sanitized condition projection and strips backend refs/ids.
+  - Executed verification so far:
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend run test -- --run src/routes/__tests__/chat.test.ts` passed: 1 file, 63 tests, including the P68 `player_local_condition` public-SSE projection/privacy regression.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 4 files, 185 tests.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-control-plane-contract.test.ts src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts src/campaign/__tests__/clone.test.ts` passed: 4 files, 31 tests.
+    - Live `/api/chat/action` proof passed on fresh zero-turn clone `p68-condition-c8c99da7` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; artifacts in `output/clean-runtime-p68-condition-live-20260611145250/`.
+    - Live action chosen after SceneFrame inspection: `I kneel in Lowwater Bazaar and keep that posture visible. I do not speak, move, attack, or touch anything.`
+    - Live SSE order included `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> state_update(player_local_condition) -> settled-turn-packet -> narrative -> finalizing_turn -> done`; done reported `worldVersion=1`, `worldTimeMinutes=0`, `mutationApplied=true`, `settled=true`.
+    - Live DB proof: one clean turn record, one accepted `condition_set` Stage 4 receipt, one active `clean_gameplay_actor_conditions` row for `kneeling`, one authority trace `gameplay-cycle-runtime.player.condition_set.v1`, no `turn_clock_ledger`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live settlement/frame proof: accepted evidence includes `player_local_condition_receipt` with `player_local_condition` claim kind and HP/movement/dialogue/no-change limits; fresh post-turn SceneFrame includes `kneeling` in `player.visibleStatus.conditions`.
+    - Backend listener cleanup verified after the harness; ports `3232` and `3001` had no listeners.
+  - Status impact:
+    - Diagnostic primitive evidence only. Final acceptance remains 0% until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

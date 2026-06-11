@@ -221,6 +221,43 @@ function ensureCleanGameplayStage4ReceiptsCloneTable(db: Database.Database): voi
   `);
 }
 
+function ensureCleanGameplayActorConditionsCloneTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS clean_gameplay_actor_conditions (
+      condition_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      actor_type TEXT NOT NULL,
+      player_id TEXT NOT NULL,
+      condition_key TEXT NOT NULL,
+      condition_label TEXT NOT NULL,
+      condition_group TEXT NOT NULL,
+      condition_scope TEXT NOT NULL,
+      anchor_location_id TEXT NOT NULL,
+      anchor_scene_location_id TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_ref TEXT,
+      target_label TEXT,
+      active INTEGER NOT NULL,
+      applied_receipt_id TEXT,
+      cleared_receipt_id TEXT,
+      base_world_version INTEGER NOT NULL,
+      result_world_version INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      CHECK (actor_type = 'player'),
+      CHECK (condition_scope = 'current_scene'),
+      CHECK (active IN (0, 1))
+    );
+    CREATE INDEX IF NOT EXISTS idx_clean_actor_conditions_campaign_player_active
+      ON clean_gameplay_actor_conditions (campaign_id, player_id, active);
+    CREATE INDEX IF NOT EXISTS idx_clean_actor_conditions_campaign_scene_active
+      ON clean_gameplay_actor_conditions (campaign_id, anchor_scene_location_id, active);
+    CREATE UNIQUE INDEX IF NOT EXISTS clean_actor_conditions_active_key_unique
+      ON clean_gameplay_actor_conditions (campaign_id, player_id, condition_key, condition_scope, anchor_scene_location_id)
+      WHERE active = 1;
+  `);
+}
+
 function applySqliteClonePlan(input: {
   dbPath: string;
   plan: CampaignStoreManifestOperationPlan;
@@ -244,6 +281,7 @@ function applySqliteClonePlan(input: {
     ensureGameplayCycleV2PacketCloneTable(db);
     ensureCleanGameplayTurnRecordsCloneTable(db);
     ensureCleanGameplayStage4ReceiptsCloneTable(db);
+    ensureCleanGameplayActorConditionsCloneTable(db);
     const applyPlan = db.transaction(() => {
       for (const { step, tableName } of sqliteSteps) {
         if (!tableExists(db, tableName)) {

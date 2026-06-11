@@ -232,6 +232,26 @@ export const cleanSupportActorRoleKindSchema = z.enum([
   "witness",
 ]);
 
+export const cleanLocalConditionKeySchema = z.enum([
+  "kneeling",
+  "crouched",
+  "prone",
+  "taking_cover",
+  "keeping_distance",
+  "stepped_back",
+  "braced",
+  "hands_visible",
+  "hands_raised",
+  "gripping_held_item",
+]);
+
+export const cleanLocalConditionTargetKindSchema = z.enum([
+  "current_scene",
+  "visible_actor_distance",
+  "visible_scene_anchor",
+  "inventory_item_readiness",
+]);
+
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
   playerIntent: shortText,
@@ -245,6 +265,7 @@ export const gmReadActionInterpretationSchema = z.object({
     "scene_local_beat",
     "visible_actor_dialogue",
     "ordinary_support_actor_needed",
+    "player_local_condition",
     "unsupported_or_unclear",
   ]).default("unsupported_or_unclear"),
   supportActorNeed: z.object({
@@ -256,6 +277,15 @@ export const gmReadActionInterpretationSchema = z.object({
       "dialogue_requested_but_not_yet_recorded",
       "service_requested_but_not_yet_resolved",
     ]),
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  localConditionNeed: z.object({
+    actorRef: z.literal("Player"),
+    operation: z.enum(["apply", "clear"]),
+    conditionKey: cleanLocalConditionKeySchema,
+    requestedPostureText: shortText,
+    targetKind: cleanLocalConditionTargetKindSchema,
+    targetRef: modelSafeRef.nullable(),
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
 }).strict();
@@ -525,7 +555,7 @@ export const gmActionChecklistStateOrEvidenceSchema = z.enum([
   "terminal_player_visible",
 ]);
 
-export const gmActionChecklistDependencyBindingSchema = z.object({
+export const gmActionChecklistMaterializedSpeakerBindingSchema = z.object({
   bindingId: z.literal("materialized_speaker"),
   fromStepId: gmActionChecklistStepIdSchema,
   requiredCapabilityId: z.literal("support_actor_create"),
@@ -534,6 +564,21 @@ export const gmActionChecklistDependencyBindingSchema = z.object({
   resolveIn: z.literal("post_dependency_scene_frame"),
   requiredFramePresence: z.literal("actors_and_citableRefs"),
 }).strict();
+
+export const gmActionChecklistPlayerLocalConditionBindingSchema = z.object({
+  bindingId: z.literal("player_local_condition"),
+  fromStepId: gmActionChecklistStepIdSchema,
+  requiredCapabilityId: z.literal("condition_set"),
+  requiredReceiptAuthority: z.literal("player_local_condition_receipt"),
+  sourcePath: z.literal("publicResult.condition.conditionKey"),
+  resolveIn: z.literal("post_dependency_scene_frame"),
+  requiredFramePresence: z.literal("player_visibleStatus.conditions"),
+}).strict();
+
+export const gmActionChecklistDependencyBindingSchema = z.discriminatedUnion("bindingId", [
+  gmActionChecklistMaterializedSpeakerBindingSchema,
+  gmActionChecklistPlayerLocalConditionBindingSchema,
+]);
 
 export const gmActionChecklistStepSchema = z.object({
   stepId: gmActionChecklistStepIdSchema,
@@ -546,6 +591,16 @@ export const gmActionChecklistStepSchema = z.object({
     stateOrEvidence: gmActionChecklistStateOrEvidenceSchema,
     requiredCapabilityId: gameplayRuntimeCapabilityIdSchema,
     summary: shortText,
+    localConditionPlan: z.object({
+      actorRef: z.literal("Player"),
+      operation: z.enum(["apply", "clear"]),
+      conditionKey: cleanLocalConditionKeySchema,
+      conditionScope: z.literal("current_scene"),
+      anchorRef: modelSafeRef,
+      targetKind: cleanLocalConditionTargetKindSchema,
+      targetRef: modelSafeRef.nullable(),
+      replacementPolicy: z.enum(["replace_same_condition_group", "no_replacement"]),
+    }).strict().nullable().optional(),
   }).strict(),
   disposition: z.object({
     kind: gmActionChecklistDispositionKindSchema,
@@ -614,6 +669,7 @@ export const cleanStage4CapabilityIdSchema = z.enum([
   "movement",
   "dialogue_record",
   "support_actor_create",
+  "condition_set",
   "time_advance",
   "scene_beat_record",
 ]);
@@ -717,6 +773,57 @@ export const cleanStage4SupportActorMaterializationResultSchema = z.object({
   claimStatus: z.literal("visible_support_actor_materialization_only"),
 }).strict();
 
+export const cleanStage4LocalConditionSetEffectSchema = z.object({
+  kind: z.literal("condition_set"),
+  authorityKind: z.literal("current_scene_player_local_condition"),
+  actorRef: z.literal("Player"),
+  conditionScope: z.literal("current_scene"),
+  anchorRef: modelSafeRef,
+  operation: z.enum(["apply", "clear"]),
+  conditionKey: cleanLocalConditionKeySchema,
+  target: z.object({
+    targetKind: cleanLocalConditionTargetKindSchema,
+    targetRef: modelSafeRef.nullable(),
+  }).strict(),
+  replacementPolicy: z.enum(["replace_same_condition_group", "no_replacement"]),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  forbiddenPayloads: z.object({
+    hpDelta: z.literal(false),
+    damage: z.literal(false),
+    healing: z.literal(false),
+    combatModifier: z.literal(false),
+    stealthSuccess: z.literal(false),
+    coverEffectiveness: z.literal(false),
+    itemCustody: z.literal(false),
+    itemLocation: z.literal(false),
+    itemEquipState: z.literal(false),
+    itemMutation: z.literal(false),
+    movement: z.literal(false),
+    routeTruth: z.literal(false),
+    worldFact: z.literal(false),
+    relationship: z.literal(false),
+    dialogueContent: z.literal(false),
+    npcCondition: z.literal(false),
+    privateKnowledge: z.literal(false),
+    absenceOrNoChange: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const cleanStage4PlayerLocalConditionResultSchema = z.object({
+  type: z.literal("player_local_condition"),
+  resultKind: z.enum(["applied", "cleared", "replaced", "already_present"]),
+  actorLabel: z.literal("Player"),
+  operation: z.enum(["apply", "clear"]),
+  conditionKey: cleanLocalConditionKeySchema,
+  conditionLabel: shortText,
+  conditionScope: z.literal("current_scene"),
+  anchorSceneLabel: shortText,
+  anchorLocationLabel: shortText,
+  targetKind: cleanLocalConditionTargetKindSchema,
+  targetLabel: shortText.nullable(),
+  claimStatus: z.literal("visible_player_local_condition_only"),
+}).strict();
+
 export const cleanStage4RequestSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-request.v1"),
   requestId: shortText,
@@ -790,6 +897,7 @@ export const cleanStage4RequestSchema = z.object({
     }).strict(),
     cleanStage4DialogueRequestEffectSchema,
     cleanStage4SupportActorCreateEffectSchema,
+    cleanStage4LocalConditionSetEffectSchema,
   ]),
 }).strict().superRefine((request, ctx) => {
   if (request.effect.kind !== request.capabilityId) {
@@ -850,6 +958,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "scene_beat_receipt",
       "terminal_dialogue_receipt",
       "support_actor_materialization_receipt",
+      "player_local_condition_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -859,6 +968,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "player_location_and_world_clock",
       "world_clock_only",
       "current_scene_support_actor",
+      "player_local_condition_state",
     ]),
     visibleResultAuthority: z.enum([
       "may_describe_visible_snapshot",
@@ -869,6 +979,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "may_acknowledge_scene_beat",
       "may_quote_visible_dialogue_response",
       "may_claim_visible_support_actor_materialized",
+      "may_claim_player_local_condition",
       "failure_only",
       "none",
     ]),
@@ -926,6 +1037,7 @@ export const cleanStage4ReceiptSchema = z.object({
       claimStatus: z.literal("visible_speaker_response_only"),
     }).strict().nullable(),
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
+    condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
   }).strict(),
   privateResult: z.object({
     playerId: shortText.nullable(),
@@ -935,6 +1047,10 @@ export const cleanStage4ReceiptSchema = z.object({
     supportActorOperation: z.enum(["inserted", "reused"]).nullable().optional(),
     anchorLocationId: shortText.nullable().optional(),
     anchorSceneLocationId: shortText.nullable().optional(),
+    conditionId: shortText.nullable().optional(),
+    conditionOperation: z.enum(["applied", "cleared", "replaced", "already_present"]).nullable().optional(),
+    previousConditionKeys: z.array(cleanLocalConditionKeySchema).max(12).optional(),
+    nextConditionKeys: z.array(cleanLocalConditionKeySchema).max(12).optional(),
     edgeIds: z.array(shortText).max(24),
     authorityTraceId: shortText.nullable(),
     clockReceiptId: shortText.nullable(),
@@ -951,6 +1067,9 @@ export const cleanStage4ReceiptSchema = z.object({
       "missing_or_ambiguous_destination",
       "route_disconnected",
       "dependency_not_accepted",
+      "missing_or_ambiguous_condition_target",
+      "condition_not_active",
+      "condition_state_conflict",
       "mutation_apply_failed",
       "receipt_persist_failed",
     ]),
@@ -1058,6 +1177,37 @@ export const cleanStage4ReceiptSchema = z.object({
       }
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "condition_set") {
+    const condition = receipt.publicResult.condition ?? null;
+    if (condition === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "condition"], message: "Accepted condition_set requires public player local condition result." });
+      return;
+    }
+    if (receipt.authority.evidenceAuthority !== "player_local_condition_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted condition_set must use player local condition evidence authority." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_player_local_condition") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted condition_set must authorize player local condition narration." });
+    }
+    if (receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes || receipt.result.tick !== receipt.base.tick) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted condition_set must not advance time or tick." });
+    }
+    if (condition.resultKind === "already_present") {
+      if (receipt.result.mutationApplied || receipt.result.worldVersion !== receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Already-present condition receipt must not mutate or advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "none" || receipt.authority.mayAuthorizeMutation !== false) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Already-present condition receipt must not authorize mutation." });
+      }
+    } else {
+      if (!receipt.result.mutationApplied || receipt.result.worldVersion <= receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Applied/cleared/replaced condition receipt must apply mutation and advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "player_local_condition_state" || receipt.authority.mayAuthorizeMutation !== true) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Mutating condition receipt must own player local condition state." });
+      }
+    }
+  }
   for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
     if (receipt.capabilityId !== capabilityId) continue;
     if (receipt.result.mutationApplied) {
@@ -1085,7 +1235,8 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/visible_observation/g, "")
     .replace(/scene_beat/g, "")
     .replace(/dialogue_response/g, "")
-    .replace(/support_actor_materialization/g, "");
+    .replace(/support_actor_materialization/g, "")
+    .replace(/player_local_condition/g, "");
   if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
     ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
   }
@@ -1130,6 +1281,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
       "scene_beat_receipt",
       "terminal_dialogue_receipt",
       "support_actor_materialization_receipt",
+      "player_local_condition_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -1159,6 +1311,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
       claimStatus: z.literal("visible_speaker_response_only"),
     }).strict().nullable(),
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
+    condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
   }).strict()).max(6),
 }).strict();
 
@@ -1173,6 +1326,7 @@ const cleanSettledClaimKindSchema = z.enum([
   "scene_beat",
   "dialogue_response",
   "support_actor_materialization",
+  "player_local_condition",
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
@@ -1186,6 +1340,7 @@ const cleanSettledEvidenceAuthoritySchema = z.enum([
   "scene_beat_receipt",
   "terminal_dialogue_receipt",
   "support_actor_materialization_receipt",
+  "player_local_condition_receipt",
   "terminal_mutation_receipt",
   "oracle_visible_outcome",
 ]);
@@ -1225,6 +1380,7 @@ export const cleanSettledStepAuditSchema = z.object({
     "scene_beat_receipt",
     "terminal_dialogue_receipt",
     "support_actor_materialization_receipt",
+    "player_local_condition_receipt",
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",

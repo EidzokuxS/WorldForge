@@ -103,6 +103,24 @@ const SUPPORT_ACTOR_DOES_NOT_PROVE = [
   "absence or no-change",
 ];
 
+const PLAYER_LOCAL_CONDITION_DOES_NOT_PROVE = [
+  "HP change",
+  "damage",
+  "healing",
+  "combat modifier",
+  "stealth success",
+  "cover effectiveness",
+  "item custody or equip state",
+  "movement",
+  "route truth",
+  "world fact",
+  "relationship change",
+  "dialogue content",
+  "NPC condition",
+  "NPC private knowledge",
+  "absence or no-change beyond the accepted local condition operation",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -412,6 +430,44 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             "current-scene materialization or reuse",
           ],
           doesNotProve: SUPPORT_ACTOR_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "player_local_condition_receipt" && receipt.publicResult.condition) {
+      const evidenceId = nextEvidenceId(evidence);
+      const condition = receipt.publicResult.condition;
+      const operationText = condition.resultKind === "already_present"
+        ? `Player is already ${condition.conditionLabel}.`
+        : condition.resultKind === "cleared"
+          ? `Player clears ${condition.conditionLabel}.`
+          : condition.resultKind === "replaced"
+            ? `Player changes local posture/readiness to ${condition.conditionLabel}.`
+            : `Player is ${condition.conditionLabel}.`;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "player_local_condition_receipt",
+        claimKinds: ["player_local_condition"],
+        text: `${operationText} Current scene anchor: ${condition.anchorSceneLabel}.`,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, operationText),
+          fact(evidenceId, 2, `Condition key: ${condition.conditionKey}.`),
+          fact(evidenceId, 3, `Current scene anchor: ${condition.anchorSceneLabel}.`),
+          fact(evidenceId, 4, `Condition result: ${condition.resultKind}.`),
+          ...(condition.targetLabel
+            ? [fact(evidenceId, 5, `Condition target: ${condition.targetLabel}.`)]
+            : []),
+        ],
+        limits: {
+          proves: [
+            "Player current-scene local posture/readiness condition operation",
+            "accepted local condition key and label",
+            "current-scene local condition anchor",
+          ],
+          doesNotProve: PLAYER_LOCAL_CONDITION_DOES_NOT_PROVE,
         },
       });
       continue;

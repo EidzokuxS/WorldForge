@@ -277,6 +277,10 @@ function refIssues(input: {
     ...input.gmRead.focalRefs,
     ...input.gmRead.evidenceRefs,
     ...input.gmRead.actionInterpretation.targetRefs,
+    ...(input.gmRead.actionInterpretation.localConditionNeed?.evidenceRefs ?? []),
+    ...(input.gmRead.actionInterpretation.localConditionNeed?.targetRef
+      ? [input.gmRead.actionInterpretation.localConditionNeed.targetRef]
+      : []),
     ...input.judgment.actorRefs,
     ...input.judgment.targetRefs,
     ...input.judgment.evidenceRefs,
@@ -288,6 +292,12 @@ function refIssues(input: {
     ...step.targetRefs,
     ...step.evidenceRefs,
     ...step.expectedVisibleEffect.visibleRefs,
+    ...(step.intended.localConditionPlan
+      ? [
+          step.intended.localConditionPlan.anchorRef,
+          ...(step.intended.localConditionPlan.targetRef ? [step.intended.localConditionPlan.targetRef] : []),
+        ]
+      : []),
   ]));
 
   for (const ref of refs) {
@@ -379,6 +389,29 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
       });
     }
     seenEffects.add(step.intended.kind);
+    if (step.intended.kind === "condition_set") {
+      if (!step.intended.localConditionPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.localConditionPlan`,
+          message: "condition_set steps require a typed localConditionPlan.",
+        });
+      }
+      const planTargetRef = step.intended.localConditionPlan?.targetRef ?? null;
+      if (planTargetRef && !step.targetRefs.some((ref) => ref.toLowerCase() === planTargetRef.toLowerCase())) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.localConditionPlan.targetRef`,
+          message: "condition_set localConditionPlan.targetRef must be included in step.targetRefs.",
+        });
+      }
+    } else if (step.intended.localConditionPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.localConditionPlan`,
+        message: "localConditionPlan is allowed only on condition_set steps.",
+      });
+    }
     if (step.disposition.kind === "stage4_backend_resolution_required") {
       stage4RequiredCount += 1;
     }
@@ -415,7 +448,7 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         issues.push({
           code: "dependency_invalid",
           path: `steps.${index}.dependencyBindings`,
-          message: "Only dialogue_record steps may bind a materialized speaker dependency.",
+          message: "Only dialogue_record steps may bind post-dependency SceneFrame requirements.",
         });
       }
       if (bindingIds.has(binding.bindingId)) {
@@ -442,15 +475,28 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         });
       }
       const dependencyStep = checklist.steps.find((candidate) => candidate.stepId === binding.fromStepId);
-      if (
-        dependencyStep?.intended.kind !== "support_actor_create"
-        || dependencyStep.intended.requiredCapabilityId !== "support_actor_create"
-      ) {
-        issues.push({
-          code: "dependency_invalid",
-          path: `steps.${index}.dependencyBindings`,
-          message: "materialized_speaker bindings must depend on an earlier support_actor_create step.",
-        });
+      if (binding.bindingId === "materialized_speaker") {
+        if (
+          dependencyStep?.intended.kind !== "support_actor_create"
+          || dependencyStep.intended.requiredCapabilityId !== "support_actor_create"
+        ) {
+          issues.push({
+            code: "dependency_invalid",
+            path: `steps.${index}.dependencyBindings`,
+            message: "materialized_speaker bindings must depend on an earlier support_actor_create step.",
+          });
+        }
+      } else if (binding.bindingId === "player_local_condition") {
+        if (
+          dependencyStep?.intended.kind !== "condition_set"
+          || dependencyStep.intended.requiredCapabilityId !== "condition_set"
+        ) {
+          issues.push({
+            code: "dependency_invalid",
+            path: `steps.${index}.dependencyBindings`,
+            message: "player_local_condition bindings must depend on an earlier condition_set step.",
+          });
+        }
       }
     }
   });
@@ -603,28 +649,36 @@ function stepFor(input: {
   evidenceRefs: readonly string[];
   dependsOnStepIds?: readonly GmActionChecklistStepId[];
   dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
+  localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   purpose?: string;
   intendedSummary?: string;
   expectedVisibleSummary?: string;
 }): GmActionChecklist["steps"][number] {
   const visibleRefs = uniqueStrings([input.actorRef, ...input.targetRefs]);
   const capability = EFFECT_TO_CAPABILITY[input.kind];
+  const intended: GmActionChecklist["steps"][number]["intended"] = {
+    kind: input.kind,
+    stateOrEvidence: input.kind === "movement"
+      || input.kind === "time_advance"
+      || input.kind === "support_actor_create"
+      || input.kind === "condition_set"
+      ? "state"
+      : input.kind === "dialogue_record"
+        ? "terminal_player_visible"
+        : "evidence",
+    requiredCapabilityId: capability,
+    summary: input.intendedSummary ?? `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
+  };
+  if (input.localConditionPlan) {
+    intended.localConditionPlan = input.localConditionPlan;
+  }
   const step: GmActionChecklist["steps"][number] = {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
     purpose: input.purpose ?? `Plan ${input.kind} for later backend resolution.`,
     actorRef: input.actorRef,
     targetRefs: uniqueStrings(input.targetRefs),
     evidenceRefs: uniqueStrings(input.evidenceRefs),
-    intended: {
-      kind: input.kind,
-      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance" || input.kind === "support_actor_create"
-        ? "state"
-        : input.kind === "dialogue_record"
-          ? "terminal_player_visible"
-          : "evidence",
-      requiredCapabilityId: capability,
-      summary: input.intendedSummary ?? `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
-    },
+    intended,
     disposition: {
       kind: "stage4_backend_resolution_required",
       reason: `${capability} requires later backend receipt authority.`,
@@ -691,7 +745,46 @@ export function buildDeterministicGmActionChecklist(input: {
   const supportActorNeed = input.gmRead.actionInterpretation.interactionKind === "ordinary_support_actor_needed"
     ? input.gmRead.actionInterpretation.supportActorNeed
     : null;
+  const localConditionNeed = input.gmRead.actionInterpretation.localConditionNeed ?? null;
   const actionText = playerActionText(input);
+
+  let localConditionStepId: GmActionChecklistStepId | null = null;
+  if (allowed.has("condition_set") && sceneRef && localConditionNeed) {
+    const targetRefs = uniqueStrings([
+      localConditionNeed.targetRef ?? sceneRef,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const conditionEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...(localConditionNeed.targetRef ? [localConditionNeed.targetRef] : []),
+      ...localConditionNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "condition_set",
+      actorRef,
+      targetRefs: targetRefs.length > 0 ? targetRefs : [sceneRef],
+      evidenceRefs: conditionEvidenceRefs,
+      localConditionPlan: {
+        actorRef: "Player",
+        operation: localConditionNeed.operation,
+        conditionKey: localConditionNeed.conditionKey,
+        conditionScope: "current_scene",
+        anchorRef: sceneRef,
+        targetKind: localConditionNeed.targetKind,
+        targetRef: localConditionNeed.targetRef,
+        replacementPolicy: localConditionNeed.operation === "apply"
+          ? "replace_same_condition_group"
+          : "no_replacement",
+      },
+      purpose: `Plan Player current-scene local condition ${localConditionNeed.operation}:${localConditionNeed.conditionKey}.`,
+      intendedSummary: `Stage 4 must settle the Player's current-scene local posture/readiness condition ${localConditionNeed.conditionKey} before narration may state it as completed. This does not authorize HP, movement, item transfer/equip, cover effectiveness, stealth, world facts, or NPC reactions.`,
+      expectedVisibleSummary: `If accepted, Player local condition ${localConditionNeed.conditionKey} may be visible in the current scene only.`,
+    }));
+    localConditionStepId = steps[steps.length - 1]?.stepId ?? null;
+  }
 
   if (movementTarget && allowed.has("movement")) {
     if (!movementTarget.connected && allowed.has("route_check")) {
@@ -728,13 +821,28 @@ export function buildDeterministicGmActionChecklist(input: {
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
   } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
-    steps.push(stepFor({
-      index: 1,
+    const dialogueStepInput: Parameters<typeof stepFor>[0] = {
+      index: steps.length + 1,
       kind: "dialogue_record",
       actorRef,
       targetRefs: [dialogueSpeaker.ref],
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
-    }));
+    };
+    if (localConditionStepId) {
+      dialogueStepInput.dependsOnStepIds = [localConditionStepId];
+      dialogueStepInput.dependencyBindings = [{
+        bindingId: "player_local_condition",
+        fromStepId: localConditionStepId,
+        requiredCapabilityId: "condition_set",
+        requiredReceiptAuthority: "player_local_condition_receipt",
+        sourcePath: "publicResult.condition.conditionKey",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "player_visibleStatus.conditions",
+      }];
+      dialogueStepInput.purpose = "Record one visible response only after the Player local condition is settled and the SceneFrame is refreshed.";
+      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after a post-dependency authoritative SceneFrame reflects the Player local condition.";
+    }
+    steps.push(stepFor(dialogueStepInput));
   } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {
     const supportEvidenceRefs = uniqueStrings([
       actorRef,
@@ -776,6 +884,8 @@ export function buildDeterministicGmActionChecklist(input: {
         expectedVisibleSummary: "If support materialization is accepted and refreshed into SceneFrame actors/citableRefs, one visible support actor response may be recorded; the response does not prove world facts.",
       }));
     }
+  } else if (steps.length > 0) {
+    // A standalone local condition has already produced the complete P68 step.
   } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
     steps.push(stepFor({
       index: 1,

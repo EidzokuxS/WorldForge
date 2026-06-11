@@ -1250,3 +1250,55 @@ export const cleanGameplayStage4Receipts = sqliteTable(
       .on(table.campaignId, table.resultWorldVersion),
   ],
 );
+
+export const cleanGameplayActorConditions = sqliteTable(
+  "clean_gameplay_actor_conditions",
+  {
+    conditionId: text("condition_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    actorType: text("actor_type").notNull(),
+    playerId: text("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    conditionKey: text("condition_key").notNull(),
+    conditionLabel: text("condition_label").notNull(),
+    conditionGroup: text("condition_group").notNull(),
+    conditionScope: text("condition_scope").notNull(),
+    anchorLocationId: text("anchor_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    anchorSceneLocationId: text("anchor_scene_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").notNull(),
+    targetRef: text("target_ref"),
+    targetLabel: text("target_label"),
+    active: integer("active", { mode: "boolean" }).notNull(),
+    appliedReceiptId: text("applied_receipt_id"),
+    clearedReceiptId: text("cleared_receipt_id"),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("clean_actor_conditions_player_only", sql`${table.actorType} = 'player'`),
+    check("clean_actor_conditions_current_scene_only", sql`${table.conditionScope} = 'current_scene'`),
+    check("clean_actor_conditions_active_bool", sql`${table.active} IN (0, 1)`),
+    index("idx_clean_actor_conditions_campaign_player_active")
+      .on(table.campaignId, table.playerId, table.active),
+    index("idx_clean_actor_conditions_campaign_scene_active")
+      .on(table.campaignId, table.anchorSceneLocationId, table.active),
+    uniqueIndex("clean_actor_conditions_active_key_unique")
+      .on(
+        table.campaignId,
+        table.playerId,
+        table.conditionKey,
+        table.conditionScope,
+        table.anchorSceneLocationId,
+      )
+      .where(sql`${table.active} = 1`),
+  ],
+);

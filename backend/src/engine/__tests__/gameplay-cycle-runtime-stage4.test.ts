@@ -238,6 +238,8 @@ function checklistForKind(
             ? "dialogue_record"
             : kind === "support_actor_create"
               ? "support_actor_create"
+              : kind === "condition_set"
+                ? "condition_set"
               : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
@@ -249,18 +251,68 @@ function checklistForKind(
         ...base.steps[0].intended,
         kind,
         requiredCapabilityId: capability,
-        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create"
+        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create" || kind === "condition_set"
           ? "state"
           : kind === "dialogue_record"
             ? "terminal_player_visible"
             : "evidence",
         summary: kind === "support_actor_create"
           ? "Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=vendor; requested role text: local vendor."
+          : kind === "condition_set"
+            ? "Stage 4 must apply one backend-owned Player local condition in the current scene."
           : base.steps[0].intended.summary,
+        ...(kind === "condition_set"
+          ? {
+            localConditionPlan: {
+              actorRef: "Player" as const,
+              operation: "apply" as const,
+              conditionKey: "kneeling" as const,
+              conditionScope: "current_scene" as const,
+              anchorRef: "Market",
+              targetKind: "current_scene" as const,
+              targetRef: "Market",
+              replacementPolicy: "replace_same_condition_group" as const,
+            },
+          }
+          : {}),
       },
       expectedVisibleEffect: {
         summary: `${kind} may be visible only after accepted receipt.`,
         visibleRefs: kind === "dialogue_record" ? ["Player", "Guide"] : ["Player", "Market"],
+      },
+    }],
+  };
+}
+
+function conditionChecklist(input: {
+  frame: AuthoritativeSceneFrame;
+  operation?: "apply" | "clear";
+  conditionKey?: "kneeling" | "crouched" | "prone" | "braced";
+  targetRef?: string | null;
+  replacementPolicy?: "replace_same_condition_group" | "no_replacement";
+  dependsOnStepIds?: GmActionChecklist["steps"][number]["dependsOnStepIds"];
+  dependencyBindings?: GmActionChecklist["steps"][number]["dependencyBindings"];
+}): GmActionChecklist {
+  const base = checklistForKind("condition_set", input.frame);
+  const step = base.steps[0]!;
+  return {
+    ...base,
+    steps: [{
+      ...step,
+      dependsOnStepIds: input.dependsOnStepIds ?? step.dependsOnStepIds,
+      dependencyBindings: input.dependencyBindings ?? step.dependencyBindings,
+      intended: {
+        ...step.intended,
+        localConditionPlan: {
+          actorRef: "Player",
+          operation: input.operation ?? "apply",
+          conditionKey: input.conditionKey ?? "kneeling",
+          conditionScope: "current_scene",
+          anchorRef: "Market",
+          targetKind: "current_scene",
+          targetRef: input.targetRef ?? "Market",
+          replacementPolicy: input.replacementPolicy ?? (input.operation === "clear" ? "no_replacement" : "replace_same_condition_group"),
+        },
       },
     }],
   };
@@ -552,6 +604,180 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
     expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 5 });
+  });
+
+  it("applies, replaces, and clears Player current-scene local conditions through clean receipt authority", async () => {
+    const conditionFrame = (
+      worldVersion: number,
+      conditions: string[] = [],
+      turnId = `clean-turn-stage4-condition-${worldVersion}`,
+    ): AuthoritativeSceneFrame => ({
+      ...frame(),
+      turnId,
+      base: { tick: 0, worldVersion, worldTimeMinutes: 0 },
+      playerAction: "I settle into a visible current-scene posture.",
+      player: {
+        ...frame().player,
+        visibleStatus: { hp: 5, conditions },
+      },
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "condition_set" as const, evidenceAuthority: "receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+
+    const applyFrame = conditionFrame(0, [], "clean-turn-stage4-condition-apply");
+    const applied = await runCleanStage4Execution({
+      frame: applyFrame,
+      checklist: conditionChecklist({ frame: applyFrame, conditionKey: "kneeling" }),
+    });
+
+    expect(applied.publicEvents).toEqual([{
+      type: "state_update",
+      data: expect.objectContaining({
+        type: "player_local_condition",
+        resultKind: "applied",
+        conditionKey: "kneeling",
+        conditionLabel: "kneeling",
+      }),
+    }]);
+    expect(applied.execution?.receipts[0]).toMatchObject({
+      capabilityId: "condition_set",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "player_local_condition_receipt",
+        mutationAuthority: "player_local_condition_state",
+        visibleResultAuthority: "may_claim_player_local_condition",
+      },
+      publicResult: {
+        condition: {
+          resultKind: "applied",
+          conditionKey: "kneeling",
+          conditionScope: "current_scene",
+          anchorSceneLabel: "Market",
+        },
+      },
+    });
+
+    const refreshed = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-stage4-condition-next",
+      idempotencyKey: "next-frame-condition-proof",
+      playerAction: {
+        submitted: "I stay kneeling.",
+        normalized: "I stay kneeling.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-condition-next"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+    expect(refreshed.capabilities.map((entry) => entry.capabilityId)).toContain("condition_set");
+    expect(refreshed.player.visibleStatus.conditions).toContain("kneeling");
+
+    const repeatFrame = conditionFrame(1, ["kneeling"], "clean-turn-stage4-condition-repeat");
+    const alreadyPresent = await runCleanStage4Execution({
+      frame: repeatFrame,
+      checklist: conditionChecklist({ frame: repeatFrame, conditionKey: "kneeling" }),
+    });
+    expect(alreadyPresent.execution?.receipts[0]).toMatchObject({
+      capabilityId: "condition_set",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        mutationAuthority: "none",
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        condition: { resultKind: "already_present", conditionKey: "kneeling" },
+      },
+    });
+
+    const replaceFrame = conditionFrame(1, ["kneeling"], "clean-turn-stage4-condition-replace");
+    const replaced = await runCleanStage4Execution({
+      frame: replaceFrame,
+      checklist: conditionChecklist({ frame: replaceFrame, conditionKey: "crouched" }),
+    });
+    expect(replaced.execution?.receipts[0]).toMatchObject({
+      capabilityId: "condition_set",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 2, worldTimeMinutes: 0, mutationApplied: true },
+      publicResult: {
+        condition: { resultKind: "replaced", conditionKey: "crouched" },
+      },
+      privateResult: {
+        previousConditionKeys: ["kneeling"],
+        nextConditionKeys: ["crouched"],
+      },
+    });
+
+    const clearFrame = conditionFrame(2, ["crouched"], "clean-turn-stage4-condition-clear");
+    const cleared = await runCleanStage4Execution({
+      frame: clearFrame,
+      checklist: conditionChecklist({
+        frame: clearFrame,
+        operation: "clear",
+        conditionKey: "crouched",
+        replacementPolicy: "no_replacement",
+      }),
+    });
+    expect(cleared.execution?.receipts[0]).toMatchObject({
+      capabilityId: "condition_set",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 3, worldTimeMinutes: 0, mutationApplied: true },
+      publicResult: {
+        condition: { resultKind: "cleared", conditionKey: "crouched" },
+      },
+      privateResult: {
+        previousConditionKeys: ["crouched"],
+        nextConditionKeys: [],
+      },
+    });
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM clean_gameplay_actor_conditions WHERE campaign_id = ?) AS conditionRows,
+          (SELECT COUNT(*) FROM clean_gameplay_actor_conditions WHERE campaign_id = ? AND active = 1) AS activeRows,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ? AND operation = 'gameplay-cycle-runtime.player.condition_set.v1') AS traceCount,
+          (SELECT COUNT(*) FROM turn_clock_ledger WHERE campaign_id = ?) AS ledgerCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion,
+          (SELECT world_time_minutes FROM world_clocks WHERE campaign_id = ?) AS worldTimeMinutes,
+          (SELECT current_tick FROM world_clocks WHERE campaign_id = ?) AS currentTick
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as {
+        conditionRows: number;
+        activeRows: number;
+        traceCount: number;
+        ledgerCount: number;
+        worldVersion: number;
+        worldTimeMinutes: number;
+        currentTick: number;
+      };
+    expect(counts).toEqual({
+      conditionRows: 2,
+      activeRows: 0,
+      traceCount: 3,
+      ledgerCount: 0,
+      worldVersion: 3,
+      worldTimeMinutes: 0,
+      currentTick: 0,
+    });
   });
 
   it("accepts observation and route-options receipts without mutating world clock", async () => {
@@ -1318,6 +1544,121 @@ describe("clean Stage 4 executor DB contracts", () => {
       failure: {
         kind: "dependency_not_accepted",
         hiddenMutationApplied: false,
+      },
+    });
+  });
+
+  it("executes condition_set then visible dialogue only after a refreshed SceneFrame reflects Player condition state", async () => {
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      playerAction: "I kneel and ask Guide what they see.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+    const first = conditionChecklist({ frame: inputFrame }).steps[0]!;
+    const dependentChecklist: GmActionChecklist = {
+      ...conditionChecklist({ frame: inputFrame }),
+      steps: [
+        first,
+        {
+          ...first,
+          stepId: "step-2",
+          purpose: "Record visible dialogue only after the accepted Player local condition is visible in a refreshed SceneFrame.",
+          targetRefs: ["Guide"],
+          evidenceRefs: ["Player", "Guide", "Market"],
+          intended: {
+            kind: "dialogue_record",
+            stateOrEvidence: "terminal_player_visible",
+            requiredCapabilityId: "dialogue_record",
+            summary: "Stage 4 may record dialogue only after a post-condition authoritative SceneFrame reflects the Player local condition.",
+          },
+          dependsOnStepIds: ["step-1"],
+          dependencyBindings: [{
+            bindingId: "player_local_condition",
+            fromStepId: "step-1",
+            requiredCapabilityId: "condition_set",
+            requiredReceiptAuthority: "player_local_condition_receipt",
+            sourcePath: "publicResult.condition.conditionKey",
+            resolveIn: "post_dependency_scene_frame",
+            requiredFramePresence: "player_visibleStatus.conditions",
+          }],
+          expectedVisibleEffect: {
+            summary: "If the Player local condition is accepted and refreshed into SceneFrame player visibleStatus, one visible Guide response may be recorded.",
+            visibleRefs: ["Player", "Guide"],
+          },
+        },
+      ],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: dependentChecklist,
+      refreshFrameAfterReceipt: async ({ receipt }) => ({
+        ...inputFrame,
+        frameId: "frame-post-condition",
+        base: {
+          tick: receipt.result.tick,
+          worldVersion: receipt.result.worldVersion,
+          worldTimeMinutes: receipt.result.worldTimeMinutes,
+        },
+        player: {
+          ...inputFrame.player,
+          visibleStatus: {
+            ...inputFrame.player.visibleStatus,
+            conditions: ["kneeling"],
+          },
+        },
+      }),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "From there, you can see under the stall curtain.",
+          summary: "Guide answers from the visible scene.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["condition_set", "accepted"],
+      ["dialogue_record", "accepted"],
+    ]);
+    expect(result.execution?.frameChain).toHaveLength(2);
+    expect(result.execution?.frameChain?.[1]).toMatchObject({
+      source: "post_dependency_scene_frame",
+      afterReceiptId: result.execution?.receipts[0]?.receiptId,
+      base: { worldVersion: 1 },
+    });
+    expect(result.execution?.receipts[1]).toMatchObject({
+      frameId: "frame-post-condition",
+      base: { worldVersion: 1 },
+      publicResult: {
+        dialogue: {
+          speakerLabel: "Guide",
+          quotedSpeech: "From there, you can see under the stall curtain.",
+        },
       },
     });
   });

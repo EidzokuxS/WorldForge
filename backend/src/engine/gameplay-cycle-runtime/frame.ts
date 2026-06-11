@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { getSqliteConnection } from "../../db/index.js";
 import { buildSceneFrame, type SceneFrame } from "../scene-frame.js";
 import {
   buildScopedForecastExcerpt,
@@ -21,6 +22,7 @@ const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "movement",
   "dialogue_record",
   "support_actor_create",
+  "condition_set",
   "time_advance",
   "scene_beat_record",
 ];
@@ -75,16 +77,42 @@ function actorRows(frame: SceneFrame): AuthoritativeSceneFrame["actors"] {
     }));
 }
 
-function playerView(frame: SceneFrame): AuthoritativeSceneFrame["player"] {
+function playerView(
+  frame: SceneFrame,
+  cleanLocalConditions: readonly string[] = [],
+): AuthoritativeSceneFrame["player"] {
   const player = frame.roster.active.find((actor) => actor.type === "player");
+  const conditions = uniqueRefs([
+    ...(player?.statusConditions ?? []),
+    ...cleanLocalConditions,
+  ]).slice(0, 12);
   return {
     ref: "Player",
     label: firstText(player?.label, "Player"),
     visibleStatus: {
       hp: typeof player?.hp === "number" ? player.hp : null,
-      conditions: player?.statusConditions?.slice(0, 12) ?? [],
+      conditions,
     },
   };
+}
+
+function activeCleanPlayerLocalConditions(campaignId: string): string[] {
+  const rows = getSqliteConnection()
+    .prepare(`
+      SELECT c.condition_label AS label
+      FROM clean_gameplay_actor_conditions c
+      INNER JOIN players p
+        ON p.id = c.player_id
+       AND p.campaign_id = c.campaign_id
+      WHERE c.campaign_id = ?
+        AND c.actor_type = 'player'
+        AND c.condition_scope = 'current_scene'
+        AND c.active = 1
+        AND p.current_scene_location_id = c.anchor_scene_location_id
+      ORDER BY c.created_at ASC, c.condition_id ASC
+    `)
+    .all(campaignId) as Array<{ label: string }>;
+  return uniqueRefs(rows.map((row) => firstText(row.label)));
 }
 
 function targetKind(target: SceneFrame["targetCandidates"][number]): "actor" | "item" | "location" | "faction" | "unknown" {
@@ -172,7 +200,8 @@ export async function buildAuthoritativeSceneFrame(
   });
   const currentLocationLabel = firstText(frame.currentLocationName, "current_location");
   const currentSceneLabel = firstText(frame.currentSceneScopeName, frame.currentLocationName, "current_scene");
-  const player = playerView(frame);
+  const cleanLocalConditions = activeCleanPlayerLocalConditions(input.campaignId);
+  const player = playerView(frame, cleanLocalConditions);
   const actors = actorRows(frame);
   const movementOptions = frame.movementCandidates.map((candidate) => ({
     ref: firstText(candidate.label),

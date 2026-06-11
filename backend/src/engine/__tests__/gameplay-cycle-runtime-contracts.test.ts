@@ -26,6 +26,7 @@ import {
   scopedForecastEnvelopeSchema,
   cleanStage4DialogueRequestEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
+  cleanStage4LocalConditionSetEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -95,6 +96,8 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       "runtime-tool-input-schemas",
       "runtime-tool-descriptors",
       "support_actor.create.v2",
+      "actor.condition_set.v2",
+      "condition_set.v2",
       "create_scene_extra",
       "spawn_npc",
       "runtime-executor",
@@ -2383,6 +2386,112 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("deterministically splits Player local condition before visible dialogue with post-condition SceneFrame refresh binding", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I kneel and ask Guide what they see.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      capabilities: [
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "Guide"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      liveSceneQuestion: "What backend-owned Player local condition must settle before visible dialogue?",
+      actionInterpretation: {
+        summary: "The player kneels, then asks the visible Guide a question.",
+        playerIntent: "Kneel and ask Guide what they see.",
+        method: "kneel and ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+        supportActorNeed: null,
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "kneeling",
+          requestedPostureText: "kneel",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "The posture change needs a condition receipt before dialogue runs.",
+        evidenceRefs: ["Player", "Market", "Guide"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-condition-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "condition_set",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps[0]).toMatchObject({
+      stepId: "step-1",
+      intended: {
+        kind: "condition_set",
+        requiredCapabilityId: "condition_set",
+        stateOrEvidence: "state",
+        localConditionPlan: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "kneeling",
+          conditionScope: "current_scene",
+          anchorRef: "Market",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          replacementPolicy: "replace_same_condition_group",
+        },
+      },
+    });
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      targetRefs: ["Guide"],
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "player_local_condition",
+        fromStepId: "step-1",
+        requiredCapabilityId: "condition_set",
+        requiredReceiptAuthority: "player_local_condition_receipt",
+        sourcePath: "publicResult.condition.conditionKey",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "player_visibleStatus.conditions",
+      }],
+      intended: {
+        kind: "dialogue_record",
+        requiredCapabilityId: "dialogue_record",
+        stateOrEvidence: "terminal_player_visible",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("falls back without repair when deterministic compile lacks a backend capability", async () => {
     const frame = actionPlanFrame({
       playerAction: "I move toward North Hall.",
@@ -2634,6 +2743,66 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
         },
       },
     }).status).toBe("rejected");
+  });
+
+  it("requires P68 condition_set effects to stay bounded to Player current-scene local posture/readiness", () => {
+    const base = {
+      kind: "condition_set" as const,
+      authorityKind: "current_scene_player_local_condition" as const,
+      actorRef: "Player" as const,
+      conditionScope: "current_scene" as const,
+      anchorRef: "Market",
+      operation: "apply" as const,
+      conditionKey: "kneeling" as const,
+      target: {
+        targetKind: "current_scene" as const,
+        targetRef: "Market",
+      },
+      replacementPolicy: "replace_same_condition_group" as const,
+      evidenceRefs: ["Player", "Market"],
+      forbiddenPayloads: {
+        hpDelta: false as const,
+        damage: false as const,
+        healing: false as const,
+        combatModifier: false as const,
+        stealthSuccess: false as const,
+        coverEffectiveness: false as const,
+        itemCustody: false as const,
+        itemLocation: false as const,
+        itemEquipState: false as const,
+        itemMutation: false as const,
+        movement: false as const,
+        routeTruth: false as const,
+        worldFact: false as const,
+        relationship: false as const,
+        dialogueContent: false as const,
+        npcCondition: false as const,
+        privateKnowledge: false as const,
+        absenceOrNoChange: false as const,
+      },
+    };
+
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
+      ...base,
+      toolId: "actor.condition_set.v2",
+    }).success).toBe(false);
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, hpDelta: true },
+    }).success).toBe(false);
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, dialogueContent: true },
+    }).success).toBe(false);
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
+      ...base,
+      actorRef: "Guide",
+    }).success).toBe(false);
+    expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
+      ...base,
+      conditionKey: "poisoned",
+    }).success).toBe(false);
   });
 
   it("accepts non-mutating terminal dialogue receipts with quote-only authority", () => {

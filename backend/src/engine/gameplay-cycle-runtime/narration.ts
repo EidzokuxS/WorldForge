@@ -145,6 +145,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For oracle_outcome, narrate only the selected visible meaning; never add movement, discovery, mutation, or hidden facts.",
     "For dialogue_response, narrate only that the visible speaker responded and what the accepted quote/summary says; never promote the speaker's claim into objective world truth.",
     "For support_actor_materialization, narrate only that the accepted visible temporary support actor/role is now present in the current scene; never invent dialogue, knowledge, relationships, services, or future relevance.",
+    "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -367,6 +368,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (supportActor) {
     return supportActor.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const playerLocalCondition = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("player_local_condition")
+  );
+  if (playerLocalCondition) {
+    return playerLocalCondition.backendFacts.map((entry) => entry.text).join(" ");
   }
 
   const sceneBeat = view.acceptedEvidence.find((evidence) =>

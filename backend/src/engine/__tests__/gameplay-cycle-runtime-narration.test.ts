@@ -173,6 +173,28 @@ function supportActorView(): CleanNarratorView {
   });
 }
 
+function playerLocalConditionView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I kneel beside the stall.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "player_local_condition_receipt",
+      claimKinds: ["player_local_condition"],
+      text: "Player is kneeling. Current scene anchor: Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Player is kneeling.", exact: true },
+        { factRef: "e1.f2", text: "Condition key: kneeling.", exact: true },
+        { factRef: "e1.f3", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f4", text: "Condition result: applied.", exact: true },
+      ],
+      limits: {
+        proves: ["Player current-scene local posture/readiness condition operation"],
+        doesNotProve: ["HP change", "damage", "combat modifier", "movement", "dialogue content", "absence or no-change"],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -446,6 +468,33 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedDialogue.status).toBe("rejected");
     if (inventedDialogue.status !== "rejected") throw new Error("expected rejected");
     expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("renders Player local condition evidence without inventing HP, cover, combat, movement, or no-change", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
+    const text = renderCleanNarrationFallback(playerLocalConditionView());
+
+    expect(text).toBe("Player is kneeling. Condition key: kneeling. Current scene anchor: Market. Condition result: applied.");
+    expect(text).not.toMatch(/\bhp|damage|cover|combat|moves?|nothing changed|no change\b/iu);
+
+    const inventedHp = validateCleanNarrationCandidate({
+      view: playerLocalConditionView(),
+      candidate: {
+        ...movementCandidate("You kneel and gain cover, taking no damage."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "You kneel and gain cover, taking no damage.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["player_local_condition", "condition_or_hp_change"],
+          auditStepIds: [],
+        }],
+        finalText: "You kneel and gain cover, taking no damage.",
+      },
+    });
+    expect(inventedHp.status).toBe("rejected");
+    if (inventedHp.status !== "rejected") throw new Error("expected rejected");
+    expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

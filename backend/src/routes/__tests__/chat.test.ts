@@ -1525,6 +1525,26 @@ describe("Campaign-loaded gameplay transport", () => {
             travelCost: 2,
           },
         },
+        {
+          type: "state_update",
+          data: {
+            type: "player_local_condition",
+            resultKind: "applied",
+            actorLabel: "Player",
+            actorRef: "player:secret-player-id",
+            operation: "apply",
+            conditionKey: "kneeling",
+            conditionLabel: "kneeling",
+            conditionScope: "current_scene",
+            anchorSceneLabel: "Lowwater Bazaar",
+            anchorSceneRef: "scene:secret-bazaar",
+            anchorLocationLabel: "Lowwater",
+            targetKind: "current_scene",
+            targetLabel: "Lowwater Bazaar",
+            conditionId: "550e8400-e29b-41d4-a716-446655440000",
+            claimStatus: "visible_player_local_condition_only",
+          },
+        },
         { type: "narrative", data: { text: "Nanami let the warning land before he moved." } },
         { type: "reasoning", data: { text: "Reasoning stays on a debug lane." } },
         {
@@ -1564,6 +1584,10 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("route-confirmation landing");
     expect(body).toContain("Canal Market");
     expect(body).toContain("\"travelCost\":2");
+    expect(body).toContain("player_local_condition");
+    expect(body).toContain("\"conditionKey\":\"kneeling\"");
+    expect(body).toContain("Lowwater Bazaar");
+    expect(body).toContain("\"claimStatus\":\"visible_player_local_condition_only\"");
     expect(body).toContain("\"worldVersion\":0");
     expect(body).toContain("\"worldTimeMinutes\":0");
     expect(body).not.toContain("event: reasoning");
@@ -1583,6 +1607,9 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("raw_tool_result");
     expect(body).not.toContain("location:raw-secret-market");
     expect(body).not.toContain("location:raw-origin");
+    expect(body).not.toContain("player:secret-player-id");
+    expect(body).not.toContain("scene:secret-bazaar");
+    expect(body).not.toContain("550e8400-e29b-41d4-a716-446655440000");
     expect(body).not.toContain("action-result:");
     expect(body).not.toContain("evt-speak");
     expect(body).not.toContain("hidden-from-done");

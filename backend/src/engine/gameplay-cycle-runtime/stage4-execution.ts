@@ -16,6 +16,7 @@ import {
 import {
   assertCleanStage4ExecutionResult,
   cleanStage4DialogueRequestEffectSchema,
+  cleanStage4LocalConditionSetEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
   assertCleanStage4Receipt,
   assertCleanStage4Request,
@@ -30,6 +31,8 @@ type Step = GmActionChecklist["steps"][number];
 type SupportActorCreateEffect = Extract<CleanStage4Request["effect"], { kind: "support_actor_create" }>;
 type SupportActorRoleKind = SupportActorCreateEffect["roleKind"];
 type SupportActorMaterializationResult = NonNullable<CleanStage4Receipt["publicResult"]["supportActor"]>;
+type LocalConditionSetEffect = Extract<CleanStage4Request["effect"], { kind: "condition_set" }>;
+type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
 
 type PlayerRow = {
   id: string;
@@ -70,6 +73,16 @@ type NpcSupportRow = {
   current_scene_location_id: string | null;
 };
 
+type CleanActorConditionRow = {
+  condition_id: string;
+  condition_key: LocalConditionSetEffect["conditionKey"];
+  condition_label: string;
+  condition_group: string;
+  target_kind: LocalConditionSetEffect["target"]["targetKind"];
+  target_ref: string | null;
+  active: number;
+};
+
 export interface CleanStage4ReceiptStore {
   insert(receipt: CleanStage4Receipt, createdAt?: number): void;
 }
@@ -85,7 +98,7 @@ export interface Stage4ExecutionEvent {
     type: "time_advance";
     elapsedMinutes: number;
     reasonKind: "brief_local_action" | "wait" | "short_rest";
-  };
+  } | PlayerLocalConditionResult;
 }
 
 export interface CleanStage4ExecutionRunResult {
@@ -105,6 +118,7 @@ export interface Stage4FrameRefreshRequest {
 export type Stage4FrameRefresh = (request: Stage4FrameRefreshRequest) => Promise<AuthoritativeSceneFrame>;
 
 type MaterializedSpeakerBinding = NonNullable<Step["dependencyBindings"]>[number];
+type PlayerLocalConditionBinding = NonNullable<Step["dependencyBindings"]>[number];
 
 type Stage4MaterializedSpeakerResolution = {
   bindingId: "materialized_speaker";
@@ -115,8 +129,19 @@ type Stage4MaterializedSpeakerResolution = {
   refreshedFrameId: string;
 };
 
+type Stage4PlayerLocalConditionResolution = {
+  bindingId: "player_local_condition";
+  fromStepId: string;
+  receiptId: string;
+  conditionKey: LocalConditionSetEffect["conditionKey"];
+  conditionLabel: string;
+  resultKind: PlayerLocalConditionResult["resultKind"];
+  refreshedFrameId: string;
+};
+
 type Stage4DialogueDependencyResolution = {
   materializedSpeaker: Stage4MaterializedSpeakerResolution | null;
+  playerLocalCondition: Stage4PlayerLocalConditionResolution | null;
 };
 
 export interface Stage4DialogueRequestCandidateRequest {
@@ -311,6 +336,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "movement") return "movement";
   if (kind === "dialogue_record") return "dialogue_record";
   if (kind === "support_actor_create") return "support_actor_create";
+  if (kind === "condition_set") return "condition_set";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
   return "scene_beat_record";
@@ -367,6 +393,44 @@ function requestEffectForStep(input: {
       evidenceRefs: input.step.evidenceRefs,
     };
   }
+  if (input.capabilityId === "condition_set") {
+    const plan = input.step.intended.localConditionPlan;
+    return {
+      kind: "condition_set",
+      authorityKind: "current_scene_player_local_condition",
+      actorRef: "Player",
+      conditionScope: "current_scene",
+      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      operation: plan?.operation ?? "apply",
+      conditionKey: plan?.conditionKey ?? "braced",
+      target: {
+        targetKind: plan?.targetKind ?? "current_scene",
+        targetRef: plan?.targetRef ?? input.frame.scene.currentScene.ref,
+      },
+      replacementPolicy: plan?.replacementPolicy ?? "no_replacement",
+      evidenceRefs: input.step.evidenceRefs,
+      forbiddenPayloads: {
+        hpDelta: false,
+        damage: false,
+        healing: false,
+        combatModifier: false,
+        stealthSuccess: false,
+        coverEffectiveness: false,
+        itemCustody: false,
+        itemLocation: false,
+        itemEquipState: false,
+        itemMutation: false,
+        movement: false,
+        routeTruth: false,
+        worldFact: false,
+        relationship: false,
+        dialogueContent: false,
+        npcCondition: false,
+        privateKnowledge: false,
+        absenceOrNoChange: false,
+      },
+    };
+  }
   return {
     kind: "scene_beat_record",
     actorRef: "Player",
@@ -394,6 +458,7 @@ function baseReceipt(input: {
   sceneBeat?: CleanStage4Receipt["publicResult"]["sceneBeat"];
   dialogue?: CleanStage4Receipt["publicResult"]["dialogue"];
   supportActor?: CleanStage4Receipt["publicResult"]["supportActor"];
+  condition?: CleanStage4Receipt["publicResult"]["condition"];
   resultWorldVersion?: number;
   resultWorldTimeMinutes?: number;
   resultTick?: number;
@@ -405,6 +470,10 @@ function baseReceipt(input: {
   destinationLocationId?: string | null;
   supportActorId?: string | null;
   supportActorOperation?: "inserted" | "reused" | null;
+  conditionId?: string | null;
+  conditionOperation?: "applied" | "cleared" | "replaced" | "already_present" | null;
+  previousConditionKeys?: LocalConditionSetEffect["conditionKey"][];
+  nextConditionKeys?: LocalConditionSetEffect["conditionKey"][];
   anchorLocationId?: string | null;
   anchorSceneLocationId?: string | null;
   edgeIds?: string[];
@@ -420,6 +489,8 @@ function baseReceipt(input: {
   const dialogueAccepted = accepted && input.capabilityId === "dialogue_record";
   const supportActorAccepted = accepted && input.capabilityId === "support_actor_create";
   const supportActorCreated = supportActorAccepted && input.supportActor?.resultKind === "created";
+  const conditionAccepted = accepted && input.capabilityId === "condition_set";
+  const conditionMutated = conditionAccepted && input.condition?.resultKind !== "already_present";
   return assertCleanStage4Receipt({
     version: "gameplay-runtime.stage4-receipt.v1",
     receiptId: `stage4-receipt-${randomUUID()}`,
@@ -456,6 +527,8 @@ function baseReceipt(input: {
                     ? "terminal_dialogue_receipt"
                     : supportActorAccepted
                       ? "support_actor_materialization_receipt"
+                      : conditionAccepted
+                        ? "player_local_condition_receipt"
                     : input.status === "skipped"
                       ? "skip_receipt"
                       : "failure_receipt",
@@ -465,6 +538,8 @@ function baseReceipt(input: {
           ? "world_clock_only"
           : supportActorCreated
             ? "current_scene_support_actor"
+            : conditionMutated
+              ? "player_local_condition_state"
             : "none",
       visibleResultAuthority: movementAccepted
         ? "may_claim_player_location_change"
@@ -482,11 +557,13 @@ function baseReceipt(input: {
                     ? "may_quote_visible_dialogue_response"
                     : supportActorAccepted
                       ? "may_claim_visible_support_actor_materialized"
+                      : conditionAccepted
+                        ? "may_claim_player_local_condition"
                     : input.status === "failed"
                       ? "failure_only"
                       : "none",
       maySupportNarrationClaim: accepted,
-      mayAuthorizeMutation: movementAccepted || timeAccepted || supportActorCreated,
+      mayAuthorizeMutation: movementAccepted || timeAccepted || supportActorCreated || conditionMutated,
     },
     publicResult: {
       summary: input.summary,
@@ -499,6 +576,7 @@ function baseReceipt(input: {
       sceneBeat: input.sceneBeat ?? null,
       dialogue: input.dialogue ?? null,
       supportActor: input.supportActor ?? null,
+      condition: input.condition ?? null,
     },
     privateResult: {
       playerId: input.playerId ?? null,
@@ -506,6 +584,10 @@ function baseReceipt(input: {
       destinationLocationId: input.destinationLocationId ?? null,
       supportActorId: input.supportActorId ?? null,
       supportActorOperation: input.supportActorOperation ?? null,
+      conditionId: input.conditionId ?? null,
+      conditionOperation: input.conditionOperation ?? null,
+      previousConditionKeys: input.previousConditionKeys ?? [],
+      nextConditionKeys: input.nextConditionKeys ?? [],
       anchorLocationId: input.anchorLocationId ?? null,
       anchorSceneLocationId: input.anchorSceneLocationId ?? null,
       edgeIds: input.edgeIds ?? [],
@@ -595,6 +677,136 @@ function labelForRef(frame: AuthoritativeSceneFrame, ref: string): string {
   if (ref.toLowerCase() === frame.scene.currentScene.ref.toLowerCase()) return frame.scene.currentScene.label;
   if (ref.toLowerCase() === frame.scene.currentLocation.ref.toLowerCase()) return frame.scene.currentLocation.label;
   return ref;
+}
+
+function localConditionLabel(key: LocalConditionSetEffect["conditionKey"]): string {
+  const labels: Record<LocalConditionSetEffect["conditionKey"], string> = {
+    kneeling: "kneeling",
+    crouched: "crouched",
+    prone: "prone",
+    taking_cover: "taking cover",
+    keeping_distance: "keeping distance",
+    stepped_back: "stepped back",
+    braced: "braced",
+    hands_visible: "hands visible",
+    hands_raised: "hands raised",
+    gripping_held_item: "gripping held item",
+  };
+  return labels[key];
+}
+
+function localConditionGroup(key: LocalConditionSetEffect["conditionKey"]): string {
+  if (["kneeling", "crouched", "prone", "taking_cover", "stepped_back"].includes(key)) {
+    return "player_local_posture";
+  }
+  if (key === "keeping_distance") return "player_local_distance";
+  if (["hands_visible", "hands_raised", "gripping_held_item"].includes(key)) {
+    return "player_local_hands";
+  }
+  return "player_local_readiness";
+}
+
+function conditionTargetIsValid(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: LocalConditionSetEffect;
+}): { ok: true; targetLabel: string | null } | { ok: false; message: string } {
+  const targetRef = input.effect.target.targetRef;
+  if (input.effect.anchorRef.toLowerCase() !== input.frame.scene.currentScene.ref.toLowerCase()) {
+    return { ok: false, message: "Stage 4 condition_set anchor must be the current SceneFrame scene." };
+  }
+  if (input.effect.conditionKey === "gripping_held_item" && input.effect.target.targetKind !== "inventory_item_readiness") {
+    return { ok: false, message: "gripping_held_item requires an already-held inventory item target." };
+  }
+  if (input.effect.target.targetKind === "inventory_item_readiness") {
+    const item = targetRef
+      ? input.frame.inventory.find((entry) => normalizedRef(entry.ref) === normalizedRef(targetRef))
+      : null;
+    return item
+      ? { ok: true, targetLabel: item.label }
+      : { ok: false, message: "Stage 4 condition_set inventory target is not visible in SceneFrame.inventory." };
+  }
+  if (input.effect.target.targetKind === "visible_actor_distance") {
+    const actor = targetRef
+      ? input.frame.actors.find((entry) => normalizedRef(entry.ref) === normalizedRef(targetRef))
+      : null;
+    return actor
+      ? { ok: true, targetLabel: actor.label }
+      : { ok: false, message: "Stage 4 condition_set distance target is not a visible SceneFrame actor." };
+  }
+  if (input.effect.target.targetKind === "visible_scene_anchor") {
+    if (!targetRef) return { ok: false, message: "Stage 4 condition_set visible scene anchor requires a citable target." };
+    return { ok: true, targetLabel: labelForRef(input.frame, targetRef) };
+  }
+  if (targetRef && ![
+    input.frame.scene.currentScene.ref,
+    input.frame.scene.currentLocation.ref,
+  ].some((ref) => normalizedRef(ref) === normalizedRef(targetRef))) {
+    return { ok: false, message: "Stage 4 condition_set current_scene target must be the current scene/location or null." };
+  }
+  return { ok: true, targetLabel: targetRef ? labelForRef(input.frame, targetRef) : null };
+}
+
+function localConditionResult(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: LocalConditionSetEffect;
+  resultKind: PlayerLocalConditionResult["resultKind"];
+  targetLabel: string | null;
+}): PlayerLocalConditionResult {
+  return {
+    type: "player_local_condition",
+    resultKind: input.resultKind,
+    actorLabel: "Player",
+    operation: input.effect.operation,
+    conditionKey: input.effect.conditionKey,
+    conditionLabel: localConditionLabel(input.effect.conditionKey),
+    conditionScope: "current_scene",
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    targetKind: input.effect.target.targetKind,
+    targetLabel: input.targetLabel,
+    claimStatus: "visible_player_local_condition_only",
+  };
+}
+
+function activeLocalConditionRows(input: {
+  campaignId: string;
+  playerId: string;
+  currentSceneLocationId: string;
+}): CleanActorConditionRow[] {
+  return getSqliteConnection()
+    .prepare(`
+      SELECT
+        condition_id,
+        condition_key,
+        condition_label,
+        condition_group,
+        target_kind,
+        target_ref,
+        active
+      FROM clean_gameplay_actor_conditions
+      WHERE campaign_id = ?
+        AND actor_type = 'player'
+        AND player_id = ?
+        AND condition_scope = 'current_scene'
+        AND anchor_scene_location_id = ?
+        AND active = 1
+      ORDER BY created_at ASC, condition_id ASC
+    `)
+    .all(input.campaignId, input.playerId, input.currentSceneLocationId) as CleanActorConditionRow[];
+}
+
+function conditionKeysAfter(input: {
+  activeRows: readonly CleanActorConditionRow[];
+  clearedConditionIds: readonly string[];
+  appliedConditionKey?: LocalConditionSetEffect["conditionKey"] | null;
+}): LocalConditionSetEffect["conditionKey"][] {
+  const cleared = new Set(input.clearedConditionIds);
+  return uniqueStrings([
+    ...input.activeRows
+      .filter((row) => !cleared.has(row.condition_id))
+      .map((row) => row.condition_key),
+    ...(input.appliedConditionKey ? [input.appliedConditionKey] : []),
+  ]) as LocalConditionSetEffect["conditionKey"][];
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -782,6 +994,12 @@ export function buildStage4DialogueRequestPrompt(input: {
         JSON.stringify(input.dependencyResolution.materializedSpeaker, null, 2),
         "The speakerRef must be exactly the resolved actorRef above, and that actor must appear in the authoritative SceneFrame below.",
       ].join("\n")
+      : input.dependencyResolution?.playerLocalCondition
+        ? [
+          "Resolved player-local-condition dependency:",
+          JSON.stringify(input.dependencyResolution.playerLocalCondition, null, 2),
+          "The condition has already been applied or cleared by Stage 4 and the authoritative SceneFrame below is post-dependency.",
+        ].join("\n")
       : "No materialized-speaker dependency is active for this dialogue step.",
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
@@ -802,6 +1020,8 @@ function buildStage4DialogueRepairPrompt(input: {
     "Do not add unsupported fields, old tool ids, backend refs, mutations, world facts, memory, or state deltas.",
     input.dependencyResolution?.materializedSpeaker
       ? `This is dependent support-actor dialogue; speakerRef must be ${input.dependencyResolution.materializedSpeaker.actorRef}.`
+      : input.dependencyResolution?.playerLocalCondition
+        ? "This dialogue follows an accepted player-local-condition dependency; do not restate or mutate that condition beyond accepted evidence."
       : "This dialogue step has no materialized-speaker dependency.",
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
@@ -2180,6 +2400,453 @@ async function executeSupportActorCreate(input: {
   });
 }
 
+async function executePlayerLocalConditionSet(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const effect = input.request.effect;
+  if (effect.kind !== "condition_set") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "condition_set",
+      kind: "invalid_backend_request",
+      message: "Stage 4 condition_set request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const plan = input.step.intended.localConditionPlan;
+  if (!plan) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "condition_set",
+      kind: "invalid_backend_request",
+      message: "Stage 4 condition_set requires a typed backend localConditionPlan.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const parsedEffect = cleanStage4LocalConditionSetEffectSchema.safeParse(effect);
+  if (!parsedEffect.success) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "condition_set",
+      kind: "invalid_backend_request",
+      message: parsedEffect.error.issues[0]?.message ?? "Stage 4 condition_set request failed schema validation.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const target = conditionTargetIsValid({ frame: input.frame, effect });
+  if (!target.ok) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "condition_set",
+      kind: "missing_or_ambiguous_condition_target",
+      message: target.message,
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  return withSqliteWriteLock("clean-stage4-player-local-condition-set", () => {
+    const db = getSqliteConnection();
+    const transaction = db.transaction(() => {
+      const player = readPlayer(input.frame);
+      const clock = readClock(input.frame.campaignId);
+      const current = validateFrameAndClock({ frame: input.frame, player, clock });
+      if (!current.ok || !player?.current_location_id || !player.current_scene_location_id) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "condition_set",
+          kind: "stale_frame_or_clock",
+          message: current.ok ? "Stage 4 current scene is unavailable for player local condition." : current.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const currentLocation = locationByLabel(input.frame, input.frame.scene.currentLocation.label);
+      const currentScene = locationByLabel(input.frame, input.frame.scene.currentScene.label);
+      if (
+        !currentLocation
+        || !currentScene
+        || player.current_location_id !== currentLocation.id
+        || player.current_scene_location_id !== currentScene.id
+      ) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "condition_set",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 current scene no longer matches the SceneFrame.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const activeRows = activeLocalConditionRows({
+        campaignId: input.frame.campaignId,
+        playerId: player.id,
+        currentSceneLocationId: currentScene.id,
+      });
+      const exactRows = activeRows.filter((row) => row.condition_key === effect.conditionKey);
+      const previousConditionKeys = uniqueStrings(activeRows.map((row) => row.condition_key)) as LocalConditionSetEffect["conditionKey"][];
+
+      if (exactRows.length > 1) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "condition_set",
+          kind: "condition_state_conflict",
+          message: "Stage 4 found ambiguous active player local condition rows.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      if (effect.operation === "clear") {
+        if (exactRows.length === 0) {
+          const receipt = skipReceipt({
+            ...input,
+            capabilityId: "condition_set",
+            kind: "condition_not_active",
+            message: `${localConditionLabel(effect.conditionKey)} is not active in the current scene.`,
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+
+        const receiptId = `stage4-receipt-${randomUUID()}`;
+        const authorityTraceId = `stage4-authority-${randomUUID()}`;
+        const resultWorldVersion = clock.world_version + 1;
+        const stateDeltaRefs = [`player:${player.id}:condition:${effect.conditionKey}:cleared`];
+        const now = Date.now();
+        const update = db.prepare(`
+          UPDATE world_clocks
+          SET world_version = ?, updated_at = ?
+          WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+        `).run(
+          resultWorldVersion,
+          now,
+          input.frame.campaignId,
+          clock.world_version,
+          clock.world_time_minutes,
+        );
+        if (update.changes !== 1) {
+          const receipt = failReceipt({
+            ...input,
+            capabilityId: "condition_set",
+            kind: "stale_frame_or_clock",
+            message: "Stage 4 condition_set found stale world clock state.",
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+        db.prepare(`
+          UPDATE clean_gameplay_actor_conditions
+          SET active = 0, cleared_receipt_id = ?, updated_at = ?
+          WHERE condition_id = ? AND active = 1
+        `).run(receiptId, now, exactRows[0].condition_id);
+        db.prepare(`
+          INSERT INTO authority_traces (
+            id,
+            campaign_id,
+            operation,
+            source_entity_type,
+            source_entity_id,
+            base_world_version,
+            result_world_version,
+            world_time_minutes,
+            elapsed_world_time_minutes,
+            tool_result_id,
+            event_ids,
+            state_delta_refs,
+            witnesses,
+            metadata,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          authorityTraceId,
+          input.frame.campaignId,
+          "gameplay-cycle-runtime.player.condition_set.v1",
+          "player",
+          player.id,
+          clock.world_version,
+          resultWorldVersion,
+          clock.world_time_minutes,
+          0,
+          receiptId,
+          "[]",
+          JSON.stringify(stateDeltaRefs),
+          JSON.stringify(effect.evidenceRefs),
+          JSON.stringify({
+            checklistId: input.checklist.checklistId,
+            stepId: input.step.stepId,
+            capabilityId: "condition_set",
+            operation: "clear",
+            conditionKey: effect.conditionKey,
+            anchorScope: "current_scene",
+            anchorRef: effect.anchorRef,
+            resultKind: "cleared",
+          }),
+          now,
+        );
+
+        const condition = localConditionResult({
+          frame: input.frame,
+          effect,
+          resultKind: "cleared",
+          targetLabel: target.targetLabel,
+        });
+        const receipt = baseReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: input.request,
+          status: "accepted",
+          capabilityId: "condition_set",
+          summary: `Player clears ${condition.conditionLabel} in ${input.frame.scene.currentScene.label}.`,
+          visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, ...(effect.target.targetRef ? [effect.target.targetRef] : [])]).slice(0, 12),
+          condition,
+          resultWorldVersion,
+          mutationApplied: true,
+          authorityTraceId,
+          playerId: player.id,
+          conditionId: exactRows[0].condition_id,
+          conditionOperation: "cleared",
+          previousConditionKeys,
+          nextConditionKeys: conditionKeysAfter({
+            activeRows,
+            clearedConditionIds: [exactRows[0].condition_id],
+            appliedConditionKey: null,
+          }),
+          anchorLocationId: currentLocation.id,
+          anchorSceneLocationId: currentScene.id,
+          stateDeltaRefs,
+        });
+        const finalReceipt = assertCleanStage4Receipt({ ...receipt, receiptId });
+        input.store.insert(finalReceipt);
+        return finalReceipt;
+      }
+
+      if (exactRows.length === 1) {
+        const condition = localConditionResult({
+          frame: input.frame,
+          effect,
+          resultKind: "already_present",
+          targetLabel: target.targetLabel,
+        });
+        const receipt = baseReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: input.request,
+          status: "accepted",
+          capabilityId: "condition_set",
+          summary: `Player is already ${condition.conditionLabel} in ${input.frame.scene.currentScene.label}.`,
+          visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, ...(effect.target.targetRef ? [effect.target.targetRef] : [])]).slice(0, 12),
+          condition,
+          playerId: player.id,
+          conditionId: exactRows[0].condition_id,
+          conditionOperation: "already_present",
+          previousConditionKeys,
+          nextConditionKeys: previousConditionKeys,
+          anchorLocationId: currentLocation.id,
+          anchorSceneLocationId: currentScene.id,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const conditionGroup = localConditionGroup(effect.conditionKey);
+      const replacedRows = effect.replacementPolicy === "replace_same_condition_group"
+        ? activeRows.filter((row) => row.condition_group === conditionGroup)
+        : [];
+      const receiptId = `stage4-receipt-${randomUUID()}`;
+      const conditionId = `stage4-condition-${randomUUID()}`;
+      const authorityTraceId = `stage4-authority-${randomUUID()}`;
+      const resultWorldVersion = clock.world_version + 1;
+      const resultKind: PlayerLocalConditionResult["resultKind"] = replacedRows.length > 0 ? "replaced" : "applied";
+      const stateDeltaRefs = [
+        ...replacedRows.map((row) => `player:${player.id}:condition:${row.condition_key}:replaced`),
+        `player:${player.id}:condition:${effect.conditionKey}:applied`,
+      ];
+      const now = Date.now();
+      const update = db.prepare(`
+        UPDATE world_clocks
+        SET world_version = ?, updated_at = ?
+        WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+      `).run(
+        resultWorldVersion,
+        now,
+        input.frame.campaignId,
+        clock.world_version,
+        clock.world_time_minutes,
+      );
+      if (update.changes !== 1) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "condition_set",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 condition_set found stale world clock state.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      for (const row of replacedRows) {
+        db.prepare(`
+          UPDATE clean_gameplay_actor_conditions
+          SET active = 0, cleared_receipt_id = ?, updated_at = ?
+          WHERE condition_id = ? AND active = 1
+        `).run(receiptId, now, row.condition_id);
+      }
+      db.prepare(`
+        INSERT INTO clean_gameplay_actor_conditions (
+          condition_id,
+          campaign_id,
+          actor_type,
+          player_id,
+          condition_key,
+          condition_label,
+          condition_group,
+          condition_scope,
+          anchor_location_id,
+          anchor_scene_location_id,
+          target_kind,
+          target_ref,
+          target_label,
+          active,
+          applied_receipt_id,
+          cleared_receipt_id,
+          base_world_version,
+          result_world_version,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, 'player', ?, ?, ?, ?, 'current_scene', ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?, ?)
+      `).run(
+        conditionId,
+        input.frame.campaignId,
+        player.id,
+        effect.conditionKey,
+        localConditionLabel(effect.conditionKey),
+        conditionGroup,
+        currentLocation.id,
+        currentScene.id,
+        effect.target.targetKind,
+        effect.target.targetRef,
+        target.targetLabel,
+        receiptId,
+        clock.world_version,
+        resultWorldVersion,
+        now,
+        now,
+      );
+      db.prepare(`
+        INSERT INTO authority_traces (
+          id,
+          campaign_id,
+          operation,
+          source_entity_type,
+          source_entity_id,
+          base_world_version,
+          result_world_version,
+          world_time_minutes,
+          elapsed_world_time_minutes,
+          tool_result_id,
+          event_ids,
+          state_delta_refs,
+          witnesses,
+          metadata,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authorityTraceId,
+        input.frame.campaignId,
+        "gameplay-cycle-runtime.player.condition_set.v1",
+        "player",
+        player.id,
+        clock.world_version,
+        resultWorldVersion,
+        clock.world_time_minutes,
+        0,
+        receiptId,
+        "[]",
+        JSON.stringify(stateDeltaRefs),
+        JSON.stringify(effect.evidenceRefs),
+        JSON.stringify({
+          checklistId: input.checklist.checklistId,
+          stepId: input.step.stepId,
+          capabilityId: "condition_set",
+          operation: "apply",
+          conditionKey: effect.conditionKey,
+          anchorScope: "current_scene",
+          anchorRef: effect.anchorRef,
+          replacementPolicy: effect.replacementPolicy,
+          resultKind,
+        }),
+        now,
+      );
+
+      const condition = localConditionResult({
+        frame: input.frame,
+        effect,
+        resultKind,
+        targetLabel: target.targetLabel,
+      });
+      const receipt = baseReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        status: "accepted",
+        capabilityId: "condition_set",
+        summary: `Player is ${condition.conditionLabel} in ${input.frame.scene.currentScene.label}.`,
+        visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, ...(effect.target.targetRef ? [effect.target.targetRef] : [])]).slice(0, 12),
+        condition,
+        resultWorldVersion,
+        mutationApplied: true,
+        authorityTraceId,
+        playerId: player.id,
+        conditionId,
+        conditionOperation: resultKind,
+        previousConditionKeys,
+        nextConditionKeys: conditionKeysAfter({
+          activeRows,
+          clearedConditionIds: replacedRows.map((row) => row.condition_id),
+          appliedConditionKey: effect.conditionKey,
+        }),
+        anchorLocationId: currentLocation.id,
+        anchorSceneLocationId: currentScene.id,
+        stateDeltaRefs,
+      });
+      const finalReceipt = assertCleanStage4Receipt({ ...receipt, receiptId });
+      input.store.insert(finalReceipt);
+      return finalReceipt;
+    });
+
+    try {
+      return transaction();
+    } catch {
+      const receipt = failReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        capabilityId: "condition_set",
+        kind: "mutation_apply_failed",
+        message: "Stage 4 condition_set mutation transaction failed before commit.",
+      });
+      input.store.insert(receipt);
+      return receipt;
+    }
+  });
+}
+
 async function executeTimeAdvance(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -2725,6 +3392,17 @@ function materializedSpeakerBinding(step: Step): MaterializedSpeakerBinding | nu
   ) ?? null;
 }
 
+function playerLocalConditionBinding(step: Step): PlayerLocalConditionBinding | null {
+  return (step.dependencyBindings ?? []).find((binding) =>
+    binding.bindingId === "player_local_condition"
+    && binding.requiredCapabilityId === "condition_set"
+    && binding.requiredReceiptAuthority === "player_local_condition_receipt"
+    && binding.sourcePath === "publicResult.condition.conditionKey"
+    && binding.resolveIn === "post_dependency_scene_frame"
+    && binding.requiredFramePresence === "player_visibleStatus.conditions"
+  ) ?? null;
+}
+
 function refreshedActorForMaterializedSpeaker(input: {
   frame: AuthoritativeSceneFrame;
   actorRef: string;
@@ -2736,6 +3414,20 @@ function refreshedActorForMaterializedSpeaker(input: {
     && normalizedRef(actor.ref) === normalizedRef(input.actorRef)
   );
   return matches.length === 1 ? matches[0] : null;
+}
+
+function refreshedPlayerConditionMatches(input: {
+  frame: AuthoritativeSceneFrame;
+  condition: PlayerLocalConditionResult;
+}): boolean {
+  const labels = input.frame.player.visibleStatus.conditions.map((condition) =>
+    condition.trim().toLowerCase()
+  );
+  const key = input.condition.conditionKey.trim().toLowerCase();
+  const label = input.condition.conditionLabel.trim().toLowerCase();
+  const present = labels.includes(key) || labels.includes(label);
+  if (input.condition.resultKind === "cleared") return !present;
+  return present;
 }
 
 async function resolveDialogueDependencies(input: {
@@ -2755,8 +3447,9 @@ async function resolveDialogueDependencies(input: {
   status: "skip";
   receipt: CleanStage4Receipt;
 }> {
-  const binding = materializedSpeakerBinding(input.step);
-  if (!binding) {
+  const speakerBinding = materializedSpeakerBinding(input.step);
+  const conditionBinding = playerLocalConditionBinding(input.step);
+  if (!speakerBinding && !conditionBinding) {
     return {
       status: "ready",
       frame: input.currentFrame,
@@ -2784,6 +3477,79 @@ async function resolveDialogueDependencies(input: {
     }),
   });
 
+  if (conditionBinding && !speakerBinding) {
+    const sourceReceipt = input.receipts.find((receipt) =>
+      receipt.stepId === conditionBinding.fromStepId
+      && receipt.capabilityId === "condition_set"
+    );
+    if (
+      !sourceReceipt
+      || sourceReceipt.status !== "accepted"
+      || sourceReceipt.authority.evidenceAuthority !== "player_local_condition_receipt"
+      || !sourceReceipt.publicResult.condition
+    ) {
+      return skipDependency("Dependent dialogue was skipped because player local condition evidence was not accepted.");
+    }
+    if (!input.refreshFrameAfterReceipt) {
+      return skipDependency("Dependent dialogue was skipped because no post-condition SceneFrame refresh was available.");
+    }
+
+    let refreshedFrame: AuthoritativeSceneFrame;
+    try {
+      refreshedFrame = await input.refreshFrameAfterReceipt({
+        initialFrame: input.initialFrame,
+        currentFrame: input.currentFrame,
+        checklist: input.checklist,
+        step: input.step,
+        receipt: sourceReceipt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return skipDependency(`Dependent dialogue was skipped because post-condition SceneFrame refresh failed: ${message}`);
+    }
+
+    const condition = sourceReceipt.publicResult.condition;
+    if (!refreshedPlayerConditionMatches({ frame: refreshedFrame, condition })) {
+      return {
+        status: "skip",
+        receipt: skipReceipt({
+          frame: refreshedFrame,
+          checklist: input.checklist,
+          step: input.step,
+          request: placeholderDialogueRequest({
+            frame: refreshedFrame,
+            checklist: input.checklist,
+            step: input.step,
+          }),
+          capabilityId: "dialogue_record",
+          kind: "dependency_not_accepted",
+          message: "Dependent dialogue was skipped because the refreshed SceneFrame did not reflect the accepted player local condition state.",
+        }),
+      };
+    }
+
+    return {
+      status: "ready",
+      frame: refreshedFrame,
+      refreshed: true,
+      afterReceiptId: sourceReceipt.receiptId,
+      resolution: {
+        materializedSpeaker: null,
+        playerLocalCondition: {
+          bindingId: "player_local_condition",
+          fromStepId: conditionBinding.fromStepId,
+          receiptId: sourceReceipt.receiptId,
+          conditionKey: condition.conditionKey,
+          conditionLabel: condition.conditionLabel,
+          resultKind: condition.resultKind,
+          refreshedFrameId: refreshedFrame.frameId,
+        },
+      },
+    };
+  }
+
+  const binding = speakerBinding;
+  if (!binding) return skipDependency("Dependent dialogue has unsupported mixed dependency bindings.");
   const sourceReceipt = input.receipts.find((receipt) =>
     receipt.stepId === binding.fromStepId
     && receipt.capabilityId === "support_actor_create"
@@ -2853,6 +3619,7 @@ async function resolveDialogueDependencies(input: {
         actorLabel: actor.label,
         refreshedFrameId: refreshedFrame.frameId,
       },
+      playerLocalCondition: null,
     },
   };
 }
@@ -2909,6 +3676,7 @@ export async function runCleanStage4Execution(input: {
       "movement",
       "dialogue_record",
       "support_actor_create",
+      "condition_set",
       "time_advance",
       "scene_beat_record",
     ];
@@ -3005,6 +3773,24 @@ export async function runCleanStage4Execution(input: {
       continue;
     }
 
+    if (step.intended.kind === "condition_set") {
+      const request = requestForStep({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        requiredRouteReceiptId: null,
+      });
+      const receipt = await executePlayerLocalConditionSet({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        request,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
     const routeDependency = receipts.find((receipt) =>
       step.dependsOnStepIds.includes(receipt.stepId)
       && receipt.capabilityId === "route_check"
@@ -3062,6 +3848,7 @@ export async function runCleanStage4Execution(input: {
       timeAdvance: receipt.publicResult.timeAdvance,
       dialogue: receipt.publicResult.dialogue,
       supportActor: receipt.publicResult.supportActor,
+      condition: receipt.publicResult.condition,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -3086,6 +3873,9 @@ export async function runCleanStage4Execution(input: {
     }
     if (result.timeAdvance) {
       publicEvents.push({ type: "state_update", data: result.timeAdvance });
+    }
+    if (result.condition) {
+      publicEvents.push({ type: "state_update", data: result.condition });
     }
   }
   return {

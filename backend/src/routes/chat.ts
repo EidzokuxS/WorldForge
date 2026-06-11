@@ -777,7 +777,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPlayerSafeStateUpdate(value: unknown): value is Record<string, unknown> {
-  return isRecord(value) && (value.type === "location_change" || value.type === "time_advance");
+  return isRecord(value) && (
+    value.type === "location_change"
+    || value.type === "time_advance"
+    || value.type === "player_local_condition"
+  );
+}
+
+const playerLocalConditionResultKinds = ["applied", "cleared", "replaced", "already_present"] as const;
+const playerLocalConditionOperations = ["apply", "clear"] as const;
+const playerLocalConditionKeys = [
+  "kneeling",
+  "crouched",
+  "prone",
+  "taking_cover",
+  "keeping_distance",
+  "stepped_back",
+  "braced",
+  "hands_visible",
+  "hands_raised",
+  "gripping_held_item",
+] as const;
+const playerLocalConditionTargetKinds = [
+  "current_scene",
+  "visible_actor_distance",
+  "visible_scene_anchor",
+  "inventory_item_readiness",
+] as const;
+
+function safeEnumValue<const T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T[number] : null;
 }
 
 function isUnsafeSseRefLike(value: string): boolean {
@@ -822,6 +851,46 @@ function playerSafeStateUpdate(value: unknown): Record<string, unknown> | null {
       type: "time_advance",
       elapsedMinutes,
       reasonKind,
+    };
+  }
+  if (value.type === "player_local_condition") {
+    const resultKind = safeEnumValue(value.resultKind, playerLocalConditionResultKinds);
+    const operation = safeEnumValue(value.operation, playerLocalConditionOperations);
+    const conditionKey = safeEnumValue(value.conditionKey, playerLocalConditionKeys);
+    const targetKind = safeEnumValue(value.targetKind, playerLocalConditionTargetKinds);
+    const actorLabel = playerSafeText(value.actorLabel);
+    const conditionLabel = playerSafeText(value.conditionLabel);
+    const anchorSceneLabel = playerSafeText(value.anchorSceneLabel);
+    const anchorLocationLabel = playerSafeText(value.anchorLocationLabel);
+    if (
+      !resultKind
+      || !operation
+      || !conditionKey
+      || !targetKind
+      || actorLabel !== "Player"
+      || !conditionLabel
+      || value.conditionScope !== "current_scene"
+      || !anchorSceneLabel
+      || !anchorLocationLabel
+      || value.claimStatus !== "visible_player_local_condition_only"
+    ) {
+      return null;
+    }
+    const targetLabel = value.targetLabel === null ? null : playerSafeText(value.targetLabel);
+    if (value.targetLabel !== null && !targetLabel) return null;
+    return {
+      type: "player_local_condition",
+      resultKind,
+      actorLabel,
+      operation,
+      conditionKey,
+      conditionLabel,
+      conditionScope: "current_scene",
+      anchorSceneLabel,
+      anchorLocationLabel,
+      targetKind,
+      targetLabel,
+      claimStatus: "visible_player_local_condition_only",
     };
   }
   const locationName = playerSafeText(value.locationName);
