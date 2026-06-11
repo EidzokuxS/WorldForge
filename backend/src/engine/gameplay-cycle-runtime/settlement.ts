@@ -121,6 +121,25 @@ const PLAYER_LOCAL_CONDITION_DOES_NOT_PROVE = [
   "absence or no-change beyond the accepted local condition operation",
 ];
 
+const ITEM_TRANSFER_DOES_NOT_PROVE = [
+  "item creation",
+  "item discovery",
+  "item inspection result",
+  "item use or activation",
+  "item damage or repair",
+  "container contents",
+  "currency or barter value",
+  "NPC consent or reaction",
+  "relationship change",
+  "world fact",
+  "route truth",
+  "location reveal",
+  "condition or HP change",
+  "dialogue content",
+  "NPC private knowledge",
+  "absence or no-change beyond the accepted item state",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -468,6 +487,42 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             "current-scene local condition anchor",
           ],
           doesNotProve: PLAYER_LOCAL_CONDITION_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "item_transfer_receipt" && receipt.publicResult.itemTransfer) {
+      const evidenceId = nextEvidenceId(evidence);
+      const itemTransfer = receipt.publicResult.itemTransfer;
+      const operationText = itemTransfer.resultKind === "already_satisfied"
+        ? `${itemTransfer.itemLabel} was already in the requested item state.`
+        : `${itemTransfer.itemLabel} item state changed: ${itemTransfer.resultKind}.`;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "item_transfer_receipt",
+        claimKinds: ["item_state"],
+        text: `${operationText} Current scene anchor: ${itemTransfer.anchorSceneLabel}.`,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, operationText),
+          fact(evidenceId, 2, `Item label: ${itemTransfer.itemLabel}.`),
+          fact(evidenceId, 3, `Operation: ${itemTransfer.operation}.`),
+          fact(evidenceId, 4, `Source: ${itemTransfer.sourceLabel}.`),
+          fact(evidenceId, 5, `Target: ${itemTransfer.targetLabel}.`),
+          fact(evidenceId, 6, `Final equip state: ${itemTransfer.finalEquipState}.`),
+          fact(evidenceId, 7, `Current scene anchor: ${itemTransfer.anchorSceneLabel}.`),
+          fact(evidenceId, 8, `Item transfer result: ${itemTransfer.resultKind}.`),
+        ],
+        limits: {
+          proves: [
+            "accepted item custody/location/equip-state operation",
+            "accepted item label",
+            "accepted source and target labels",
+            "current scene item state anchor",
+          ],
+          doesNotProve: ITEM_TRANSFER_DOES_NOT_PROVE,
         },
       });
       continue;

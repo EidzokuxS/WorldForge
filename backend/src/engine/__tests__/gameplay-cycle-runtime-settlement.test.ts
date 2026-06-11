@@ -271,6 +271,76 @@ function playerLocalConditionReceipt(inputFrame = frame(), inputChecklist = chec
   });
 }
 
+function itemTransferReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    ...movementReceipt(inputFrame, inputChecklist),
+    receiptId: "stage4-receipt-item-transfer-1",
+    requestId: "stage4-request-item-transfer-1",
+    capabilityId: "item_transfer",
+    result: { ...inputFrame.base, worldVersion: inputFrame.base.worldVersion + 1, mutationApplied: true },
+    authority: {
+      evidenceAuthority: "item_transfer_receipt",
+      mutationAuthority: "item_custody_location_equip_state",
+      visibleResultAuthority: "may_claim_item_state_change",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: true,
+    },
+    publicResult: {
+      summary: "Brass Tube item state is settled: transferred_to_actor.",
+      visibleRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      routeStatus: null,
+      locationChange: null,
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: null,
+      itemTransfer: {
+        type: "item_transfer",
+        resultKind: "transferred_to_actor",
+        itemLabel: "Brass Tube",
+        actorLabel: "Player",
+        operation: "give_to_visible_actor",
+        sourceLabel: "Player",
+        targetLabel: "Guide",
+        anchorSceneLabel: "Market",
+        anchorLocationLabel: "Market",
+        finalOwnerKind: "visible_actor",
+        finalLocationKind: "none",
+        finalEquipState: "carried",
+        finalEquippedSlot: null,
+        claimStatus: "visible_item_state_change_only",
+      },
+    },
+    privateResult: {
+      playerId: "player-1",
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: null,
+      conditionOperation: null,
+      itemId: "item-brass-tube",
+      itemOperation: "give_to_visible_actor",
+      previousOwnerId: "player-1",
+      nextOwnerId: "npc-guide",
+      previousLocationId: null,
+      nextLocationId: null,
+      previousEquipState: "carried",
+      nextEquipState: "carried",
+      previousEquippedSlot: null,
+      nextEquippedSlot: null,
+      edgeIds: [],
+      authorityTraceId: "stage4-authority-item-transfer",
+      clockReceiptId: null,
+      stateDeltaRefs: ["item:item-brass-tube:owner:npc-guide"],
+    },
+    failure: null,
+  });
+}
+
 function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStage4ExecutionResult {
   return cleanStage4ExecutionResultSchema.parse({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -297,6 +367,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         dialogue: receipt.publicResult.dialogue,
         supportActor: receipt.publicResult.supportActor,
         condition: receipt.publicResult.condition,
+        itemTransfer: receipt.publicResult.itemTransfer,
       })),
   });
 }
@@ -490,6 +561,57 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(condition?.limits.doesNotProve).toContain("dialogue content");
     expect(JSON.stringify(view)).not.toContain("condition-1");
     expect(JSON.stringify(view)).not.toContain("player-1");
+  });
+
+  it("settles item_transfer receipts as item_state evidence only", () => {
+    const inputFrame = frame({
+      playerAction: "I hand the Brass Tube to Guide.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "North Hall", "Guide", "Brass Tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = itemTransferReceipt(inputFrame, inputChecklist);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    const itemState = packet.acceptedEvidence.find((entry) => entry.authority === "item_transfer_receipt");
+    expect(itemState?.claimKinds).toEqual(["item_state"]);
+    expect(itemState?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Brass Tube item state changed: transferred_to_actor.",
+      "Item label: Brass Tube.",
+      "Operation: give_to_visible_actor.",
+      "Source: Player.",
+      "Target: Guide.",
+      "Final equip state: carried.",
+      "Current scene anchor: Market.",
+      "Item transfer result: transferred_to_actor.",
+    ]);
+    expect(itemState?.limits.doesNotProve).toEqual(expect.arrayContaining([
+      "item discovery",
+      "item use or activation",
+      "NPC consent or reaction",
+      "world fact",
+      "dialogue content",
+      "absence or no-change beyond the accepted item state",
+    ]));
+    expect(JSON.stringify(view)).not.toContain("item-brass-tube");
+    expect(JSON.stringify(view)).not.toContain("npc-guide");
+    expect(JSON.stringify(view)).not.toContain("stage4-authority-item-transfer");
   });
 
   it("settles support actor materialization as visible actor presence only", () => {

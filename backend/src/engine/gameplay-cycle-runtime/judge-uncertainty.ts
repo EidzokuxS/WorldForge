@@ -432,6 +432,16 @@ function branchIssues(input: {
     );
   }
   if (
+    gmRead.actionInterpretation.interactionKind === "item_transfer"
+    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
+    && judgment.checkNeed === "no_roll_needed"
+  ) {
+    add(
+      "checkNeed",
+      "Player item custody/location/equip-state transitions require backend_action_plan_needed so Stage 4 can issue an item transfer receipt before narration.",
+    );
+  }
+  if (
     judgment.checkNeed === "backend_action_plan_needed"
     && judgment.noRollReason?.code !== "backend_receipt_required"
   ) {
@@ -580,6 +590,7 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "When GM Read actionInterpretation.interactionKind is visible_actor_dialogue, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible speaker response receipt.",
     "When GM Read actionInterpretation.interactionKind is ordinary_support_actor_needed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the support actor materialization receipt. Do not call Oracle for ordinary support actor availability.",
     "When GM Read actionInterpretation.interactionKind is player_local_condition, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the Player local condition receipt. Do not call Oracle for uncontested posture/readiness.",
+    "When GM Read actionInterpretation.interactionKind is item_transfer, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the item transfer receipt. Do not call Oracle for ordinary uncontested give/drop/pickup/equip/unequip.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",
     "For non-Oracle branches, oracleAdmission and difficulty must be null and noRollReason must be present.",
     "For Oracle branches, include difficulty plus oracleAdmission with strong_hit, weak_hit, and miss meanings; do not include noRollReason.",

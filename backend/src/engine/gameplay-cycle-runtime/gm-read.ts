@@ -235,7 +235,15 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
   const visibleActorRefs = new Set(frame.actors.map((actor) => actor.ref.toLowerCase()));
   const inventoryRefs = new Set(frame.inventory.map((item) => item.ref.toLowerCase()));
+  const visibleItemRefs = new Set(frame.targets
+    .filter((target) => target.kind === "item")
+    .map((target) => target.ref.toLowerCase()));
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
+  const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
+  const sceneRefs = new Set([
+    frame.scene.currentScene.ref.toLowerCase(),
+    frame.scene.currentLocation.ref.toLowerCase(),
+  ]);
 
   if (localConditionNeed) {
     const targetRef = localConditionNeed.targetRef?.toLowerCase() ?? null;
@@ -273,6 +281,73 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localConditionNeed.targetKind",
         message: "gripping_held_item requires targetKind=inventory_item_readiness.",
+      });
+    }
+  }
+
+  if (itemTransferNeed) {
+    const itemRef = itemTransferNeed.itemRef.toLowerCase();
+    const targetRef = itemTransferNeed.targetRef.toLowerCase();
+    const operation = itemTransferNeed.operation;
+    const expected: Record<typeof operation, {
+      sourceKind: typeof itemTransferNeed.sourceKind;
+      targetKind: typeof itemTransferNeed.targetKind;
+      equipSlot: typeof itemTransferNeed.equipSlot;
+    }> = {
+      give_to_visible_actor: { sourceKind: "player_inventory", targetKind: "visible_actor", equipSlot: null },
+      drop_in_current_scene: { sourceKind: "player_inventory", targetKind: "current_scene", equipSlot: null },
+      pickup_from_current_scene: { sourceKind: "current_scene_item", targetKind: "player_inventory", equipSlot: null },
+      equip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_equipment", equipSlot: "equipped" },
+      unequip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_inventory", equipSlot: null },
+    };
+    const expectedShape = expected[operation];
+    if (
+      itemTransferNeed.sourceKind !== expectedShape.sourceKind
+      || itemTransferNeed.targetKind !== expectedShape.targetKind
+      || itemTransferNeed.equipSlot !== expectedShape.equipSlot
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "itemTransferNeed source/target/equipSlot shape must match the bounded item transfer operation.",
+      });
+    }
+    if (itemTransferNeed.sourceKind === "player_inventory" && !inventoryRefs.has(itemRef)) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed.itemRef",
+        message: "Player inventory item transfers require one SceneFrame.inventory item ref.",
+      });
+    }
+    if (itemTransferNeed.sourceKind === "current_scene_item" && !visibleItemRefs.has(itemRef)) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed.itemRef",
+        message: "Current-scene item pickups require one visible SceneFrame.targets item ref.",
+      });
+    }
+    if (itemTransferNeed.targetKind === "visible_actor" && !visibleActorRefs.has(targetRef)) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed.targetRef",
+        message: "Giving an item requires one already-visible non-player actor target ref.",
+      });
+    }
+    if (itemTransferNeed.targetKind === "current_scene" && !sceneRefs.has(targetRef)) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed.targetRef",
+        message: "Dropping or placing an item requires the current scene/location target ref.",
+      });
+    }
+    if (
+      ["player_inventory", "player_equipment"].includes(itemTransferNeed.targetKind)
+      && targetRef !== frame.player.ref.toLowerCase()
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed.targetRef",
+        message: "Pickup/equip/unequip targets must use Player as the target ref.",
       });
     }
   }
@@ -320,6 +395,38 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "player_local_condition must not include supportActorNeed.",
       });
     }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "player_local_condition must not include itemTransferNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "item_transfer") {
+    if (read.actionInterpretation.itemTransferNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "item_transfer requires itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "item_transfer must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "item_transfer must not include localConditionNeed.",
+      });
+    }
     return issues;
   }
 
@@ -336,6 +443,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localConditionNeed",
         message: "ordinary_support_actor_needed must not include localConditionNeed in P68.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "ordinary_support_actor_needed must not include itemTransferNeed.",
       });
     }
     const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
@@ -361,6 +475,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       code: "interaction_invalid",
       path: "actionInterpretation.localConditionNeed",
       message: "localConditionNeed is allowed only for player_local_condition or visible_actor_dialogue compound actions.",
+    });
+  }
+  if (read.actionInterpretation.itemTransferNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.itemTransferNeed",
+      message: "itemTransferNeed is allowed only for item_transfer or visible_actor_dialogue compound actions.",
     });
   }
   return issues;
@@ -495,7 +616,7 @@ export function buildGmReadSystemPrompt(): string {
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
-    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, player_local_condition, unsupported_or_unclear.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, player_local_condition, item_transfer, unsupported_or_unclear.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
     "Use ordinary_support_actor_needed only when the player needs one ordinary local current-scene role absent from SceneFrame.actors, with roleKind in the schema and supportActorNeed filled. Do not target an invented actor ref.",
@@ -504,9 +625,15 @@ export function buildGmReadSystemPrompt(): string {
     "Use player_local_condition only for uncontested first-person current-scene Player posture/readiness such as kneeling, crouched, prone, taking_cover as posture only, keeping_distance, stepped_back, braced, hands_visible, hands_raised, or gripping_held_item for an already-inventory item.",
     "localConditionNeed does not authorize HP, damage, healing, injuries, combat status, NPC conditions, stealth success, cover effectiveness, movement, item custody/location/equip changes, tags, discovery, world facts, relationship, absence, no-change, or dialogue content.",
     "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory. For visible_actor_distance, targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
+    "Use item_transfer only for one uncontested Player item custody/location/equip-state transition: give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, equip_inventory_item, or unequip_inventory_item.",
+    "itemTransferNeed must cite itemRef from SceneFrame.inventory for give/drop/equip/unequip, or from SceneFrame.targets where kind=item for pickup. give_to_visible_actor targetRef must be a visible actor; drop targetRef must be current scene/location; pickup/equip/unequip targetRef must be Player.",
+    "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
+    "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
+    "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
     "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
+    "For item_transfer or compound itemTransferNeed, itemTransferNeed.itemRef, targetRef, and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",
     "Keep arrays short and omit all fields not defined by the schema.",

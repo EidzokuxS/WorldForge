@@ -195,6 +195,54 @@ function playerLocalConditionView(): CleanNarratorView {
   });
 }
 
+function itemStateView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I hand the Brass Tube to Guide.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "item_transfer_receipt",
+      claimKinds: ["item_state"],
+      text: "Brass Tube item state changed: transferred_to_actor. Current scene anchor: Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Brass Tube item state changed: transferred_to_actor.", exact: true },
+        { factRef: "e1.f2", text: "Item label: Brass Tube.", exact: true },
+        { factRef: "e1.f3", text: "Operation: give_to_visible_actor.", exact: true },
+        { factRef: "e1.f4", text: "Source: Player.", exact: true },
+        { factRef: "e1.f5", text: "Target: Guide.", exact: true },
+        { factRef: "e1.f6", text: "Final equip state: carried.", exact: true },
+        { factRef: "e1.f7", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f8", text: "Item transfer result: transferred_to_actor.", exact: true },
+      ],
+      limits: {
+        proves: [
+          "accepted item custody/location/equip-state operation",
+          "accepted item label",
+          "accepted source and target labels",
+          "current scene item state anchor",
+        ],
+        doesNotProve: [
+          "item creation",
+          "item discovery",
+          "item inspection result",
+          "item use or activation",
+          "item damage or repair",
+          "container contents",
+          "currency or barter value",
+          "NPC consent or reaction",
+          "relationship change",
+          "world fact",
+          "route truth",
+          "location reveal",
+          "condition or HP change",
+          "dialogue content",
+          "NPC private knowledge",
+          "absence or no-change beyond the accepted item state",
+        ],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -495,6 +543,41 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedHp.status).toBe("rejected");
     if (inventedHp.status !== "rejected") throw new Error("expected rejected");
     expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For item_state");
+    const text = renderCleanNarrationFallback(itemStateView());
+
+    expect(text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
+    expect(text).not.toMatch(/\bsays|discovers?|uses?|activates?|consents?|reacts?|nothing changed|no change\b/iu);
+
+    for (const unsupportedClaim of [
+      "dialogue_response",
+      "visible_fact",
+      "support_actor_materialization",
+      "route_status",
+      "player_local_condition",
+    ] as const) {
+      const result = validateCleanNarrationCandidate({
+        view: itemStateView(),
+        candidate: {
+          ...movementCandidate("Guide accepts the Brass Tube and explains how it works."),
+          sentences: [{
+            kind: "accepted_evidence",
+            text: "Guide accepts the Brass Tube and explains how it works.",
+            evidenceRefs: ["e1"],
+            backendFactRefs: ["e1.f1"],
+            claimKinds: ["item_state", unsupportedClaim],
+            auditStepIds: [],
+          }],
+          finalText: "Guide accepts the Brass Tube and explains how it works.",
+        },
+      });
+      expect(result.status).toBe("rejected");
+      if (result.status !== "rejected") throw new Error("expected rejected");
+      expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+    }
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

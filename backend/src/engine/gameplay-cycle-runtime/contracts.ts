@@ -252,6 +252,26 @@ export const cleanLocalConditionTargetKindSchema = z.enum([
   "inventory_item_readiness",
 ]);
 
+export const cleanItemTransferOperationSchema = z.enum([
+  "give_to_visible_actor",
+  "drop_in_current_scene",
+  "pickup_from_current_scene",
+  "equip_inventory_item",
+  "unequip_inventory_item",
+]);
+
+export const cleanItemTransferSourceKindSchema = z.enum([
+  "player_inventory",
+  "current_scene_item",
+]);
+
+export const cleanItemTransferTargetKindSchema = z.enum([
+  "visible_actor",
+  "current_scene",
+  "player_inventory",
+  "player_equipment",
+]);
+
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
   playerIntent: shortText,
@@ -266,6 +286,7 @@ export const gmReadActionInterpretationSchema = z.object({
     "visible_actor_dialogue",
     "ordinary_support_actor_needed",
     "player_local_condition",
+    "item_transfer",
     "unsupported_or_unclear",
   ]).default("unsupported_or_unclear"),
   supportActorNeed: z.object({
@@ -286,6 +307,17 @@ export const gmReadActionInterpretationSchema = z.object({
     requestedPostureText: shortText,
     targetKind: cleanLocalConditionTargetKindSchema,
     targetRef: modelSafeRef.nullable(),
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  itemTransferNeed: z.object({
+    actorRef: z.literal("Player"),
+    operation: cleanItemTransferOperationSchema,
+    itemRef: modelSafeRef,
+    sourceKind: cleanItemTransferSourceKindSchema,
+    targetKind: cleanItemTransferTargetKindSchema,
+    targetRef: modelSafeRef,
+    equipSlot: z.literal("equipped").nullable(),
+    requestedItemText: shortText,
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
 }).strict();
@@ -575,9 +607,20 @@ export const gmActionChecklistPlayerLocalConditionBindingSchema = z.object({
   requiredFramePresence: z.literal("player_visibleStatus.conditions"),
 }).strict();
 
+export const gmActionChecklistItemTransferBindingSchema = z.object({
+  bindingId: z.literal("item_transfer_state"),
+  fromStepId: gmActionChecklistStepIdSchema,
+  requiredCapabilityId: z.literal("item_transfer"),
+  requiredReceiptAuthority: z.literal("item_transfer_receipt"),
+  sourcePath: z.literal("publicResult.itemTransfer"),
+  resolveIn: z.literal("post_dependency_scene_frame"),
+  requiredFramePresence: z.literal("item_state_reconciled"),
+}).strict();
+
 export const gmActionChecklistDependencyBindingSchema = z.discriminatedUnion("bindingId", [
   gmActionChecklistMaterializedSpeakerBindingSchema,
   gmActionChecklistPlayerLocalConditionBindingSchema,
+  gmActionChecklistItemTransferBindingSchema,
 ]);
 
 export const gmActionChecklistStepSchema = z.object({
@@ -600,6 +643,17 @@ export const gmActionChecklistStepSchema = z.object({
       targetKind: cleanLocalConditionTargetKindSchema,
       targetRef: modelSafeRef.nullable(),
       replacementPolicy: z.enum(["replace_same_condition_group", "no_replacement"]),
+    }).strict().nullable().optional(),
+    itemTransferPlan: z.object({
+      actorRef: z.literal("Player"),
+      operation: cleanItemTransferOperationSchema,
+      itemRef: modelSafeRef,
+      sourceKind: cleanItemTransferSourceKindSchema,
+      targetKind: cleanItemTransferTargetKindSchema,
+      targetRef: modelSafeRef,
+      targetEquipState: z.enum(["carried", "equipped"]),
+      targetEquippedSlot: z.literal("equipped").nullable(),
+      anchorRef: modelSafeRef,
     }).strict().nullable().optional(),
   }).strict(),
   disposition: z.object({
@@ -669,6 +723,7 @@ export const cleanStage4CapabilityIdSchema = z.enum([
   "movement",
   "dialogue_record",
   "support_actor_create",
+  "item_transfer",
   "condition_set",
   "time_advance",
   "scene_beat_record",
@@ -824,6 +879,70 @@ export const cleanStage4PlayerLocalConditionResultSchema = z.object({
   claimStatus: z.literal("visible_player_local_condition_only"),
 }).strict();
 
+export const cleanStage4ItemTransferEffectSchema = z.object({
+  kind: z.literal("item_transfer"),
+  authorityKind: z.literal("player_current_scene_item_state_transition"),
+  actorRef: z.literal("Player"),
+  operation: cleanItemTransferOperationSchema,
+  itemRef: modelSafeRef,
+  source: z.object({
+    sourceKind: cleanItemTransferSourceKindSchema,
+    requiredOwner: z.enum(["Player", "none"]),
+    requiredLocation: z.enum(["current_scene", "none"]),
+    requiredEquipState: z.enum(["carried", "equipped"]).nullable(),
+  }).strict(),
+  target: z.object({
+    targetKind: cleanItemTransferTargetKindSchema,
+    targetRef: modelSafeRef,
+    targetEquipState: z.enum(["carried", "equipped"]),
+    targetEquippedSlot: z.literal("equipped").nullable(),
+  }).strict(),
+  anchorRef: modelSafeRef,
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  forbiddenPayloads: z.object({
+    itemCreation: z.literal(false),
+    itemDiscovery: z.literal(false),
+    itemInspection: z.literal(false),
+    itemUseOrActivation: z.literal(false),
+    itemDamageOrRepair: z.literal(false),
+    containerContents: z.literal(false),
+    currencyOrBarter: z.literal(false),
+    npcConsentOrReaction: z.literal(false),
+    relationship: z.literal(false),
+    worldFact: z.literal(false),
+    routeTruth: z.literal(false),
+    locationReveal: z.literal(false),
+    hpOrCondition: z.literal(false),
+    dialogueContent: z.literal(false),
+    privateKnowledge: z.literal(false),
+    absenceOrNoChange: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const cleanStage4ItemTransferResultSchema = z.object({
+  type: z.literal("item_transfer"),
+  resultKind: z.enum([
+    "transferred_to_actor",
+    "dropped_in_scene",
+    "picked_up",
+    "equipped",
+    "unequipped",
+    "already_satisfied",
+  ]),
+  itemLabel: shortText,
+  actorLabel: z.literal("Player"),
+  operation: cleanItemTransferOperationSchema,
+  sourceLabel: shortText,
+  targetLabel: shortText,
+  anchorSceneLabel: shortText,
+  anchorLocationLabel: shortText,
+  finalOwnerKind: z.enum(["player", "visible_actor", "none"]),
+  finalLocationKind: z.enum(["current_scene", "none"]),
+  finalEquipState: z.enum(["carried", "equipped"]),
+  finalEquippedSlot: z.string().trim().min(1).max(80).nullable(),
+  claimStatus: z.literal("visible_item_state_change_only"),
+}).strict();
+
 export const cleanStage4RequestSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-request.v1"),
   requestId: shortText,
@@ -897,6 +1016,7 @@ export const cleanStage4RequestSchema = z.object({
     }).strict(),
     cleanStage4DialogueRequestEffectSchema,
     cleanStage4SupportActorCreateEffectSchema,
+    cleanStage4ItemTransferEffectSchema,
     cleanStage4LocalConditionSetEffectSchema,
   ]),
 }).strict().superRefine((request, ctx) => {
@@ -915,8 +1035,14 @@ export const cleanStage4RequestSchema = z.object({
     }
     return;
   }
+  if (request.effect.kind === "item_transfer") {
+    if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
+      ctx.addIssue({ code: "custom", path: ["author"], message: "P69 item_transfer requests must be backend-authored from the accepted checklist." });
+    }
+    return;
+  }
   if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
-    ctx.addIssue({ code: "custom", path: ["author"], message: "Only dialogue_record and support_actor_create may be model-authored in P66." });
+    ctx.addIssue({ code: "custom", path: ["author"], message: "Only dialogue_record and support_actor_create may be model-authored in the clean runtime." });
   }
 });
 
@@ -959,6 +1085,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "terminal_dialogue_receipt",
       "support_actor_materialization_receipt",
       "player_local_condition_receipt",
+      "item_transfer_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -969,6 +1096,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "world_clock_only",
       "current_scene_support_actor",
       "player_local_condition_state",
+      "item_custody_location_equip_state",
     ]),
     visibleResultAuthority: z.enum([
       "may_describe_visible_snapshot",
@@ -980,6 +1108,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "may_quote_visible_dialogue_response",
       "may_claim_visible_support_actor_materialized",
       "may_claim_player_local_condition",
+      "may_claim_item_state_change",
       "failure_only",
       "none",
     ]),
@@ -1038,6 +1167,7 @@ export const cleanStage4ReceiptSchema = z.object({
     }).strict().nullable(),
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
+    itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
   }).strict(),
   privateResult: z.object({
     playerId: shortText.nullable(),
@@ -1051,6 +1181,16 @@ export const cleanStage4ReceiptSchema = z.object({
     conditionOperation: z.enum(["applied", "cleared", "replaced", "already_present"]).nullable().optional(),
     previousConditionKeys: z.array(cleanLocalConditionKeySchema).max(12).optional(),
     nextConditionKeys: z.array(cleanLocalConditionKeySchema).max(12).optional(),
+    itemId: shortText.nullable().optional(),
+    itemOperation: cleanItemTransferOperationSchema.nullable().optional(),
+    previousOwnerId: shortText.nullable().optional(),
+    nextOwnerId: shortText.nullable().optional(),
+    previousLocationId: shortText.nullable().optional(),
+    nextLocationId: shortText.nullable().optional(),
+    previousEquipState: z.enum(["carried", "equipped"]).nullable().optional(),
+    nextEquipState: z.enum(["carried", "equipped"]).nullable().optional(),
+    previousEquippedSlot: shortText.nullable().optional(),
+    nextEquippedSlot: shortText.nullable().optional(),
     edgeIds: z.array(shortText).max(24),
     authorityTraceId: shortText.nullable(),
     clockReceiptId: shortText.nullable(),
@@ -1065,11 +1205,17 @@ export const cleanStage4ReceiptSchema = z.object({
       "frame_mismatch",
       "stale_frame_or_clock",
       "missing_or_ambiguous_destination",
+      "missing_or_ambiguous_item",
+      "missing_or_ambiguous_target",
       "route_disconnected",
       "dependency_not_accepted",
       "missing_or_ambiguous_condition_target",
       "condition_not_active",
       "condition_state_conflict",
+      "source_state_mismatch",
+      "target_not_visible",
+      "target_state_invalid",
+      "equip_slot_conflict",
       "mutation_apply_failed",
       "receipt_persist_failed",
     ]),
@@ -1208,6 +1354,37 @@ export const cleanStage4ReceiptSchema = z.object({
       }
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "item_transfer") {
+    const itemTransfer = receipt.publicResult.itemTransfer ?? null;
+    if (itemTransfer === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "itemTransfer"], message: "Accepted item_transfer requires public item transfer result." });
+      return;
+    }
+    if (receipt.authority.evidenceAuthority !== "item_transfer_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted item_transfer must use item transfer evidence authority." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_item_state_change") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted item_transfer must authorize item-state narration." });
+    }
+    if (receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes || receipt.result.tick !== receipt.base.tick) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted item_transfer must not advance time or tick." });
+    }
+    if (itemTransfer.resultKind === "already_satisfied") {
+      if (receipt.result.mutationApplied || receipt.result.worldVersion !== receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Already-satisfied item_transfer receipt must not mutate or advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "none" || receipt.authority.mayAuthorizeMutation !== false) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Already-satisfied item_transfer receipt must not authorize mutation." });
+      }
+    } else {
+      if (!receipt.result.mutationApplied || receipt.result.worldVersion <= receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Mutating item_transfer receipt must apply mutation and advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "item_custody_location_equip_state" || receipt.authority.mayAuthorizeMutation !== true) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Mutating item_transfer receipt must own item custody/location/equip state." });
+      }
+    }
+  }
   for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
     if (receipt.capabilityId !== capabilityId) continue;
     if (receipt.result.mutationApplied) {
@@ -1236,7 +1413,8 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/scene_beat/g, "")
     .replace(/dialogue_response/g, "")
     .replace(/support_actor_materialization/g, "")
-    .replace(/player_local_condition/g, "");
+    .replace(/player_local_condition/g, "")
+    .replace(/item_transfer/g, "");
   if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
     ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
   }
@@ -1282,6 +1460,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
       "terminal_dialogue_receipt",
       "support_actor_materialization_receipt",
       "player_local_condition_receipt",
+      "item_transfer_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -1312,6 +1491,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     }).strict().nullable(),
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
+    itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
   }).strict()).max(6),
 }).strict();
 
@@ -1327,6 +1507,7 @@ const cleanSettledClaimKindSchema = z.enum([
   "dialogue_response",
   "support_actor_materialization",
   "player_local_condition",
+  "item_state",
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
@@ -1341,6 +1522,7 @@ const cleanSettledEvidenceAuthoritySchema = z.enum([
   "terminal_dialogue_receipt",
   "support_actor_materialization_receipt",
   "player_local_condition_receipt",
+  "item_transfer_receipt",
   "terminal_mutation_receipt",
   "oracle_visible_outcome",
 ]);
@@ -1381,6 +1563,7 @@ export const cleanSettledStepAuditSchema = z.object({
     "terminal_dialogue_receipt",
     "support_actor_materialization_receipt",
     "player_local_condition_receipt",
+    "item_transfer_receipt",
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",

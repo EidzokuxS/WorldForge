@@ -27,6 +27,7 @@ import {
   cleanStage4DialogueRequestEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
   cleanStage4LocalConditionSetEffectSchema,
+  cleanStage4ItemTransferEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -679,6 +680,33 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
   });
 }
 
+function itemTransferActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  const base = actionPlanFrame();
+  return actionPlanFrame({
+    playerAction: "I hand the Brass Tube to Guide.",
+    actors: [{
+      ref: "Guide",
+      label: "Guide",
+      role: "support",
+      visibleStatus: { hp: null, conditions: [] },
+    }],
+    targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+    inventory: [{
+      ref: "Brass Tube",
+      label: "Brass Tube",
+      equipState: "carried",
+      tags: [],
+    }],
+    capabilities: [
+      ...base.capabilities,
+      { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    ...overrides,
+  });
+}
+
 function actionPlanGmRead(frame = actionPlanFrame()): GmRead {
   return {
     ...validGmRead(frame),
@@ -694,6 +722,34 @@ function actionPlanGmRead(frame = actionPlanFrame()): GmRead {
       interactionKind: "movement_intent",
     },
     interpretationRationale: "The action requests a world-state consequence.",
+  };
+}
+
+function itemTransferGmRead(frame = itemTransferActionPlanFrame()): GmRead {
+  return {
+    ...actionPlanGmRead(frame),
+    focalRefs: ["Player", "Guide", "Brass Tube"],
+    evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+    liveSceneQuestion: "Which bounded item custody transition must Stage 4 settle?",
+    actionInterpretation: {
+      summary: "The player hands Brass Tube to visible Guide.",
+      playerIntent: "Hand Brass Tube to Guide.",
+      method: "hand",
+      targetRefs: ["Brass Tube", "Guide"],
+      interactionKind: "item_transfer",
+      itemTransferNeed: {
+        actorRef: "Player",
+        operation: "give_to_visible_actor",
+        itemRef: "Brass Tube",
+        sourceKind: "player_inventory",
+        targetKind: "visible_actor",
+        targetRef: "Guide",
+        equipSlot: null,
+        requestedItemText: "Brass Tube",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    },
+    interpretationRationale: "Giving a carried item to a visible actor needs item-state receipt authority.",
   };
 }
 
@@ -1051,6 +1107,70 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
     expect(rejected.status).toBe("rejected");
     expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
+  });
+
+  it.each([
+    ["hand", "I hand the Brass Tube to Guide."],
+    ["give", "I give the Brass Tube to Guide."],
+  ])("accepts %s as bounded item_transfer from Player inventory to a visible actor", (_verb, playerAction) => {
+    const frame = itemTransferActionPlanFrame({ playerAction });
+    const candidate = itemTransferGmRead(frame);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "item_transfer",
+      targetRefs: ["Brass Tube", "Guide"],
+      itemTransferNeed: {
+        actorRef: "Player",
+        operation: "give_to_visible_actor",
+        itemRef: "Brass Tube",
+        sourceKind: "player_inventory",
+        targetKind: "visible_actor",
+        targetRef: "Guide",
+        equipSlot: null,
+      },
+    });
+  });
+
+  it("keeps gripping an already-held item in player_local_condition instead of item_transfer", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I grip the Brass Tube.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player is holding an inventory item in the current scene.",
+      liveSceneQuestion: "Which local Player readiness condition should Stage 4 settle?",
+      focalRefs: ["Player", "Brass Tube"],
+      evidenceRefs: ["Player", "Brass Tube", "Market"],
+      actionInterpretation: {
+        summary: "The player grips an already-held item without changing item custody.",
+        playerIntent: "Grip Brass Tube.",
+        method: "grip",
+        targetRefs: ["Brass Tube"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "grip Brass Tube",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+        },
+      },
+      interpretationRationale: "Grip/readiness changes are Player local condition state, not item custody.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
   });
 
   it("accepts ordinary_support_actor_needed only with bounded supportActorNeed and no visible actor target", () => {
@@ -1424,6 +1544,38 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         }),
       ]),
     );
+  });
+
+  it("requires item_transfer to use the backend action-plan branch instead of no-roll narration", () => {
+    const frame = itemTransferActionPlanFrame();
+    const gmRead = itemTransferGmRead(frame);
+    const noRoll = validJudgeUncertainty(frame, gmRead);
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      checkRationale: "Uncontested item custody still needs backend item-transfer receipt authority.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Item transfer needs a clean item_transfer receipt before narration.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
   });
 
   it("repairs procedural no-roll drift into backend action-plan admission", async () => {
@@ -2243,6 +2395,182 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
   });
 
+  it("deterministically produces item_transfer checklist for an uncontested visible-actor handoff", async () => {
+    const frame = itemTransferActionPlanFrame();
+    const gmRead = itemTransferGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Item transfer needs a clean item_transfer receipt before narration.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-transfer",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      actorRef: "Player",
+      targetRefs: ["Brass Tube", "Guide", "Market"],
+      intended: {
+        kind: "item_transfer",
+        requiredCapabilityId: "item_transfer",
+        stateOrEvidence: "state",
+        itemTransferPlan: {
+          actorRef: "Player",
+          operation: "give_to_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          targetKind: "visible_actor",
+          targetRef: "Guide",
+          targetEquipState: "carried",
+          targetEquippedSlot: null,
+          anchorRef: "Market",
+        },
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("uses the current SceneFrame scene as item_transfer anchor even when GM Read omits the scene ref", async () => {
+    const frame = itemTransferActionPlanFrame();
+    const gmRead: GmRead = {
+      ...itemTransferGmRead(frame),
+      evidenceRefs: ["Player", "Brass Tube", "Guide"],
+      actionInterpretation: {
+        ...itemTransferGmRead(frame).actionInterpretation,
+        targetRefs: ["Brass Tube", "Guide"],
+        itemTransferNeed: {
+          ...itemTransferGmRead(frame).actionInterpretation.itemTransferNeed!,
+          evidenceRefs: ["Player", "Brass Tube", "Guide"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Brass Tube", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Item transfer needs a clean item_transfer receipt before narration.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-transfer-implicit-scene",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]?.targetRefs).toEqual(["Brass Tube", "Guide", "Market"]);
+    expect(result.checklist.steps[0]?.intended.itemTransferPlan?.anchorRef).toBe("Market");
+    expect(result.checklist.steps[0]?.intended.itemTransferPlan?.anchorRef).not.toBe("Brass Tube");
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("deterministically splits compound item transfer plus visible dialogue with item_transfer_state refresh binding", async () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I hand the Brass Tube to Guide and ask what it is.",
+    });
+    const gmRead: GmRead = {
+      ...itemTransferGmRead(frame),
+      liveSceneQuestion: "Which item state must settle before Guide can visibly answer?",
+      actionInterpretation: {
+        ...itemTransferGmRead(frame).actionInterpretation,
+        summary: "The player hands Brass Tube to Guide and asks a question.",
+        playerIntent: "Hand Brass Tube to Guide, then ask what it is.",
+        method: "hand and ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      checkRationale: "The item state must settle before dependent visible dialogue can be recorded.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Compound item transfer and dialogue need backend receipts with refreshed frame binding.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-transfer-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "item_transfer",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps[0]).toMatchObject({
+      stepId: "step-1",
+      intended: {
+        kind: "item_transfer",
+        requiredCapabilityId: "item_transfer",
+        itemTransferPlan: {
+          operation: "give_to_visible_actor",
+          itemRef: "Brass Tube",
+          targetRef: "Guide",
+        },
+      },
+    });
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      targetRefs: ["Guide"],
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "item_transfer_state",
+        fromStepId: "step-1",
+        requiredCapabilityId: "item_transfer",
+        requiredReceiptAuthority: "item_transfer_receipt",
+        sourcePath: "publicResult.itemTransfer",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "item_state_reconciled",
+      }],
+      intended: {
+        kind: "dialogue_record",
+        requiredCapabilityId: "dialogue_record",
+        stateOrEvidence: "terminal_player_visible",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("deterministically produces only support_actor_create for ordinary support actor needs", async () => {
     const frame = actionPlanFrame({
       playerAction: "I look for a local vendor in the market.",
@@ -2802,6 +3130,70 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(cleanStage4LocalConditionSetEffectSchema.safeParse({
       ...base,
       conditionKey: "poisoned",
+    }).success).toBe(false);
+  });
+
+  it("requires P69 item_transfer effects to stay bounded to Player current-scene item state", () => {
+    const base = {
+      kind: "item_transfer" as const,
+      authorityKind: "player_current_scene_item_state_transition" as const,
+      actorRef: "Player" as const,
+      operation: "give_to_visible_actor" as const,
+      itemRef: "Brass Tube",
+      source: {
+        sourceKind: "player_inventory" as const,
+        requiredOwner: "Player" as const,
+        requiredLocation: "none" as const,
+        requiredEquipState: null,
+      },
+      target: {
+        targetKind: "visible_actor" as const,
+        targetRef: "Guide",
+        targetEquipState: "carried" as const,
+        targetEquippedSlot: null,
+      },
+      anchorRef: "Market",
+      evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      forbiddenPayloads: {
+        itemCreation: false as const,
+        itemDiscovery: false as const,
+        itemInspection: false as const,
+        itemUseOrActivation: false as const,
+        itemDamageOrRepair: false as const,
+        containerContents: false as const,
+        currencyOrBarter: false as const,
+        npcConsentOrReaction: false as const,
+        relationship: false as const,
+        worldFact: false as const,
+        routeTruth: false as const,
+        locationReveal: false as const,
+        hpOrCondition: false as const,
+        dialogueContent: false as const,
+        privateKnowledge: false as const,
+        absenceOrNoChange: false as const,
+      },
+    };
+
+    expect(cleanStage4ItemTransferEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      toolId: "item.transfer.v2",
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      actorRef: "Guide",
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, npcConsentOrReaction: true },
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, itemDiscovery: true },
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      target: { ...base.target, targetEquippedSlot: "backpack" },
     }).success).toBe(false);
   });
 

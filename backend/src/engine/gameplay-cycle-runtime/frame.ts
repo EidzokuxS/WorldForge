@@ -23,6 +23,7 @@ const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "dialogue_record",
   "support_actor_create",
   "condition_set",
+  "item_transfer",
   "time_advance",
   "scene_beat_record",
 ];

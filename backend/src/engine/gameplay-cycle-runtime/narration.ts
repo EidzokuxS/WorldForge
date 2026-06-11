@@ -146,6 +146,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For dialogue_response, narrate only that the visible speaker responded and what the accepted quote/summary says; never promote the speaker's claim into objective world truth.",
     "For support_actor_materialization, narrate only that the accepted visible temporary support actor/role is now present in the current scene; never invent dialogue, knowledge, relationships, services, or future relevance.",
     "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
+    "For item_state, narrate only the accepted item custody/location/equip-state operation; never add item creation, discovery, inspection, use, damage, container contents, barter value, NPC consent/reaction, relationship, route, location, condition, dialogue, private knowledge, absence, or no-change claims.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -351,6 +352,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (elapsed) {
     return elapsed.backendFacts[0]?.text ?? elapsed.text;
+  }
+
+  const itemState = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("item_state")
+  );
+  if (itemState) {
+    return itemState.backendFacts.map((entry) => entry.text).join(" ");
   }
 
   const dialogue = view.acceptedEvidence.find((evidence) =>

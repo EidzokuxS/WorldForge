@@ -240,6 +240,8 @@ function checklistForKind(
               ? "support_actor_create"
               : kind === "condition_set"
                 ? "condition_set"
+                : kind === "item_transfer"
+                  ? "item_transfer"
               : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
@@ -251,7 +253,7 @@ function checklistForKind(
         ...base.steps[0].intended,
         kind,
         requiredCapabilityId: capability,
-        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create" || kind === "condition_set"
+        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create" || kind === "condition_set" || kind === "item_transfer"
           ? "state"
           : kind === "dialogue_record"
             ? "terminal_player_visible"
@@ -461,6 +463,139 @@ function insertNpc(input: {
   );
 }
 
+function insertItem(input: {
+  id: string;
+  name: string;
+  ownerId?: string | null;
+  locationId?: string | null;
+  equipState?: "carried" | "equipped";
+  equippedSlot?: string | null;
+  tags?: string[];
+}): void {
+  exec(
+    `INSERT INTO items (
+      id, campaign_id, name, tags, owner_id, location_id, equip_state, equipped_slot, is_signature
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    input.id,
+    CAMPAIGN_ID,
+    input.name,
+    JSON.stringify(input.tags ?? []),
+    input.ownerId ?? null,
+    input.locationId ?? null,
+    input.equipState ?? "carried",
+    input.equippedSlot ?? null,
+    0,
+  );
+}
+
+function itemTransferFrame(worldVersion = 0): AuthoritativeSceneFrame {
+  return {
+    ...frame(),
+    frameId: `frame-stage4-item-${worldVersion}`,
+    turnId: `clean-turn-stage4-item-${worldVersion}`,
+    base: { tick: 0, worldVersion, worldTimeMinutes: 0 },
+    playerAction: "I hand the Brass Tube to Guide.",
+    actors: [{
+      ref: "Guide",
+      label: "Guide",
+      role: "support",
+      visibleStatus: { hp: null, conditions: [] },
+    }],
+    targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+    inventory: [{
+      ref: "Brass Tube",
+      label: "Brass Tube",
+      equipState: "carried",
+      tags: [],
+    }],
+    capabilities: [
+      ...frame().capabilities,
+      { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "North Hall", "Guide", "Brass Tube"],
+  };
+}
+
+function itemTransferChecklist(inputFrame = itemTransferFrame()): GmActionChecklist {
+  const base = checklistForKind("item_transfer", inputFrame);
+  const step = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Hand Brass Tube to Guide.",
+      admittedConsequenceNeed: "Item custody/equip state requires backend receipt authority.",
+    },
+    steps: [{
+      ...step,
+      targetRefs: ["Brass Tube", "Guide", "Market"],
+      evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      intended: {
+        kind: "item_transfer",
+        stateOrEvidence: "state",
+        requiredCapabilityId: "item_transfer",
+        summary: "Stage 4 must transfer Brass Tube from Player inventory to visible Guide through backend item authority.",
+        itemTransferPlan: {
+          actorRef: "Player",
+          operation: "give_to_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          targetKind: "visible_actor",
+          targetRef: "Guide",
+          targetEquipState: "carried",
+          targetEquippedSlot: null,
+          anchorRef: "Market",
+        },
+      },
+      expectedVisibleEffect: {
+        summary: "Accepted item transfer receipt only; no NPC reaction or dialogue is authorized.",
+        visibleRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    }],
+  };
+}
+
+function itemTransferThenDialogueChecklist(inputFrame = itemTransferFrame()): GmActionChecklist {
+  const base = itemTransferChecklist(inputFrame);
+  const itemStep = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Hand Brass Tube to Guide, then ask what it is.",
+      admittedConsequenceNeed: "Item custody must refresh SceneFrame before visible dialogue can be recorded.",
+    },
+    steps: [
+      itemStep,
+      {
+        ...itemStep,
+        stepId: "step-2",
+        purpose: "Record dependent visible Guide dialogue only after post-item-transfer SceneFrame refresh.",
+        targetRefs: ["Guide"],
+        evidenceRefs: ["Player", "Guide", "Market"],
+        intended: {
+          kind: "dialogue_record",
+          stateOrEvidence: "terminal_player_visible",
+          requiredCapabilityId: "dialogue_record",
+          summary: "Stage 4 may record Guide dialogue only after the accepted item transfer is reflected in a refreshed SceneFrame.",
+        },
+        dependsOnStepIds: ["step-1"],
+        dependencyBindings: [{
+          bindingId: "item_transfer_state",
+          fromStepId: "step-1",
+          requiredCapabilityId: "item_transfer",
+          requiredReceiptAuthority: "item_transfer_receipt",
+          sourcePath: "publicResult.itemTransfer",
+          resolveIn: "post_dependency_scene_frame",
+          requiredFramePresence: "item_state_reconciled",
+        }],
+        expectedVisibleEffect: {
+          summary: "If item transfer is accepted and refreshed into SceneFrame item state, one visible Guide response may be recorded.",
+          visibleRefs: ["Player", "Guide"],
+        },
+      },
+    ],
+  };
+}
+
 async function runVendorSupportActorCreate(inputFrame = {
   ...frame(),
   playerAction: "I look for a local vendor in the market.",
@@ -604,6 +739,224 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
     expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 5 });
+  });
+
+  it("transfers a carried item to a visible current-scene actor through clean item_transfer authority", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const inputFrame = itemTransferFrame();
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: itemTransferChecklist(inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.publicEvents).toEqual([]);
+    expect(result.execution?.mutationApplied).toBe(true);
+    expect(result.execution?.resultWorldVersion).toBe(1);
+    expect(result.execution?.visibleResults[0]).toMatchObject({
+      authority: "item_transfer_receipt",
+      itemTransfer: {
+        type: "item_transfer",
+        resultKind: "transferred_to_actor",
+        itemLabel: "Brass Tube",
+        operation: "give_to_visible_actor",
+        targetLabel: "Guide",
+        finalOwnerKind: "visible_actor",
+        finalLocationKind: "none",
+        finalEquipState: "carried",
+        claimStatus: "visible_item_state_change_only",
+      },
+    });
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "item_transfer_receipt",
+        mutationAuthority: "item_custody_location_equip_state",
+        visibleResultAuthority: "may_claim_item_state_change",
+      },
+      publicResult: {
+        itemTransfer: {
+          itemLabel: "Brass Tube",
+          targetLabel: "Guide",
+        },
+      },
+      privateResult: {
+        itemId: "item-brass-tube",
+        itemOperation: "give_to_visible_actor",
+        previousOwnerId: "player-1",
+        nextOwnerId: "npc-guide",
+        previousLocationId: null,
+        nextLocationId: null,
+        previousEquipState: "carried",
+        nextEquipState: "carried",
+      },
+    });
+
+    const item = getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube") as { ownerId: string | null; locationId: string | null; equipState: string; equippedSlot: string | null };
+    expect(item).toEqual({
+      ownerId: "npc-guide",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 1, worldTimeMinutes: 0, currentTick: 0 });
+    const authority = getSqliteConnection()
+      .prepare("SELECT operation, source_entity_type AS sourceEntityType, source_entity_id AS sourceEntityId, result_world_version AS resultWorldVersion FROM authority_traces WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { operation: string; sourceEntityType: string; sourceEntityId: string; resultWorldVersion: number };
+    expect(authority).toEqual({
+      operation: "gameplay-cycle-runtime.item_transfer.v1",
+      sourceEntityType: "item",
+      sourceEntityId: "item-brass-tube",
+      resultWorldVersion: 1,
+    });
+    const ledgerCount = getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { count: number };
+    expect(ledgerCount.count).toBe(0);
+  });
+
+  it("executes item_transfer then dialogue_record only after a refreshed SceneFrame reflects item state", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const baseFrame = itemTransferFrame();
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...baseFrame,
+      playerAction: "I hand the Brass Tube to Guide and ask what it is.",
+      capabilities: [
+        ...baseFrame.capabilities,
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: itemTransferThenDialogueChecklist(inputFrame),
+      refreshFrameAfterReceipt: async ({ receipt }) => ({
+        ...inputFrame,
+        frameId: "frame-post-item-transfer",
+        base: {
+          tick: receipt.result.tick,
+          worldVersion: receipt.result.worldVersion,
+          worldTimeMinutes: receipt.result.worldTimeMinutes,
+        },
+        inventory: [],
+        citableRefs: ["Player", "Market", "North Hall", "Guide"],
+      }),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "It is yours no longer.",
+          summary: "Guide answers from the visible scene.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["item_transfer", "accepted"],
+      ["dialogue_record", "accepted"],
+    ]);
+    const itemReceipt = result.execution?.receipts[0];
+    const dialogueReceipt = result.execution?.receipts[1];
+    expect(result.execution?.frameChain).toHaveLength(2);
+    expect(result.execution?.frameChain?.[1]).toMatchObject({
+      source: "post_dependency_scene_frame",
+      afterReceiptId: itemReceipt?.receiptId,
+      frameId: "frame-post-item-transfer",
+      base: { tick: 0, worldVersion: 1, worldTimeMinutes: 0 },
+    });
+    expect(dialogueReceipt).toMatchObject({
+      frameId: "frame-post-item-transfer",
+      base: { worldVersion: 1 },
+      result: { worldVersion: 1, mutationApplied: false },
+      publicResult: {
+        dialogue: {
+          speakerLabel: "Guide",
+          quotedSpeech: "It is yours no longer.",
+          claimStatus: "visible_speaker_response_only",
+        },
+      },
+    });
+  });
+
+  it("fails item_transfer without mutating when the visible actor target is not in the current scene", async () => {
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      equipState: "carried",
+    });
+    const inputFrame = itemTransferFrame();
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: itemTransferChecklist(inputFrame),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "failed",
+      failure: {
+        kind: "target_not_visible",
+        hiddenMutationApplied: false,
+      },
+    });
+    const item = getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId FROM items WHERE id = ?")
+      .get("item-brass-tube") as { ownerId: string };
+    expect(item.ownerId).toBe("player-1");
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
   });
 
   it("applies, replaces, and clears Player current-scene local conditions through clean receipt authority", async () => {

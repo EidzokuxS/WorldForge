@@ -273,19 +273,7 @@ function refIssues(input: {
   checklist: GmActionChecklist;
 }): GmActionChecklistValidationIssue[] {
   const citable = lowerSet(input.frame.citableRefs);
-  const admitted = lowerSet([
-    ...input.gmRead.focalRefs,
-    ...input.gmRead.evidenceRefs,
-    ...input.gmRead.actionInterpretation.targetRefs,
-    ...(input.gmRead.actionInterpretation.localConditionNeed?.evidenceRefs ?? []),
-    ...(input.gmRead.actionInterpretation.localConditionNeed?.targetRef
-      ? [input.gmRead.actionInterpretation.localConditionNeed.targetRef]
-      : []),
-    ...input.judgment.actorRefs,
-    ...input.judgment.targetRefs,
-    ...input.judgment.evidenceRefs,
-    ...(input.judgment.noRollReason?.evidenceRefs ?? []),
-  ]);
+  const admitted = admittedRefSet(input);
   const issues: GmActionChecklistValidationIssue[] = [];
   const refs = uniqueStrings(input.checklist.steps.flatMap((step) => [
     step.actorRef,
@@ -412,6 +400,36 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         message: "localConditionPlan is allowed only on condition_set steps.",
       });
     }
+    if (step.intended.kind === "item_transfer") {
+      if (!step.intended.itemTransferPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.itemTransferPlan`,
+          message: "item_transfer steps require a typed itemTransferPlan.",
+        });
+      }
+      const plan = step.intended.itemTransferPlan;
+      if (plan) {
+        const plannedRefs = [plan.itemRef, plan.targetRef, plan.anchorRef].map((ref) => ref.toLowerCase());
+        const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
+        for (const ref of plannedRefs) {
+          if (!stepRefs.includes(ref)) {
+            issues.push({
+              code: "step_invalid",
+              path: `steps.${index}.intended.itemTransferPlan`,
+              message: "itemTransferPlan refs must be included in step target/evidence refs.",
+            });
+            break;
+          }
+        }
+      }
+    } else if (step.intended.itemTransferPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.itemTransferPlan`,
+        message: "itemTransferPlan is allowed only on item_transfer steps.",
+      });
+    }
     if (step.disposition.kind === "stage4_backend_resolution_required") {
       stage4RequiredCount += 1;
     }
@@ -497,6 +515,17 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
             message: "player_local_condition bindings must depend on an earlier condition_set step.",
           });
         }
+      } else if (binding.bindingId === "item_transfer_state") {
+        if (
+          dependencyStep?.intended.kind !== "item_transfer"
+          || dependencyStep.intended.requiredCapabilityId !== "item_transfer"
+        ) {
+          issues.push({
+            code: "dependency_invalid",
+            path: `steps.${index}.dependencyBindings`,
+            message: "item_transfer_state bindings must depend on an earlier item_transfer step.",
+          });
+        }
       }
     }
   });
@@ -577,14 +606,35 @@ export function validateGmActionChecklistCandidate(input: {
   return { status: "accepted", checklist, issues: [] };
 }
 
+function implicitFrameAnchorRefs(frame: AuthoritativeSceneFrame): string[] {
+  return uniqueStrings([
+    frame.player.ref,
+    frame.scene.currentScene.ref,
+    frame.scene.currentLocation.ref,
+  ]);
+}
+
 function admittedRefSet(input: {
+  frame: AuthoritativeSceneFrame;
   gmRead: GmRead;
   judgment: JudgeUncertainty;
 }): Set<string> {
   return lowerSet([
+    ...implicitFrameAnchorRefs(input.frame),
     ...input.gmRead.focalRefs,
     ...input.gmRead.evidenceRefs,
     ...input.gmRead.actionInterpretation.targetRefs,
+    ...(input.gmRead.actionInterpretation.localConditionNeed?.evidenceRefs ?? []),
+    ...(input.gmRead.actionInterpretation.localConditionNeed?.targetRef
+      ? [input.gmRead.actionInterpretation.localConditionNeed.targetRef]
+      : []),
+    ...(input.gmRead.actionInterpretation.itemTransferNeed
+      ? [
+        input.gmRead.actionInterpretation.itemTransferNeed.itemRef,
+        input.gmRead.actionInterpretation.itemTransferNeed.targetRef,
+        ...input.gmRead.actionInterpretation.itemTransferNeed.evidenceRefs,
+      ]
+      : []),
     ...input.judgment.actorRefs,
     ...input.judgment.targetRefs,
     ...input.judgment.evidenceRefs,
@@ -650,6 +700,7 @@ function stepFor(input: {
   dependsOnStepIds?: readonly GmActionChecklistStepId[];
   dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
+  itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   purpose?: string;
   intendedSummary?: string;
   expectedVisibleSummary?: string;
@@ -662,6 +713,7 @@ function stepFor(input: {
       || input.kind === "time_advance"
       || input.kind === "support_actor_create"
       || input.kind === "condition_set"
+      || input.kind === "item_transfer"
       ? "state"
       : input.kind === "dialogue_record"
         ? "terminal_player_visible"
@@ -671,6 +723,9 @@ function stepFor(input: {
   };
   if (input.localConditionPlan) {
     intended.localConditionPlan = input.localConditionPlan;
+  }
+  if (input.itemTransferPlan) {
+    intended.itemTransferPlan = input.itemTransferPlan;
   }
   const step: GmActionChecklist["steps"][number] = {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
@@ -719,9 +774,6 @@ export function buildDeterministicGmActionChecklist(input: {
     candidates: [
       input.frame.scene.currentScene.ref,
       input.frame.scene.currentLocation.ref,
-      ...input.gmRead.actionInterpretation.targetRefs,
-      ...input.judgment.targetRefs,
-      ...evidenceRefs,
     ],
     citable,
     admitted,
@@ -746,9 +798,11 @@ export function buildDeterministicGmActionChecklist(input: {
     ? input.gmRead.actionInterpretation.supportActorNeed
     : null;
   const localConditionNeed = input.gmRead.actionInterpretation.localConditionNeed ?? null;
+  const itemTransferNeed = input.gmRead.actionInterpretation.itemTransferNeed ?? null;
   const actionText = playerActionText(input);
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
+  let itemTransferStepId: GmActionChecklistStepId | null = null;
   if (allowed.has("condition_set") && sceneRef && localConditionNeed) {
     const targetRefs = uniqueStrings([
       localConditionNeed.targetRef ?? sceneRef,
@@ -784,6 +838,47 @@ export function buildDeterministicGmActionChecklist(input: {
       expectedVisibleSummary: `If accepted, Player local condition ${localConditionNeed.conditionKey} may be visible in the current scene only.`,
     }));
     localConditionStepId = steps[steps.length - 1]?.stepId ?? null;
+  }
+
+  if (allowed.has("item_transfer") && sceneRef && itemTransferNeed) {
+    const targetRefs = uniqueStrings([
+      itemTransferNeed.itemRef,
+      itemTransferNeed.targetRef,
+      sceneRef,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const itemEvidenceRefs = uniqueStrings([
+      actorRef,
+      itemTransferNeed.itemRef,
+      itemTransferNeed.targetRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...itemTransferNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const targetEquipState = itemTransferNeed.operation === "equip_inventory_item" ? "equipped" : "carried";
+    const targetEquippedSlot = itemTransferNeed.operation === "equip_inventory_item" ? "equipped" : null;
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "item_transfer",
+      actorRef,
+      targetRefs: targetRefs.length > 0 ? targetRefs : [itemTransferNeed.itemRef, itemTransferNeed.targetRef],
+      evidenceRefs: itemEvidenceRefs,
+      itemTransferPlan: {
+        actorRef: "Player",
+        operation: itemTransferNeed.operation,
+        itemRef: itemTransferNeed.itemRef,
+        sourceKind: itemTransferNeed.sourceKind,
+        targetKind: itemTransferNeed.targetKind,
+        targetRef: itemTransferNeed.targetRef,
+        targetEquipState,
+        targetEquippedSlot,
+        anchorRef: sceneRef,
+      },
+      purpose: `Plan Player item transition ${itemTransferNeed.operation} for ${itemTransferNeed.requestedItemText}.`,
+      intendedSummary: `Stage 4 must settle one Player item custody/location/equip-state transition (${itemTransferNeed.operation}) before narration may claim item state changed. This does not authorize item discovery, inspection, use, consent, dialogue, world facts, routes, HP/conditions, absence, or no-change.`,
+      expectedVisibleSummary: `If accepted, final item custody/location/equip state for ${itemTransferNeed.itemRef} may be visible only through the item_transfer receipt.`,
+    }));
+    itemTransferStepId = steps[steps.length - 1]?.stepId ?? null;
   }
 
   if (movementTarget && allowed.has("movement")) {
@@ -828,9 +923,11 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [dialogueSpeaker.ref],
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
     };
+    const dependsOnStepIds: GmActionChecklistStepId[] = [];
+    const dependencyBindings: NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]> = [];
     if (localConditionStepId) {
-      dialogueStepInput.dependsOnStepIds = [localConditionStepId];
-      dialogueStepInput.dependencyBindings = [{
+      dependsOnStepIds.push(localConditionStepId);
+      dependencyBindings.push({
         bindingId: "player_local_condition",
         fromStepId: localConditionStepId,
         requiredCapabilityId: "condition_set",
@@ -838,9 +935,25 @@ export function buildDeterministicGmActionChecklist(input: {
         sourcePath: "publicResult.condition.conditionKey",
         resolveIn: "post_dependency_scene_frame",
         requiredFramePresence: "player_visibleStatus.conditions",
-      }];
-      dialogueStepInput.purpose = "Record one visible response only after the Player local condition is settled and the SceneFrame is refreshed.";
-      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after a post-dependency authoritative SceneFrame reflects the Player local condition.";
+      });
+    }
+    if (itemTransferStepId) {
+      dependsOnStepIds.push(itemTransferStepId);
+      dependencyBindings.push({
+        bindingId: "item_transfer_state",
+        fromStepId: itemTransferStepId,
+        requiredCapabilityId: "item_transfer",
+        requiredReceiptAuthority: "item_transfer_receipt",
+        sourcePath: "publicResult.itemTransfer",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "item_state_reconciled",
+      });
+    }
+    if (dependencyBindings.length > 0) {
+      dialogueStepInput.dependsOnStepIds = dependsOnStepIds;
+      dialogueStepInput.dependencyBindings = dependencyBindings;
+      dialogueStepInput.purpose = "Record one visible response only after prior state-bearing steps are settled and the SceneFrame is refreshed.";
+      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after post-dependency authoritative SceneFrame refresh reflects accepted Player local condition or item state requirements.";
     }
     steps.push(stepFor(dialogueStepInput));
   } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {

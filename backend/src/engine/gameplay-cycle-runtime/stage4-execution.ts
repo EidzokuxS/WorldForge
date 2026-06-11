@@ -16,6 +16,7 @@ import {
 import {
   assertCleanStage4ExecutionResult,
   cleanStage4DialogueRequestEffectSchema,
+  cleanStage4ItemTransferEffectSchema,
   cleanStage4LocalConditionSetEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
   assertCleanStage4Receipt,
@@ -33,6 +34,8 @@ type SupportActorRoleKind = SupportActorCreateEffect["roleKind"];
 type SupportActorMaterializationResult = NonNullable<CleanStage4Receipt["publicResult"]["supportActor"]>;
 type LocalConditionSetEffect = Extract<CleanStage4Request["effect"], { kind: "condition_set" }>;
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
+type ItemTransferEffect = Extract<CleanStage4Request["effect"], { kind: "item_transfer" }>;
+type ItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTransfer"]>;
 
 type PlayerRow = {
   id: string;
@@ -83,6 +86,17 @@ type CleanActorConditionRow = {
   active: number;
 };
 
+type ItemRow = {
+  id: string;
+  name: string;
+  tags: string;
+  owner_id: string | null;
+  location_id: string | null;
+  equip_state: "carried" | "equipped";
+  equipped_slot: string | null;
+  is_signature: number;
+};
+
 export interface CleanStage4ReceiptStore {
   insert(receipt: CleanStage4Receipt, createdAt?: number): void;
 }
@@ -98,7 +112,7 @@ export interface Stage4ExecutionEvent {
     type: "time_advance";
     elapsedMinutes: number;
     reasonKind: "brief_local_action" | "wait" | "short_rest";
-  } | PlayerLocalConditionResult;
+  } | PlayerLocalConditionResult | ItemTransferResult;
 }
 
 export interface CleanStage4ExecutionRunResult {
@@ -119,6 +133,7 @@ export type Stage4FrameRefresh = (request: Stage4FrameRefreshRequest) => Promise
 
 type MaterializedSpeakerBinding = NonNullable<Step["dependencyBindings"]>[number];
 type PlayerLocalConditionBinding = NonNullable<Step["dependencyBindings"]>[number];
+type ItemTransferBinding = NonNullable<Step["dependencyBindings"]>[number];
 
 type Stage4MaterializedSpeakerResolution = {
   bindingId: "materialized_speaker";
@@ -139,9 +154,19 @@ type Stage4PlayerLocalConditionResolution = {
   refreshedFrameId: string;
 };
 
+type Stage4ItemTransferResolution = {
+  bindingId: "item_transfer_state";
+  fromStepId: string;
+  receiptId: string;
+  resultKind: ItemTransferResult["resultKind"];
+  itemLabel: string;
+  refreshedFrameId: string;
+};
+
 type Stage4DialogueDependencyResolution = {
   materializedSpeaker: Stage4MaterializedSpeakerResolution | null;
   playerLocalCondition: Stage4PlayerLocalConditionResolution | null;
+  itemTransfer: Stage4ItemTransferResolution | null;
 };
 
 export interface Stage4DialogueRequestCandidateRequest {
@@ -336,6 +361,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "movement") return "movement";
   if (kind === "dialogue_record") return "dialogue_record";
   if (kind === "support_actor_create") return "support_actor_create";
+  if (kind === "item_transfer") return "item_transfer";
   if (kind === "condition_set") return "condition_set";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
@@ -426,6 +452,51 @@ function requestEffectForStep(input: {
         relationship: false,
         dialogueContent: false,
         npcCondition: false,
+        privateKnowledge: false,
+        absenceOrNoChange: false,
+      },
+    };
+  }
+  if (input.capabilityId === "item_transfer") {
+    const plan = input.step.intended.itemTransferPlan;
+    const operation = plan?.operation ?? "drop_in_current_scene";
+    const sourceKind = plan?.sourceKind ?? "player_inventory";
+    const targetKind = plan?.targetKind ?? "current_scene";
+    return {
+      kind: "item_transfer",
+      authorityKind: "player_current_scene_item_state_transition",
+      actorRef: "Player",
+      operation,
+      itemRef: plan?.itemRef ?? input.destinationRef,
+      source: {
+        sourceKind,
+        requiredOwner: sourceKind === "player_inventory" ? "Player" : "none",
+        requiredLocation: sourceKind === "current_scene_item" ? "current_scene" : "none",
+        requiredEquipState: operation === "unequip_inventory_item" ? "equipped" : null,
+      },
+      target: {
+        targetKind,
+        targetRef: plan?.targetRef ?? input.frame.scene.currentScene.ref,
+        targetEquipState: plan?.targetEquipState ?? "carried",
+        targetEquippedSlot: plan?.targetEquippedSlot ?? null,
+      },
+      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      evidenceRefs: input.step.evidenceRefs,
+      forbiddenPayloads: {
+        itemCreation: false,
+        itemDiscovery: false,
+        itemInspection: false,
+        itemUseOrActivation: false,
+        itemDamageOrRepair: false,
+        containerContents: false,
+        currencyOrBarter: false,
+        npcConsentOrReaction: false,
+        relationship: false,
+        worldFact: false,
+        routeTruth: false,
+        locationReveal: false,
+        hpOrCondition: false,
+        dialogueContent: false,
         privateKnowledge: false,
         absenceOrNoChange: false,
       },
@@ -809,6 +880,366 @@ function conditionKeysAfter(input: {
   ]) as LocalConditionSetEffect["conditionKey"][];
 }
 
+function itemRowsForCampaign(campaignId: string): ItemRow[] {
+  return getSqliteConnection()
+    .prepare(`
+      SELECT
+        id,
+        name,
+        tags,
+        owner_id,
+        location_id,
+        equip_state,
+        equipped_slot,
+        is_signature
+      FROM items
+      WHERE campaign_id = ?
+    `)
+    .all(campaignId) as ItemRow[];
+}
+
+function itemByVisibleLabel(input: {
+  rows: readonly ItemRow[];
+  label: string;
+  sourceKind: ItemTransferEffect["source"]["sourceKind"];
+  playerId: string;
+  currentSceneLocationId: string;
+}): { ok: true; row: ItemRow } | { ok: false; kind: NonNullable<CleanStage4Receipt["failure"]>["kind"]; message: string } {
+  const normalized = normalizedRef(input.label);
+  const labelMatches = input.rows.filter((row) => normalizedRef(row.name) === normalized);
+  const matches = labelMatches.filter((row) => {
+    if (input.sourceKind === "player_inventory") return row.owner_id === input.playerId;
+    return row.owner_id === null && row.location_id === input.currentSceneLocationId;
+  });
+  if (matches.length === 1) return { ok: true, row: matches[0] };
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      kind: "missing_or_ambiguous_item",
+      message: "Stage 4 item_transfer could not resolve exactly one item from the accepted SceneFrame evidence.",
+    };
+  }
+  if (labelMatches.length > 0) {
+    return {
+      ok: false,
+      kind: "source_state_mismatch",
+      message: "Stage 4 item_transfer found an item label, but its current owner/location does not match the accepted request source.",
+    };
+  }
+  return {
+    ok: false,
+    kind: "missing_or_ambiguous_item",
+    message: "Stage 4 item_transfer could not resolve exactly one item from the accepted SceneFrame evidence.",
+  };
+}
+
+function visibleActorTarget(input: {
+  frame: AuthoritativeSceneFrame;
+  targetRef: string;
+  currentLocationId: string;
+  currentSceneLocationId: string;
+}): { ok: true; actorLabel: string; npcId: string } | { ok: false; message: string } {
+  const actor = input.frame.actors.find((entry) =>
+    entry.role !== "player" && normalizedRef(entry.ref) === normalizedRef(input.targetRef)
+  );
+  if (!actor) {
+    return { ok: false, message: "Stage 4 item_transfer target actor is not visible in the SceneFrame." };
+  }
+  const rows = getSqliteConnection()
+    .prepare(`
+      SELECT id, name, current_location_id, current_scene_location_id
+      FROM npcs
+      WHERE campaign_id = ?
+        AND name = ?
+    `)
+    .all(input.frame.campaignId, actor.label) as Array<{
+      id: string;
+      name: string;
+      current_location_id: string | null;
+      current_scene_location_id: string | null;
+    }>;
+  const currentRows = rows.filter((row) =>
+    row.current_location_id === input.currentLocationId
+    && row.current_scene_location_id === input.currentSceneLocationId
+  );
+  if (currentRows.length !== 1) {
+    return { ok: false, message: "Stage 4 item_transfer could not resolve exactly one visible actor target row." };
+  }
+  return { ok: true, actorLabel: actor.label, npcId: currentRows[0].id };
+}
+
+function itemTransferResultKind(operation: ItemTransferEffect["operation"]): Exclude<ItemTransferResult["resultKind"], "already_satisfied"> {
+  if (operation === "give_to_visible_actor") return "transferred_to_actor";
+  if (operation === "drop_in_current_scene") return "dropped_in_scene";
+  if (operation === "pickup_from_current_scene") return "picked_up";
+  if (operation === "equip_inventory_item") return "equipped";
+  return "unequipped";
+}
+
+function itemTransferReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  receiptId?: string;
+  itemTransfer: ItemTransferResult;
+  resultWorldVersion?: number;
+  mutationApplied: boolean;
+  authorityTraceId?: string | null;
+  playerId: string;
+  itemId: string;
+  previousOwnerId: string | null;
+  nextOwnerId: string | null;
+  previousLocationId: string | null;
+  nextLocationId: string | null;
+  previousEquipState: "carried" | "equipped";
+  nextEquipState: "carried" | "equipped";
+  previousEquippedSlot: string | null;
+  nextEquippedSlot: string | null;
+  anchorLocationId: string;
+  anchorSceneLocationId: string;
+  stateDeltaRefs?: string[];
+}): CleanStage4Receipt {
+  const mutating = input.mutationApplied;
+  return assertCleanStage4Receipt({
+    version: "gameplay-runtime.stage4-receipt.v1",
+    receiptId: input.receiptId ?? `stage4-receipt-${randomUUID()}`,
+    requestId: input.request.requestId,
+    campaignId: input.frame.campaignId,
+    turnId: input.frame.turnId,
+    frameId: input.frame.frameId,
+    checklistId: input.checklist.checklistId,
+    stepId: input.step.stepId,
+    capabilityId: "item_transfer",
+    status: "accepted",
+    source: input.request.source,
+    base: input.frame.base,
+    result: {
+      tick: input.frame.base.tick,
+      worldVersion: input.resultWorldVersion ?? input.frame.base.worldVersion,
+      worldTimeMinutes: input.frame.base.worldTimeMinutes,
+      mutationApplied: mutating,
+    },
+    authority: {
+      evidenceAuthority: "item_transfer_receipt",
+      mutationAuthority: mutating ? "item_custody_location_equip_state" : "none",
+      visibleResultAuthority: "may_claim_item_state_change",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: mutating,
+    },
+    publicResult: {
+      summary: mutating
+        ? `${input.itemTransfer.itemLabel} item state is settled: ${input.itemTransfer.resultKind}.`
+        : `${input.itemTransfer.itemLabel} is already in the requested item state.`,
+      visibleRefs: uniqueStrings([
+        "Player",
+        input.frame.scene.currentScene.ref,
+        input.itemTransfer.itemLabel,
+        input.itemTransfer.targetLabel,
+      ]).slice(0, 12),
+      routeStatus: null,
+      routeOptions: null,
+      locationChange: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
+      dialogue: null,
+      itemTransfer: input.itemTransfer,
+    },
+    privateResult: {
+      playerId: input.playerId,
+      fromLocationId: null,
+      destinationLocationId: null,
+      edgeIds: [],
+      authorityTraceId: input.authorityTraceId ?? null,
+      clockReceiptId: null,
+      stateDeltaRefs: input.stateDeltaRefs ?? [],
+      itemId: input.itemId,
+      itemOperation: input.itemTransfer.operation,
+      previousOwnerId: input.previousOwnerId,
+      nextOwnerId: input.nextOwnerId,
+      previousLocationId: input.previousLocationId,
+      nextLocationId: input.nextLocationId,
+      previousEquipState: input.previousEquipState,
+      nextEquipState: input.nextEquipState,
+      previousEquippedSlot: input.previousEquippedSlot,
+      nextEquippedSlot: input.nextEquippedSlot,
+      anchorLocationId: input.anchorLocationId,
+      anchorSceneLocationId: input.anchorSceneLocationId,
+    },
+    failure: null,
+  });
+}
+
+function itemTransferStateMatches(input: {
+  row: ItemRow;
+  nextOwnerId: string | null;
+  nextLocationId: string | null;
+  nextEquipState: "carried" | "equipped";
+  nextEquippedSlot: string | null;
+}): boolean {
+  return input.row.owner_id === input.nextOwnerId
+    && input.row.location_id === input.nextLocationId
+    && input.row.equip_state === input.nextEquipState
+    && input.row.equipped_slot === input.nextEquippedSlot;
+}
+
+function effectRefsAreCitable(input: {
+  frame: AuthoritativeSceneFrame;
+  refs: readonly string[];
+}): boolean {
+  const citable = new Set(input.frame.citableRefs.map(normalizedRef));
+  return input.refs.every((ref) => citable.has(normalizedRef(ref)) && !backendRefIssue(ref));
+}
+
+function itemTransferTargetForEffect(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: ItemTransferEffect;
+  player: PlayerRow;
+  currentLocationId: string;
+  currentSceneLocationId: string;
+}): {
+  ok: true;
+  targetLabel: string;
+  nextOwnerId: string | null;
+  nextLocationId: string | null;
+  nextEquipState: "carried" | "equipped";
+  nextEquippedSlot: string | null;
+  finalOwnerKind: ItemTransferResult["finalOwnerKind"];
+  finalLocationKind: ItemTransferResult["finalLocationKind"];
+} | { ok: false; kind: NonNullable<CleanStage4Receipt["failure"]>["kind"]; message: string } {
+  const operation = input.effect.operation;
+  const target = input.effect.target;
+  if (
+    operation === "give_to_visible_actor"
+    && (input.effect.source.sourceKind !== "player_inventory" || target.targetKind !== "visible_actor")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer give requires a player inventory source and visible actor target." };
+  }
+  if (
+    operation === "drop_in_current_scene"
+    && (input.effect.source.sourceKind !== "player_inventory" || target.targetKind !== "current_scene")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer drop requires a player inventory source and current-scene target." };
+  }
+  if (
+    operation === "pickup_from_current_scene"
+    && (input.effect.source.sourceKind !== "current_scene_item" || target.targetKind !== "player_inventory")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer pickup requires a current-scene item source and player inventory target." };
+  }
+  if (
+    operation === "equip_inventory_item"
+    && (input.effect.source.sourceKind !== "player_inventory" || target.targetKind !== "player_equipment")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer equip requires a player inventory source and player equipment target." };
+  }
+  if (
+    operation === "unequip_inventory_item"
+    && (input.effect.source.sourceKind !== "player_inventory" || target.targetKind !== "player_inventory")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer unequip requires a player inventory source and player inventory target." };
+  }
+
+  if (operation === "give_to_visible_actor") {
+    const actor = visibleActorTarget({
+      frame: input.frame,
+      targetRef: target.targetRef,
+      currentLocationId: input.currentLocationId,
+      currentSceneLocationId: input.currentSceneLocationId,
+    });
+    if (!actor.ok) {
+      return { ok: false, kind: "target_not_visible", message: actor.message };
+    }
+    return {
+      ok: true,
+      targetLabel: actor.actorLabel,
+      nextOwnerId: actor.npcId,
+      nextLocationId: null,
+      nextEquipState: "carried",
+      nextEquippedSlot: null,
+      finalOwnerKind: "visible_actor",
+      finalLocationKind: "none",
+    };
+  }
+
+  if (operation === "drop_in_current_scene") {
+    if (normalizedRef(target.targetRef) !== normalizedRef(input.frame.scene.currentScene.ref)) {
+      return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer drop target must be the current SceneFrame scene." };
+    }
+    return {
+      ok: true,
+      targetLabel: input.frame.scene.currentScene.label,
+      nextOwnerId: null,
+      nextLocationId: input.currentSceneLocationId,
+      nextEquipState: "carried",
+      nextEquippedSlot: null,
+      finalOwnerKind: "none",
+      finalLocationKind: "current_scene",
+    };
+  }
+
+  if (operation === "pickup_from_current_scene" || operation === "unequip_inventory_item") {
+    if (normalizedRef(target.targetRef) !== normalizedRef(input.frame.player.ref)) {
+      return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer player inventory target must be Player." };
+    }
+    return {
+      ok: true,
+      targetLabel: input.frame.player.label,
+      nextOwnerId: input.player.id,
+      nextLocationId: null,
+      nextEquipState: "carried",
+      nextEquippedSlot: null,
+      finalOwnerKind: "player",
+      finalLocationKind: "none",
+    };
+  }
+
+  if (normalizedRef(target.targetRef) !== normalizedRef(input.frame.player.ref)) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer player equipment target must be Player." };
+  }
+  return {
+    ok: true,
+    targetLabel: input.frame.player.label,
+    nextOwnerId: input.player.id,
+    nextLocationId: null,
+    nextEquipState: "equipped",
+    nextEquippedSlot: target.targetEquippedSlot ?? "equipped",
+    finalOwnerKind: "player",
+    finalLocationKind: "none",
+  };
+}
+
+function itemTransferResult(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: ItemTransferEffect;
+  resultKind: ItemTransferResult["resultKind"];
+  itemLabel: string;
+  sourceLabel: string;
+  targetLabel: string;
+  finalOwnerKind: ItemTransferResult["finalOwnerKind"];
+  finalLocationKind: ItemTransferResult["finalLocationKind"];
+  finalEquipState: "carried" | "equipped";
+  finalEquippedSlot: string | null;
+}): ItemTransferResult {
+  return {
+    type: "item_transfer",
+    resultKind: input.resultKind,
+    itemLabel: input.itemLabel,
+    actorLabel: "Player",
+    operation: input.effect.operation,
+    sourceLabel: input.sourceLabel,
+    targetLabel: input.targetLabel,
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    finalOwnerKind: input.finalOwnerKind,
+    finalLocationKind: input.finalLocationKind,
+    finalEquipState: input.finalEquipState,
+    finalEquippedSlot: input.finalEquippedSlot,
+    claimStatus: "visible_item_state_change_only",
+  };
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -1000,7 +1431,13 @@ export function buildStage4DialogueRequestPrompt(input: {
           JSON.stringify(input.dependencyResolution.playerLocalCondition, null, 2),
           "The condition has already been applied or cleared by Stage 4 and the authoritative SceneFrame below is post-dependency.",
         ].join("\n")
-      : "No materialized-speaker dependency is active for this dialogue step.",
+        : input.dependencyResolution?.itemTransfer
+          ? [
+            "Resolved item-transfer dependency:",
+            JSON.stringify(input.dependencyResolution.itemTransfer, null, 2),
+            "The item state has already been applied by Stage 4 and the authoritative SceneFrame below is post-dependency.",
+          ].join("\n")
+          : "No post-dependency SceneFrame binding is active for this dialogue step.",
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
     "Authoritative SceneFrame:",
@@ -1022,7 +1459,9 @@ function buildStage4DialogueRepairPrompt(input: {
       ? `This is dependent support-actor dialogue; speakerRef must be ${input.dependencyResolution.materializedSpeaker.actorRef}.`
       : input.dependencyResolution?.playerLocalCondition
         ? "This dialogue follows an accepted player-local-condition dependency; do not restate or mutate that condition beyond accepted evidence."
-      : "This dialogue step has no materialized-speaker dependency.",
+        : input.dependencyResolution?.itemTransfer
+          ? "This dialogue follows an accepted item-transfer dependency; do not restate or mutate item state beyond accepted evidence."
+          : "This dialogue step has no post-dependency SceneFrame binding.",
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
     "Original candidate:",
@@ -2847,6 +3286,447 @@ async function executePlayerLocalConditionSet(input: {
   });
 }
 
+async function executeItemTransfer(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const effect = input.request.effect;
+  if (effect.kind !== "item_transfer") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "item_transfer",
+      kind: "invalid_backend_request",
+      message: "Stage 4 item_transfer request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  if (!input.step.intended.itemTransferPlan) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "item_transfer",
+      kind: "invalid_backend_request",
+      message: "Stage 4 item_transfer requires a typed backend itemTransferPlan.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const parsedEffect = cleanStage4ItemTransferEffectSchema.safeParse(effect);
+  if (!parsedEffect.success) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "item_transfer",
+      kind: "invalid_backend_request",
+      message: parsedEffect.error.issues[0]?.message ?? "Stage 4 item_transfer request failed schema validation.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  if (normalizedRef(effect.anchorRef) !== normalizedRef(input.frame.scene.currentScene.ref)) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "item_transfer",
+      kind: "invalid_backend_request",
+      message: "Stage 4 item_transfer anchor must be the current SceneFrame scene.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  if (!effectRefsAreCitable({
+    frame: input.frame,
+    refs: uniqueStrings([
+      effect.actorRef,
+      effect.itemRef,
+      effect.target.targetRef,
+      effect.anchorRef,
+      ...effect.evidenceRefs,
+    ]),
+  })) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "item_transfer",
+      kind: "invalid_backend_request",
+      message: "Stage 4 item_transfer cited refs outside SceneFrame.citableRefs or backend-looking refs.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  return withSqliteWriteLock("clean-stage4-item-transfer", () => {
+    const db = getSqliteConnection();
+    const transaction = db.transaction(() => {
+      const player = readPlayer(input.frame);
+      const clock = readClock(input.frame.campaignId);
+      const current = validateFrameAndClock({ frame: input.frame, player, clock });
+      if (!current.ok || !player?.current_location_id || !player.current_scene_location_id) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: "stale_frame_or_clock",
+          message: current.ok ? "Stage 4 current scene is unavailable for item_transfer." : current.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const currentLocation = locationByLabel(input.frame, input.frame.scene.currentLocation.label);
+      const currentScene = locationByLabel(input.frame, input.frame.scene.currentScene.label);
+      if (
+        !currentLocation
+        || !currentScene
+        || player.current_location_id !== currentLocation.id
+        || player.current_scene_location_id !== currentScene.id
+      ) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 current scene no longer matches the SceneFrame.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const visibleSource = effect.source.sourceKind === "player_inventory"
+        ? input.frame.inventory.find((item) => normalizedRef(item.ref) === normalizedRef(effect.itemRef))
+        : input.frame.targets.find((target) =>
+          target.kind === "item" && normalizedRef(target.ref) === normalizedRef(effect.itemRef)
+        );
+      if (!visibleSource) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: "missing_or_ambiguous_item",
+          message: "Stage 4 item_transfer source item is not present in the accepted SceneFrame source surface.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const target = itemTransferTargetForEffect({
+        frame: input.frame,
+        effect,
+        player,
+        currentLocationId: currentLocation.id,
+        currentSceneLocationId: currentScene.id,
+      });
+      if (!target.ok) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: target.kind,
+          message: target.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const itemLabel = visibleSource.label;
+      const itemRows = itemRowsForCampaign(input.frame.campaignId);
+      const item = itemByVisibleLabel({
+        rows: itemRows,
+        label: itemLabel,
+        sourceKind: effect.source.sourceKind,
+        playerId: player.id,
+        currentSceneLocationId: currentScene.id,
+      });
+      if (!item.ok) {
+        const finalStateRow = itemRows.filter((row) => normalizedRef(row.name) === normalizedRef(itemLabel))
+          .find((row) => itemTransferStateMatches({
+            row,
+            nextOwnerId: target.nextOwnerId,
+            nextLocationId: target.nextLocationId,
+            nextEquipState: target.nextEquipState,
+            nextEquippedSlot: target.nextEquippedSlot,
+          })) ?? null;
+        if (finalStateRow) {
+          const result = itemTransferResult({
+            frame: input.frame,
+            effect,
+            resultKind: "already_satisfied",
+            itemLabel,
+            sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+            targetLabel: target.targetLabel,
+            finalOwnerKind: target.finalOwnerKind,
+            finalLocationKind: target.finalLocationKind,
+            finalEquipState: target.nextEquipState,
+            finalEquippedSlot: target.nextEquippedSlot,
+          });
+          const receipt = itemTransferReceipt({
+            frame: input.frame,
+            checklist: input.checklist,
+            step: input.step,
+            request: input.request,
+            itemTransfer: result,
+            mutationApplied: false,
+            playerId: player.id,
+            itemId: finalStateRow.id,
+            previousOwnerId: finalStateRow.owner_id,
+            nextOwnerId: finalStateRow.owner_id,
+            previousLocationId: finalStateRow.location_id,
+            nextLocationId: finalStateRow.location_id,
+            previousEquipState: finalStateRow.equip_state,
+            nextEquipState: finalStateRow.equip_state,
+            previousEquippedSlot: finalStateRow.equipped_slot,
+            nextEquippedSlot: finalStateRow.equipped_slot,
+            anchorLocationId: currentLocation.id,
+            anchorSceneLocationId: currentScene.id,
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: item.kind,
+          message: item.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const sourceRequiresEquip = effect.source.requiredEquipState;
+      if (
+        sourceRequiresEquip
+        && item.row.equip_state !== sourceRequiresEquip
+        && !itemTransferStateMatches({
+          row: item.row,
+          nextOwnerId: target.nextOwnerId,
+          nextLocationId: target.nextLocationId,
+          nextEquipState: target.nextEquipState,
+          nextEquippedSlot: target.nextEquippedSlot,
+        })
+      ) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: "source_state_mismatch",
+          message: "Stage 4 item_transfer item equip state does not match the accepted request source.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      if (effect.operation === "equip_inventory_item") {
+        const slotConflict = itemRows.some((row) =>
+          row.id !== item.row.id
+          && row.owner_id === player.id
+          && row.equip_state === "equipped"
+          && row.equipped_slot === target.nextEquippedSlot
+        );
+        if (slotConflict) {
+          const receipt = failReceipt({
+            ...input,
+            capabilityId: "item_transfer",
+            kind: "equip_slot_conflict",
+            message: "Stage 4 item_transfer cannot equip into an occupied player equipment slot.",
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+      }
+
+      if (itemTransferStateMatches({
+        row: item.row,
+        nextOwnerId: target.nextOwnerId,
+        nextLocationId: target.nextLocationId,
+        nextEquipState: target.nextEquipState,
+        nextEquippedSlot: target.nextEquippedSlot,
+      })) {
+        const result = itemTransferResult({
+          frame: input.frame,
+          effect,
+          resultKind: "already_satisfied",
+          itemLabel,
+          sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+          targetLabel: target.targetLabel,
+          finalOwnerKind: target.finalOwnerKind,
+          finalLocationKind: target.finalLocationKind,
+          finalEquipState: target.nextEquipState,
+          finalEquippedSlot: target.nextEquippedSlot,
+        });
+        const receipt = itemTransferReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: input.request,
+          itemTransfer: result,
+          mutationApplied: false,
+          playerId: player.id,
+          itemId: item.row.id,
+          previousOwnerId: item.row.owner_id,
+          nextOwnerId: item.row.owner_id,
+          previousLocationId: item.row.location_id,
+          nextLocationId: item.row.location_id,
+          previousEquipState: item.row.equip_state,
+          nextEquipState: item.row.equip_state,
+          previousEquippedSlot: item.row.equipped_slot,
+          nextEquippedSlot: item.row.equipped_slot,
+          anchorLocationId: currentLocation.id,
+          anchorSceneLocationId: currentScene.id,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const receiptId = `stage4-receipt-${randomUUID()}`;
+      const authorityTraceId = `stage4-authority-${randomUUID()}`;
+      const resultWorldVersion = clock.world_version + 1;
+      const now = Date.now();
+      const resultKind = itemTransferResultKind(effect.operation);
+      const stateDeltaRefs = uniqueStrings([
+        `item:${item.row.id}:owner`,
+        `item:${item.row.id}:location`,
+        `item:${item.row.id}:equip_state`,
+      ]);
+      const updateItem = db.prepare(`
+        UPDATE items
+        SET owner_id = ?, location_id = ?, equip_state = ?, equipped_slot = ?
+        WHERE id = ?
+          AND campaign_id = ?
+          AND owner_id IS ?
+          AND location_id IS ?
+          AND equip_state = ?
+          AND equipped_slot IS ?
+      `).run(
+        target.nextOwnerId,
+        target.nextLocationId,
+        target.nextEquipState,
+        target.nextEquippedSlot,
+        item.row.id,
+        input.frame.campaignId,
+        item.row.owner_id,
+        item.row.location_id,
+        item.row.equip_state,
+        item.row.equipped_slot,
+      );
+      if (updateItem.changes !== 1) {
+        throw new Error("item row optimistic update failed");
+      }
+      const updateClock = db.prepare(`
+        UPDATE world_clocks
+        SET world_version = ?, updated_at = ?
+        WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+      `).run(
+        resultWorldVersion,
+        now,
+        input.frame.campaignId,
+        clock.world_version,
+        clock.world_time_minutes,
+      );
+      if (updateClock.changes !== 1) {
+        throw new Error("item transfer clock update failed");
+      }
+      db.prepare(`
+        INSERT INTO authority_traces (
+          id,
+          campaign_id,
+          operation,
+          source_entity_type,
+          source_entity_id,
+          base_world_version,
+          result_world_version,
+          world_time_minutes,
+          elapsed_world_time_minutes,
+          tool_result_id,
+          event_ids,
+          state_delta_refs,
+          witnesses,
+          metadata,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authorityTraceId,
+        input.frame.campaignId,
+        "gameplay-cycle-runtime.item_transfer.v1",
+        "item",
+        item.row.id,
+        clock.world_version,
+        resultWorldVersion,
+        clock.world_time_minutes,
+        0,
+        receiptId,
+        "[]",
+        JSON.stringify(stateDeltaRefs),
+        JSON.stringify(effect.evidenceRefs),
+        JSON.stringify({
+          checklistId: input.checklist.checklistId,
+          stepId: input.step.stepId,
+          capabilityId: "item_transfer",
+          operation: effect.operation,
+          resultKind,
+          sourceKind: effect.source.sourceKind,
+          targetKind: effect.target.targetKind,
+          anchorScope: "current_scene",
+          anchorRef: effect.anchorRef,
+        }),
+        now,
+      );
+
+      const result = itemTransferResult({
+        frame: input.frame,
+        effect,
+        resultKind,
+        itemLabel,
+        sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+        targetLabel: target.targetLabel,
+        finalOwnerKind: target.finalOwnerKind,
+        finalLocationKind: target.finalLocationKind,
+        finalEquipState: target.nextEquipState,
+        finalEquippedSlot: target.nextEquippedSlot,
+      });
+      const receipt = itemTransferReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        receiptId,
+        itemTransfer: result,
+        resultWorldVersion,
+        mutationApplied: true,
+        authorityTraceId,
+        playerId: player.id,
+        itemId: item.row.id,
+        previousOwnerId: item.row.owner_id,
+        nextOwnerId: target.nextOwnerId,
+        previousLocationId: item.row.location_id,
+        nextLocationId: target.nextLocationId,
+        previousEquipState: item.row.equip_state,
+        nextEquipState: target.nextEquipState,
+        previousEquippedSlot: item.row.equipped_slot,
+        nextEquippedSlot: target.nextEquippedSlot,
+        anchorLocationId: currentLocation.id,
+        anchorSceneLocationId: currentScene.id,
+        stateDeltaRefs,
+      });
+      input.store.insert(receipt);
+      return receipt;
+    });
+
+    try {
+      return transaction();
+    } catch {
+      const receipt = failReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        capabilityId: "item_transfer",
+        kind: "mutation_apply_failed",
+        message: "Stage 4 item_transfer mutation transaction failed before commit.",
+      });
+      input.store.insert(receipt);
+      return receipt;
+    }
+  });
+}
+
 async function executeTimeAdvance(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -3403,6 +4283,17 @@ function playerLocalConditionBinding(step: Step): PlayerLocalConditionBinding | 
   ) ?? null;
 }
 
+function itemTransferBinding(step: Step): ItemTransferBinding | null {
+  return (step.dependencyBindings ?? []).find((binding) =>
+    binding.bindingId === "item_transfer_state"
+    && binding.requiredCapabilityId === "item_transfer"
+    && binding.requiredReceiptAuthority === "item_transfer_receipt"
+    && binding.sourcePath === "publicResult.itemTransfer"
+    && binding.resolveIn === "post_dependency_scene_frame"
+    && binding.requiredFramePresence === "item_state_reconciled"
+  ) ?? null;
+}
+
 function refreshedActorForMaterializedSpeaker(input: {
   frame: AuthoritativeSceneFrame;
   actorRef: string;
@@ -3430,6 +4321,33 @@ function refreshedPlayerConditionMatches(input: {
   return present;
 }
 
+function refreshedItemTransferMatches(input: {
+  frame: AuthoritativeSceneFrame;
+  itemTransfer: ItemTransferResult;
+}): boolean {
+  const itemLabel = normalizedRef(input.itemTransfer.itemLabel);
+  const inventoryItem = input.frame.inventory.find((item) =>
+    normalizedRef(item.label) === itemLabel || normalizedRef(item.ref) === itemLabel
+  );
+  if (input.itemTransfer.finalOwnerKind === "player") {
+    return Boolean(inventoryItem && inventoryItem.equipState === input.itemTransfer.finalEquipState);
+  }
+  if (input.itemTransfer.finalOwnerKind === "none" && input.itemTransfer.finalLocationKind === "current_scene") {
+    return input.frame.targets.some((target) =>
+      target.kind === "item"
+      && (normalizedRef(target.label) === itemLabel || normalizedRef(target.ref) === itemLabel)
+    );
+  }
+  if (input.itemTransfer.finalOwnerKind === "visible_actor") {
+    const targetVisible = input.frame.actors.some((actor) =>
+      actor.role !== "player"
+      && normalizedRef(actor.label) === normalizedRef(input.itemTransfer.targetLabel)
+    );
+    return targetVisible && !inventoryItem;
+  }
+  return false;
+}
+
 async function resolveDialogueDependencies(input: {
   initialFrame: AuthoritativeSceneFrame;
   currentFrame: AuthoritativeSceneFrame;
@@ -3449,7 +4367,8 @@ async function resolveDialogueDependencies(input: {
 }> {
   const speakerBinding = materializedSpeakerBinding(input.step);
   const conditionBinding = playerLocalConditionBinding(input.step);
-  if (!speakerBinding && !conditionBinding) {
+  const itemBinding = itemTransferBinding(input.step);
+  if (!speakerBinding && !conditionBinding && !itemBinding) {
     return {
       status: "ready",
       frame: input.currentFrame,
@@ -3477,7 +4396,7 @@ async function resolveDialogueDependencies(input: {
     }),
   });
 
-  if (conditionBinding && !speakerBinding) {
+  if (conditionBinding && !speakerBinding && !itemBinding) {
     const sourceReceipt = input.receipts.find((receipt) =>
       receipt.stepId === conditionBinding.fromStepId
       && receipt.capabilityId === "condition_set"
@@ -3544,12 +4463,84 @@ async function resolveDialogueDependencies(input: {
           resultKind: condition.resultKind,
           refreshedFrameId: refreshedFrame.frameId,
         },
+        itemTransfer: null,
+      },
+    };
+  }
+
+  if (itemBinding && !speakerBinding && !conditionBinding) {
+    const sourceReceipt = input.receipts.find((receipt) =>
+      receipt.stepId === itemBinding.fromStepId
+      && receipt.capabilityId === "item_transfer"
+    );
+    if (
+      !sourceReceipt
+      || sourceReceipt.status !== "accepted"
+      || sourceReceipt.authority.evidenceAuthority !== "item_transfer_receipt"
+      || !sourceReceipt.publicResult.itemTransfer
+    ) {
+      return skipDependency("Dependent dialogue was skipped because item transfer evidence was not accepted.");
+    }
+    if (!input.refreshFrameAfterReceipt) {
+      return skipDependency("Dependent dialogue was skipped because no post-item-transfer SceneFrame refresh was available.");
+    }
+
+    let refreshedFrame: AuthoritativeSceneFrame;
+    try {
+      refreshedFrame = await input.refreshFrameAfterReceipt({
+        initialFrame: input.initialFrame,
+        currentFrame: input.currentFrame,
+        checklist: input.checklist,
+        step: input.step,
+        receipt: sourceReceipt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return skipDependency(`Dependent dialogue was skipped because post-item-transfer SceneFrame refresh failed: ${message}`);
+    }
+
+    const itemTransfer = sourceReceipt.publicResult.itemTransfer;
+    if (!refreshedItemTransferMatches({ frame: refreshedFrame, itemTransfer })) {
+      return {
+        status: "skip",
+        receipt: skipReceipt({
+          frame: refreshedFrame,
+          checklist: input.checklist,
+          step: input.step,
+          request: placeholderDialogueRequest({
+            frame: refreshedFrame,
+            checklist: input.checklist,
+            step: input.step,
+          }),
+          capabilityId: "dialogue_record",
+          kind: "dependency_not_accepted",
+          message: "Dependent dialogue was skipped because the refreshed SceneFrame did not reflect the accepted item state.",
+        }),
+      };
+    }
+
+    return {
+      status: "ready",
+      frame: refreshedFrame,
+      refreshed: true,
+      afterReceiptId: sourceReceipt.receiptId,
+      resolution: {
+        materializedSpeaker: null,
+        playerLocalCondition: null,
+        itemTransfer: {
+          bindingId: "item_transfer_state",
+          fromStepId: itemBinding.fromStepId,
+          receiptId: sourceReceipt.receiptId,
+          resultKind: itemTransfer.resultKind,
+          itemLabel: itemTransfer.itemLabel,
+          refreshedFrameId: refreshedFrame.frameId,
+        },
       },
     };
   }
 
   const binding = speakerBinding;
-  if (!binding) return skipDependency("Dependent dialogue has unsupported mixed dependency bindings.");
+  if (!binding || conditionBinding || itemBinding) return skipDependency("Dependent dialogue has unsupported mixed dependency bindings.");
   const sourceReceipt = input.receipts.find((receipt) =>
     receipt.stepId === binding.fromStepId
     && receipt.capabilityId === "support_actor_create"
@@ -3620,6 +4611,7 @@ async function resolveDialogueDependencies(input: {
         refreshedFrameId: refreshedFrame.frameId,
       },
       playerLocalCondition: null,
+      itemTransfer: null,
     },
   };
 }
@@ -3677,6 +4669,7 @@ export async function runCleanStage4Execution(input: {
       "dialogue_record",
       "support_actor_create",
       "condition_set",
+      "item_transfer",
       "time_advance",
       "scene_beat_record",
     ];
@@ -3791,6 +4784,24 @@ export async function runCleanStage4Execution(input: {
       continue;
     }
 
+    if (step.intended.kind === "item_transfer") {
+      const request = requestForStep({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        requiredRouteReceiptId: null,
+      });
+      const receipt = await executeItemTransfer({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        request,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
     const routeDependency = receipts.find((receipt) =>
       step.dependsOnStepIds.includes(receipt.stepId)
       && receipt.capabilityId === "route_check"
@@ -3849,6 +4860,7 @@ export async function runCleanStage4Execution(input: {
       dialogue: receipt.publicResult.dialogue,
       supportActor: receipt.publicResult.supportActor,
       condition: receipt.publicResult.condition,
+      itemTransfer: receipt.publicResult.itemTransfer,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",

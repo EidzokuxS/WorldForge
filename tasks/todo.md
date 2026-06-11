@@ -3019,3 +3019,81 @@ Session: `gm-v1-consequenc-slice`.
     - Backend listener cleanup verified after the harness; ports `3232` and `3001` had no listeners.
   - Status impact:
     - Diagnostic primitive evidence only. Final acceptance remains 0% until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P69 clean gameplay runtime Primitive 15 Item Transfer:
+  - Status:
+    - [x] Re-read the attached P66 decision text and confirm current clean branch preserves the P66/P67 split: P66 materializes only; P67 composes only through refreshed SceneFrame.
+    - [x] Map the current clean runtime capability surface after P68 with read-only sidecar review.
+    - [x] Prepare and run Oracle/GPT-5.5 Pro review with one bundled text attachment.
+    - [x] Record the valid Oracle decision and the invalid follow-up run.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement the narrow clean `item_transfer` primitive.
+    - [x] Add focused contract tests for schemas, GM Read/Judge/Checklist, Stage 4 DB behavior, settlement/narration limits, SceneFrame refresh, and import fences.
+    - [x] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p69-next-primitive`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Pro Extended`.
+    - Bundle: one bundled text attachment, 15 files, usage `inputTokens=153396`, `outputTokens=6260`, `totalTokens=159656`.
+    - Question artifact: `output/oracle/p69-clean-next-primitive-question.md`.
+    - Answer artifact: `output/oracle/p69-clean-next-primitive-answer.md`.
+    - Delivery verification: `C:\Users\robra\.oracle\sessions\wf-clean-p69-next-primitive\meta.json` has `status=completed`, `promptSubmitted=true`, model selection `resolvedLabel=Pro Extended`, `browserBundleFiles=true`, `browserBundleFormat="text"`, all 15 intended files in `options.file`, transcript at `C:\Users\robra\.oracle\sessions\wf-clean-p69-next-primitive\artifacts\transcript.md`, and output log usage shows a real 6260-token answer.
+    - Accepted decision: `item_transfer` - MODIFY -> GO.
+    - Invalid follow-up evidence: `wf-clean-p69-order-followup` asked whether `local_observation` should supersede `item_transfer`, but saved transcript/usage show only answer `I` with `outputTokens=1`. Per lessons, this is invalid Oracle evidence and must not be used as the P69 architecture decision.
+  - Sidecar dissent / next-candidate note:
+    - Read-only sidecars converged that `local_observation` / `active_search_observation` is a strong next primitive before POI/reveal/world-fact work.
+    - P69 must not absorb active checks, search, phone/device status, signs, storefronts, POI discovery, or absence proof into item_transfer.
+    - If those pressures block manual play before P69 is done, stop and run a valid Oracle review for `local_observation`; do not patch it through item state.
+  - Accepted P69 scope:
+    - Implement only a narrow Player item custody/location/equip-state transition.
+    - Covered actions: give one carried/equipped item to one visible current-scene actor; drop/place one carried/equipped item in the current scene; pick up one visible current-scene item; equip one inventory item; unequip one equipped inventory item.
+    - Non-goals: item creation, hidden item discovery, search result, item inspection/details, item use/activation, damage/repair/consumption, stack splitting, currency/barter/payment, container contents, restow/no-op-without-state-change, stealing/pickpocketing/planting on an unwilling actor, remote/offscreen transfer, NPC-initiated transfer, target consent/reaction, relationship, world fact, route/location/POI truth, HP/condition change, success bonus, "no one notices", absence, or no-change.
+  - Ownership contract:
+    - GM Read classifies a bounded `item_transfer` / `itemTransferNeed`; it does not emit executable Stage 4 payloads.
+    - Judge admits ordinary uncontested item transitions as `backend_action_plan_needed` with `backend_receipt_required`; no Oracle for ordinary give/drop/pickup/equip/unequip.
+    - Checklist emits exactly one backend-owned `item_transfer` state step from accepted GM Read/Judge fields.
+    - Compound item-transfer plus dialogue must split the physical item-state step before the dialogue step; dialogue cannot carry inventory mutation.
+    - Stage 4 request is backend-authored from the accepted checklist and current SceneFrame, not old v2 model-authored transfer payloads.
+  - Runtime contract:
+    - Use `items`, player/NPC/location/current-scene/world-clock reads, `authority_traces`, and clean Stage 4 receipt persistence as data/source adapters.
+    - Mutating accepted transfers run under `withSqliteWriteLock("clean-stage4-item-transfer")` and one SQLite transaction.
+    - Mutating result advances `worldVersion` by 1, does not advance `worldTimeMinutes` or `tick`, updates exactly the target item row, writes `authority_traces.operation="gameplay-cycle-runtime.item_transfer.v1"`, and persists the clean receipt atomically.
+    - Accepted already-satisfied result does not mutate, does not advance worldVersion/time/tick, and must not be narrated as if the action newly happened.
+    - Failed/skipped receipts cannot authorize item-state narration and must report no hidden mutation.
+    - Forbidden production imports: old gameplay-cycle-v2 transfer schemas/handlers/planners/ledgers, root tool executor, saga/restore/replay systems, old packet stores, old narrator-attempt systems, and vector/episodic memory writers.
+  - Receipt/narration contract:
+    - Receipt authority: `item_transfer_receipt`.
+    - Mutation authority: `item_custody_location_equip_state` for mutating accepted operations, otherwise `none`.
+    - Visible result authority: `may_claim_item_state_change`.
+    - Accepted evidence claim kind: `item_state`.
+    - Accepted receipt proves only item label, Player as initiating actor, accepted operation/result kind, public source/target labels, current-scene anchor, and final custody/location/equip state.
+    - It explicitly does not prove consent, dialogue, NPC reaction, hidden notice, item effects/use, world fact, route/location/POI truth, relationship/faction status, HP/condition, search/discovery, absence, or no-change.
+  - SceneFrame refresh/dependency rule:
+    - Pre-mutation SceneFrame remains immutable.
+    - Any later same-turn step that depends on the new item state requires a real post-transfer authoritative SceneFrame refresh.
+    - Pickup/equip/unequip refresh must show Player inventory/equip state. Drop/place refresh may require a narrow `visibleSceneItems` projection. Give refresh must show the target actor still visible and the item no longer in Player inventory; richer actor-held item targeting can wait.
+  - Planned verification:
+    - Schema tests reject old `transfer_item.v2`/`item.transfer.v2` shapes, `toolId`, `effectBinding`, backend refs, UUIDs, `knowledge:*`, private guard terms, multiple items, hidden/non-citable items, container targets, arbitrary locations, missing visible target for give, and forbidden payloads.
+    - GM Read/Judge/Checklist tests prove "I grip the already-held tube" stays `player_local_condition`, "I hand the tube to Guide" becomes `item_transfer`, and compound hand-plus-ask splits item_transfer before dialogue.
+    - Stage 4 tests cover give, drop/place, pickup, equip, unequip, already-satisfied, stale frame/clock, ambiguous item, hidden target, source mismatch, equip slot conflict, rollback, authority trace, no tick/time/clock ledger, and no old v2/saga/narrator/vector/episodic writes.
+    - Settlement/narrator tests allow only accepted final item-state narration and forbid consent, dialogue, no-change, item effect, discovery/search, relationship, world fact, route/location/POI truth, HP/condition, and hidden notice.
+    - Refresh tests prove dependent later steps use a post-transfer SceneFrame and skip if refresh does not reconcile item state.
+    - Live proof design: fresh zero-turn clone with Player carrying `Brass Tube` and visible current-scene `Guide`; action `I hand the Brass Tube to Guide.` Verify one accepted `item_transfer` receipt, item owner becomes Guide, worldVersion +1 only, authority trace, item_state settled evidence, grounded narration, and no old v2/saga/narrator/oracle/simulation stores.
+  - Implementation evidence:
+    - Added clean `item_transfer` capability, GM Read `itemTransferNeed`, Judge backend-action-plan admission, checklist `itemTransferPlan`, and `item_transfer_state` dependency binding.
+    - Stage 4 now builds backend-authored item-transfer requests from accepted checklist state, validates current SceneFrame/citable refs/source item/target actor or scene/player equipment, and executes accepted mutations under `clean-stage4-item-transfer`.
+    - Mutating accepted transfer updates exactly one `items` row, advances `worldVersion` by 1 only, writes `authority_traces.operation="gameplay-cycle-runtime.item_transfer.v1"`, persists one clean receipt, and does not advance `worldTimeMinutes`, `currentTick`, or `turn_clock_ledger`.
+    - Settlement maps accepted item receipts to `item_state` evidence only. Narration view/fallback exposes item state facts with limits against consent, reaction, dialogue, discovery/search, item use/effect, relationship, world fact, route/location truth, HP/condition, absence, and no-change.
+    - Dependent same-turn dialogue after item transfer requires `item_transfer_state` and a post-transfer authoritative SceneFrame refresh; dialogue skips if the refreshed frame does not reconcile item state.
+    - Live fallout fixed: deterministic checklist now treats Player/currentScene/currentLocation as implicit authoritative anchor refs and no longer falls back to item/actor refs as the `item_transfer` scene anchor when GM Read omits the scene ref.
+  - Executed verification:
+    - GitNexus impact before edits was LOW for `buildDeterministicGmActionChecklist`, `runCleanStage4Execution`, `buildCleanSettledTurnPacket`, `buildCleanNarratorView`, `runCleanNarration`, `stage4Evidence`, `admittedRefSet`, and `refIssues`; no HIGH/CRITICAL impact was ignored.
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 4 files, 198 tests.
+    - Live proof first attempt `output/p69-live-item-transfer-20260611T163435Z/` correctly exposed a checklist anchor bug: Stage 4 rejected `item_transfer` because the anchor fell through to a non-scene ref. No mutation occurred.
+    - Live `/api/chat/action` proof passed after the anchor fix on fresh zero-turn clone `p69-clone-item-transfer-20260611t164401z`; artifacts in `output/p69-live-item-transfer-20260611T164401Z/`.
+    - Live action: `I hand the Brass Tube to Guide.`
+    - Live DB proof: one accepted `item_transfer` receipt, item `Brass Tube` owner changed from Player to `Guide`, final state `carried`, `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, no `turn_clock_ledger`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live narration proof: player-facing text was multi-token and grounded in accepted item state/dialogue receipts: `You give the Brass Tube to Guide. Guide says: "Thank you for the Brass Tube."`
+    - GitNexus `detect_changes(scope=all)` before commit reported HIGH risk because shared clean Stage 4 receipt/request paths changed (`runCleanStage4Execution`, `baseReceipt`, `requestEffectForStep`) and affected movement/support/condition receipt processes. Reviewed key contexts; coverage is the focused 198-test clean runtime suite plus the live P69 proof.
+  - Status impact:
+    - Diagnostic primitive evidence complete for P69. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
