@@ -207,6 +207,10 @@ function fact(evidenceId: string, index: number, text: string) {
   };
 }
 
+function boundedBackendFacts(facts: Array<ReturnType<typeof fact>>): Array<ReturnType<typeof fact>> {
+  return facts.slice(0, 8);
+}
+
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
   const evidenceId = nextEvidenceId(evidence);
   evidence.push({
@@ -356,7 +360,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds: ["current_scene", "current_location", "visible_actor", "visible_fact", "inventory_status", "movement_option"],
         text: receipt.publicResult.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts,
+        backendFacts: boundedBackendFacts(backendFacts),
         limits: {
           proves: ["current visible SceneFrame snapshot entries"],
           doesNotProve: SCENE_DOES_NOT_PROVE,
@@ -409,13 +413,13 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds: ["movement_option"],
         text: receipt.publicResult.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: routeOptions.options.slice(0, 12).map((option, index) =>
+        backendFacts: boundedBackendFacts(routeOptions.options.slice(0, 12).map((option, index) =>
           fact(
             evidenceId,
             index + 1,
             `Route option: ${option.label} (${option.connected ? "connected" : "not connected"}${option.travelCost === null ? "" : `, ${option.travelCost} minute(s)`}).`,
           )
-        ),
+        )),
         limits: {
           proves: ["route options exposed by current SceneFrame"],
           doesNotProve: ROUTE_OPTIONS_DOES_NOT_PROVE,

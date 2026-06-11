@@ -3163,3 +3163,45 @@ Session: `gm-v1-consequenc-slice`.
     - GitNexus `detect_changes(scope=all)` before commit reported HIGH risk across 27 changed symbols / 13 affected processes because shared clean Stage 4 request/receipt paths changed. Reviewed `baseReceipt`, `requestEffectForStep`, and `executeSupportActorCreate`; the support-actor processes are hunk-mapping noise around adjacent Stage 4 code, while the real blast radius is the shared receipt/assertion path covered by typecheck, the focused suite, and live proof.
   - Status impact:
     - Diagnostic primitive evidence complete for P70. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P71 clean gameplay runtime Primitive 17 Device Status Observation:
+  - Status:
+    - [x] Identify the next likely primitive after P70 from lessons and manual-play blockers.
+    - [ ] Prepare and run a valid Oracle/GPT-5.5 Pro review with one real context bundle.
+    - [ ] Record Oracle recommendation, accepted scope, and rejected alternatives.
+    - [ ] Run GitNexus impact before editing indexed symbols.
+    - [ ] Implement only the Oracle-approved clean device-status observation primitive.
+    - [ ] Add focused contract tests for schema, GM Read/Judge/Checklist, Stage 4 behavior, settlement/narration limits, and no old-runtime leakage.
+    - [ ] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
+  - Candidate problem:
+    - P70 `local_observation` intentionally rejects phone/device status, screen contents, signal, battery, calls, messages, notifications, and instructions.
+    - Manual-play blockers repeatedly involve actions like checking a `Burner phone`, watching for signal/messages/calls/instructions, or carrying a phone while moving.
+    - Prior lessons forbid proving device status from item custody, known-fact lookup, route/movement, raw player text, GM Read intent, narrator inference, or `start_search found=false`.
+  - Candidate boundary for Oracle review:
+    - Possible primitive name: `device_status_observation`.
+    - Input: authoritative current SceneFrame, citable Player-held/visible device item refs, accepted GM Read/Judge/Checklist step, requested status facet text, and any existing model-safe public item/device surface adapter.
+    - Output: accepted read-only receipt that proves only bounded current-frame device status facets that are explicitly exposed by modeled data or a narrow deterministic adapter.
+    - Must not mutate device/item/world state, invent messages/calls/signal, inspect hidden/private contents, create quests/instructions, prove broad absence/no-change, or turn a non-confirmed check into "no message/no signal/no call".
+  - Oracle review plan:
+    - Ask for GO/MODIFY/NO-GO on implementing P71 now versus doing local scene positioning, minor POI/location reveal, or player-known world fact first.
+    - Ask whether P71 should be a dedicated `device_status_observation` capability/receipt or a limited extension of P70 `local_observation`.
+    - Ask for exact allowed facets, schema shape, receipt/evidence limits, no-match/failure semantics, and verification plan.
+    - Attach current clean runtime contracts, frame builder, GM Read/Judge/Checklist, Stage 4, settlement/narration, relevant tests, P70 Oracle answer, lessons, and canonical architecture doc.
+  - Oracle/GPT-5.5 Pro review attempts:
+    - Invalid attempt `wf-clean-p71-device-status`: dry-run succeeded with one bundled text attachment, 11 files, about 108714 prompt tokens.
+    - Real browser run failed before prompt submission with `Unable to locate the ChatGPT model selector button. No cookies were applied; log in to ChatGPT in Chrome or provide inline cookies`; session `meta.json` status is `error`, no transcript/usage, so this is not review evidence.
+  - Diagnostic evidence before implementation:
+    - Source campaign search found zero-turn phone candidates. Chosen source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424` has `chat=0`, clock 0, old stores 0, and Player-owned equipped `Burner phone`.
+    - First live diagnostic clone `p71-clone-device-status-20260611t184228`, action `I check the Burner phone screen for signal bars, messages, missed calls, and any instructions.`, exposed unrelated current fallout: Stage 5 restored the turn because a rich `observe_visible` evidence entry generated more than 8 `backendFacts` and violated `cleanSettledEvidenceSchema`.
+    - Fixed the Stage 5 contract fallout by capping generated `backendFacts` to the schema limit for rich `scene_observation_receipt` and `route_options_receipt` evidence; added settlement regression coverage.
+    - Post-fix live diagnostic clone `p71-clone-device-status-20260611t184558` reached `narrative`, `finalizing_turn`, and `done` with no restore, one clean turn record, zero Stage 4 receipts, zero old v2/saga/narrator/oracle/simulation stores, and zero `turn_clock_ledger`.
+    - Post-fix narration was multi-token but did not answer the requested signal/messages/calls/instructions status: `You are at Shibuya District. Kenjaku, Nishimura Koji, and Sendo Atsushi are here. You carry a burner phone, a delivery manifest, and a worn courier bag.` This confirms P71 remains an ownership gap rather than solved behavior.
+    - Verification for fallout fix: `npm --prefix backend run typecheck` passed; focused clean runtime suite passed (4 files, 206 tests); GitNexus impact/detect reported LOW for the touched Stage 5 settlement symbols.
+  - Candidate accepted scope if Oracle agrees:
+    - Backend-owned, read-only, current-frame observation over Player-carried/equipped or current-scene visible device items only.
+    - Covered requests: visible screen/status check, signal indicator, battery/power indicator, visible notification/call/message indicator, only when an exposed modeled surface exists.
+    - Bounded negative evidence may only say that no modeled/exposed device-status surface for the requested facet is available at this frame/worldVersion; it must not prove no real-world message/signal/call exists.
+  - Rejected/deferred:
+    - No hidden/private message contents, no new message/call generation, no radio/phone network simulation, no item effects/use, no hacking/decryption, no durable world fact, no route/location truth, no POI/search discovery, no NPC reaction, and no broad absence/no-change claim.
+  - Status impact:
+    - Planning only. No diagnostic or acceptance credit yet.

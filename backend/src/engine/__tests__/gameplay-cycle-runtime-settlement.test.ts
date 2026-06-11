@@ -1038,10 +1038,22 @@ describe("clean Stage 5 settlement contracts", () => {
           type: "visible_observation",
           currentScene: "Market",
           currentLocation: "Market",
-          visibleActors: ["Guide"],
-          visibleFacts: ["Lanterns burn along the market stalls."],
-          inventory: [],
-          movementOptions: ["North Hall"],
+          visibleActors: ["Guide", "Harbor Clerk", "Market Porter", "Lamp Keeper", "Cart Driver", "Courier"],
+          visibleFacts: [
+            "Lanterns burn along the market stalls.",
+            "A route board hangs beside the stall.",
+            "Rainwater gathers near the awning.",
+            "The crowd keeps to the west edge.",
+          ],
+          inventory: ["Brass Tube", "Field Notebook", "Pocket Lens", "Token Pouch"],
+          movementOptions: [
+            "North Hall",
+            "South Arcade",
+            "East Gate",
+            "West Stairs",
+            "Canal Walk",
+            "Archive Door",
+          ],
         },
         sceneBeat: null,
         dialogue: null,
@@ -1077,7 +1089,20 @@ describe("clean Stage 5 settlement contracts", () => {
         routeOptions: {
           type: "route_options",
           fromLabel: "Market",
-          options: [{ label: "North Hall", connected: true, travelCost: 1 }],
+          options: [
+            { label: "North Hall", connected: true, travelCost: 1 },
+            { label: "South Arcade", connected: true, travelCost: 2 },
+            { label: "East Gate", connected: true, travelCost: 2 },
+            { label: "West Stairs", connected: true, travelCost: 3 },
+            { label: "Canal Walk", connected: true, travelCost: 4 },
+            { label: "Archive Door", connected: false, travelCost: null },
+            { label: "Clock Yard", connected: true, travelCost: 5 },
+            { label: "Glasshouse", connected: true, travelCost: 6 },
+            { label: "Old Ferry", connected: false, travelCost: null },
+            { label: "Signal Loft", connected: true, travelCost: 7 },
+            { label: "Ledger Annex", connected: true, travelCost: 8 },
+            { label: "Blue Bridge", connected: true, travelCost: 9 },
+          ],
         },
         timeAdvance: null,
         visibleObservation: null,
@@ -1121,7 +1146,10 @@ describe("clean Stage 5 settlement contracts", () => {
       "inventory_status",
       "movement_option",
     ]);
+    expect(observation?.backendFacts).toHaveLength(8);
+    expect(observation?.backendFacts.at(-1)?.text).toBe("Visible actor: Courier.");
     const routes = packet.acceptedEvidence.find((entry) => entry.authority === "route_options_receipt");
+    expect(routes?.backendFacts).toHaveLength(8);
     expect(routes?.backendFacts[0]?.text).toBe("Route option: North Hall (connected, 1 minute(s)).");
     expect(routes?.limits.doesNotProve).toContain("hidden routes");
   });
