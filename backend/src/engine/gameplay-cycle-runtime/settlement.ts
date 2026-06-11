@@ -158,6 +158,25 @@ const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
   "no-change",
 ];
 
+const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
+  "hidden or private message contents",
+  "true absence of messages, calls, or signal",
+  "message or call generation or delivery",
+  "caller or sender identity",
+  "instructions or mission content",
+  "true network coverage",
+  "device use or activation",
+  "hacking or decryption",
+  "item custody, location, or equip state",
+  "route truth",
+  "location reveal",
+  "dialogue content",
+  "private knowledge",
+  "world fact",
+  "broad absence or no-change",
+  "future device state",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -398,6 +417,43 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             ? ["bounded no-match against enumerated exposed current SceneFrame observation surfaces"]
             : ["matching exposed current SceneFrame observation surface entries"],
           doesNotProve: LOCAL_OBSERVATION_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "device_surface_observation_receipt" && receipt.publicResult.deviceSurfaceObservation) {
+      const evidenceId = nextEvidenceId(evidence);
+      const observation = receipt.publicResult.deviceSurfaceObservation;
+      const noSurface = observation.resultKind === "no_requested_surface";
+      const claimKinds: CleanSettledEvidence["claimKinds"] = noSurface
+        ? ["device_surface_observation", "device_surface_unavailable"]
+        : ["device_surface_observation"];
+      const facetFacts = observation.observedFacets.slice(0, 5).map((facet, index) =>
+        fact(evidenceId, index + 4, `${facet.displayLabel}: ${facet.valueText}.`)
+      );
+      const unavailableFacts = observation.unavailableFacetKinds.length > 0
+        ? [fact(evidenceId, facetFacts.length + 4, `No modeled/exposed device surface for requested facet(s): ${observation.unavailableFacetKinds.join(", ")} at this frame/worldVersion.`)]
+        : [];
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "device_surface_observation_receipt",
+        claimKinds,
+        text: observation.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: boundedBackendFacts([
+          fact(evidenceId, 1, observation.summary),
+          fact(evidenceId, 2, `Device: ${observation.deviceLabel}.`),
+          fact(evidenceId, 3, `Requested facets: ${observation.requestedFacetKinds.join(", ")}.`),
+          ...facetFacts,
+          ...unavailableFacts,
+        ]),
+        limits: {
+          proves: noSurface
+            ? ["bounded no modeled/exposed requested device surface at this frame/worldVersion", "requested device label"]
+            : ["modeled public device surface facets", "requested device label", "current frame/worldVersion device surface anchor"],
+          doesNotProve: DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE,
         },
       });
       continue;

@@ -244,6 +244,8 @@ function checklistForKind(
                   ? "condition_set"
                   : kind === "item_transfer"
                     ? "item_transfer"
+                    : kind === "device_surface_observation"
+                      ? "device_surface_observation"
               : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
@@ -573,6 +575,94 @@ function itemTransferChecklist(inputFrame = itemTransferFrame()): GmActionCheckl
   };
 }
 
+function deviceSurfaceFrame(input: {
+  facets?: NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number]["facets"];
+  availableFacetKinds?: NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number]["availableFacetKinds"];
+  playerAction?: string;
+} = {}): AuthoritativeSceneFrame {
+  const base = frame();
+  const facets = input.facets ?? [{
+    facetKind: "screen_state" as const,
+    displayLabel: "Screen",
+    valueText: "lit",
+    valueClass: "indicator_state" as const,
+    publicSafe: true as const,
+  }, {
+    facetKind: "signal_indicator" as const,
+    displayLabel: "Signal indicator",
+    valueText: "two visible bars",
+    valueClass: "meter_value" as const,
+    publicSafe: true as const,
+  }];
+  return {
+    ...base,
+    frameId: "frame-stage4-device-1",
+    turnId: "clean-turn-stage4-device-1",
+    playerAction: input.playerAction ?? "I check the Burner phone screen and signal indicator.",
+    inventory: [{
+      ref: "Burner phone",
+      label: "Burner phone",
+      equipState: "equipped",
+      tags: ["phone"],
+    }],
+    deviceStatusSurfaces: [{
+      surfaceVersion: "scene_frame_device_status_surface.v1",
+      deviceRef: "Burner phone",
+      deviceLabel: "Burner phone",
+      deviceKind: "phone",
+      holderScope: "player_equipped",
+      anchorRef: "Market",
+      availableFacetKinds: input.availableFacetKinds ?? facets.map((facet) => facet.facetKind),
+      facets,
+    }],
+    capabilities: [
+      ...base.capabilities,
+      { capabilityId: "device_surface_observation", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "North Hall", "Burner phone"],
+  };
+}
+
+function deviceSurfaceChecklist(inputFrame = deviceSurfaceFrame(), input: {
+  facetKinds?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>["facetKinds"];
+  allowNoSurface?: boolean;
+  requestedFacetText?: string;
+} = {}): GmActionChecklist {
+  const base = checklistForKind("device_surface_observation", inputFrame);
+  const step = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Check Burner phone visible surface indicators.",
+      admittedConsequenceNeed: "Device surface observations require backend receipt authority.",
+    },
+    steps: [{
+      ...step,
+      targetRefs: ["Burner phone", "Market"],
+      evidenceRefs: ["Player", "Burner phone", "Market"],
+      intended: {
+        kind: "device_surface_observation",
+        stateOrEvidence: "evidence",
+        requiredCapabilityId: "device_surface_observation",
+        summary: "Stage 4 must read only modeled public device surface facets from the current SceneFrame.",
+        deviceObservationPlan: {
+          actorRef: "Player",
+          deviceRef: "Burner phone",
+          requestedDeviceText: "Burner phone",
+          requestedFacetText: input.requestedFacetText ?? "screen and signal indicator",
+          facetKinds: input.facetKinds ?? ["screen_state", "signal_indicator"],
+          allowNoSurface: input.allowNoSurface ?? true,
+          anchorRef: "Market",
+        },
+      },
+      expectedVisibleEffect: {
+        summary: "Accepted device surface observation receipt only; no private contents or network truth is authorized.",
+        visibleRefs: ["Player", "Burner phone", "Market"],
+      },
+    }],
+  };
+}
+
 function itemTransferThenDialogueChecklist(inputFrame = itemTransferFrame()): GmActionChecklist {
   const base = itemTransferChecklist(inputFrame);
   const itemStep = base.steps[0]!;
@@ -758,6 +848,109 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
     expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 5 });
+  });
+
+  it("accepts modeled public device surface facets without mutating world state", async () => {
+    const inputFrame = deviceSurfaceFrame();
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: deviceSurfaceChecklist(inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.publicEvents).toEqual([]);
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.resultWorldVersion).toBe(0);
+    expect(result.execution?.visibleResults[0]).toMatchObject({
+      authority: "device_surface_observation_receipt",
+      deviceSurfaceObservation: {
+        type: "device_surface_observation",
+        resultKind: "facets_observed",
+        deviceLabel: "Burner phone",
+        requestedFacetKinds: ["screen_state", "signal_indicator"],
+        observedFacets: [
+          {
+            facetKind: "screen_state",
+            displayLabel: "Screen",
+            valueText: "lit",
+            claimStatus: "modeled_public_device_surface_only",
+          },
+          {
+            facetKind: "signal_indicator",
+            displayLabel: "Signal indicator",
+            valueText: "two visible bars",
+            claimStatus: "modeled_public_device_surface_only",
+          },
+        ],
+        boundedNoSurface: false,
+        claimStatus: "bounded_current_frame_device_surface_only",
+      },
+    });
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "device_surface_observation",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 0, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "device_surface_observation_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_claim_device_surface_observation",
+        mayAuthorizeMutation: false,
+      },
+    });
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+    const authorityCount = getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM authority_traces WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { count: number };
+    expect(authorityCount.count).toBe(0);
+  });
+
+  it("accepts bounded device no-surface without claiming no signal, no messages, or no-change", async () => {
+    const inputFrame = deviceSurfaceFrame({
+      facets: [],
+      availableFacetKinds: [],
+      playerAction: "I check whether the Burner phone has a message.",
+    });
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: deviceSurfaceChecklist(inputFrame, {
+        facetKinds: ["message_indicator"],
+        requestedFacetText: "message indicator",
+        allowNoSurface: true,
+      }),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "device_surface_observation",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "device_surface_observation_receipt",
+        mutationAuthority: "none",
+      },
+      publicResult: {
+        deviceSurfaceObservation: {
+          resultKind: "no_requested_surface",
+          deviceLabel: "Burner phone",
+          requestedFacetKinds: ["message_indicator"],
+          observedFacets: [],
+          unavailableFacetKinds: ["message_indicator"],
+          boundedNoSurface: true,
+        },
+      },
+    });
+    const summary = result.execution?.receipts[0]?.publicResult.summary ?? "";
+    expect(summary).toContain("No modeled/exposed device surface facet");
+    expect(summary).not.toMatch(/no messages|no calls|no signal|nothing changed|no change/iu);
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
   });
 
   it("transfers a carried item to a visible current-scene actor through clean item_transfer authority", async () => {

@@ -148,6 +148,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
     "For item_state, narrate only the accepted item custody/location/equip-state operation; never add item creation, discovery, inspection, use, damage, container contents, barter value, NPC consent/reaction, relationship, route, location, condition, dialogue, private knowledge, absence, or no-change claims.",
     "For local_observation, narrate only the accepted exposed current SceneFrame observation result. For bounded_visibility_negative, say only that no matching entry was exposed by the enumerated current SceneFrame surfaces at this frame/worldVersion; never claim broad absence, hidden absence, discovery failure, no-change, route truth, device status, item effects, or world facts.",
+    "For device_surface_observation, narrate only the accepted modeled public device surface facet(s), or the bounded current-frame no-surface result. Never claim hidden/private message contents, true no-message/no-call/no-signal, instructions, message/call generation, network truth, device use, hacking, route/location truth, world facts, dialogue, or no-change.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -300,6 +301,13 @@ function fallbackLanguage(view: CleanNarratorView): "ru" | "en" {
   return /[\u0400-\u04ff]/u.test(view.playerAction) ? "ru" : "en";
 }
 
+function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
+  return view.acceptedEvidence.some((evidence) =>
+    evidence.claimKinds.includes("item_state")
+    || evidence.claimKinds.includes("device_surface_observation")
+  );
+}
+
 export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   const language = fallbackLanguage(view);
   const movement = view.acceptedEvidence.find((evidence) =>
@@ -339,6 +347,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (routeOptions) {
     return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const deviceSurfaceObservation = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("device_surface_observation")
+  );
+  if (deviceSurfaceObservation) {
+    return deviceSurfaceObservation.backendFacts.map((entry) => entry.text).join(" ");
   }
 
   const localObservation = view.acceptedEvidence.find((evidence) =>
@@ -442,6 +457,18 @@ export async function runCleanNarration(input: {
   const promptInput = buildCleanNarratorPromptInput(input.narratorView);
   const system = buildCleanNarrationSystemPrompt();
   const prompt = buildCleanNarrationPrompt(promptInput);
+  if (needsDeterministicAuthorityProjection(input.narratorView)) {
+    return {
+      ...assertCleanNarrationResult({
+        version: "gameplay-runtime.clean-narration-result.v1",
+        packetId: input.narratorView.packetId,
+        turnId: input.narratorView.turnId,
+        text: renderCleanNarrationFallback(input.narratorView),
+        source: "deterministic_authority_projection",
+      }),
+      validationIssues: [],
+    };
+  }
   const generateCandidate =
     input.generateCandidate
     ?? ((request: CleanNarrationCandidateRequest) => generateCleanNarrationCandidate({

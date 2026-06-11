@@ -48,6 +48,7 @@ const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|knowledge|loca
 export const EFFECT_TO_CAPABILITY: Record<GmActionChecklistEffectKind, GameplayRuntimeCapabilityId> = {
   observe_visible: "observe_visible",
   local_observation: "local_observation",
+  device_surface_observation: "device_surface_observation",
   route_options: "route_options",
   route_check: "route_check",
   movement: "movement",
@@ -287,6 +288,25 @@ function refIssues(input: {
           ...(step.intended.localConditionPlan.targetRef ? [step.intended.localConditionPlan.targetRef] : []),
         ]
       : []),
+    ...(step.intended.itemTransferPlan
+      ? [
+          step.intended.itemTransferPlan.itemRef,
+          step.intended.itemTransferPlan.targetRef,
+          step.intended.itemTransferPlan.anchorRef,
+        ]
+      : []),
+    ...(step.intended.localObservationPlan
+      ? [
+          ...(step.intended.localObservationPlan.targetRef ? [step.intended.localObservationPlan.targetRef] : []),
+          step.intended.localObservationPlan.anchorRef,
+        ]
+      : []),
+    ...(step.intended.deviceObservationPlan
+      ? [
+          step.intended.deviceObservationPlan.deviceRef,
+          step.intended.deviceObservationPlan.anchorRef,
+        ]
+      : []),
   ]));
 
   for (const ref of refs) {
@@ -461,6 +481,36 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         code: "step_invalid",
         path: `steps.${index}.intended.localObservationPlan`,
         message: "localObservationPlan is allowed only on local_observation steps.",
+      });
+    }
+    if (step.intended.kind === "device_surface_observation") {
+      if (!step.intended.deviceObservationPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.deviceObservationPlan`,
+          message: "device_surface_observation steps require a typed deviceObservationPlan.",
+        });
+      }
+      const plan = step.intended.deviceObservationPlan;
+      if (plan) {
+        const plannedRefs = [plan.deviceRef, plan.anchorRef].map((ref) => ref.toLowerCase());
+        const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
+        for (const ref of plannedRefs) {
+          if (!stepRefs.includes(ref)) {
+            issues.push({
+              code: "step_invalid",
+              path: `steps.${index}.intended.deviceObservationPlan`,
+              message: "deviceObservationPlan refs must be included in step target/evidence refs.",
+            });
+            break;
+          }
+        }
+      }
+    } else if (step.intended.deviceObservationPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.deviceObservationPlan`,
+        message: "deviceObservationPlan is allowed only on device_surface_observation steps.",
       });
     }
     if (step.disposition.kind === "stage4_backend_resolution_required") {
@@ -676,6 +726,12 @@ function admittedRefSet(input: {
         ...input.gmRead.actionInterpretation.localObservationNeed.evidenceRefs,
       ]
       : []),
+    ...(input.gmRead.actionInterpretation.deviceObservationNeed
+      ? [
+        input.gmRead.actionInterpretation.deviceObservationNeed.deviceRef,
+        ...input.gmRead.actionInterpretation.deviceObservationNeed.evidenceRefs,
+      ]
+      : []),
     ...input.judgment.actorRefs,
     ...input.judgment.targetRefs,
     ...input.judgment.evidenceRefs,
@@ -743,6 +799,7 @@ function stepFor(input: {
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
+  deviceObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>;
   purpose?: string;
   intendedSummary?: string;
   expectedVisibleSummary?: string;
@@ -771,6 +828,9 @@ function stepFor(input: {
   }
   if (input.localObservationPlan) {
     intended.localObservationPlan = input.localObservationPlan;
+  }
+  if (input.deviceObservationPlan) {
+    intended.deviceObservationPlan = input.deviceObservationPlan;
   }
   const step: GmActionChecklist["steps"][number] = {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
@@ -846,6 +906,9 @@ export function buildDeterministicGmActionChecklist(input: {
   const itemTransferNeed = input.gmRead.actionInterpretation.itemTransferNeed ?? null;
   const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     ? input.gmRead.actionInterpretation.localObservationNeed ?? null
+    : null;
+  const deviceObservationNeed = input.gmRead.actionInterpretation.interactionKind === "device_status_observation"
+    ? input.gmRead.actionInterpretation.deviceObservationNeed ?? null
     : null;
   const actionText = playerActionText(input);
 
@@ -960,6 +1023,40 @@ export function buildDeterministicGmActionChecklist(input: {
       purpose: `Plan bounded current-scene local observation for ${localObservationNeed.queryText}.`,
       intendedSummary: `Stage 4 must settle a read-only local observation over enumerated current SceneFrame surfaces before narration may claim the result. This does not authorize hidden discovery, broad absence, item use, device status, route truth, world facts, mutation, or dialogue.`,
       expectedVisibleSummary: `If accepted, local observation may describe only matching exposed current-scene surface entries for ${localObservationNeed.queryText}.`,
+    }));
+  }
+
+  if (allowed.has("device_surface_observation") && sceneRef && deviceObservationNeed) {
+    const deviceTargetRefs = uniqueStrings([
+      deviceObservationNeed.deviceRef,
+      sceneRef,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const deviceEvidenceRefs = uniqueStrings([
+      actorRef,
+      deviceObservationNeed.deviceRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...deviceObservationNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "device_surface_observation",
+      actorRef,
+      targetRefs: deviceTargetRefs.length > 0 ? deviceTargetRefs : [deviceObservationNeed.deviceRef],
+      evidenceRefs: deviceEvidenceRefs,
+      deviceObservationPlan: {
+        actorRef: "Player",
+        deviceRef: deviceObservationNeed.deviceRef,
+        requestedDeviceText: deviceObservationNeed.requestedDeviceText,
+        requestedFacetText: deviceObservationNeed.requestedFacetText,
+        facetKinds: deviceObservationNeed.facetKinds,
+        allowNoSurface: deviceObservationNeed.allowNoSurface,
+        anchorRef: sceneRef,
+      },
+      purpose: `Plan bounded current-frame device surface observation for ${deviceObservationNeed.requestedDeviceText}.`,
+      intendedSummary: "Stage 4 must settle a read-only device surface observation over modeled public device facets before narration may claim the result. This does not authorize private contents, message/call generation, network truth, item use, hacking, no signal, no message, no call, no-change, world facts, or mutation.",
+      expectedVisibleSummary: `If accepted, device observation may describe only modeled public surface facets for ${deviceObservationNeed.requestedDeviceText}.`,
     }));
   }
 

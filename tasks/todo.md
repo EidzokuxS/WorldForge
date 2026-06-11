@@ -3095,6 +3095,16 @@ Session: `gm-v1-consequenc-slice`.
     - Live DB proof: one accepted `item_transfer` receipt, item `Brass Tube` owner changed from Player to `Guide`, final state `carried`, `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, no `turn_clock_ledger`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
     - Live narration proof: player-facing text was multi-token and grounded in accepted item state/dialogue receipts: `You give the Brass Tube to Guide. Guide says: "Thank you for the Brass Tube."`
     - GitNexus `detect_changes(scope=all)` before commit reported HIGH risk because shared clean Stage 4 receipt/request paths changed (`runCleanStage4Execution`, `baseReceipt`, `requestEffectForStep`) and affected movement/support/condition receipt processes. Reviewed key contexts; coverage is the focused 198-test clean runtime suite plus the live P69 proof.
+  - Post-handoff verification / superseding proof (2026-06-11):
+    - The earlier live narration with `Guide says...` is now treated as invalid P69 evidence: `item_transfer_receipt` proves item state only, not dialogue, consent, or NPC reaction.
+    - Invalid fresh clones during repair were not counted: one exposed model narration inventing Guide dialogue from item_state evidence; two exposed GM Read `equipSlot="carried"` generation/repair fallout; one exposed an extra `dialogue_record` receipt for the non-speech action `I hand the Brass Tube to Guide.`
+    - Fixes kept the accepted contract narrow: `gmReadSchema` still rejects carried `equipSlot`; only the model-generation envelope admits that near-miss so repair can run, GM Read prompt now states target recipient is not dialogue, and item_state/device_surface_observation narration uses deterministic authority projection instead of model paraphrase.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 217 tests passed.
+    - Fresh zero-turn `/api/chat/action` proof passed on clone `p69-item-transfer-730b07ed`; artifacts: `output/clean-runtime-p69-item-transfer-live-20260611195608/`.
+    - Live action: `I hand the Brass Tube to Guide.`
+    - Live DB proof: exactly one accepted `item_transfer` receipt, item owner became fixture `Guide`, `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, exactly one authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Live narration proof: multi-token deterministic item_state projection only, with no Guide quote/reaction/dialogue: `Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Mira Voss. Target: Guide. Final equip state: carried. Current scene anchor: Lowwater Bazaar. Item transfer result: transferred_to_actor.`
   - Status impact:
     - Diagnostic primitive evidence complete for P69. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
 
@@ -3167,11 +3177,11 @@ Session: `gm-v1-consequenc-slice`.
 - P71 clean gameplay runtime Primitive 17 Device Status Observation:
   - Status:
     - [x] Identify the next likely primitive after P70 from lessons and manual-play blockers.
-    - [ ] Prepare and run a valid Oracle/GPT-5.5 Pro review with one real context bundle.
-    - [ ] Record Oracle recommendation, accepted scope, and rejected alternatives.
-    - [ ] Run GitNexus impact before editing indexed symbols.
-    - [ ] Implement only the Oracle-approved clean device-status observation primitive.
-    - [ ] Add focused contract tests for schema, GM Read/Judge/Checklist, Stage 4 behavior, settlement/narration limits, and no old-runtime leakage.
+    - [x] Prepare and run a valid Oracle/GPT-5.5 Pro review with one real context bundle.
+    - [x] Record Oracle recommendation, accepted scope, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the Oracle-approved clean device-surface observation primitive.
+    - [x] Add focused contract tests for schema, GM Read/Judge/Checklist, Stage 4 behavior, settlement/narration limits, and no old-runtime leakage.
     - [ ] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
   - Candidate problem:
     - P70 `local_observation` intentionally rejects phone/device status, screen contents, signal, battery, calls, messages, notifications, and instructions.
@@ -3192,7 +3202,8 @@ Session: `gm-v1-consequenc-slice`.
     - Real browser run failed before prompt submission with `Unable to locate the ChatGPT model selector button. No cookies were applied; log in to ChatGPT in Chrome or provide inline cookies`; session `meta.json` status is `error`, no transcript/usage, so this is not review evidence.
     - Invalid smoke `wf-oracle-browser-smoke-current`: run used `--browser-attachments never`, so no attachment was delivered; `meta.json` shows `browserAttachments="never"`, `browserBundleFiles=false`, promptSubmitted inline, then Chrome disconnected. Per correction, this is not attachment evidence and must not count toward P71 review.
     - Invalid bundled smoke `wf-oracle-browser-smoke-bundle`: run used `--browser-bundle-files --browser-bundle-format text`, but failed before prompt submission with the same ChatGPT auth/model-selector error. `meta.json` shows `browserBundleFiles=true` but no `browser.runtime.promptSubmitted`, transcript, or usage, so no attachment was delivered.
-    - Current blocker: Oracle browser profile/auth cannot currently reach the ChatGPT composer/model selector. P71 implementation remains blocked on valid review evidence or an explicitly accepted local-only architecture decision.
+    - Valid review `wf-clean-p71-device-status-2`: ran through Oracle browser with `--browser-bundle-files --browser-bundle-format text`, 11 files bundled into one text attachment, ChatGPT model resolved to `Pro Extended`, `status=completed`, `browser.runtime.promptSubmitted=true`, `browserBundleFiles=true`, `browserBundleFormat="text"`, all intended files listed in `options.file`, transcript exists at `C:\Users\robra\.oracle\sessions\wf-clean-p71-device-status-2\artifacts\transcript.md`, usage `inputTokens=108840`, `outputTokens=4154`, `totalTokens=112994`.
+    - Verdict: MODIFY -> GO. Implement P71 now as a dedicated read-only sibling primitive named `device_surface_observation`, not as an extension of P70 `local_observation`.
     - Repeatable review runbook recorded in `tasks/p71-device-status-oracle-review-runbook.md`; future attempts must satisfy its valid-evidence checklist before any P71 code is written.
   - Diagnostic evidence before implementation:
     - Source campaign search found zero-turn phone candidates. Chosen source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424` has `chat=0`, clock 0, old stores 0, and Player-owned equipped `Burner phone`.
@@ -3205,7 +3216,26 @@ Session: `gm-v1-consequenc-slice`.
     - Backend-owned, read-only, current-frame observation over Player-carried/equipped or current-scene visible device items only.
     - Covered requests: visible screen/status check, signal indicator, battery/power indicator, visible notification/call/message indicator, only when an exposed modeled surface exists.
     - Bounded negative evidence may only say that no modeled/exposed device-status surface for the requested facet is available at this frame/worldVersion; it must not prove no real-world message/signal/call exists.
+  - Oracle-accepted P71 scope:
+    - Primitive/capability name: `device_surface_observation`; receipt authority `device_surface_observation_receipt`; visible result authority `may_claim_device_surface_observation`; public result `deviceSurfaceObservation`.
+    - Allowed facets: `screen_state`, `power_indicator`, `battery_indicator`, `signal_indicator`, `notification_indicator`, `message_indicator`, `call_indicator`.
+    - Proves only exact modeled public device-surface facets for a citable Player-carried/equipped or current-scene visible device at the current frame/worldVersion, or the bounded fact that no modeled/exposed surface for the requested facet is available.
+    - Must keep `mutationApplied=false`, no worldVersion/time/tick advance, no old v2/saga/narrator/oracle/simulation stores, and no old gameplay-cycle-v2 tool/schema/handler imports.
+    - GM Read should emit typed `deviceObservationNeed`; Judge should admit it as backend receipt required with no Oracle; Checklist should emit `device_surface_observation`, not `local_observation`; Stage 4 must compile the request from current frame/device surfaces only.
   - Rejected/deferred:
     - No hidden/private message contents, no new message/call generation, no radio/phone network simulation, no item effects/use, no hacking/decryption, no durable world fact, no route/location truth, no POI/search discovery, no NPC reaction, and no broad absence/no-change claim.
+    - Do not narrate "no message", "no call", "no signal", "no instruction", "nothing changed", "the phone is silent", or objective screen/device truth unless the exact accepted surface facet supports a surface-form claim.
+  - Implementation evidence:
+    - Added clean `device_surface_observation` capability/effect/result/receipt contracts without importing or binding old gameplay-cycle-v2 schemas, handlers, tool stores, narrator stores, Oracle stores, or simulation stores.
+    - SceneFrame now exposes only citable Player-carried/equipped or current-scene visible device surface refs/facets; empty modeled surfaces authorize only bounded `no_requested_surface`, not objective no-signal/no-message/no-call truth.
+    - GM Read emits typed `deviceObservationNeed`; Judge admits it as `backend_action_plan_needed` with `backend_receipt_required`; Checklist emits deterministic `device_surface_observation`.
+    - Stage 4 executes read-only device-surface observation from the current frame, with `mutationApplied=false`, no worldVersion/time/tick advance, no authority trace, and accepted receipt authority `device_surface_observation_receipt`.
+    - Settlement maps accepted receipts to `device_surface_observation` / `device_surface_unavailable` evidence only, with limits against hidden/private contents, message/call generation, true absence, network truth, item use, hacking, route/location/world facts, mutation, and broad no-change.
+    - Narration uses deterministic authority projection for accepted device surface evidence so model paraphrase cannot turn bounded no-surface into "no messages", "no calls", "no signal", or instructions.
+  - Executed verification:
+    - GitNexus impact was run before edits on indexed clean runtime boundaries; the relevant edited runtime symbols reported LOW risk. `baseReceipt` was not edited in this P71 pass.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 217 tests passed.
+    - P71 live zero-turn `/api/chat/action` proof is still pending; do not count P71 as diagnostic-complete until that proof is run and DB/narration invariants are checked.
   - Status impact:
-    - Planning only. No diagnostic or acceptance credit yet.
+    - Implementation and focused tests are in place, but diagnostic primitive evidence is not complete until the P71 live proof runs. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

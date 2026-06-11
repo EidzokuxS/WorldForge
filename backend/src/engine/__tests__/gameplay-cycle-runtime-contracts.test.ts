@@ -29,6 +29,7 @@ import {
   cleanStage4LocalConditionSetEffectSchema,
   cleanStage4ItemTransferEffectSchema,
   cleanStage4LocalObservationEffectSchema,
+  cleanStage4DeviceSurfaceObservationEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -36,6 +37,7 @@ import {
 } from "../gameplay-cycle-runtime/runtime.js";
 import {
   buildGmReadSystemPrompt,
+  gmReadModelGenerationSchema,
   runCleanGmRead,
   validateGmReadCandidate,
 } from "../gameplay-cycle-runtime/gm-read.js";
@@ -796,6 +798,76 @@ function localObservationGmRead(frame = localObservationFrame()): GmRead {
   };
 }
 
+function deviceSurfaceFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  const base = actionPlanFrame();
+  return actionPlanFrame({
+    playerAction: "I check the Burner phone screen and signal indicator.",
+    inventory: [{
+      ref: "Burner phone",
+      label: "Burner phone",
+      equipState: "equipped",
+      tags: ["phone"],
+    }],
+    deviceStatusSurfaces: [{
+      surfaceVersion: "scene_frame_device_status_surface.v1",
+      deviceRef: "Burner phone",
+      deviceLabel: "Burner phone",
+      deviceKind: "phone",
+      holderScope: "player_equipped",
+      anchorRef: "Market",
+      availableFacetKinds: ["screen_state", "signal_indicator"],
+      facets: [
+        {
+          facetKind: "screen_state",
+          displayLabel: "Screen",
+          valueText: "lit",
+          valueClass: "indicator_state",
+          publicSafe: true,
+        },
+        {
+          facetKind: "signal_indicator",
+          displayLabel: "Signal indicator",
+          valueText: "two visible bars",
+          valueClass: "meter_value",
+          publicSafe: true,
+        },
+      ],
+    }],
+    capabilities: [
+      ...base.capabilities,
+      { capabilityId: "device_surface_observation", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "North Hall", "Burner phone"],
+    ...overrides,
+  });
+}
+
+function deviceSurfaceGmRead(frame = deviceSurfaceFrame()): GmRead {
+  return {
+    ...actionPlanGmRead(frame),
+    focalRefs: ["Player", "Burner phone"],
+    evidenceRefs: ["Player", "Market", "Burner phone"],
+    liveSceneQuestion: "Which modeled public device surface facet should Stage 4 read?",
+    actionInterpretation: {
+      summary: "The player checks the modeled public Burner phone surface indicators.",
+      playerIntent: "Check Burner phone screen and signal indicator.",
+      method: "look",
+      targetRefs: ["Burner phone"],
+      interactionKind: "device_status_observation",
+      deviceObservationNeed: {
+        actorRef: "Player",
+        deviceRef: "Burner phone",
+        requestedDeviceText: "Burner phone",
+        requestedFacetText: "screen and signal indicator",
+        facetKinds: ["screen_state", "signal_indicator"],
+        allowNoSurface: true,
+        evidenceRefs: ["Player", "Market", "Burner phone"],
+      },
+    },
+    interpretationRationale: "Modeled device surfaces need a dedicated device_surface_observation receipt.",
+  };
+}
+
 function actionPlanJudge(frame = actionPlanFrame(), gmRead = actionPlanGmRead(frame)): JudgeUncertainty {
   return {
     ...validJudgeUncertainty(frame, gmRead),
@@ -1178,6 +1250,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
   });
 
+  it("keeps carried equipSlot as a model-generation near-miss, not an accepted item_transfer contract", () => {
+    const frame = itemTransferActionPlanFrame();
+    const nearMiss = {
+      ...itemTransferGmRead(frame),
+      actionInterpretation: {
+        ...itemTransferGmRead(frame).actionInterpretation,
+        itemTransferNeed: {
+          ...itemTransferGmRead(frame).actionInterpretation.itemTransferNeed!,
+          equipSlot: "carried",
+        },
+      },
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(nearMiss).success).toBe(true);
+    expect(gmReadSchema.safeParse(nearMiss).success).toBe(false);
+    const result = validateGmReadCandidate({ frame, candidate: nearMiss });
+    expect(result.status).toBe("rejected");
+  });
+
   it("keeps gripping an already-held item in player_local_condition instead of item_transfer", () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I grip the Brass Tube.",
@@ -1238,6 +1329,46 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
     expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
     expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
+  it("accepts device_status_observation only from exposed SceneFrame device surfaces", () => {
+    const frame = deviceSurfaceFrame();
+    const candidate = deviceSurfaceGmRead(frame);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "device_status_observation",
+      targetRefs: ["Burner phone"],
+      deviceObservationNeed: {
+        actorRef: "Player",
+        deviceRef: "Burner phone",
+        facetKinds: ["screen_state", "signal_indicator"],
+        allowNoSurface: true,
+      },
+    });
+
+    const smuggledLocalObservation: GmRead = {
+      ...candidate,
+      actionInterpretation: {
+        ...candidate.actionInterpretation,
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "Burner phone signal",
+          targetRef: "Burner phone",
+          surfaceKinds: ["inventory_item"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market", "Burner phone"],
+        },
+      },
+    };
+    const rejected = validateGmReadCandidate({ frame, candidate: smuggledLocalObservation });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
   it("rejects localObservationNeed when the target ref is outside the requested exposed surface", () => {
@@ -1448,8 +1579,10 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("must not narrate");
     expect(prompt).toContain("must not");
     expect(prompt).toContain("call tools");
+    expect(prompt).toContain("Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself.");
     expect(prompt).toContain("procedural does not authorize");
     expect(prompt).toContain("uncertain does not authorize");
+    expect(prompt).toContain("Do not copy the inventory item's current equipState into equipSlot.");
   });
 
   it("repairs once locally, then accepts only a validated GM Read", async () => {
@@ -1705,6 +1838,38 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         code: "backend_receipt_required",
         explanation: "Local observation needs a clean local_observation receipt before narration.",
         evidenceRefs: ["Player", "Guide", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
+  });
+
+  it("requires device_status_observation to use the backend action-plan branch instead of no-roll narration", () => {
+    const frame = deviceSurfaceFrame();
+    const gmRead = deviceSurfaceGmRead(frame);
+    const noRoll = validJudgeUncertainty(frame, gmRead);
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Burner phone"],
+      evidenceRefs: ["Player", "Market", "Burner phone"],
+      checkRationale: "Device surface observation needs backend device_surface_observation receipt authority.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Device surface observation needs a clean device_surface_observation receipt before narration.",
+        evidenceRefs: ["Player", "Burner phone", "Market"],
       },
     };
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
@@ -2512,6 +2677,56 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "stage4_backend_resolution_required",
       },
     });
+  });
+
+  it("deterministically produces device_surface_observation checklist for modeled device surface checks", async () => {
+    const frame = deviceSurfaceFrame();
+    const gmRead = deviceSurfaceGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Burner phone"],
+      evidenceRefs: ["Player", "Market", "Burner phone"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Device surface observation needs a clean device_surface_observation receipt before narration.",
+        evidenceRefs: ["Player", "Burner phone", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-device-surface",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      actorRef: "Player",
+      targetRefs: ["Burner phone", "Market"],
+      intended: {
+        kind: "device_surface_observation",
+        requiredCapabilityId: "device_surface_observation",
+        stateOrEvidence: "evidence",
+        deviceObservationPlan: {
+          actorRef: "Player",
+          deviceRef: "Burner phone",
+          requestedDeviceText: "Burner phone",
+          requestedFacetText: "screen and signal indicator",
+          facetKinds: ["screen_state", "signal_indicator"],
+          allowNoSurface: true,
+          anchorRef: "Market",
+        },
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
   });
 
   it("deterministically produces dialogue_record checklist only for accepted visible actor dialogue", async () => {
@@ -3425,6 +3640,58 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(cleanStage4LocalObservationEffectSchema.safeParse({
       ...base,
       forbiddenPayloads: { ...base.forbiddenPayloads, phoneOrDeviceStatus: true },
+    }).success).toBe(false);
+  });
+
+  it("requires P71 device_surface_observation effects to stay bounded to modeled public device surfaces", () => {
+    const base = {
+      kind: "device_surface_observation" as const,
+      authorityKind: "current_frame_device_status_surface" as const,
+      actorRef: "Player" as const,
+      anchorRef: "Market",
+      deviceRef: "Burner phone",
+      requestedDeviceText: "Burner phone",
+      requestedFacetText: "screen and signal indicator",
+      facetKinds: ["screen_state", "signal_indicator"] as const,
+      allowNoSurface: true,
+      evidenceRefs: ["Player", "Market", "Burner phone"],
+      forbiddenPayloads: {
+        privateMessageContents: false as const,
+        messageOrCallGeneration: false as const,
+        networkSimulation: false as const,
+        hackingOrDecryption: false as const,
+        itemUseOrActivation: false as const,
+        itemStateChange: false as const,
+        routeTruth: false as const,
+        locationReveal: false as const,
+        worldFact: false as const,
+        dialogueContent: false as const,
+        privateKnowledge: false as const,
+        mutation: false as const,
+        absenceOrNoChange: false as const,
+      },
+    };
+
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
+      ...base,
+      actorRef: "Guide",
+    }).success).toBe(false);
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
+      ...base,
+      facetKinds: ["private_message_body"],
+    }).success).toBe(false);
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, privateMessageContents: true },
+    }).success).toBe(false);
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, networkSimulation: true },
+    }).success).toBe(false);
+    expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, absenceOrNoChange: true },
     }).success).toBe(false);
   });
 

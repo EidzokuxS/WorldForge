@@ -17,6 +17,7 @@ import {
 const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "observe_visible",
   "local_observation",
+  "device_surface_observation",
   "oracle_roll",
   "route_options",
   "route_check",
@@ -124,6 +125,24 @@ function targetKind(target: SceneFrame["targetCandidates"][number]): "actor" | "
   return "unknown";
 }
 
+function deviceKindForPublicItem(input: {
+  label: string;
+  tags?: readonly string[];
+}): NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number]["deviceKind"] | null {
+  const haystack = [
+    input.label,
+    ...(input.tags ?? []),
+  ].join(" ").trim().toLowerCase();
+  if (haystack.length === 0) return null;
+  if (haystack.includes("phone")) return "phone";
+  if (haystack.includes("radio")) return "radio";
+  if (haystack.includes("tablet")) return "tablet";
+  if (haystack.includes("laptop")) return "laptop";
+  if (haystack.includes("terminal")) return "terminal";
+  if (haystack.includes("device")) return "other_device";
+  return null;
+}
+
 function eventRows(frame: SceneFrame): AuthoritativeSceneFrame["scene"]["recentLocalFacts"] {
   return frame.recentEvents.slice(0, 24).map((event, index) => ({
     factId: firstText(event.id, `recent-${index + 1}`),
@@ -224,6 +243,41 @@ export async function buildAuthoritativeSceneFrame(
     equipState: item.equipState,
     tags: item.tags.slice(0, 12),
   }));
+  const inventoryDeviceSurfaces = inventory.flatMap((item) => {
+    const deviceKind = deviceKindForPublicItem({ label: item.label, tags: item.tags });
+    if (!deviceKind) return [];
+    return [{
+      surfaceVersion: "scene_frame_device_status_surface.v1" as const,
+      deviceRef: item.ref,
+      deviceLabel: item.label,
+      deviceKind,
+      holderScope: item.equipState === "equipped" ? "player_equipped" as const : "player_inventory" as const,
+      anchorRef: currentSceneLabel,
+      availableFacetKinds: [],
+      facets: [],
+    }];
+  });
+  const visibleTargetDeviceSurfaces = targets.flatMap((target) => {
+    if (target.kind !== "item") return [];
+    const deviceKind = deviceKindForPublicItem({ label: target.label });
+    if (!deviceKind) return [];
+    return [{
+      surfaceVersion: "scene_frame_device_status_surface.v1" as const,
+      deviceRef: target.ref,
+      deviceLabel: target.label,
+      deviceKind,
+      holderScope: "current_scene_visible" as const,
+      anchorRef: currentSceneLabel,
+      availableFacetKinds: [],
+      facets: [],
+    }];
+  });
+  const deviceStatusSurfaces = uniqueRefs([
+    ...inventoryDeviceSurfaces.map((surface) => surface.deviceRef),
+    ...visibleTargetDeviceSurfaces.map((surface) => surface.deviceRef),
+  ]).map((ref) =>
+    [...inventoryDeviceSurfaces, ...visibleTargetDeviceSurfaces].find((surface) => surface.deviceRef === ref)!
+  ).slice(0, 32);
   const recentLocalFacts = eventRows(frame);
   const forecast = buildForecastEnvelope(frame, input.campaignId);
   const citableRefs = uniqueRefs([
@@ -274,6 +328,7 @@ export async function buildAuthoritativeSceneFrame(
     movementOptions,
     targets,
     inventory,
+    deviceStatusSurfaces,
     capabilities: LIVE_GAMEPLAY_CAPABILITIES.map((capabilityId) => ({
       capabilityId,
       evidenceAuthority: capabilityId === "observe_visible" || capabilityId === "route_options"

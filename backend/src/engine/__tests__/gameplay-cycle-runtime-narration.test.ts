@@ -279,6 +279,48 @@ function localObservationView(): CleanNarratorView {
   });
 }
 
+function deviceSurfaceObservationView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I check whether the Burner phone has a message.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "device_surface_observation_receipt",
+      claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+      text: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.", exact: true },
+        { factRef: "e1.f2", text: "Device: Burner phone.", exact: true },
+        { factRef: "e1.f3", text: "Requested facets: message_indicator.", exact: true },
+        { factRef: "e1.f4", text: "No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.", exact: true },
+      ],
+      limits: {
+        proves: [
+          "bounded no modeled/exposed requested device surface at this frame/worldVersion",
+          "requested device label",
+        ],
+        doesNotProve: [
+          "hidden or private message contents",
+          "true absence of messages, calls, or signal",
+          "message or call generation or delivery",
+          "caller or sender identity",
+          "instructions or mission content",
+          "true network coverage",
+          "device use or activation",
+          "hacking or decryption",
+          "item custody, location, or equip state",
+          "route truth",
+          "location reveal",
+          "dialogue content",
+          "private knowledge",
+          "world fact",
+          "broad absence or no-change",
+          "future device state",
+        ],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -616,6 +658,20 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
+  it("uses deterministic authority projection for item_state instead of model paraphrase", async () => {
+    const result = await runCleanNarration({
+      narratorView: itemStateView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("item_state should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
+    expect(result.text).not.toMatch(/\bsays|accepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
+  });
+
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
     const text = renderCleanNarrationFallback(localObservationView());
@@ -641,6 +697,47 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.status).toBe("rejected");
     if (unsupported.status !== "rejected") throw new Error("expected rejected");
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
+    const text = renderCleanNarrationFallback(deviceSurfaceObservationView());
+
+    expect(text).toBe("No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion. Device: Burner phone. Requested facets: message_indicator. No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.");
+    expect(text).not.toMatch(/private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
+
+    const unsupported = validateCleanNarrationCandidate({
+      view: deviceSurfaceObservationView(),
+      candidate: {
+        ...movementCandidate("The Burner phone has no new messages and no signal."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "The Burner phone has no new messages and no signal.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["device_surface_observation", "visible_fact"],
+          auditStepIds: [],
+        }],
+        finalText: "The Burner phone has no new messages and no signal.",
+      },
+    });
+    expect(unsupported.status).toBe("rejected");
+    if (unsupported.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("uses deterministic authority projection for device_surface_observation instead of model paraphrase", async () => {
+    const result = await runCleanNarration({
+      narratorView: deviceSurfaceObservationView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("device_surface_observation should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toContain("No modeled/exposed device surface facet");
+    expect(result.text).not.toMatch(/no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

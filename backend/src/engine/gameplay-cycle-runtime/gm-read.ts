@@ -4,7 +4,11 @@ import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../../ai/provider-registry.js";
 import {
   assertGmRead,
+  cleanItemTransferOperationSchema,
+  cleanItemTransferSourceKindSchema,
+  cleanItemTransferTargetKindSchema,
   gmReadSchema,
+  gmReadActionInterpretationSchema,
   type AuthoritativeSceneFrame,
   type GmRead,
 } from "./contracts.js";
@@ -53,7 +57,26 @@ const NORMALIZED_FORBIDDEN_EXECUTION_KEYS = new Set(
 const UUID_LIKE_REF = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|packet|receipt|route|scene|turn|world)[_:]/i;
 
-const gmReadGenerationSchema = gmReadSchema.passthrough();
+const gmReadGenerationModelSafeRef = z.string().trim().min(1).max(120);
+const gmReadGenerationShortText = z.string().trim().min(1).max(500);
+
+const gmReadGenerationItemTransferNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  operation: cleanItemTransferOperationSchema,
+  itemRef: gmReadGenerationModelSafeRef,
+  sourceKind: cleanItemTransferSourceKindSchema,
+  targetKind: cleanItemTransferTargetKindSchema,
+  targetRef: gmReadGenerationModelSafeRef,
+  equipSlot: z.enum(["equipped", "carried"]).nullable(),
+  requestedItemText: gmReadGenerationShortText,
+  evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
+}).strict();
+
+export const gmReadModelGenerationSchema = gmReadSchema.extend({
+  actionInterpretation: gmReadActionInterpretationSchema.extend({
+    itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
+  }).strict(),
+}).passthrough();
 
 export interface GmReadValidationIssue {
   code:
@@ -192,6 +215,10 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...(read.actionInterpretation.localObservationNeed?.targetRef
       ? [read.actionInterpretation.localObservationNeed.targetRef]
       : []),
+    ...(read.actionInterpretation.deviceObservationNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.deviceObservationNeed?.deviceRef
+      ? [read.actionInterpretation.deviceObservationNeed.deviceRef]
+      : []),
   ]);
   const issues: GmReadValidationIssue[] = [];
 
@@ -245,10 +272,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
   const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
+  const deviceObservationNeed = read.actionInterpretation.deviceObservationNeed ?? null;
   const sceneRefs = new Set([
     frame.scene.currentScene.ref.toLowerCase(),
     frame.scene.currentLocation.ref.toLowerCase(),
   ]);
+  const deviceSurfaceRefs = new Set((frame.deviceStatusSurfaces ?? [])
+    .map((surface) => surface.deviceRef.toLowerCase()));
 
   if (localConditionNeed) {
     const targetRef = localConditionNeed.targetRef?.toLowerCase() ?? null;
@@ -398,6 +428,14 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     }
   }
 
+  if (deviceObservationNeed && !deviceSurfaceRefs.has(deviceObservationNeed.deviceRef.toLowerCase())) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.deviceObservationNeed.deviceRef",
+      message: "deviceObservationNeed.deviceRef must be one exposed SceneFrame.deviceStatusSurfaces device ref.",
+    });
+  }
+
   if (read.actionInterpretation.interactionKind === "current_scene_observation") {
     if (read.actionInterpretation.supportActorNeed != null) {
       issues.push({
@@ -418,6 +456,52 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.itemTransferNeed",
         message: "current_scene_observation must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "current_scene_observation must not include deviceObservationNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "device_status_observation") {
+    if (read.actionInterpretation.deviceObservationNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "device_status_observation requires deviceObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "device_status_observation must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "device_status_observation must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "device_status_observation must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "device_status_observation must not include localObservationNeed.",
       });
     }
     return issues;
@@ -455,6 +539,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "visible_actor_dialogue must not include localObservationNeed.",
       });
     }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "visible_actor_dialogue must not include deviceObservationNeed.",
+      });
+    }
     return issues;
   }
 
@@ -485,6 +576,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localObservationNeed",
         message: "player_local_condition must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "player_local_condition must not include deviceObservationNeed.",
       });
     }
     return issues;
@@ -519,6 +617,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "item_transfer must not include localObservationNeed.",
       });
     }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "item_transfer must not include deviceObservationNeed.",
+      });
+    }
     return issues;
   }
 
@@ -549,6 +654,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localObservationNeed",
         message: "ordinary_support_actor_needed must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "ordinary_support_actor_needed must not include deviceObservationNeed.",
       });
     }
     const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
@@ -588,6 +700,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       code: "interaction_invalid",
       path: "actionInterpretation.localObservationNeed",
       message: "localObservationNeed is allowed only for current_scene_observation.",
+    });
+  }
+  if (read.actionInterpretation.deviceObservationNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.deviceObservationNeed",
+      message: "deviceObservationNeed is allowed only for device_status_observation.",
     });
   }
   return issues;
@@ -691,6 +810,7 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     movementOptions: frame.movementOptions,
     targets: frame.targets,
     inventory: frame.inventory,
+    deviceStatusSurfaces: frame.deviceStatusSurfaces ?? [],
     capabilities: frame.capabilities,
     citableRefs: frame.citableRefs,
     forecast: {
@@ -722,8 +842,9 @@ export function buildGmReadSystemPrompt(): string {
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
-    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, player_local_condition, item_transfer, unsupported_or_unclear.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, unsupported_or_unclear.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
+    "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
     "Use ordinary_support_actor_needed only when the player needs one ordinary local current-scene role absent from SceneFrame.actors, with roleKind in the schema and supportActorNeed filled. Do not target an invented actor ref.",
     "ordinary_support_actor_needed may cover ordinary local roles like vendor, guard, clerk, dockhand, guide, porter, witness, helper, laborer, courier, attendant, bystander, or crowd voice. It does not authorize dialogue content.",
@@ -733,6 +854,7 @@ export function buildGmReadSystemPrompt(): string {
     "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory. For visible_actor_distance, targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
     "Use item_transfer only for one uncontested Player item custody/location/equip-state transition: give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, equip_inventory_item, or unequip_inventory_item.",
     "itemTransferNeed must cite itemRef from SceneFrame.inventory for give/drop/equip/unequip, or from SceneFrame.targets where kind=item for pickup. give_to_visible_actor targetRef must be a visible actor; drop targetRef must be current scene/location; pickup/equip/unequip targetRef must be Player.",
+    "itemTransferNeed.equipSlot is the requested target equipment slot only: set it to \"equipped\" only for equip_inventory_item, and set it to null for give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, and unequip_inventory_item. Do not copy the inventory item's current equipState into equipSlot.",
     "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
     "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
     "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
@@ -740,11 +862,15 @@ export function buildGmReadSystemPrompt(): string {
     "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
     "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",
     "localObservationNeed does not authorize hidden discovery, concealed search, thorough room search, broad absence, item use/effects, phone or device status/messages, POI/storefront/landmark truth unless already exposed by a SceneFrame surface, route truth beyond route option/check receipts, world facts, mutation, dialogue content, or private facts.",
+    "Use device_status_observation with deviceObservationNeed only for checking citable Player-carried/equipped or current-scene visible device surfaces from SceneFrame.deviceStatusSurfaces.",
+    "deviceObservationNeed facets are only screen_state, power_indicator, battery_indicator, signal_indicator, notification_indicator, message_indicator, or call_indicator. allowNoSurface=true means only bounded no-surface, not no signal/no message/no call/no instruction/no-change.",
+    "deviceObservationNeed does not authorize hidden/private message contents, instructions, message/call generation, caller/sender identity, true network state, item use/activation, hacking/decryption, route/location truth, world facts, mutation, broad absence, or no-change.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
     "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For item_transfer or compound itemTransferNeed, itemTransferNeed.itemRef, targetRef, and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "For localObservationNeed, evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
+    "For deviceObservationNeed, deviceRef and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",
     "Keep arrays short and omit all fields not defined by the schema.",
@@ -783,7 +909,7 @@ async function generateGmReadCandidate(input: {
 }): Promise<unknown> {
   const generated = await safeGenerateObject({
     model: createModel(input.provider, { role: "judge", reasoningMode: "bypass" }),
-    schema: gmReadGenerationSchema,
+    schema: gmReadModelGenerationSchema,
     system: input.request.system,
     prompt: input.request.prompt,
     temperature: 0.1,

@@ -15,6 +15,7 @@ import {
 } from "../location-graph.js";
 import {
   assertCleanStage4ExecutionResult,
+  cleanStage4DeviceSurfaceObservationEffectSchema,
   cleanStage4DialogueRequestEffectSchema,
   cleanStage4ItemTransferEffectSchema,
   cleanStage4LocalObservationEffectSchema,
@@ -40,6 +41,10 @@ type ItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTr
 type LocalObservationEffect = Extract<CleanStage4Request["effect"], { kind: "local_observation" }>;
 type LocalObservationResult = NonNullable<CleanStage4Receipt["publicResult"]["localObservation"]>;
 type LocalObservationSurfaceKind = LocalObservationEffect["surfaceKinds"][number];
+type DeviceSurfaceObservationEffect = Extract<CleanStage4Request["effect"], { kind: "device_surface_observation" }>;
+type DeviceSurfaceObservationResult = NonNullable<CleanStage4Receipt["publicResult"]["deviceSurfaceObservation"]>;
+type DeviceFacetKind = DeviceSurfaceObservationEffect["facetKinds"][number];
+type DeviceSurfaceFacet = NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number]["facets"][number];
 type LocalObservationSurfaceEntry = {
   surfaceKind: LocalObservationSurfaceKind;
   ref: string;
@@ -367,6 +372,7 @@ function requestForStep(input: {
 function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStage4Receipt["capabilityId"] {
   if (kind === "observe_visible") return "observe_visible";
   if (kind === "local_observation") return "local_observation";
+  if (kind === "device_surface_observation") return "device_surface_observation";
   if (kind === "route_options") return "route_options";
   if (kind === "route_check") return "route_check";
   if (kind === "movement") return "movement";
@@ -420,6 +426,36 @@ function requestEffectForStep(input: {
         dialogueContent: false,
         privateKnowledge: false,
         mutation: false,
+      },
+    };
+  }
+  if (input.capabilityId === "device_surface_observation") {
+    const plan = input.step.intended.deviceObservationPlan;
+    return {
+      kind: "device_surface_observation",
+      authorityKind: "current_frame_device_status_surface",
+      actorRef: "Player",
+      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      deviceRef: plan?.deviceRef ?? input.destinationRef,
+      requestedDeviceText: plan?.requestedDeviceText ?? input.destinationRef,
+      requestedFacetText: plan?.requestedFacetText ?? "device surface",
+      facetKinds: plan?.facetKinds ?? ["screen_state"],
+      allowNoSurface: plan?.allowNoSurface ?? false,
+      evidenceRefs: input.step.evidenceRefs,
+      forbiddenPayloads: {
+        privateMessageContents: false,
+        messageOrCallGeneration: false,
+        networkSimulation: false,
+        hackingOrDecryption: false,
+        itemUseOrActivation: false,
+        itemStateChange: false,
+        routeTruth: false,
+        locationReveal: false,
+        worldFact: false,
+        dialogueContent: false,
+        privateKnowledge: false,
+        mutation: false,
+        absenceOrNoChange: false,
       },
     };
   }
@@ -2494,6 +2530,276 @@ function executeLocalObservation(input: {
       ...matchedEntries.map((entry) => entry.ref),
     ]).slice(0, 12),
     localObservation: result,
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+function uniqueDeviceFacetKinds(kinds: readonly DeviceFacetKind[]): DeviceFacetKind[] {
+  return uniqueStrings(kinds) as DeviceFacetKind[];
+}
+
+function deviceSurfaceForEffect(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: DeviceSurfaceObservationEffect;
+}): NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number] | null {
+  const matches = (input.frame.deviceStatusSurfaces ?? []).filter((surface) =>
+    normalizedRef(surface.deviceRef) === normalizedRef(input.effect.deviceRef)
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function deviceFacetSummary(input: {
+  effect: DeviceSurfaceObservationEffect;
+  surface: NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number];
+  resultKind: DeviceSurfaceObservationResult["resultKind"];
+  observedFacets: readonly DeviceSurfaceFacet[];
+  unavailableFacetKinds: readonly DeviceFacetKind[];
+}): string {
+  if (input.resultKind === "no_requested_surface") {
+    return `No modeled/exposed device surface facet is available for ${input.surface.deviceLabel} (${input.effect.requestedFacetText}) at this frame/worldVersion.`;
+  }
+  const observed = input.observedFacets
+    .map((facet) => `${facet.displayLabel}: ${facet.valueText}`)
+    .slice(0, 6)
+    .join("; ");
+  if (input.resultKind === "partial_facets_observed") {
+    return `Modeled/exposed device surface for ${input.surface.deviceLabel}: ${observed}. Unavailable requested facet(s): ${input.unavailableFacetKinds.join(", ")}.`;
+  }
+  return `Modeled/exposed device surface for ${input.surface.deviceLabel}: ${observed}.`;
+}
+
+function deviceSurfaceObservationResult(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: DeviceSurfaceObservationEffect;
+  surface: NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number];
+  resultKind: DeviceSurfaceObservationResult["resultKind"];
+  observedFacets: readonly DeviceSurfaceFacet[];
+  unavailableFacetKinds: readonly DeviceFacetKind[];
+}): DeviceSurfaceObservationResult {
+  const summary = deviceFacetSummary(input);
+  return {
+    type: "device_surface_observation",
+    surfaceVersion: "scene_frame_device_status_surface.v1",
+    resultKind: input.resultKind,
+    deviceLabel: input.surface.deviceLabel,
+    requestedFacetText: input.effect.requestedFacetText,
+    requestedFacetKinds: uniqueDeviceFacetKinds(input.effect.facetKinds),
+    observedFacets: input.observedFacets.slice(0, 12).map((facet) => ({
+      facetKind: facet.facetKind,
+      displayLabel: facet.displayLabel,
+      valueText: facet.valueText,
+      valueClass: facet.valueClass,
+      claimStatus: "modeled_public_device_surface_only",
+    })),
+    unavailableFacetKinds: uniqueDeviceFacetKinds(input.unavailableFacetKinds),
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    boundedNoSurface: input.resultKind === "no_requested_surface",
+    summary,
+    claimStatus: "bounded_current_frame_device_surface_only",
+  };
+}
+
+function deviceSurfaceObservationReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  deviceSurfaceObservation: DeviceSurfaceObservationResult;
+  visibleRefs: string[];
+}): CleanStage4Receipt {
+  return assertCleanStage4Receipt({
+    version: "gameplay-runtime.stage4-receipt.v1",
+    receiptId: `stage4-receipt-${randomUUID()}`,
+    requestId: input.request.requestId,
+    campaignId: input.frame.campaignId,
+    turnId: input.frame.turnId,
+    frameId: input.frame.frameId,
+    checklistId: input.checklist.checklistId,
+    stepId: input.step.stepId,
+    capabilityId: "device_surface_observation",
+    status: "accepted",
+    source: input.request.source,
+    base: input.frame.base,
+    result: {
+      tick: input.frame.base.tick,
+      worldVersion: input.frame.base.worldVersion,
+      worldTimeMinutes: input.frame.base.worldTimeMinutes,
+      mutationApplied: false,
+    },
+    authority: {
+      evidenceAuthority: "device_surface_observation_receipt",
+      mutationAuthority: "none",
+      visibleResultAuthority: "may_claim_device_surface_observation",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: false,
+    },
+    publicResult: {
+      summary: input.deviceSurfaceObservation.summary,
+      visibleRefs: input.visibleRefs,
+      routeStatus: null,
+      routeOptions: null,
+      locationChange: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      localObservation: null,
+      deviceSurfaceObservation: input.deviceSurfaceObservation,
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: null,
+      itemTransfer: null,
+    },
+    privateResult: {
+      playerId: null,
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: null,
+      conditionOperation: null,
+      previousConditionKeys: [],
+      nextConditionKeys: [],
+      itemId: null,
+      itemOperation: null,
+      previousOwnerId: null,
+      nextOwnerId: null,
+      previousLocationId: null,
+      nextLocationId: null,
+      previousEquipState: null,
+      nextEquipState: null,
+      previousEquippedSlot: null,
+      nextEquippedSlot: null,
+      anchorLocationId: null,
+      anchorSceneLocationId: null,
+      edgeIds: [],
+      authorityTraceId: null,
+      clockReceiptId: null,
+      stateDeltaRefs: [],
+    },
+    failure: null,
+  });
+}
+
+function executeDeviceSurfaceObservation(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): CleanStage4Receipt {
+  if (input.request.effect.kind !== "device_surface_observation") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "invalid_backend_request",
+      message: "Stage 4 device_surface_observation request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  const parsedEffect = cleanStage4DeviceSurfaceObservationEffectSchema.safeParse(input.request.effect);
+  if (!parsedEffect.success) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "invalid_backend_request",
+      message: parsedEffect.error.issues[0]?.message ?? "Stage 4 device_surface_observation request failed schema validation.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const effect = parsedEffect.data;
+  const anchorRefs = new Set([
+    normalizedRef(input.frame.scene.currentScene.ref),
+    normalizedRef(input.frame.scene.currentLocation.ref),
+  ]);
+  if (!anchorRefs.has(normalizedRef(effect.anchorRef))) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 device_surface_observation anchor must be the current SceneFrame scene or location.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  if (!effectRefsAreCitable({
+    frame: input.frame,
+    refs: uniqueStrings(["Player", effect.anchorRef, effect.deviceRef, ...effect.evidenceRefs]),
+  })) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 device_surface_observation refs must be citable current SceneFrame refs.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const surface = deviceSurfaceForEffect({ frame: input.frame, effect });
+  if (!surface) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "missing_or_ambiguous_item",
+      message: "Stage 4 device_surface_observation deviceRef is not a single exposed SceneFrame device surface.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  if (normalizedRef(surface.anchorRef) !== normalizedRef(input.frame.scene.currentScene.ref)) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 device_surface_observation surface is not anchored to the current SceneFrame scene.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const requestedKinds = uniqueDeviceFacetKinds(effect.facetKinds);
+  const requested = new Set(requestedKinds);
+  const observedFacets = surface.facets
+    .filter((facet) => facet.publicSafe && requested.has(facet.facetKind))
+    .slice(0, 12);
+  const observedKinds = new Set(observedFacets.map((facet) => facet.facetKind));
+  const unavailableFacetKinds = requestedKinds.filter((kind) => !observedKinds.has(kind));
+  const resultKind: DeviceSurfaceObservationResult["resultKind"] = observedFacets.length === 0
+    ? "no_requested_surface"
+    : unavailableFacetKinds.length > 0
+      ? "partial_facets_observed"
+      : "facets_observed";
+  if (resultKind === "no_requested_surface" && !effect.allowNoSurface) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "device_surface_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 device_surface_observation found no modeled/exposed requested device surface and bounded no-surface evidence was not admitted.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const result = deviceSurfaceObservationResult({
+    frame: input.frame,
+    effect,
+    surface,
+    resultKind,
+    observedFacets,
+    unavailableFacetKinds,
+  });
+  const receipt = deviceSurfaceObservationReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    deviceSurfaceObservation: result,
+    visibleRefs: uniqueStrings(["Player", effect.anchorRef, effect.deviceRef, ...effect.evidenceRefs]).slice(0, 12),
   });
   input.store.insert(receipt);
   return receipt;
@@ -4975,6 +5281,7 @@ export async function runCleanStage4Execution(input: {
     const implementedKinds: Array<Step["intended"]["kind"]> = [
       "observe_visible",
       "local_observation",
+      "device_surface_observation",
       "route_options",
       "route_check",
       "movement",
@@ -5096,6 +5403,24 @@ export async function runCleanStage4Execution(input: {
       continue;
     }
 
+    if (step.intended.kind === "device_surface_observation") {
+      const request = requestForStep({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        requiredRouteReceiptId: null,
+      });
+      const receipt = executeDeviceSurfaceObservation({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        request,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
     if (step.intended.kind === "condition_set") {
       const request = requestForStep({
         frame: currentFrame,
@@ -5192,6 +5517,7 @@ export async function runCleanStage4Execution(input: {
       condition: receipt.publicResult.condition,
       itemTransfer: receipt.publicResult.itemTransfer,
       localObservation: receipt.publicResult.localObservation,
+      deviceSurfaceObservation: receipt.publicResult.deviceSurfaceObservation,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",

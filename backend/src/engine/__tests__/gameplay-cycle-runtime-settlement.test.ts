@@ -411,6 +411,77 @@ function localObservationReceipt(inputFrame = frame(), inputChecklist = checklis
   });
 }
 
+function deviceSurfaceObservationReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    ...movementReceipt(inputFrame, inputChecklist),
+    receiptId: "stage4-receipt-device-surface-1",
+    requestId: "stage4-request-device-surface-1",
+    capabilityId: "device_surface_observation",
+    result: { ...inputFrame.base, mutationApplied: false },
+    authority: {
+      evidenceAuthority: "device_surface_observation_receipt",
+      mutationAuthority: "none",
+      visibleResultAuthority: "may_claim_device_surface_observation",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: false,
+    },
+    publicResult: {
+      summary: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      visibleRefs: ["Player", "Burner phone", "Market"],
+      routeStatus: null,
+      locationChange: null,
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      localObservation: null,
+      deviceSurfaceObservation: {
+        type: "device_surface_observation",
+        surfaceVersion: "scene_frame_device_status_surface.v1",
+        resultKind: "no_requested_surface",
+        deviceLabel: "Burner phone",
+        requestedFacetText: "message indicator",
+        requestedFacetKinds: ["message_indicator"],
+        observedFacets: [],
+        unavailableFacetKinds: ["message_indicator"],
+        anchorSceneLabel: "Market",
+        anchorLocationLabel: "Market",
+        boundedNoSurface: true,
+        summary: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+        claimStatus: "bounded_current_frame_device_surface_only",
+      },
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: null,
+      itemTransfer: null,
+    },
+    privateResult: {
+      playerId: null,
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: null,
+      conditionOperation: null,
+      itemId: null,
+      itemOperation: null,
+      previousOwnerId: null,
+      nextOwnerId: null,
+      previousLocationId: null,
+      nextLocationId: null,
+      previousEquipState: null,
+      nextEquipState: null,
+      previousEquippedSlot: null,
+      nextEquippedSlot: null,
+      edgeIds: [],
+      authorityTraceId: null,
+      clockReceiptId: null,
+      stateDeltaRefs: [],
+    },
+    failure: null,
+  });
+}
+
 function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStage4ExecutionResult {
   return cleanStage4ExecutionResultSchema.parse({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -439,6 +510,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         condition: receipt.publicResult.condition,
         itemTransfer: receipt.publicResult.itemTransfer,
         localObservation: receipt.publicResult.localObservation,
+        deviceSurfaceObservation: receipt.publicResult.deviceSurfaceObservation,
       })),
   });
 }
@@ -724,6 +796,50 @@ describe("clean Stage 5 settlement contracts", () => {
       "no-change",
     ]));
     expect(JSON.stringify(view)).not.toContain("secret");
+  });
+
+  it("settles device_surface_observation receipts as bounded public device surface evidence only", () => {
+    const inputFrame = frame({
+      playerAction: "I check whether the Burner phone has a message.",
+      inventory: [{
+        ref: "Burner phone",
+        label: "Burner phone",
+        equipState: "equipped",
+        tags: ["phone"],
+      }],
+      citableRefs: ["Player", "Market", "North Hall", "Burner phone"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = deviceSurfaceObservationReceipt(inputFrame, inputChecklist);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    const deviceSurface = packet.acceptedEvidence.find((entry) => entry.authority === "device_surface_observation_receipt");
+    expect(deviceSurface?.claimKinds).toEqual(["device_surface_observation", "device_surface_unavailable"]);
+    expect(deviceSurface?.backendFacts.map((entry) => entry.text)).toEqual([
+      "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      "Device: Burner phone.",
+      "Requested facets: message_indicator.",
+      "No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.",
+    ]);
+    expect(deviceSurface?.limits.proves).toEqual([
+      "bounded no modeled/exposed requested device surface at this frame/worldVersion",
+      "requested device label",
+    ]);
+    expect(deviceSurface?.limits.doesNotProve).toEqual(expect.arrayContaining([
+      "hidden or private message contents",
+      "true absence of messages, calls, or signal",
+      "message or call generation or delivery",
+      "true network coverage",
+      "device use or activation",
+      "broad absence or no-change",
+    ]));
+    expect(JSON.stringify(view)).not.toContain("privateResult");
+    expect(JSON.stringify(view)).not.toMatch(/no messages|no calls|no signal|nothing changed|no change/iu);
   });
 
   it("settles support actor materialization as visible actor presence only", () => {

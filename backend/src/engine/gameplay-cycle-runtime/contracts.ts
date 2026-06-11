@@ -52,6 +52,7 @@ export const gameplayRuntimeTurnInputSchema = z.object({
 export const gameplayRuntimeCapabilityIdSchema = z.enum([
   "observe_visible",
   "local_observation",
+  "device_surface_observation",
   "oracle_roll",
   "route_options",
   "route_check",
@@ -104,6 +105,44 @@ export const inventoryItemViewSchema = z.object({
   label: shortText,
   equipState: z.enum(["carried", "equipped"]),
   tags: z.array(shortText).max(12),
+});
+
+export const cleanDeviceFacetKindSchema = z.enum([
+  "screen_state",
+  "power_indicator",
+  "battery_indicator",
+  "signal_indicator",
+  "notification_indicator",
+  "message_indicator",
+  "call_indicator",
+]);
+
+export const sceneFrameDeviceStatusSurfaceSchema = z.object({
+  surfaceVersion: z.literal("scene_frame_device_status_surface.v1"),
+  deviceRef: modelSafeRef,
+  deviceLabel: shortText,
+  deviceKind: z.enum(["phone", "radio", "tablet", "laptop", "terminal", "other_device"]),
+  holderScope: z.enum(["player_inventory", "player_equipped", "current_scene_visible"]),
+  anchorRef: modelSafeRef,
+  availableFacetKinds: z.array(cleanDeviceFacetKindSchema).max(7),
+  facets: z.array(z.object({
+    facetKind: cleanDeviceFacetKindSchema,
+    displayLabel: shortText,
+    valueText: shortText,
+    valueClass: z.enum(["visible_status_text", "indicator_state", "meter_value", "icon_state"]),
+    publicSafe: z.literal(true),
+  }).strict()).max(12),
+}).strict().superRefine((surface, ctx) => {
+  const available = new Set(surface.availableFacetKinds);
+  surface.facets.forEach((facet, index) => {
+    if (!available.has(facet.facetKind)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["facets", index, "facetKind"],
+        message: "Device surface facets must be listed in availableFacetKinds.",
+      });
+    }
+  });
 });
 
 export const scopedForecastEnvelopeSchema = z.object({
@@ -159,6 +198,7 @@ export const authoritativeSceneFrameSchema = z.object({
   movementOptions: z.array(movementOptionViewSchema).max(32),
   targets: z.array(targetCandidateViewSchema).max(64),
   inventory: z.array(inventoryItemViewSchema).max(64),
+  deviceStatusSurfaces: z.array(sceneFrameDeviceStatusSurfaceSchema).max(32).optional(),
   capabilities: z.array(z.object({
     capabilityId: gameplayRuntimeCapabilityIdSchema,
     evidenceAuthority: z.enum([
@@ -295,6 +335,12 @@ export const cleanLocalObservationResultKindSchema = z.enum([
   "bounded_no_match",
 ]);
 
+export const cleanDeviceSurfaceObservationResultKindSchema = z.enum([
+  "facets_observed",
+  "partial_facets_observed",
+  "no_requested_surface",
+]);
+
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
   playerIntent: shortText,
@@ -307,6 +353,7 @@ export const gmReadActionInterpretationSchema = z.object({
     "time_passage",
     "scene_local_beat",
     "visible_actor_dialogue",
+    "device_status_observation",
     "ordinary_support_actor_needed",
     "player_local_condition",
     "item_transfer",
@@ -350,6 +397,15 @@ export const gmReadActionInterpretationSchema = z.object({
     targetRef: modelSafeRef.nullable(),
     surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
     allowBoundedNegative: z.boolean(),
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  deviceObservationNeed: z.object({
+    actorRef: z.literal("Player"),
+    deviceRef: modelSafeRef,
+    requestedDeviceText: shortText,
+    requestedFacetText: shortText,
+    facetKinds: z.array(cleanDeviceFacetKindSchema).min(1).max(7),
+    allowNoSurface: z.boolean(),
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
 }).strict();
@@ -592,6 +648,7 @@ export const gmActionChecklistStepIdSchema = z.enum([
 export const gmActionChecklistEffectKindSchema = z.enum([
   "observe_visible",
   "local_observation",
+  "device_surface_observation",
   "route_options",
   "route_check",
   "movement",
@@ -697,6 +754,15 @@ export const gmActionChecklistStepSchema = z.object({
       allowBoundedNegative: z.boolean(),
       anchorRef: modelSafeRef,
     }).strict().nullable().optional(),
+    deviceObservationPlan: z.object({
+      actorRef: z.literal("Player"),
+      deviceRef: modelSafeRef,
+      requestedDeviceText: shortText,
+      requestedFacetText: shortText,
+      facetKinds: z.array(cleanDeviceFacetKindSchema).min(1).max(7),
+      allowNoSurface: z.boolean(),
+      anchorRef: modelSafeRef,
+    }).strict().nullable().optional(),
   }).strict(),
   disposition: z.object({
     kind: gmActionChecklistDispositionKindSchema,
@@ -761,6 +827,7 @@ export const frozenApiProjectionSchema = z.object({
 export const cleanStage4CapabilityIdSchema = z.enum([
   "observe_visible",
   "local_observation",
+  "device_surface_observation",
   "route_options",
   "route_check",
   "movement",
@@ -1033,6 +1100,56 @@ export const cleanStage4LocalObservationResultSchema = z.object({
   claimStatus: z.literal("bounded_current_scene_observation_only"),
 }).strict();
 
+export const cleanStage4DeviceSurfaceObservationEffectSchema = z.object({
+  kind: z.literal("device_surface_observation"),
+  authorityKind: z.literal("current_frame_device_status_surface"),
+  actorRef: z.literal("Player"),
+  anchorRef: modelSafeRef,
+  deviceRef: modelSafeRef,
+  requestedDeviceText: shortText,
+  requestedFacetText: shortText,
+  facetKinds: z.array(cleanDeviceFacetKindSchema).min(1).max(7),
+  allowNoSurface: z.boolean(),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  forbiddenPayloads: z.object({
+    privateMessageContents: z.literal(false),
+    messageOrCallGeneration: z.literal(false),
+    networkSimulation: z.literal(false),
+    hackingOrDecryption: z.literal(false),
+    itemUseOrActivation: z.literal(false),
+    itemStateChange: z.literal(false),
+    routeTruth: z.literal(false),
+    locationReveal: z.literal(false),
+    worldFact: z.literal(false),
+    dialogueContent: z.literal(false),
+    privateKnowledge: z.literal(false),
+    mutation: z.literal(false),
+    absenceOrNoChange: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const cleanStage4DeviceSurfaceObservationResultSchema = z.object({
+  type: z.literal("device_surface_observation"),
+  surfaceVersion: z.literal("scene_frame_device_status_surface.v1"),
+  resultKind: cleanDeviceSurfaceObservationResultKindSchema,
+  deviceLabel: shortText,
+  requestedFacetText: shortText,
+  requestedFacetKinds: z.array(cleanDeviceFacetKindSchema).min(1).max(7),
+  observedFacets: z.array(z.object({
+    facetKind: cleanDeviceFacetKindSchema,
+    displayLabel: shortText,
+    valueText: shortText,
+    valueClass: z.enum(["visible_status_text", "indicator_state", "meter_value", "icon_state"]),
+    claimStatus: z.literal("modeled_public_device_surface_only"),
+  }).strict()).max(12),
+  unavailableFacetKinds: z.array(cleanDeviceFacetKindSchema).max(7),
+  anchorSceneLabel: shortText,
+  anchorLocationLabel: shortText,
+  boundedNoSurface: z.boolean(),
+  summary: shortText,
+  claimStatus: z.literal("bounded_current_frame_device_surface_only"),
+}).strict();
+
 export const cleanStage4RequestSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-request.v1"),
   requestId: shortText,
@@ -1069,6 +1186,7 @@ export const cleanStage4RequestSchema = z.object({
       evidenceRefs: z.array(modelSafeRef).min(1).max(12),
     }).strict(),
     cleanStage4LocalObservationEffectSchema,
+    cleanStage4DeviceSurfaceObservationEffectSchema,
     z.object({
       kind: z.literal("route_options"),
       actorRef: z.literal("Player"),
@@ -1138,6 +1256,12 @@ export const cleanStage4RequestSchema = z.object({
     }
     return;
   }
+  if (request.effect.kind === "device_surface_observation") {
+    if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
+      ctx.addIssue({ code: "custom", path: ["author"], message: "P71 device_surface_observation requests must be backend-authored from the accepted checklist." });
+    }
+    return;
+  }
   if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
     ctx.addIssue({ code: "custom", path: ["author"], message: "Only dialogue_record and support_actor_create may be model-authored in the clean runtime." });
   }
@@ -1177,6 +1301,7 @@ export const cleanStage4ReceiptSchema = z.object({
     evidenceAuthority: z.enum([
       "scene_observation_receipt",
       "local_observation_receipt",
+      "device_surface_observation_receipt",
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
@@ -1199,6 +1324,7 @@ export const cleanStage4ReceiptSchema = z.object({
     visibleResultAuthority: z.enum([
       "may_describe_visible_snapshot",
       "may_claim_local_observation",
+      "may_claim_device_surface_observation",
       "may_list_route_options",
       "may_explain_route_status",
       "may_claim_player_location_change",
@@ -1248,6 +1374,7 @@ export const cleanStage4ReceiptSchema = z.object({
       movementOptions: z.array(shortText).max(32),
     }).strict().nullable(),
     localObservation: cleanStage4LocalObservationResultSchema.nullable().optional(),
+    deviceSurfaceObservation: cleanStage4DeviceSurfaceObservationResultSchema.nullable().optional(),
     sceneBeat: z.object({
       type: z.literal("scene_beat"),
       beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
@@ -1509,6 +1636,30 @@ export const cleanStage4ReceiptSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["authority"], message: "Accepted local_observation mutation authority must be none." });
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "device_surface_observation") {
+    const deviceSurfaceObservation = receipt.publicResult.deviceSurfaceObservation ?? null;
+    if (deviceSurfaceObservation === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "deviceSurfaceObservation"], message: "Accepted device_surface_observation requires public device surface observation result." });
+      return;
+    }
+    if (receipt.authority.evidenceAuthority !== "device_surface_observation_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted device_surface_observation must use device surface observation evidence authority." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_device_surface_observation") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted device_surface_observation must authorize device surface narration." });
+    }
+    if (
+      receipt.result.mutationApplied
+      || receipt.result.worldVersion !== receipt.base.worldVersion
+      || receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes
+      || receipt.result.tick !== receipt.base.tick
+    ) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted device_surface_observation must not mutate or advance world state, time, or tick." });
+    }
+    if (receipt.authority.mutationAuthority !== "none" || receipt.authority.mayAuthorizeMutation !== false) {
+      ctx.addIssue({ code: "custom", path: ["authority"], message: "Accepted device_surface_observation mutation authority must be none." });
+    }
+  }
   for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
     if (receipt.capabilityId !== capabilityId) continue;
     if (receipt.result.mutationApplied) {
@@ -1536,6 +1687,9 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/visible_observation/g, "")
     .replace(/local_observation/g, "")
     .replace(/scene_frame_current_observation_surface\.v1/g, "")
+    .replace(/device_surface_observation/g, "")
+    .replace(/deviceSurfaceObservation/g, "")
+    .replace(/scene_frame_device_status_surface\.v1/g, "")
     .replace(/scene_beat/g, "")
     .replace(/dialogue_response/g, "")
     .replace(/support_actor_materialization/g, "")
@@ -1581,6 +1735,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     authority: z.enum([
       "scene_observation_receipt",
       "local_observation_receipt",
+      "device_surface_observation_receipt",
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
@@ -1620,6 +1775,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
     itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
     localObservation: cleanStage4LocalObservationResultSchema.nullable().optional(),
+    deviceSurfaceObservation: cleanStage4DeviceSurfaceObservationResultSchema.nullable().optional(),
   }).strict()).max(6),
 }).strict();
 
@@ -1631,6 +1787,8 @@ const cleanSettledClaimKindSchema = z.enum([
   "visible_target",
   "local_observation",
   "bounded_visibility_negative",
+  "device_surface_observation",
+  "device_surface_unavailable",
   "inventory_status",
   "movement_option",
   "route_status",
@@ -1648,6 +1806,7 @@ const cleanSettledEvidenceAuthoritySchema = z.enum([
   "scene_frame_snapshot",
   "scene_observation_receipt",
   "local_observation_receipt",
+  "device_surface_observation_receipt",
   "route_options_receipt",
   "route_check_receipt",
   "scene_beat_receipt",
@@ -1690,6 +1849,7 @@ export const cleanSettledStepAuditSchema = z.object({
   authority: z.enum([
       "scene_observation_receipt",
       "local_observation_receipt",
+      "device_surface_observation_receipt",
       "route_options_receipt",
     "route_check_receipt",
     "scene_beat_receipt",
@@ -1890,6 +2050,7 @@ export const cleanNarrationResultSchema = z.object({
   text: z.string().trim().min(1).max(900),
   source: z.enum([
     "model",
+    "deterministic_authority_projection",
     "fallback_generation_error",
     "fallback_validation_error",
     "fallback_empty_evidence",

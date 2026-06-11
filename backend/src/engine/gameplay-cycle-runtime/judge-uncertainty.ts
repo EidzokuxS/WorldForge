@@ -453,6 +453,17 @@ function branchIssues(input: {
     );
   }
   if (
+    gmRead.actionInterpretation.interactionKind === "device_status_observation"
+    && gmRead.actionInterpretation.deviceObservationNeed != null
+    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
+    && judgment.checkNeed === "no_roll_needed"
+  ) {
+    add(
+      "checkNeed",
+      "Device surface observations require backend_action_plan_needed so Stage 4 can issue a device surface observation receipt before narration.",
+    );
+  }
+  if (
     judgment.checkNeed === "backend_action_plan_needed"
     && judgment.noRollReason?.code !== "backend_receipt_required"
   ) {
@@ -603,6 +614,7 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "When GM Read actionInterpretation.interactionKind is player_local_condition, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the Player local condition receipt. Do not call Oracle for uncontested posture/readiness.",
     "When GM Read actionInterpretation.interactionKind is item_transfer, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the item transfer receipt. Do not call Oracle for ordinary uncontested give/drop/pickup/equip/unequip.",
     "When GM Read actionInterpretation.interactionKind is current_scene_observation with localObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the local observation receipt. Do not call Oracle for targeted visible SceneFrame surface observations or bounded no-match over enumerated current-scene surfaces.",
+    "When GM Read actionInterpretation.interactionKind is device_status_observation with deviceObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the device surface observation receipt. Do not call Oracle for checking modeled public device surface indicators or bounded no-surface results.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",
     "For non-Oracle branches, oracleAdmission and difficulty must be null and noRollReason must be present.",
     "For Oracle branches, include difficulty plus oracleAdmission with strong_hit, weak_hit, and miss meanings; do not include noRollReason.",
