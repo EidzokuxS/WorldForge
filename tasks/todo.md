@@ -3182,7 +3182,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Run GitNexus impact before editing indexed symbols.
     - [x] Implement only the Oracle-approved clean device-surface observation primitive.
     - [x] Add focused contract tests for schema, GM Read/Judge/Checklist, Stage 4 behavior, settlement/narration limits, and no old-runtime leakage.
-    - [ ] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
+    - [x] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
   - Candidate problem:
     - P70 `local_observation` intentionally rejects phone/device status, screen contents, signal, battery, calls, messages, notifications, and instructions.
     - Manual-play blockers repeatedly involve actions like checking a `Burner phone`, watching for signal/messages/calls/instructions, or carrying a phone while moving.
@@ -3235,7 +3235,11 @@ Session: `gm-v1-consequenc-slice`.
   - Executed verification:
     - GitNexus impact was run before edits on indexed clean runtime boundaries; the relevant edited runtime symbols reported LOW risk. `baseReceipt` was not edited in this P71 pass.
     - `npm --prefix backend run typecheck` passed.
-    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 217 tests passed.
-    - P71 live zero-turn `/api/chat/action` proof is still pending; do not count P71 as diagnostic-complete until that proof is run and DB/narration invariants are checked.
+    - Focused clean runtime suite passed after the GM Read generation-envelope fallout fix: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 218 tests passed.
+    - Live zero-turn `/api/chat/action` proof passed on fresh clone `p71-clone-device-surface-20260611t202027` with action `I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators.`; artifacts are under `output/p71-live-device-surface-20260611t202027/`.
+    - Live DB proof: one accepted `device_surface_observation` receipt, `publicResult.deviceSurfaceObservation.resultKind=no_requested_surface`, requested facets `signal_indicator,notification_indicator,call_indicator`, `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, `mutationApplied=false`, no `authority_traces`, no `turn_clock_ledger`, and no old v2/saga/narrator/oracle/simulation store rows.
+    - Live narration proof: multi-token bounded no-modeled/exposed-surface wording for the requested device facets, without true no-message/no-call/no-signal/no-instruction/no-change claims.
+    - Invalid live attempts before the final proof were recorded as diagnostic fallout only: `p71-live-device-surface-20260611t201408` failed the local harness because it scanned receipt limits as if they were player-facing narration, and `p71-live-device-surface-20260611t201606` exposed real GM Read generation fallout where an overlong `interpretationRationale` failed the native JSON schema before normal repair.
+    - Fallout fix: `gmReadModelGenerationSchema` now accepts overlong-but-repairable summary/question/rationale text up to the generation envelope while the strict accepted `gmReadSchema` still rejects it; regression coverage proves the near-miss reaches validation/repair rather than becoming a route-level failure.
   - Status impact:
-    - Implementation and focused tests are in place, but diagnostic primitive evidence is not complete until the P71 live proof runs. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+    - Diagnostic primitive evidence is complete for P71. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

@@ -1269,6 +1269,19 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.status).toBe("rejected");
   });
 
+  it("keeps overlong GM Read rationale as a model-generation near-miss for repair only", () => {
+    const frame = deviceSurfaceFrame();
+    const nearMiss = {
+      ...deviceSurfaceGmRead(frame),
+      interpretationRationale: "Device surface observation requires backend receipt authority. ".repeat(20),
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(nearMiss).success).toBe(true);
+    expect(gmReadSchema.safeParse(nearMiss).success).toBe(false);
+    const result = validateGmReadCandidate({ frame, candidate: nearMiss });
+    expect(result.status).toBe("rejected");
+  });
+
   it("keeps gripping an already-held item in player_local_condition instead of item_transfer", () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I grip the Brass Tube.",

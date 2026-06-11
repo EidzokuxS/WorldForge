@@ -59,6 +59,7 @@ const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|p
 
 const gmReadGenerationModelSafeRef = z.string().trim().min(1).max(120);
 const gmReadGenerationShortText = z.string().trim().min(1).max(500);
+const gmReadGenerationRepairableText = z.string().trim().min(1).max(2000);
 
 const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
@@ -73,9 +74,12 @@ const gmReadGenerationItemTransferNeedSchema = z.object({
 }).strict();
 
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
+  situationSummary: gmReadGenerationRepairableText,
+  liveSceneQuestion: gmReadGenerationRepairableText,
   actionInterpretation: gmReadActionInterpretationSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
   }).strict(),
+  interpretationRationale: gmReadGenerationRepairableText,
 }).passthrough();
 
 export interface GmReadValidationIssue {
@@ -840,6 +844,7 @@ export function buildGmReadSystemPrompt(): string {
     "You are the clean WorldForge GM Read interpreter.",
     "Return only a JSON object matching gm-read.v1.",
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
+    "Keep situationSummary, liveSceneQuestion, and interpretationRationale concise enough for the gm-read.v1 field limits.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, unsupported_or_unclear.",
