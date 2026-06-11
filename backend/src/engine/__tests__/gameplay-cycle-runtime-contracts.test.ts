@@ -28,6 +28,7 @@ import {
   cleanStage4SupportActorCreateEffectSchema,
   cleanStage4LocalConditionSetEffectSchema,
   cleanStage4ItemTransferEffectSchema,
+  cleanStage4LocalObservationEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -668,6 +669,7 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
   return minimalFrame({
     capabilities: [
       { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+      { capabilityId: "local_observation", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "route_options", evidenceAuthority: "observation_only", allowed: true },
       { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
@@ -750,6 +752,47 @@ function itemTransferGmRead(frame = itemTransferActionPlanFrame()): GmRead {
       },
     },
     interpretationRationale: "Giving a carried item to a visible actor needs item-state receipt authority.",
+  };
+}
+
+function localObservationFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  return actionPlanFrame({
+    playerAction: "Do I see Guide here?",
+    actors: [{
+      ref: "Guide",
+      label: "Guide",
+      role: "support",
+      visibleStatus: { hp: null, conditions: [] },
+    }],
+    targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+    citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    ...overrides,
+  });
+}
+
+function localObservationGmRead(frame = localObservationFrame()): GmRead {
+  return {
+    ...actionPlanGmRead(frame),
+    focalRefs: ["Player", "Guide"],
+    evidenceRefs: ["Player", "Market", "Guide"],
+    liveSceneQuestion: "Which exposed current-scene observation surface should Stage 4 query?",
+    actionInterpretation: {
+      summary: "The player asks whether Guide is visible here.",
+      playerIntent: "Check whether Guide is visible here.",
+      method: "look",
+      targetRefs: ["Guide"],
+      interactionKind: "current_scene_observation",
+      localObservationNeed: {
+        actorRef: "Player",
+        mode: "target_match",
+        queryText: "Guide",
+        targetRef: "Guide",
+        surfaceKinds: ["visible_actor", "visible_target"],
+        allowBoundedNegative: true,
+        evidenceRefs: ["Player", "Market", "Guide"],
+      },
+    },
+    interpretationRationale: "Targeted visible observation needs a bounded local observation receipt.",
   };
 }
 
@@ -1173,6 +1216,63 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
   });
 
+  it("accepts targeted current-scene local observation without turning it into item, movement, or scene beat authority", () => {
+    const frame = localObservationFrame();
+    const candidate = localObservationGmRead(frame);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "current_scene_observation",
+      targetRefs: ["Guide"],
+      localObservationNeed: {
+        actorRef: "Player",
+        mode: "target_match",
+        queryText: "Guide",
+        targetRef: "Guide",
+        surfaceKinds: ["visible_actor", "visible_target"],
+        allowBoundedNegative: true,
+      },
+    });
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
+  it("rejects localObservationNeed when the target ref is outside the requested exposed surface", () => {
+    const frame = localObservationFrame();
+    const candidate: GmRead = {
+      ...localObservationGmRead(frame),
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        targetRefs: ["North Hall"],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "North Hall",
+          targetRef: "North Hall",
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market", "North Hall"],
+        },
+      },
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localObservationNeed.targetRef",
+        }),
+      ]),
+    );
+  });
+
   it("accepts ordinary_support_actor_needed only with bounded supportActorNeed and no visible actor target", () => {
     const frame = minimalFrame({
       actors: [{
@@ -1573,6 +1673,38 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         code: "backend_receipt_required",
         explanation: "Item transfer needs a clean item_transfer receipt before narration.",
         evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
+  });
+
+  it("requires targeted local_observation to use the backend action-plan branch instead of no-roll narration", () => {
+    const frame = localObservationFrame();
+    const gmRead = localObservationGmRead(frame);
+    const noRoll = validJudgeUncertainty(frame, gmRead);
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      checkRationale: "Targeted local observation needs backend local-observation receipt authority.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Local observation needs a clean local_observation receipt before narration.",
+        evidenceRefs: ["Player", "Guide", "Market"],
       },
     };
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
@@ -2331,6 +2463,54 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     expect(result.checklist.authority).toMatchObject({
       mayAuthorizeMutation: false,
       maySupportNarrationClaim: false,
+    });
+  });
+
+  it("deterministically produces local_observation checklist for targeted visible-surface questions", async () => {
+    const frame = localObservationFrame();
+    const gmRead = localObservationGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Targeted local observation needs a clean local_observation receipt before narration.",
+        evidenceRefs: ["Player", "Guide", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-local-observation",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      actorRef: "Player",
+      targetRefs: ["Guide", "Market"],
+      intended: {
+        kind: "local_observation",
+        requiredCapabilityId: "local_observation",
+        stateOrEvidence: "evidence",
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "Guide",
+          targetRef: "Guide",
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
     });
   });
 
@@ -3194,6 +3374,57 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(cleanStage4ItemTransferEffectSchema.safeParse({
       ...base,
       target: { ...base.target, targetEquippedSlot: "backpack" },
+    }).success).toBe(false);
+  });
+
+  it("requires P70 local_observation effects to stay bounded to exposed current SceneFrame surfaces", () => {
+    const base = {
+      kind: "local_observation" as const,
+      authorityKind: "current_scene_observation_surface" as const,
+      actorRef: "Player" as const,
+      anchorRef: "Market",
+      mode: "target_match" as const,
+      queryText: "Guide",
+      targetRef: "Guide",
+      surfaceKinds: ["visible_actor", "visible_target"] as const,
+      allowBoundedNegative: true,
+      evidenceRefs: ["Player", "Market", "Guide"],
+      forbiddenPayloads: {
+        hiddenDiscovery: false as const,
+        concealedSearch: false as const,
+        broadAbsence: false as const,
+        itemUseOrActivation: false as const,
+        itemStateChange: false as const,
+        phoneOrDeviceStatus: false as const,
+        routeTruth: false as const,
+        locationReveal: false as const,
+        worldFact: false as const,
+        dialogueContent: false as const,
+        privateKnowledge: false as const,
+        mutation: false as const,
+      },
+    };
+
+    expect(cleanStage4LocalObservationEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4LocalObservationEffectSchema.safeParse({
+      ...base,
+      toolId: "search_area.v2",
+    }).success).toBe(false);
+    expect(cleanStage4LocalObservationEffectSchema.safeParse({
+      ...base,
+      actorRef: "Guide",
+    }).success).toBe(false);
+    expect(cleanStage4LocalObservationEffectSchema.safeParse({
+      ...base,
+      surfaceKinds: ["hidden_clue"],
+    }).success).toBe(false);
+    expect(cleanStage4LocalObservationEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, broadAbsence: true },
+    }).success).toBe(false);
+    expect(cleanStage4LocalObservationEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, phoneOrDeviceStatus: true },
     }).success).toBe(false);
   });
 

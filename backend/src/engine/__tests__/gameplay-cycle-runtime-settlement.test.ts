@@ -341,6 +341,76 @@ function itemTransferReceipt(inputFrame = frame(), inputChecklist = checklist(in
   });
 }
 
+function localObservationReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    ...movementReceipt(inputFrame, inputChecklist),
+    receiptId: "stage4-receipt-local-observation-1",
+    requestId: "stage4-request-local-observation-1",
+    capabilityId: "local_observation",
+    result: { ...inputFrame.base, mutationApplied: false },
+    authority: {
+      evidenceAuthority: "local_observation_receipt",
+      mutationAuthority: "none",
+      visibleResultAuthority: "may_claim_local_observation",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: false,
+    },
+    publicResult: {
+      summary: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+      visibleRefs: ["Player", "Market"],
+      routeStatus: null,
+      locationChange: null,
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      localObservation: {
+        type: "local_observation",
+        surfaceVersion: "scene_frame_current_observation_surface.v1",
+        resultKind: "bounded_no_match",
+        mode: "target_match",
+        queryText: "Violet Astrolabe",
+        targetLabel: null,
+        matchedEntries: [],
+        searchedSurfaceKinds: ["visible_actor", "visible_target"],
+        anchorSceneLabel: "Market",
+        anchorLocationLabel: "Market",
+        boundedNegative: true,
+        summary: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+        claimStatus: "bounded_current_scene_observation_only",
+      },
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: null,
+      itemTransfer: null,
+    },
+    privateResult: {
+      playerId: "player-1",
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: null,
+      conditionOperation: null,
+      itemId: null,
+      itemOperation: null,
+      previousOwnerId: null,
+      nextOwnerId: null,
+      previousLocationId: null,
+      nextLocationId: null,
+      previousEquipState: null,
+      nextEquipState: null,
+      previousEquippedSlot: null,
+      nextEquippedSlot: null,
+      edgeIds: [],
+      authorityTraceId: null,
+      clockReceiptId: null,
+      stateDeltaRefs: [],
+    },
+    failure: null,
+  });
+}
+
 function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStage4ExecutionResult {
   return cleanStage4ExecutionResultSchema.parse({
     version: "gameplay-runtime.stage4-execution-result.v1",
@@ -368,6 +438,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         supportActor: receipt.publicResult.supportActor,
         condition: receipt.publicResult.condition,
         itemTransfer: receipt.publicResult.itemTransfer,
+        localObservation: receipt.publicResult.localObservation,
       })),
   });
 }
@@ -612,6 +683,47 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("item-brass-tube");
     expect(JSON.stringify(view)).not.toContain("npc-guide");
     expect(JSON.stringify(view)).not.toContain("stage4-authority-item-transfer");
+  });
+
+  it("settles local_observation receipts as bounded current-scene observation evidence only", () => {
+    const inputFrame = frame({
+      playerAction: "Do I see a Violet Astrolabe here?",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = localObservationReceipt(inputFrame, inputChecklist);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
+    expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
+      "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+      "Searched current SceneFrame surfaces: visible_actor, visible_target.",
+    ]);
+    expect(observation?.limits.proves).toEqual([
+      "bounded no-match against enumerated exposed current SceneFrame observation surfaces",
+    ]);
+    expect(observation?.limits.doesNotProve).toEqual(expect.arrayContaining([
+      "hidden discovery",
+      "broad absence",
+      "phone or device status",
+      "route truth beyond route option/check receipts",
+      "world fact",
+      "no-change",
+    ]));
+    expect(JSON.stringify(view)).not.toContain("secret");
   });
 
   it("settles support actor materialization as visible actor presence only", () => {

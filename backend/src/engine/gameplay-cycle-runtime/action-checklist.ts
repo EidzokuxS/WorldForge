@@ -47,6 +47,7 @@ const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|knowledge|loca
 
 export const EFFECT_TO_CAPABILITY: Record<GmActionChecklistEffectKind, GameplayRuntimeCapabilityId> = {
   observe_visible: "observe_visible",
+  local_observation: "local_observation",
   route_options: "route_options",
   route_check: "route_check",
   movement: "movement",
@@ -430,6 +431,38 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         message: "itemTransferPlan is allowed only on item_transfer steps.",
       });
     }
+    if (step.intended.kind === "local_observation") {
+      if (!step.intended.localObservationPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.localObservationPlan`,
+          message: "local_observation steps require a typed localObservationPlan.",
+        });
+      }
+      const plan = step.intended.localObservationPlan;
+      if (plan) {
+        const plannedRefs = [plan.targetRef, plan.anchorRef]
+          .filter((ref): ref is string => Boolean(ref))
+          .map((ref) => ref.toLowerCase());
+        const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
+        for (const ref of plannedRefs) {
+          if (!stepRefs.includes(ref)) {
+            issues.push({
+              code: "step_invalid",
+              path: `steps.${index}.intended.localObservationPlan`,
+              message: "localObservationPlan refs must be included in step target/evidence refs.",
+            });
+            break;
+          }
+        }
+      }
+    } else if (step.intended.localObservationPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.localObservationPlan`,
+        message: "localObservationPlan is allowed only on local_observation steps.",
+      });
+    }
     if (step.disposition.kind === "stage4_backend_resolution_required") {
       stage4RequiredCount += 1;
     }
@@ -635,6 +668,14 @@ function admittedRefSet(input: {
         ...input.gmRead.actionInterpretation.itemTransferNeed.evidenceRefs,
       ]
       : []),
+    ...(input.gmRead.actionInterpretation.localObservationNeed
+      ? [
+        ...(input.gmRead.actionInterpretation.localObservationNeed.targetRef
+          ? [input.gmRead.actionInterpretation.localObservationNeed.targetRef]
+          : []),
+        ...input.gmRead.actionInterpretation.localObservationNeed.evidenceRefs,
+      ]
+      : []),
     ...input.judgment.actorRefs,
     ...input.judgment.targetRefs,
     ...input.judgment.evidenceRefs,
@@ -701,6 +742,7 @@ function stepFor(input: {
   dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
+  localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
   purpose?: string;
   intendedSummary?: string;
   expectedVisibleSummary?: string;
@@ -726,6 +768,9 @@ function stepFor(input: {
   }
   if (input.itemTransferPlan) {
     intended.itemTransferPlan = input.itemTransferPlan;
+  }
+  if (input.localObservationPlan) {
+    intended.localObservationPlan = input.localObservationPlan;
   }
   const step: GmActionChecklist["steps"][number] = {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
@@ -799,6 +844,9 @@ export function buildDeterministicGmActionChecklist(input: {
     : null;
   const localConditionNeed = input.gmRead.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = input.gmRead.actionInterpretation.itemTransferNeed ?? null;
+  const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
+    ? input.gmRead.actionInterpretation.localObservationNeed ?? null
+    : null;
   const actionText = playerActionText(input);
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
@@ -879,6 +927,40 @@ export function buildDeterministicGmActionChecklist(input: {
       expectedVisibleSummary: `If accepted, final item custody/location/equip state for ${itemTransferNeed.itemRef} may be visible only through the item_transfer receipt.`,
     }));
     itemTransferStepId = steps[steps.length - 1]?.stepId ?? null;
+  }
+
+  if (allowed.has("local_observation") && sceneRef && localObservationNeed) {
+    const localTargetRefs = uniqueStrings([
+      localObservationNeed.targetRef ?? sceneRef,
+      sceneRef,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const localEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...(localObservationNeed.targetRef ? [localObservationNeed.targetRef] : []),
+      ...localObservationNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "local_observation",
+      actorRef,
+      targetRefs: localTargetRefs.length > 0 ? localTargetRefs : [sceneRef],
+      evidenceRefs: localEvidenceRefs,
+      localObservationPlan: {
+        actorRef: "Player",
+        mode: localObservationNeed.mode,
+        queryText: localObservationNeed.queryText,
+        targetRef: localObservationNeed.targetRef,
+        surfaceKinds: localObservationNeed.surfaceKinds,
+        allowBoundedNegative: localObservationNeed.allowBoundedNegative,
+        anchorRef: sceneRef,
+      },
+      purpose: `Plan bounded current-scene local observation for ${localObservationNeed.queryText}.`,
+      intendedSummary: `Stage 4 must settle a read-only local observation over enumerated current SceneFrame surfaces before narration may claim the result. This does not authorize hidden discovery, broad absence, item use, device status, route truth, world facts, mutation, or dialogue.`,
+      expectedVisibleSummary: `If accepted, local observation may describe only matching exposed current-scene surface entries for ${localObservationNeed.queryText}.`,
+    }));
   }
 
   if (movementTarget && allowed.has("movement")) {
@@ -998,7 +1080,7 @@ export function buildDeterministicGmActionChecklist(input: {
       }));
     }
   } else if (steps.length > 0) {
-    // A standalone local condition has already produced the complete P68 step.
+    // A standalone state/evidence primitive has already produced the complete step set.
   } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
     steps.push(stepFor({
       index: 1,

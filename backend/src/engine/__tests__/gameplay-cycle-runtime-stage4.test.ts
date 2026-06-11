@@ -228,27 +228,33 @@ function checklistForKind(
   const base = checklist(inputFrame);
   const capability = kind === "observe_visible"
     ? "observe_visible"
-    : kind === "route_options"
-      ? "route_options"
-      : kind === "time_advance"
-        ? "time_advance"
-        : kind === "scene_beat_record"
-          ? "scene_beat_record"
-          : kind === "dialogue_record"
-            ? "dialogue_record"
-            : kind === "support_actor_create"
-              ? "support_actor_create"
-              : kind === "condition_set"
-                ? "condition_set"
-                : kind === "item_transfer"
-                  ? "item_transfer"
+    : kind === "local_observation"
+      ? "local_observation"
+      : kind === "route_options"
+        ? "route_options"
+        : kind === "time_advance"
+          ? "time_advance"
+          : kind === "scene_beat_record"
+            ? "scene_beat_record"
+            : kind === "dialogue_record"
+              ? "dialogue_record"
+              : kind === "support_actor_create"
+                ? "support_actor_create"
+                : kind === "condition_set"
+                  ? "condition_set"
+                  : kind === "item_transfer"
+                    ? "item_transfer"
               : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
     steps: [{
       ...base.steps[0],
-      targetRefs: kind === "movement" ? ["North Hall"] : kind === "dialogue_record" ? ["Guide"] : ["Market"],
-      evidenceRefs: kind === "dialogue_record" ? ["Player", "Guide", "Market"] : ["Player", "Market"],
+      targetRefs: kind === "movement"
+        ? ["North Hall"]
+        : kind === "dialogue_record" || kind === "local_observation"
+          ? ["Guide", "Market"]
+          : ["Market"],
+      evidenceRefs: kind === "dialogue_record" || kind === "local_observation" ? ["Player", "Guide", "Market"] : ["Player", "Market"],
       intended: {
         ...base.steps[0].intended,
         kind,
@@ -277,10 +283,23 @@ function checklistForKind(
             },
           }
           : {}),
+        ...(kind === "local_observation"
+          ? {
+            localObservationPlan: {
+              actorRef: "Player" as const,
+              mode: "target_match" as const,
+              queryText: "Guide",
+              targetRef: "Guide",
+              surfaceKinds: ["visible_actor", "visible_target"] as const,
+              allowBoundedNegative: true,
+              anchorRef: "Market",
+            },
+          }
+          : {}),
       },
       expectedVisibleEffect: {
         summary: `${kind} may be visible only after accepted receipt.`,
-        visibleRefs: kind === "dialogue_record" ? ["Player", "Guide"] : ["Player", "Market"],
+        visibleRefs: kind === "dialogue_record" || kind === "local_observation" ? ["Player", "Guide", "Market"] : ["Player", "Market"],
       },
     }],
   };
@@ -1198,6 +1217,110 @@ describe("clean Stage 4 executor DB contracts", () => {
       connected: true,
       travelCost: 3,
     }]);
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("produces local_observation positive and bounded-no-match receipts without mutating world state", async () => {
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      playerAction: "Do I see Guide here?",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "local_observation", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+
+    const positive = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("local_observation", inputFrame),
+    });
+
+    expect(positive.execution?.mutationApplied).toBe(false);
+    expect(positive.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 0, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "local_observation_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_claim_local_observation",
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        localObservation: {
+          type: "local_observation",
+          resultKind: "positive_match",
+          queryText: "Guide",
+          targetLabel: "Guide",
+          matchedEntries: [expect.objectContaining({ surfaceKind: "visible_actor", label: "Guide" })],
+          boundedNegative: false,
+          claimStatus: "bounded_current_scene_observation_only",
+        },
+      },
+    });
+    expect(positive.execution?.visibleResults[0]?.localObservation?.resultKind).toBe("positive_match");
+
+    const noMatchFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-no-match",
+      turnId: "clean-turn-stage4-local-observation-no-match",
+      playerAction: "Do I see a Violet Astrolabe here?",
+    };
+    const noMatchChecklist = checklistForKind("local_observation", noMatchFrame);
+    noMatchChecklist.steps[0] = {
+      ...noMatchChecklist.steps[0]!,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...noMatchChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "Violet Astrolabe",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+
+    const noMatch = await runCleanStage4Execution({
+      frame: noMatchFrame,
+      checklist: noMatchChecklist,
+    });
+
+    expect(noMatch.execution?.mutationApplied).toBe(false);
+    expect(noMatch.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      authority: {
+        evidenceAuthority: "local_observation_receipt",
+        mutationAuthority: "none",
+      },
+      publicResult: {
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "Violet Astrolabe",
+          matchedEntries: [],
+          searchedSurfaceKinds: ["visible_actor", "visible_target"],
+          boundedNegative: true,
+        },
+      },
+    });
+    expect(noMatch.execution?.receipts[0]?.publicResult.summary).toContain("No matching current SceneFrame observation surface entry is exposed");
 
     const clock = getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")

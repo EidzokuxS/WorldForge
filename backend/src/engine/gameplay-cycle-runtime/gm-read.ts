@@ -188,6 +188,10 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...(read.actionInterpretation.localConditionNeed?.targetRef
       ? [read.actionInterpretation.localConditionNeed.targetRef]
       : []),
+    ...(read.actionInterpretation.localObservationNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.localObservationNeed?.targetRef
+      ? [read.actionInterpretation.localObservationNeed.targetRef]
+      : []),
   ]);
   const issues: GmReadValidationIssue[] = [];
 
@@ -240,6 +244,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     .map((target) => target.ref.toLowerCase()));
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
+  const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
   const sceneRefs = new Set([
     frame.scene.currentScene.ref.toLowerCase(),
     frame.scene.currentLocation.ref.toLowerCase(),
@@ -352,6 +357,72 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     }
   }
 
+  if (localObservationNeed) {
+    const localSurfaceRefs = new Set<string>();
+    for (const surfaceKind of localObservationNeed.surfaceKinds) {
+      if (surfaceKind === "current_scene") {
+        localSurfaceRefs.add(frame.scene.currentScene.ref.toLowerCase());
+      } else if (surfaceKind === "current_location") {
+        localSurfaceRefs.add(frame.scene.currentLocation.ref.toLowerCase());
+      } else if (surfaceKind === "visible_actor") {
+        frame.actors
+          .filter((actor) => actor.role !== "player")
+          .forEach((actor) => localSurfaceRefs.add(actor.ref.toLowerCase()));
+      } else if (surfaceKind === "visible_target") {
+        frame.targets.forEach((target) => localSurfaceRefs.add(target.ref.toLowerCase()));
+      } else if (surfaceKind === "inventory_item") {
+        frame.inventory.forEach((item) => localSurfaceRefs.add(item.ref.toLowerCase()));
+      } else if (surfaceKind === "visible_fact") {
+        [...frame.scene.visibleFacts, ...frame.scene.recentLocalFacts]
+          .forEach((fact) => localSurfaceRefs.add(fact.source.toLowerCase()));
+      } else if (surfaceKind === "movement_option") {
+        frame.movementOptions.forEach((option) => localSurfaceRefs.add(option.ref.toLowerCase()));
+      }
+    }
+    if (localObservationNeed.mode === "list_surface" && localObservationNeed.targetRef !== null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed.targetRef",
+        message: "list_surface local observations must not target one ref.",
+      });
+    }
+    if (
+      localObservationNeed.targetRef
+      && !localSurfaceRefs.has(localObservationNeed.targetRef.toLowerCase())
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed.targetRef",
+        message: "localObservationNeed.targetRef must be exposed by one requested current SceneFrame observation surface.",
+      });
+    }
+  }
+
+  if (read.actionInterpretation.interactionKind === "current_scene_observation") {
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "current_scene_observation must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "current_scene_observation must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "current_scene_observation must not include itemTransferNeed.",
+      });
+    }
+    return issues;
+  }
+
   if (read.actionInterpretation.interactionKind === "visible_actor_dialogue") {
     const speakerTargets = frame.actors.filter((actor) =>
       actor.role !== "player" && loweredTargets.includes(actor.ref.toLowerCase())
@@ -375,6 +446,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.supportActorNeed",
         message: "visible_actor_dialogue must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "visible_actor_dialogue must not include localObservationNeed.",
       });
     }
     return issues;
@@ -402,6 +480,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "player_local_condition must not include itemTransferNeed.",
       });
     }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "player_local_condition must not include localObservationNeed.",
+      });
+    }
     return issues;
   }
 
@@ -427,6 +512,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "item_transfer must not include localConditionNeed.",
       });
     }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "item_transfer must not include localObservationNeed.",
+      });
+    }
     return issues;
   }
 
@@ -450,6 +542,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.itemTransferNeed",
         message: "ordinary_support_actor_needed must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "ordinary_support_actor_needed must not include localObservationNeed.",
       });
     }
     const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
@@ -482,6 +581,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       code: "interaction_invalid",
       path: "actionInterpretation.itemTransferNeed",
       message: "itemTransferNeed is allowed only for item_transfer or visible_actor_dialogue compound actions.",
+    });
+  }
+  if (read.actionInterpretation.localObservationNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.localObservationNeed",
+      message: "localObservationNeed is allowed only for current_scene_observation.",
     });
   }
   return issues;
@@ -630,10 +736,15 @@ export function buildGmReadSystemPrompt(): string {
     "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
     "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
     "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
+    "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details.",
+    "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
+    "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",
+    "localObservationNeed does not authorize hidden discovery, concealed search, thorough room search, broad absence, item use/effects, phone or device status/messages, POI/storefront/landmark truth unless already exposed by a SceneFrame surface, route truth beyond route option/check receipts, world facts, mutation, dialogue content, or private facts.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
     "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For item_transfer or compound itemTransferNeed, itemTransferNeed.itemRef, targetRef, and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
+    "For localObservationNeed, evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",
     "Keep arrays short and omit all fields not defined by the schema.",

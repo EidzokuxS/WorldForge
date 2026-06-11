@@ -147,6 +147,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For support_actor_materialization, narrate only that the accepted visible temporary support actor/role is now present in the current scene; never invent dialogue, knowledge, relationships, services, or future relevance.",
     "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
     "For item_state, narrate only the accepted item custody/location/equip-state operation; never add item creation, discovery, inspection, use, damage, container contents, barter value, NPC consent/reaction, relationship, route, location, condition, dialogue, private knowledge, absence, or no-change claims.",
+    "For local_observation, narrate only the accepted exposed current SceneFrame observation result. For bounded_visibility_negative, say only that no matching entry was exposed by the enumerated current SceneFrame surfaces at this frame/worldVersion; never claim broad absence, hidden absence, discovery failure, no-change, route truth, device status, item effects, or world facts.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -338,6 +339,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (routeOptions) {
     return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const localObservation = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("local_observation")
+  );
+  if (localObservation) {
+    return localObservation.backendFacts.map((entry) => entry.text).join(" ");
   }
 
   const observation = view.acceptedEvidence.find((evidence) =>

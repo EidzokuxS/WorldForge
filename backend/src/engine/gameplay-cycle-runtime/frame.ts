@@ -16,6 +16,7 @@ import {
 
 const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "observe_visible",
+  "local_observation",
   "oracle_roll",
   "route_options",
   "route_check",

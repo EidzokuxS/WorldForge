@@ -3097,3 +3097,69 @@ Session: `gm-v1-consequenc-slice`.
     - GitNexus `detect_changes(scope=all)` before commit reported HIGH risk because shared clean Stage 4 receipt/request paths changed (`runCleanStage4Execution`, `baseReceipt`, `requestEffectForStep`) and affected movement/support/condition receipt processes. Reviewed key contexts; coverage is the focused 198-test clean runtime suite plus the live P69 proof.
   - Status impact:
     - Diagnostic primitive evidence complete for P69. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P70 clean gameplay runtime Primitive 16 Local Observation / Active Search:
+  - Status:
+    - [x] Identify the next likely primitive after P69 from sidecar dissent, lessons, and P69 Oracle follow-up notes.
+    - [x] Prepare and run a valid Oracle/GPT-5.5 Pro review with one real context bundle.
+    - [x] Record Oracle recommendation, accepted scope, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the Oracle-approved clean local-observation primitive.
+    - [x] Add focused contract tests for schema, GM Read/Judge/Checklist, Stage 4 behavior, settlement/narration limits, and no old-runtime leakage.
+    - [x] Verify with typecheck, focused tests, route tests where needed, and one live zero-turn `/api/chat/action` proof.
+  - Candidate problem:
+    - Existing clean `observe_visible` is a broad current SceneFrame snapshot receipt.
+    - Manual play keeps needing targeted current-scene observation/search ownership: checking visible people, objects, signs, device/screen status, storefronts, local landmarks, or whether a concrete current-scene thing is present.
+    - Prior lessons forbid smuggling those claims through item_transfer, movement, Oracle, playerAction text, GM Read intent, or narrator inference.
+  - Candidate boundary for Oracle review:
+    - Possible primitive name: `local_observation` or `active_search_observation`.
+    - Input: current authoritative SceneFrame, accepted GM Read/Judge/Checklist step, player observation target text, citable current-scene refs/surfaces.
+    - Output: accepted observation receipt that can prove only bounded current-scene visible snapshot/query results from current SceneFrame or a narrowly-owned search adapter.
+    - Must not mutate world, create POIs/items/NPCs, reveal locations, inspect hidden/private facts, prove broad absence/no-change, prove phone/device messages/signal/battery unless a dedicated current-scene device-status source exists, or turn unmodeled POI/storefront/sign guesses into world facts.
+    - Open design question: whether P70 should only sharpen existing `observe_visible` into targeted positive evidence from SceneFrame, or also own explicit negative/currently-not-visible evidence for bounded current-scene surfaces.
+  - Oracle review plan:
+    - Ask for GO/MODIFY/NO-GO on implementing P70 now.
+    - Ask whether to extend existing `observe_visible` or add a new `local_observation` capability/receipt.
+    - Ask for exact allowed actions, schema shape, receipt/evidence limits, failure semantics, and verification plan.
+    - Attach current clean runtime contracts, frame builder, GM Read/Judge/Checklist, Stage 4, settlement/narration, runtime adapter, relevant tests, P69 Oracle answer, lessons, and canonical architecture doc.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p70-local-observatio`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, resolved ChatGPT `Pro Extended`.
+    - Bundle: one bundled text attachment, 12 files, usage `inputTokens=109507`, `outputTokens=4011`, `totalTokens=113518`.
+    - Question artifact: `output/oracle/p70-clean-local-observation-question.md`.
+    - Answer artifact: `output/oracle/p70-clean-local-observation-answer.md`.
+    - Delivery verification: `C:\Users\robra\.oracle\sessions\wf-clean-p70-local-observatio\meta.json` has `status=completed`, `promptSubmitted=true`, model selection `resolvedLabel=Pro Extended`, `browserBundleFiles=true`, `browserBundleFormat="text"`, all 12 intended files in `options.file`, transcript at `C:\Users\robra\.oracle\sessions\wf-clean-p70-local-observatio\artifacts\transcript.md`, and usage shows a real 4011-token answer.
+    - Accepted decision: MODIFY -> GO.
+    - Accepted primitive: new narrow `local_observation`; do not call it `active_search_observation` and do not broaden `observe_visible`.
+  - Accepted P70 scope:
+    - Backend-owned, read-only, current-scene observation over enumerated model-safe visible surfaces.
+    - Cover targeted visible people/object/item/target queries, `Do I see X here?`, and visible surface-entry inspection only to confirm exposed label/ref/public surface text.
+    - Allow bounded negative evidence only as "no matching entry exposed by enumerated current SceneFrame observation surfaces searched at this frame/worldVersion."
+    - Bounded negative must not prove broad absence, hidden absence, offscreen facts, no-change, impossibility, or future non-discoverability.
+  - Rejected/deferred:
+    - No hidden discovery, concealed search, private facts, clue finding, thorough room search, broad absence, item use/effects, note contents unless already exposed, phone screen/status/messages, POI/storefront/landmark truth unless already a current SceneFrame surface, or route truth beyond route option/check receipts.
+    - No Oracle-as-search-receipt, no movement/route/item/dialogue smuggling, no LLM mining of descriptions into new POIs/items/routes.
+  - Implementation contract:
+    - Stage 0 derives deterministic `scene_frame_current_observation_surface.v1` from authoritative SceneFrame and any approved narrow public adapters.
+    - GM Read adds typed `localObservationNeed` under `current_scene_observation`; it carries requested text/query/mode/surface kinds/evidence refs only.
+    - Judge admits grounded local observation as `backend_action_plan_needed` with `backend_receipt_required`, no Oracle.
+    - Checklist emits one `local_observation` step. Broad look-around may stay `observe_visible`; `Do I see X?` must not fall through to `scene_beat_record`.
+    - Stage 4 builds deterministic backend-authored read-only request from checklist/current frame.
+    - Receipt adds `local_observation_receipt`, `may_claim_local_observation`, and `publicResult.localObservation` with result kinds `positive_list`, `positive_match`, `ambiguous_match`, `bounded_no_match`.
+    - Settlement/narration should add narrow `local_observation`, `visible_target`, and `bounded_visibility_negative` evidence or equivalent mapping with strict limits.
+  - Implementation evidence:
+    - Added clean `local_observation` capability/effect/receipt/evidence contracts without touching old gameplay-cycle-v2 schemas or handlers.
+    - GM Read now admits targeted current-scene `localObservationNeed`; Judge requires backend-action-plan/receipt for it; Checklist emits a deterministic `local_observation` step.
+    - Stage 4 derives deterministic `scene_frame_current_observation_surface.v1` entries from the current SceneFrame and executes read-only positive/ambiguous/bounded-no-match observations with no mutation, worldVersion, time, or tick changes.
+    - Settlement maps accepted local observation receipts only to `local_observation`, `visible_target`, and `bounded_visibility_negative` claim kinds with strict limits against broad absence, hidden discovery, route truth, world facts, device status, mutation, and no-change claims.
+    - Narration prompt/fallback can report bounded current-frame no-match evidence without broadening it into discovery, absence, route, phone/device, or world-state claims.
+  - Executed verification:
+    - GitNexus impact was run before edits. All edited symbols were LOW risk except shared `baseReceipt`, which reported CRITICAL because it participates in multiple clean Stage 4 receipt paths; the edit was limited to mechanical authority mapping and covered by focused runtime tests plus live proof.
+    - `npm --prefix backend run typecheck` passed after implementation.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 206 tests passed.
+    - Live `/api/chat/action` proof passed on fresh clone `p70-clone-local-observation-20260611t182846` with action `Do I see a Violet Astrolabe here?`; artifacts are under `output/p70-live-local-observation-20260611t182846/`.
+    - Live DB proof: one accepted `local_observation` receipt, `publicResult.localObservation.resultKind=bounded_no_match`, `worldVersion=0`, `worldTimeMinutes=0`, `tick=0`, no mutation, no `authority_traces`, no `turn_clock_ledger`, and no old v2/saga/narrator/oracle/simulation store rows.
+    - Live narration proof: multi-token bounded no-match wording grounded in current SceneFrame surfaces; no broad absence claim.
+    - GitNexus `detect_changes(scope=all)` before commit reported HIGH risk across 27 changed symbols / 13 affected processes because shared clean Stage 4 request/receipt paths changed. Reviewed `baseReceipt`, `requestEffectForStep`, and `executeSupportActorCreate`; the support-actor processes are hunk-mapping noise around adjacent Stage 4 code, while the real blast radius is the shared receipt/assertion path covered by typecheck, the focused suite, and live proof.
+  - Status impact:
+    - Diagnostic primitive evidence complete for P70. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

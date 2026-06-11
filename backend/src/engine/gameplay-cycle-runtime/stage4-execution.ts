@@ -17,6 +17,7 @@ import {
   assertCleanStage4ExecutionResult,
   cleanStage4DialogueRequestEffectSchema,
   cleanStage4ItemTransferEffectSchema,
+  cleanStage4LocalObservationEffectSchema,
   cleanStage4LocalConditionSetEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
   assertCleanStage4Receipt,
@@ -36,6 +37,15 @@ type LocalConditionSetEffect = Extract<CleanStage4Request["effect"], { kind: "co
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
 type ItemTransferEffect = Extract<CleanStage4Request["effect"], { kind: "item_transfer" }>;
 type ItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTransfer"]>;
+type LocalObservationEffect = Extract<CleanStage4Request["effect"], { kind: "local_observation" }>;
+type LocalObservationResult = NonNullable<CleanStage4Receipt["publicResult"]["localObservation"]>;
+type LocalObservationSurfaceKind = LocalObservationEffect["surfaceKinds"][number];
+type LocalObservationSurfaceEntry = {
+  surfaceKind: LocalObservationSurfaceKind;
+  ref: string;
+  label: string;
+  detail: string | null;
+};
 
 type PlayerRow = {
   id: string;
@@ -356,6 +366,7 @@ function requestForStep(input: {
 
 function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStage4Receipt["capabilityId"] {
   if (kind === "observe_visible") return "observe_visible";
+  if (kind === "local_observation") return "local_observation";
   if (kind === "route_options") return "route_options";
   if (kind === "route_check") return "route_check";
   if (kind === "movement") return "movement";
@@ -381,6 +392,35 @@ function requestEffectForStep(input: {
       actorRef: "Player",
       scope: "current_scene",
       evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  if (input.capabilityId === "local_observation") {
+    const plan = input.step.intended.localObservationPlan;
+    return {
+      kind: "local_observation",
+      authorityKind: "current_scene_observation_surface",
+      actorRef: "Player",
+      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      mode: plan?.mode ?? "target_match",
+      queryText: plan?.queryText ?? input.frame.scene.currentScene.label,
+      targetRef: plan?.targetRef ?? null,
+      surfaceKinds: plan?.surfaceKinds ?? ["current_scene", "current_location", "visible_actor", "visible_target", "inventory_item", "visible_fact"],
+      allowBoundedNegative: plan?.allowBoundedNegative ?? false,
+      evidenceRefs: input.step.evidenceRefs,
+      forbiddenPayloads: {
+        hiddenDiscovery: false,
+        concealedSearch: false,
+        broadAbsence: false,
+        itemUseOrActivation: false,
+        itemStateChange: false,
+        phoneOrDeviceStatus: false,
+        routeTruth: false,
+        locationReveal: false,
+        worldFact: false,
+        dialogueContent: false,
+        privateKnowledge: false,
+        mutation: false,
+      },
     };
   }
   if (input.capabilityId === "route_options") {
@@ -526,6 +566,7 @@ function baseReceipt(input: {
   locationChange?: CleanStage4Receipt["publicResult"]["locationChange"];
   timeAdvance?: CleanStage4Receipt["publicResult"]["timeAdvance"];
   visibleObservation?: CleanStage4Receipt["publicResult"]["visibleObservation"];
+  localObservation?: CleanStage4Receipt["publicResult"]["localObservation"];
   sceneBeat?: CleanStage4Receipt["publicResult"]["sceneBeat"];
   dialogue?: CleanStage4Receipt["publicResult"]["dialogue"];
   supportActor?: CleanStage4Receipt["publicResult"]["supportActor"];
@@ -555,6 +596,7 @@ function baseReceipt(input: {
   const movementAccepted = accepted && input.capabilityId === "movement";
   const timeAccepted = accepted && input.capabilityId === "time_advance";
   const observationAccepted = accepted && input.capabilityId === "observe_visible";
+  const localObservationAccepted = accepted && input.capabilityId === "local_observation";
   const routeOptionsAccepted = accepted && input.capabilityId === "route_options";
   const sceneBeatAccepted = accepted && input.capabilityId === "scene_beat_record";
   const dialogueAccepted = accepted && input.capabilityId === "dialogue_record";
@@ -588,18 +630,20 @@ function baseReceipt(input: {
           ? "terminal_mutation_receipt"
           : observationAccepted
             ? "scene_observation_receipt"
-            : routeOptionsAccepted
-              ? "route_options_receipt"
-              : accepted && input.capabilityId === "route_check"
-                ? "route_check_receipt"
-                : sceneBeatAccepted
-                  ? "scene_beat_receipt"
-                  : dialogueAccepted
-                    ? "terminal_dialogue_receipt"
-                    : supportActorAccepted
-                      ? "support_actor_materialization_receipt"
-                      : conditionAccepted
-                        ? "player_local_condition_receipt"
+            : localObservationAccepted
+              ? "local_observation_receipt"
+              : routeOptionsAccepted
+                ? "route_options_receipt"
+                : accepted && input.capabilityId === "route_check"
+                  ? "route_check_receipt"
+                  : sceneBeatAccepted
+                    ? "scene_beat_receipt"
+                    : dialogueAccepted
+                      ? "terminal_dialogue_receipt"
+                      : supportActorAccepted
+                        ? "support_actor_materialization_receipt"
+                        : conditionAccepted
+                          ? "player_local_condition_receipt"
                     : input.status === "skipped"
                       ? "skip_receipt"
                       : "failure_receipt",
@@ -618,18 +662,20 @@ function baseReceipt(input: {
           ? "may_claim_elapsed_time"
           : observationAccepted
             ? "may_describe_visible_snapshot"
-            : routeOptionsAccepted
-              ? "may_list_route_options"
-              : accepted && input.capabilityId === "route_check"
-                ? "may_explain_route_status"
-                : sceneBeatAccepted
-                  ? "may_acknowledge_scene_beat"
-                  : dialogueAccepted
-                    ? "may_quote_visible_dialogue_response"
-                    : supportActorAccepted
-                      ? "may_claim_visible_support_actor_materialized"
-                      : conditionAccepted
-                        ? "may_claim_player_local_condition"
+            : localObservationAccepted
+              ? "may_claim_local_observation"
+              : routeOptionsAccepted
+                ? "may_list_route_options"
+                : accepted && input.capabilityId === "route_check"
+                  ? "may_explain_route_status"
+                  : sceneBeatAccepted
+                    ? "may_acknowledge_scene_beat"
+                    : dialogueAccepted
+                      ? "may_quote_visible_dialogue_response"
+                      : supportActorAccepted
+                        ? "may_claim_visible_support_actor_materialized"
+                        : conditionAccepted
+                          ? "may_claim_player_local_condition"
                     : input.status === "failed"
                       ? "failure_only"
                       : "none",
@@ -644,6 +690,7 @@ function baseReceipt(input: {
       locationChange: input.locationChange ?? null,
       timeAdvance: input.timeAdvance ?? null,
       visibleObservation: input.visibleObservation ?? null,
+      localObservation: input.localObservation ?? null,
       sceneBeat: input.sceneBeat ?? null,
       dialogue: input.dialogue ?? null,
       supportActor: input.supportActor ?? null,
@@ -2183,6 +2230,270 @@ function executeObserveVisible(input: {
       inventory,
       movementOptions,
     },
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+function shortObservationText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) return null;
+  return trimmed.slice(0, 500);
+}
+
+function localObservationSurface(input: {
+  frame: AuthoritativeSceneFrame;
+  surfaceKinds: readonly LocalObservationSurfaceKind[];
+}): LocalObservationSurfaceEntry[] {
+  const requested = new Set(input.surfaceKinds);
+  const entries: LocalObservationSurfaceEntry[] = [];
+  if (requested.has("current_scene")) {
+    entries.push({
+      surfaceKind: "current_scene",
+      ref: input.frame.scene.currentScene.ref,
+      label: input.frame.scene.currentScene.label,
+      detail: shortObservationText(input.frame.scene.currentScene.description),
+    });
+  }
+  if (requested.has("current_location")) {
+    entries.push({
+      surfaceKind: "current_location",
+      ref: input.frame.scene.currentLocation.ref,
+      label: input.frame.scene.currentLocation.label,
+      detail: shortObservationText(input.frame.scene.currentLocation.description),
+    });
+  }
+  if (requested.has("visible_actor")) {
+    for (const actor of input.frame.actors.filter((entry) => entry.role !== "player")) {
+      entries.push({
+        surfaceKind: "visible_actor",
+        ref: actor.ref,
+        label: actor.label,
+        detail: shortObservationText(`visible ${actor.role} actor`),
+      });
+    }
+  }
+  if (requested.has("visible_target")) {
+    for (const target of input.frame.targets) {
+      entries.push({
+        surfaceKind: "visible_target",
+        ref: target.ref,
+        label: target.label,
+        detail: shortObservationText(`${target.kind} target`),
+      });
+    }
+  }
+  if (requested.has("inventory_item")) {
+    for (const item of input.frame.inventory) {
+      entries.push({
+        surfaceKind: "inventory_item",
+        ref: item.ref,
+        label: item.label,
+        detail: shortObservationText(`inventory item, ${item.equipState}`),
+      });
+    }
+  }
+  if (requested.has("visible_fact")) {
+    for (const factEntry of [...input.frame.scene.visibleFacts, ...input.frame.scene.recentLocalFacts]) {
+      entries.push({
+        surfaceKind: "visible_fact",
+        ref: factEntry.source,
+        label: factEntry.summary,
+        detail: null,
+      });
+    }
+  }
+  if (requested.has("movement_option")) {
+    for (const option of input.frame.movementOptions) {
+      entries.push({
+        surfaceKind: "movement_option",
+        ref: option.ref,
+        label: option.label,
+        detail: shortObservationText("movement option label only"),
+      });
+    }
+  }
+  return entries.slice(0, 64);
+}
+
+function normalizeObservationMatch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+}
+
+function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: string): boolean {
+  const query = normalizeObservationMatch(queryText);
+  if (query.length === 0) return false;
+  const haystacks = [
+    entry.label,
+    entry.detail ?? "",
+    entry.surfaceKind.replace(/_/gu, " "),
+  ].map(normalizeObservationMatch).filter((value) => value.length > 0);
+  return haystacks.some((value) =>
+    value.includes(query) || (query.length >= 3 && query.includes(value))
+  );
+}
+
+function uniqueObservationEntries(entries: readonly LocalObservationSurfaceEntry[]): LocalObservationSurfaceEntry[] {
+  const byEntity = new Map<string, LocalObservationSurfaceEntry>();
+  for (const entry of entries) {
+    const key = `${normalizedRef(entry.ref)}::${normalizeObservationMatch(entry.label)}`;
+    if (!byEntity.has(key)) byEntity.set(key, entry);
+  }
+  return [...byEntity.values()];
+}
+
+function localObservationSummary(input: {
+  effect: LocalObservationEffect;
+  resultKind: LocalObservationResult["resultKind"];
+  matchedEntries: readonly LocalObservationSurfaceEntry[];
+}): string {
+  if (input.resultKind === "bounded_no_match") {
+    return `No matching current SceneFrame observation surface entry is exposed for "${input.effect.queryText}" at this frame/worldVersion.`;
+  }
+  const labels = input.matchedEntries.map((entry) => entry.label).slice(0, 6).join(", ");
+  if (input.resultKind === "positive_list") {
+    return labels.length > 0
+      ? `Current SceneFrame observation surface exposes: ${labels}.`
+      : `No entries are exposed by the requested current SceneFrame observation surfaces.`;
+  }
+  if (input.resultKind === "ambiguous_match") {
+    return `Current SceneFrame observation surface has multiple exposed matches for "${input.effect.queryText}": ${labels}.`;
+  }
+  return `Current SceneFrame observation surface exposes ${labels} for "${input.effect.queryText}".`;
+}
+
+function localObservationResult(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: LocalObservationEffect;
+  resultKind: LocalObservationResult["resultKind"];
+  matchedEntries: readonly LocalObservationSurfaceEntry[];
+}): LocalObservationResult {
+  const summary = localObservationSummary(input);
+  const firstMatch = input.matchedEntries[0] ?? null;
+  return {
+    type: "local_observation",
+    surfaceVersion: "scene_frame_current_observation_surface.v1",
+    resultKind: input.resultKind,
+    mode: input.effect.mode,
+    queryText: input.effect.queryText,
+    targetLabel: input.resultKind === "positive_match" && firstMatch ? firstMatch.label : null,
+    matchedEntries: input.matchedEntries.slice(0, 12).map((entry) => ({
+      surfaceKind: entry.surfaceKind,
+      label: entry.label,
+      detail: entry.detail,
+    })),
+    searchedSurfaceKinds: input.effect.surfaceKinds,
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    boundedNegative: input.resultKind === "bounded_no_match",
+    summary,
+    claimStatus: "bounded_current_scene_observation_only",
+  };
+}
+
+function executeLocalObservation(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): CleanStage4Receipt {
+  if (input.request.effect.kind !== "local_observation") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "local_observation",
+      kind: "invalid_backend_request",
+      message: "Stage 4 local_observation request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+  const parsedEffect = cleanStage4LocalObservationEffectSchema.safeParse(input.request.effect);
+  if (!parsedEffect.success) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "local_observation",
+      kind: "invalid_backend_request",
+      message: parsedEffect.error.issues[0]?.message ?? "Stage 4 local_observation request failed schema validation.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const effect = parsedEffect.data;
+  const anchorRefs = new Set([
+    normalizedRef(input.frame.scene.currentScene.ref),
+    normalizedRef(input.frame.scene.currentLocation.ref),
+  ]);
+  if (!anchorRefs.has(normalizedRef(effect.anchorRef))) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "local_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 local_observation anchor must be the current SceneFrame scene or location.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const entries = localObservationSurface({
+    frame: input.frame,
+    surfaceKinds: effect.surfaceKinds,
+  });
+  let matchedEntries: LocalObservationSurfaceEntry[] = [];
+  let resultKind: LocalObservationResult["resultKind"];
+  if (effect.mode === "list_surface") {
+    matchedEntries = entries.slice(0, 12);
+    resultKind = matchedEntries.length > 0 ? "positive_list" : "bounded_no_match";
+  } else if (effect.targetRef) {
+    matchedEntries = uniqueObservationEntries(entries.filter((entry) =>
+      normalizedRef(entry.ref) === normalizedRef(effect.targetRef ?? "")
+    )).slice(0, 12);
+    resultKind = matchedEntries.length === 0
+      ? "bounded_no_match"
+      : matchedEntries.length === 1
+        ? "positive_match"
+        : "ambiguous_match";
+  } else {
+    matchedEntries = uniqueObservationEntries(entries.filter((entry) => entryMatchesQuery(entry, effect.queryText))).slice(0, 12);
+    resultKind = matchedEntries.length === 0
+      ? "bounded_no_match"
+      : matchedEntries.length === 1
+        ? "positive_match"
+        : "ambiguous_match";
+  }
+
+  if (resultKind === "bounded_no_match" && !effect.allowBoundedNegative) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "local_observation",
+      kind: "insufficient_grounding",
+      message: "Stage 4 local_observation found no exposed surface entry and bounded negative evidence was not admitted.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const result = localObservationResult({
+    frame: input.frame,
+    effect,
+    resultKind,
+    matchedEntries,
+  });
+  const receipt = baseReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    status: "accepted",
+    capabilityId: "local_observation",
+    summary: result.summary,
+    visibleRefs: uniqueStrings([
+      "Player",
+      effect.anchorRef,
+      ...matchedEntries.map((entry) => entry.ref),
+    ]).slice(0, 12),
+    localObservation: result,
   });
   input.store.insert(receipt);
   return receipt;
@@ -4663,6 +4974,7 @@ export async function runCleanStage4Execution(input: {
     }
     const implementedKinds: Array<Step["intended"]["kind"]> = [
       "observe_visible",
+      "local_observation",
       "route_options",
       "route_check",
       "movement",
@@ -4766,6 +5078,24 @@ export async function runCleanStage4Execution(input: {
       continue;
     }
 
+    if (step.intended.kind === "local_observation") {
+      const request = requestForStep({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        requiredRouteReceiptId: null,
+      });
+      const receipt = executeLocalObservation({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        request,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
     if (step.intended.kind === "condition_set") {
       const request = requestForStep({
         frame: currentFrame,
@@ -4861,6 +5191,7 @@ export async function runCleanStage4Execution(input: {
       supportActor: receipt.publicResult.supportActor,
       condition: receipt.publicResult.condition,
       itemTransfer: receipt.publicResult.itemTransfer,
+      localObservation: receipt.publicResult.localObservation,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",

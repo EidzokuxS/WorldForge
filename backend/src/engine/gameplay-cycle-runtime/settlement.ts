@@ -140,6 +140,24 @@ const ITEM_TRANSFER_DOES_NOT_PROVE = [
   "absence or no-change beyond the accepted item state",
 ];
 
+const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
+  "hidden discovery",
+  "concealed or thorough search result",
+  "private facts",
+  "broad absence",
+  "offscreen facts",
+  "future non-discoverability",
+  "item use or effects",
+  "item state change",
+  "phone or device status",
+  "route truth beyond route option/check receipts",
+  "location reveal",
+  "world fact",
+  "dialogue content",
+  "mutation",
+  "no-change",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -342,6 +360,40 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         limits: {
           proves: ["current visible SceneFrame snapshot entries"],
           doesNotProve: SCENE_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "local_observation_receipt" && receipt.publicResult.localObservation) {
+      const evidenceId = nextEvidenceId(evidence);
+      const observation = receipt.publicResult.localObservation;
+      const boundedNegative = observation.resultKind === "bounded_no_match";
+      const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
+        ? ["local_observation", "bounded_visibility_negative"]
+        : observation.resultKind === "positive_list"
+          ? ["local_observation"]
+          : ["local_observation", "visible_target"];
+      const matchFacts = observation.matchedEntries.slice(0, 6).map((entry, index) =>
+        fact(evidenceId, index + 3, `Observed ${entry.surfaceKind}: ${entry.label}.`)
+      );
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "local_observation_receipt",
+        claimKinds,
+        text: observation.summary,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, observation.summary),
+          fact(evidenceId, 2, `Searched current SceneFrame surfaces: ${observation.searchedSurfaceKinds.join(", ")}.`),
+          ...matchFacts,
+        ],
+        limits: {
+          proves: boundedNegative
+            ? ["bounded no-match against enumerated exposed current SceneFrame observation surfaces"]
+            : ["matching exposed current SceneFrame observation surface entries"],
+          doesNotProve: LOCAL_OBSERVATION_DOES_NOT_PROVE,
         },
       });
       continue;

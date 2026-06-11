@@ -243,6 +243,42 @@ function itemStateView(): CleanNarratorView {
   });
 }
 
+function localObservationView(): CleanNarratorView {
+  return movementView({
+    playerAction: "Do I see a Violet Astrolabe here?",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "local_observation_receipt",
+      claimKinds: ["local_observation", "bounded_visibility_negative"],
+      text: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.", exact: true },
+        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible_actor, visible_target.", exact: true },
+      ],
+      limits: {
+        proves: ["bounded no-match against enumerated exposed current SceneFrame observation surfaces"],
+        doesNotProve: [
+          "hidden discovery",
+          "concealed or thorough search result",
+          "private facts",
+          "broad absence",
+          "offscreen facts",
+          "future non-discoverability",
+          "item use or effects",
+          "item state change",
+          "phone or device status",
+          "route truth beyond route option/check receipts",
+          "location reveal",
+          "world fact",
+          "dialogue content",
+          "mutation",
+          "no-change",
+        ],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -578,6 +614,33 @@ describe("clean Stage 6 narration contracts", () => {
       if (result.status !== "rejected") throw new Error("expected rejected");
       expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
     }
+  });
+
+  it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
+    const text = renderCleanNarrationFallback(localObservationView());
+
+    expect(text).toBe("No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion. Searched current SceneFrame surfaces: visible_actor, visible_target.");
+    expect(text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
+
+    const unsupported = validateCleanNarrationCandidate({
+      view: localObservationView(),
+      candidate: {
+        ...movementCandidate("The Violet Astrolabe is absent from the market."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "The Violet Astrolabe is absent from the market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["local_observation", "visible_fact"],
+          auditStepIds: [],
+        }],
+        finalText: "The Violet Astrolabe is absent from the market.",
+      },
+    });
+    expect(unsupported.status).toBe("rejected");
+    if (unsupported.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

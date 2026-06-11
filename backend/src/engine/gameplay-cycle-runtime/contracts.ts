@@ -51,6 +51,7 @@ export const gameplayRuntimeTurnInputSchema = z.object({
 
 export const gameplayRuntimeCapabilityIdSchema = z.enum([
   "observe_visible",
+  "local_observation",
   "oracle_roll",
   "route_options",
   "route_check",
@@ -272,6 +273,28 @@ export const cleanItemTransferTargetKindSchema = z.enum([
   "player_equipment",
 ]);
 
+export const cleanLocalObservationSurfaceKindSchema = z.enum([
+  "current_scene",
+  "current_location",
+  "visible_actor",
+  "visible_target",
+  "inventory_item",
+  "visible_fact",
+  "movement_option",
+]);
+
+export const cleanLocalObservationModeSchema = z.enum([
+  "list_surface",
+  "target_match",
+]);
+
+export const cleanLocalObservationResultKindSchema = z.enum([
+  "positive_list",
+  "positive_match",
+  "ambiguous_match",
+  "bounded_no_match",
+]);
+
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
   playerIntent: shortText,
@@ -318,6 +341,15 @@ export const gmReadActionInterpretationSchema = z.object({
     targetRef: modelSafeRef,
     equipSlot: z.literal("equipped").nullable(),
     requestedItemText: shortText,
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  localObservationNeed: z.object({
+    actorRef: z.literal("Player"),
+    mode: cleanLocalObservationModeSchema,
+    queryText: shortText,
+    targetRef: modelSafeRef.nullable(),
+    surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+    allowBoundedNegative: z.boolean(),
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
 }).strict();
@@ -559,6 +591,7 @@ export const gmActionChecklistStepIdSchema = z.enum([
 
 export const gmActionChecklistEffectKindSchema = z.enum([
   "observe_visible",
+  "local_observation",
   "route_options",
   "route_check",
   "movement",
@@ -655,6 +688,15 @@ export const gmActionChecklistStepSchema = z.object({
       targetEquippedSlot: z.literal("equipped").nullable(),
       anchorRef: modelSafeRef,
     }).strict().nullable().optional(),
+    localObservationPlan: z.object({
+      actorRef: z.literal("Player"),
+      mode: cleanLocalObservationModeSchema,
+      queryText: shortText,
+      targetRef: modelSafeRef.nullable(),
+      surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+      allowBoundedNegative: z.boolean(),
+      anchorRef: modelSafeRef,
+    }).strict().nullable().optional(),
   }).strict(),
   disposition: z.object({
     kind: gmActionChecklistDispositionKindSchema,
@@ -718,6 +760,7 @@ export const frozenApiProjectionSchema = z.object({
 
 export const cleanStage4CapabilityIdSchema = z.enum([
   "observe_visible",
+  "local_observation",
   "route_options",
   "route_check",
   "movement",
@@ -943,6 +986,53 @@ export const cleanStage4ItemTransferResultSchema = z.object({
   claimStatus: z.literal("visible_item_state_change_only"),
 }).strict();
 
+export const cleanStage4LocalObservationEffectSchema = z.object({
+  kind: z.literal("local_observation"),
+  authorityKind: z.literal("current_scene_observation_surface"),
+  actorRef: z.literal("Player"),
+  anchorRef: modelSafeRef,
+  mode: cleanLocalObservationModeSchema,
+  queryText: shortText,
+  targetRef: modelSafeRef.nullable(),
+  surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+  allowBoundedNegative: z.boolean(),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  forbiddenPayloads: z.object({
+    hiddenDiscovery: z.literal(false),
+    concealedSearch: z.literal(false),
+    broadAbsence: z.literal(false),
+    itemUseOrActivation: z.literal(false),
+    itemStateChange: z.literal(false),
+    phoneOrDeviceStatus: z.literal(false),
+    routeTruth: z.literal(false),
+    locationReveal: z.literal(false),
+    worldFact: z.literal(false),
+    dialogueContent: z.literal(false),
+    privateKnowledge: z.literal(false),
+    mutation: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const cleanStage4LocalObservationResultSchema = z.object({
+  type: z.literal("local_observation"),
+  surfaceVersion: z.literal("scene_frame_current_observation_surface.v1"),
+  resultKind: cleanLocalObservationResultKindSchema,
+  mode: cleanLocalObservationModeSchema,
+  queryText: shortText,
+  targetLabel: shortText.nullable(),
+  matchedEntries: z.array(z.object({
+    surfaceKind: cleanLocalObservationSurfaceKindSchema,
+    label: shortText,
+    detail: shortText.nullable(),
+  }).strict()).max(12),
+  searchedSurfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+  anchorSceneLabel: shortText,
+  anchorLocationLabel: shortText,
+  boundedNegative: z.boolean(),
+  summary: shortText,
+  claimStatus: z.literal("bounded_current_scene_observation_only"),
+}).strict();
+
 export const cleanStage4RequestSchema = z.object({
   version: z.literal("gameplay-runtime.stage4-request.v1"),
   requestId: shortText,
@@ -978,6 +1068,7 @@ export const cleanStage4RequestSchema = z.object({
       scope: z.literal("current_scene"),
       evidenceRefs: z.array(modelSafeRef).min(1).max(12),
     }).strict(),
+    cleanStage4LocalObservationEffectSchema,
     z.object({
       kind: z.literal("route_options"),
       actorRef: z.literal("Player"),
@@ -1041,6 +1132,12 @@ export const cleanStage4RequestSchema = z.object({
     }
     return;
   }
+  if (request.effect.kind === "local_observation") {
+    if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
+      ctx.addIssue({ code: "custom", path: ["author"], message: "P70 local_observation requests must be backend-authored from the accepted checklist." });
+    }
+    return;
+  }
   if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
     ctx.addIssue({ code: "custom", path: ["author"], message: "Only dialogue_record and support_actor_create may be model-authored in the clean runtime." });
   }
@@ -1079,6 +1176,7 @@ export const cleanStage4ReceiptSchema = z.object({
   authority: z.object({
     evidenceAuthority: z.enum([
       "scene_observation_receipt",
+      "local_observation_receipt",
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
@@ -1100,6 +1198,7 @@ export const cleanStage4ReceiptSchema = z.object({
     ]),
     visibleResultAuthority: z.enum([
       "may_describe_visible_snapshot",
+      "may_claim_local_observation",
       "may_list_route_options",
       "may_explain_route_status",
       "may_claim_player_location_change",
@@ -1148,6 +1247,7 @@ export const cleanStage4ReceiptSchema = z.object({
       inventory: z.array(shortText).max(12),
       movementOptions: z.array(shortText).max(32),
     }).strict().nullable(),
+    localObservation: cleanStage4LocalObservationResultSchema.nullable().optional(),
     sceneBeat: z.object({
       type: z.literal("scene_beat"),
       beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
@@ -1385,6 +1485,30 @@ export const cleanStage4ReceiptSchema = z.object({
       }
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "local_observation") {
+    const localObservation = receipt.publicResult.localObservation ?? null;
+    if (localObservation === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "localObservation"], message: "Accepted local_observation requires public local observation result." });
+      return;
+    }
+    if (receipt.authority.evidenceAuthority !== "local_observation_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted local_observation must use local observation evidence authority." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_local_observation") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted local_observation must authorize local observation narration." });
+    }
+    if (
+      receipt.result.mutationApplied
+      || receipt.result.worldVersion !== receipt.base.worldVersion
+      || receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes
+      || receipt.result.tick !== receipt.base.tick
+    ) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted local_observation must not mutate or advance world state, time, or tick." });
+    }
+    if (receipt.authority.mutationAuthority !== "none" || receipt.authority.mayAuthorizeMutation !== false) {
+      ctx.addIssue({ code: "custom", path: ["authority"], message: "Accepted local_observation mutation authority must be none." });
+    }
+  }
   for (const capabilityId of ["observe_visible", "route_options", "scene_beat_record"] as const) {
     if (receipt.capabilityId !== capabilityId) continue;
     if (receipt.result.mutationApplied) {
@@ -1410,6 +1534,8 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/route_options/g, "")
     .replace(/time_advance/g, "")
     .replace(/visible_observation/g, "")
+    .replace(/local_observation/g, "")
+    .replace(/scene_frame_current_observation_surface\.v1/g, "")
     .replace(/scene_beat/g, "")
     .replace(/dialogue_response/g, "")
     .replace(/support_actor_materialization/g, "")
@@ -1454,6 +1580,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     receiptId: shortText,
     authority: z.enum([
       "scene_observation_receipt",
+      "local_observation_receipt",
       "route_options_receipt",
       "route_check_receipt",
       "scene_beat_receipt",
@@ -1492,6 +1619,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
     itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
+    localObservation: cleanStage4LocalObservationResultSchema.nullable().optional(),
   }).strict()).max(6),
 }).strict();
 
@@ -1500,6 +1628,9 @@ const cleanSettledClaimKindSchema = z.enum([
   "current_location",
   "visible_fact",
   "visible_actor",
+  "visible_target",
+  "local_observation",
+  "bounded_visibility_negative",
   "inventory_status",
   "movement_option",
   "route_status",
@@ -1516,6 +1647,7 @@ const cleanSettledClaimKindSchema = z.enum([
 const cleanSettledEvidenceAuthoritySchema = z.enum([
   "scene_frame_snapshot",
   "scene_observation_receipt",
+  "local_observation_receipt",
   "route_options_receipt",
   "route_check_receipt",
   "scene_beat_receipt",
@@ -1556,8 +1688,9 @@ export const cleanSettledStepAuditSchema = z.object({
   status: z.enum(["accepted", "failed", "skipped", "not_run"]),
   receiptId: shortText.nullable(),
   authority: z.enum([
-    "scene_observation_receipt",
-    "route_options_receipt",
+      "scene_observation_receipt",
+      "local_observation_receipt",
+      "route_options_receipt",
     "route_check_receipt",
     "scene_beat_receipt",
     "terminal_dialogue_receipt",
