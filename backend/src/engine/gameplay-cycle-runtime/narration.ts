@@ -144,6 +144,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For player_location_change, narrate only the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, narrate only the selected visible meaning; never add movement, discovery, mutation, or hidden facts.",
     "For dialogue_response, narrate only that the visible speaker responded and what the accepted quote/summary says; never promote the speaker's claim into objective world truth.",
+    "For support_actor_materialization, narrate only that the accepted visible temporary support actor/role is now present in the current scene; never invent dialogue, knowledge, relationships, services, or future relevance.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -359,6 +360,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
       entry.text.includes(" says: ") || entry.text.includes("dialogue response")
     );
     return quoteFact?.text ?? dialogue.text;
+  }
+
+  const supportActor = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("support_actor_materialization")
+  );
+  if (supportActor) {
+    return supportActor.backendFacts.map((entry) => entry.text).join(" ");
   }
 
   const sceneBeat = view.acceptedEvidence.find((evidence) =>

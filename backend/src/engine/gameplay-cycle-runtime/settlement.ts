@@ -91,6 +91,18 @@ const DIALOGUE_DOES_NOT_PROVE = [
   "absence or no-change",
 ];
 
+const SUPPORT_ACTOR_DOES_NOT_PROVE = [
+  "dialogue content",
+  "NPC private knowledge",
+  "relationship change",
+  "future relevance",
+  "durable world fact",
+  "item state",
+  "route truth",
+  "movement",
+  "absence or no-change",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -372,6 +384,34 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             "speaker response happened this turn",
           ],
           doesNotProve: DIALOGUE_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "support_actor_materialization_receipt" && receipt.publicResult.supportActor) {
+      const evidenceId = nextEvidenceId(evidence);
+      const supportActor = receipt.publicResult.supportActor;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "support_actor_materialization_receipt",
+        claimKinds: ["visible_actor", "support_actor_materialization"],
+        text: `${supportActor.actorLabel} is visible as a ${supportActor.roleLabel} in ${supportActor.anchorSceneLabel}.`,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, `Visible support actor: ${supportActor.actorLabel}.`),
+          fact(evidenceId, 2, `Support role: ${supportActor.roleLabel}.`),
+          fact(evidenceId, 3, `Anchor scene: ${supportActor.anchorSceneLabel}.`),
+          fact(evidenceId, 4, `Materialization result: ${supportActor.resultKind}.`),
+        ],
+        limits: {
+          proves: [
+            "visible temporary support actor label",
+            "ordinary support role",
+            "current-scene materialization or reuse",
+          ],
+          doesNotProve: SUPPORT_ACTOR_DOES_NOT_PROVE,
         },
       });
       continue;

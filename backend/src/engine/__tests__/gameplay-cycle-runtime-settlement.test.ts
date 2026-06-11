@@ -234,6 +234,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         locationChange: receipt.publicResult.locationChange,
         timeAdvance: receipt.publicResult.timeAdvance,
         dialogue: receipt.publicResult.dialogue,
+        supportActor: receipt.publicResult.supportActor,
       })),
   });
 }
@@ -397,6 +398,84 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(dialogue?.backendFacts[1]?.text).toBe('Guide says: "The north stairs flooded before dawn.".');
     expect(dialogue?.limits.doesNotProve).toContain("truth of speaker claim");
     expect(dialogue?.limits.doesNotProve).toContain("durable world fact");
+  });
+
+  it("settles support actor materialization as visible actor presence only", () => {
+    const inputFrame = frame({
+      playerAction: "I look for a local vendor in the market.",
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const supportReceipt = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      receiptId: "stage4-receipt-support-actor-1",
+      requestId: "stage4-request-support-actor-1",
+      capabilityId: "support_actor_create",
+      result: { ...inputFrame.base, worldVersion: inputFrame.base.worldVersion + 1, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "support_actor_materialization_receipt",
+        mutationAuthority: "current_scene_support_actor",
+        visibleResultAuthority: "may_claim_visible_support_actor_materialized",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: true,
+      },
+      publicResult: {
+        summary: "Local Vendor is materialized as a vendor in Market.",
+        visibleRefs: ["Player", "Market", "Local Vendor"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: null,
+        supportActor: {
+          type: "support_actor_materialization",
+          resultKind: "created",
+          actorRef: "Local Vendor",
+          actorLabel: "Local Vendor",
+          roleKind: "vendor",
+          roleLabel: "vendor",
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          publicSummary: "An ordinary local vendor is available in the market.",
+          visibleCue: null,
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+          },
+          claimStatus: "visible_support_actor_materialization_only",
+        },
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        supportActorId: "npc-local-vendor",
+        supportActorOperation: "inserted",
+        anchorLocationId: "loc-market",
+        anchorSceneLocationId: "loc-market",
+        edgeIds: [],
+        authorityTraceId: "stage4-authority-support",
+        clockReceiptId: null,
+        stateDeltaRefs: ["npc:npc-local-vendor:created", "scene:loc-market:support_actors"],
+      },
+    });
+
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([supportReceipt], inputFrame),
+    });
+
+    const support = packet.acceptedEvidence.find((entry) => entry.authority === "support_actor_materialization_receipt");
+    expect(support?.claimKinds).toEqual(["visible_actor", "support_actor_materialization"]);
+    expect(support?.backendFacts[0]?.text).toBe("Visible support actor: Local Vendor.");
+    expect(support?.limits.doesNotProve).toContain("dialogue content");
+    expect(support?.limits.doesNotProve).toContain("NPC private knowledge");
+    expect(support?.limits.doesNotProve).toContain("durable world fact");
   });
 
   it("settles P64 non-movement receipts into exact accepted evidence authorities", () => {

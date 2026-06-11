@@ -20,6 +20,7 @@ const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "route_check",
   "movement",
   "dialogue_record",
+  "support_actor_create",
   "time_advance",
   "scene_beat_record",
 ];

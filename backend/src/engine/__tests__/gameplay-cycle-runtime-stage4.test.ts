@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, connectDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
+import { buildAuthoritativeSceneFrame } from "../gameplay-cycle-runtime/frame.js";
 import { runCleanStage4Execution } from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
   AuthoritativeSceneFrame,
@@ -14,6 +15,16 @@ import type {
 const CAMPAIGN_ID = "stage4-campaign";
 
 let tempRoot = "";
+let previousCampaignRoot: string | undefined;
+
+const CLEAN_SUPPORT_TAGS = [
+  "temporary-support",
+  "clean-runtime-support",
+  "support-role:vendor",
+  "current-scene",
+  "minor-support",
+  "reactive-only",
+];
 
 function exec(sql: string, ...values: unknown[]): void {
   getSqliteConnection().prepare(sql).run(...values);
@@ -224,7 +235,9 @@ function checklistForKind(
           ? "scene_beat_record"
           : kind === "dialogue_record"
             ? "dialogue_record"
-            : base.steps[0].intended.requiredCapabilityId;
+            : kind === "support_actor_create"
+              ? "support_actor_create"
+              : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
     steps: [{
@@ -235,11 +248,14 @@ function checklistForKind(
         ...base.steps[0].intended,
         kind,
         requiredCapabilityId: capability,
-        stateOrEvidence: kind === "time_advance" || kind === "movement"
+        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create"
           ? "state"
           : kind === "dialogue_record"
             ? "terminal_player_visible"
             : "evidence",
+        summary: kind === "support_actor_create"
+          ? "Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=vendor; requested role text: local vendor."
+          : base.steps[0].intended.summary,
       },
       expectedVisibleEffect: {
         summary: `${kind} may be visible only after accepted receipt.`,
@@ -249,9 +265,104 @@ function checklistForKind(
   };
 }
 
+function supportActorEffect(roleKind: "vendor" | "guide" = "vendor") {
+  return {
+    kind: "support_actor_create" as const,
+    authorityKind: "ordinary_current_scene_support_actor" as const,
+    anchorScope: "current_scene" as const,
+    anchorRef: "Market",
+    roleKind,
+    roleLabel: roleKind,
+    publicPresentation: {
+      publicSummary: `An ordinary local ${roleKind} is available in the market.`,
+      visibleCue: `The local ${roleKind} is close enough to be visible.`,
+      voiceHint: null,
+    },
+    identityBounds: {
+      tier: "temporary" as const,
+      persistence: "current_scene" as const,
+      significance: "minor_support" as const,
+      agency: "reactive_only" as const,
+      mayBecomePersistentHere: false as const,
+    },
+    reusePolicy: "reuse_matching_temporary_current_scene_or_create" as const,
+    reason: `The player requested an ordinary local ${roleKind}.`,
+    evidenceRefs: ["Player", "Market"],
+    forbiddenPayloads: {
+      dialogueContent: false as const,
+      worldFact: false as const,
+      relationship: false as const,
+      itemState: false as const,
+      routeTruth: false as const,
+      futureRelevance: false as const,
+      privateKnowledge: false as const,
+    },
+  };
+}
+
+function insertNpc(input: {
+  id: string;
+  name: string;
+  tier?: "temporary" | "persistent" | "key";
+  locationId?: string | null;
+  sceneLocationId?: string | null;
+  tags?: string[];
+  persona?: string;
+}): void {
+  const tags = input.tags ?? [];
+  exec(
+    `INSERT INTO npcs (
+      id, campaign_id, name, persona, character_record, derived_tags, tags, tier,
+      current_location_id, current_scene_location_id, goals, beliefs, unprocessed_importance, inactive_ticks, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    input.id,
+    CAMPAIGN_ID,
+    input.name,
+    input.persona ?? `${input.name} persona.`,
+    "{}",
+    JSON.stringify(tags),
+    JSON.stringify(tags),
+    input.tier ?? "temporary",
+    input.locationId ?? "loc-market",
+    input.sceneLocationId ?? "loc-market",
+    JSON.stringify({ short_term: [], long_term: [] }),
+    "[]",
+    0,
+    0,
+    Date.now(),
+  );
+}
+
+async function runVendorSupportActorCreate(inputFrame = {
+  ...frame(),
+  playerAction: "I look for a local vendor in the market.",
+  capabilities: [
+    ...frame().capabilities,
+    { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+  ],
+  citableRefs: ["Player", "Market", "North Hall"],
+}): Promise<Awaited<ReturnType<typeof runCleanStage4Execution>>> {
+  return runCleanStage4Execution({
+    frame: inputFrame,
+    checklist: checklistForKind("support_actor_create", inputFrame),
+    generateSupportActorRequest: async () => supportActorEffect("vendor"),
+  });
+}
+
 describe("clean Stage 4 executor DB contracts", () => {
   beforeEach(() => {
+    previousCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wf-stage4-"));
+    process.env.GSD_CAMPAIGNS_ROOT = tempRoot;
+    const campaignDir = path.join(tempRoot, CAMPAIGN_ID);
+    fs.mkdirSync(campaignDir, { recursive: true });
+    fs.writeFileSync(path.join(campaignDir, "config.json"), JSON.stringify({
+      name: "Stage 4 Campaign",
+      premise: "A focused Stage 4 test campaign.",
+      generationComplete: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }, null, 2));
     connectDb(path.join(tempRoot, "state.db"));
     runMigrations();
     seedWorld();
@@ -259,6 +370,8 @@ describe("clean Stage 4 executor DB contracts", () => {
 
   afterEach(() => {
     closeDb();
+    if (previousCampaignRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;
+    else process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -517,6 +630,435 @@ describe("clean Stage 4 executor DB contracts", () => {
       ledger: (getSqliteConnection().prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger WHERE campaign_id = ?").get(CAMPAIGN_ID) as { count: number }).count,
     };
     expect(sideEffects).toEqual({ traces: 0, ledger: 0 });
+  });
+
+  it("creates a temporary current-scene support actor with materialization receipt authority", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for a local vendor in the market.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.publicEvents).toEqual([]);
+    expect(result.execution?.mutationApplied).toBe(true);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "support_actor_materialization_receipt",
+        mutationAuthority: "current_scene_support_actor",
+        visibleResultAuthority: "may_claim_visible_support_actor_materialized",
+        mayAuthorizeMutation: true,
+      },
+      publicResult: {
+        supportActor: {
+          type: "support_actor_materialization",
+          resultKind: "created",
+          actorRef: "Local Vendor",
+          actorLabel: "Local Vendor",
+          roleKind: "vendor",
+          roleLabel: "vendor",
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          claimStatus: "visible_support_actor_materialization_only",
+        },
+      },
+    });
+
+    const npc = getSqliteConnection()
+      .prepare("SELECT name, tier, current_location_id AS currentLocationId, current_scene_location_id AS currentSceneLocationId, tags FROM npcs WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { name: string; tier: string; currentLocationId: string; currentSceneLocationId: string; tags: string };
+    expect(npc).toMatchObject({
+      name: "Local Vendor",
+      tier: "temporary",
+      currentLocationId: "loc-market",
+      currentSceneLocationId: "loc-market",
+    });
+    expect(JSON.parse(npc.tags)).toEqual(expect.arrayContaining([
+      "temporary-support",
+      "clean-runtime-support",
+      "support-role:vendor",
+      "current-scene",
+      "minor-support",
+      "reactive-only",
+    ]));
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 1, worldTimeMinutes: 0, currentTick: 0 });
+
+    const authority = getSqliteConnection()
+      .prepare(`
+        SELECT
+          operation,
+          source_entity_type AS sourceEntityType,
+          source_entity_id AS sourceEntityId,
+          result_world_version AS resultWorldVersion,
+          elapsed_world_time_minutes AS elapsedMinutes,
+          state_delta_refs AS stateDeltaRefs,
+          witnesses,
+          metadata
+        FROM authority_traces
+        WHERE campaign_id = ?
+      `)
+      .get(CAMPAIGN_ID) as {
+        operation: string;
+        sourceEntityType: string;
+        sourceEntityId: string;
+        resultWorldVersion: number;
+        elapsedMinutes: number;
+        stateDeltaRefs: string;
+        witnesses: string;
+        metadata: string;
+      };
+    expect(authority).toMatchObject({
+      operation: "gameplay-cycle-runtime.support_actor.materialize.v1",
+      sourceEntityType: "npc",
+      resultWorldVersion: 1,
+      elapsedMinutes: 0,
+    });
+    expect(authority.sourceEntityId).toMatch(/^stage4-support-actor-/u);
+    expect(JSON.parse(authority.stateDeltaRefs)).toEqual([
+      `npc:${authority.sourceEntityId}:created`,
+      "scene:loc-market:support_actors",
+    ]);
+    expect(JSON.parse(authority.witnesses)).toEqual(["Player", "Market"]);
+    expect(JSON.parse(authority.metadata)).toMatchObject({
+      checklistId: "gm-action-checklist-stage4-1",
+      stepId: "step-1",
+      capabilityId: "support_actor_create",
+      roleKind: "vendor",
+      roleLabel: "vendor",
+      anchorScope: "current_scene",
+      resultKind: "created",
+    });
+    const ledgerCount = getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { count: number };
+    expect(ledgerCount.count).toBe(0);
+
+    const refreshed = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-stage4-next",
+      idempotencyKey: "next-frame-proof",
+      playerAction: {
+        submitted: "I look at the vendor.",
+        normalized: "I look at the vendor.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-next"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+    expect(refreshed.actors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Local Vendor" }),
+    ]));
+    expect(refreshed.citableRefs).toContain("Local Vendor");
+  });
+
+  it("reuses the exact matching temporary current-scene support actor without mutation", async () => {
+    insertNpc({
+      id: "npc-existing-vendor",
+      name: "Local Vendor",
+      tags: CLEAN_SUPPORT_TAGS,
+      persona: "An ordinary local vendor is already visible.",
+    });
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for a local vendor in the market.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 0, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "support_actor_materialization_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "may_claim_visible_support_actor_materialized",
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        supportActor: {
+          resultKind: "reused",
+          actorLabel: "Local Vendor",
+          roleKind: "vendor",
+        },
+      },
+    });
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("reuses the sole same-scene temporary support actor for the role even when its label differs", async () => {
+    insertNpc({
+      id: "npc-existing-bazaar-vendor",
+      name: "Bazaar Vendor",
+      tags: CLEAN_SUPPORT_TAGS,
+      persona: "A clean temporary vendor is already available in the scene.",
+    });
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for a local vendor in the market.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "accepted",
+      publicResult: {
+        supportActor: {
+          resultKind: "reused",
+          actorRef: "Bazaar Vendor",
+          actorLabel: "Bazaar Vendor",
+          roleKind: "vendor",
+        },
+      },
+      privateResult: {
+        supportActorId: "npc-existing-bazaar-vendor",
+        supportActorOperation: "reused",
+      },
+    });
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("fails support actor materialization when same-role same-scene temporary support actors are ambiguous", async () => {
+    insertNpc({ id: "npc-vendor-a", name: "Bazaar Vendor", tags: CLEAN_SUPPORT_TAGS });
+    insertNpc({ id: "npc-vendor-b", name: "Market Vendor", tags: CLEAN_SUPPORT_TAGS });
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for a local vendor in the market.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "failed",
+      failure: {
+        kind: "insufficient_grounding",
+        hiddenMutationApplied: false,
+      },
+    });
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 2, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("fails support actor materialization on non-reusable same-label collision without hidden mutation", async () => {
+    insertNpc({
+      id: "npc-persistent-vendor",
+      name: "Local Vendor",
+      tier: "persistent",
+      tags: [],
+      persona: "A persistent vendor with the same label already exists.",
+    });
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for a local vendor in the market.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => supportActorEffect("vendor"),
+    });
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "failed",
+      authority: {
+        evidenceAuthority: "failure_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "failure_only",
+      },
+      failure: {
+        kind: "insufficient_grounding",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(result.execution?.receipts[0]?.failure?.message).not.toContain("persistent");
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("fails hidden sibling-scene support actor collision without exposing the hidden row", async () => {
+    exec(
+      "INSERT INTO locations (id, campaign_id, name, description, kind, persistence, tags, is_starting, connected_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "loc-side-stall",
+      CAMPAIGN_ID,
+      "Side Stall",
+      "A sibling scene.",
+      "micro",
+      "temporary",
+      "[]",
+      0,
+      "[]",
+    );
+    insertNpc({
+      id: "npc-hidden-sibling-vendor",
+      name: "Local Vendor",
+      tags: [...CLEAN_SUPPORT_TAGS, "hidden"],
+      sceneLocationId: "loc-side-stall",
+      persona: "Hidden sibling vendor private payload.",
+    });
+
+    const result = await runVendorSupportActorCreate();
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "failed",
+      failure: {
+        kind: "insufficient_grounding",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(JSON.stringify(receipt)).not.toContain("npc-hidden-sibling-vendor");
+    expect(JSON.stringify(receipt)).not.toContain("Hidden sibling vendor");
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
+  });
+
+  it("fails broad-location hidden support actor collision without exposing the hidden row", async () => {
+    insertNpc({
+      id: "npc-hidden-broad-vendor",
+      name: "Local Vendor",
+      tags: [...CLEAN_SUPPORT_TAGS, "secret"],
+      sceneLocationId: null,
+      persona: "Hidden broad-location vendor private payload.",
+    });
+
+    const result = await runVendorSupportActorCreate();
+
+    expect(result.execution?.mutationApplied).toBe(false);
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "failed",
+      failure: {
+        kind: "insufficient_grounding",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(JSON.stringify(receipt)).not.toContain("npc-hidden-broad-vendor");
+    expect(JSON.stringify(receipt)).not.toContain("Hidden broad-location vendor");
+
+    const counts = getSqliteConnection()
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM npcs WHERE campaign_id = ?) AS npcCount,
+          (SELECT COUNT(*) FROM authority_traces WHERE campaign_id = ?) AS traceCount,
+          (SELECT world_version FROM world_clocks WHERE campaign_id = ?) AS worldVersion
+      `)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID) as { npcCount: number; traceCount: number; worldVersion: number };
+    expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
   });
 
   it("accepts scene-beat receipts as non-mutating visible acknowledgement", async () => {

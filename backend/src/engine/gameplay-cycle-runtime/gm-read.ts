@@ -183,6 +183,7 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...read.focalRefs,
     ...read.evidenceRefs,
     ...read.actionInterpretation.targetRefs,
+    ...(read.actionInterpretation.supportActorNeed?.evidenceRefs ?? []),
   ]);
   const issues: GmReadValidationIssue[] = [];
 
@@ -226,24 +227,62 @@ function frameMismatchIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
 }
 
 function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmReadValidationIssue[] {
-  if (read.actionInterpretation.interactionKind !== "visible_actor_dialogue") return [];
-  const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
-  const speakerTargets = frame.actors.filter((actor) =>
-    actor.role !== "player" && loweredTargets.includes(actor.ref.toLowerCase())
-  );
   const issues: GmReadValidationIssue[] = [];
-  if (speakerTargets.length !== 1) {
-    issues.push({
-      code: "interaction_invalid",
-      path: "actionInterpretation.targetRefs",
-      message: "visible_actor_dialogue requires exactly one already-visible non-player speaker ref from SceneFrame.actors.",
-    });
+  const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
+  const visibleActorRefs = new Set(frame.actors.map((actor) => actor.ref.toLowerCase()));
+
+  if (read.actionInterpretation.interactionKind === "visible_actor_dialogue") {
+    const speakerTargets = frame.actors.filter((actor) =>
+      actor.role !== "player" && loweredTargets.includes(actor.ref.toLowerCase())
+    );
+    if (speakerTargets.length !== 1) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+        message: "visible_actor_dialogue requires exactly one already-visible non-player speaker ref from SceneFrame.actors.",
+      });
+    }
+    if (loweredTargets.includes(frame.player.ref.toLowerCase())) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+        message: "visible_actor_dialogue speaker target must not be Player.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "visible_actor_dialogue must not include supportActorNeed.",
+      });
+    }
+    return issues;
   }
-  if (loweredTargets.includes(frame.player.ref.toLowerCase())) {
+
+  if (read.actionInterpretation.interactionKind === "ordinary_support_actor_needed") {
+    if (read.actionInterpretation.supportActorNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "ordinary_support_actor_needed requires supportActorNeed.",
+      });
+    }
+    const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
+    if (targetedVisibleActors.length > 0) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+        message: "ordinary_support_actor_needed must not target already-visible actors; use visible_actor_dialogue for visible speakers.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.supportActorNeed != null) {
     issues.push({
       code: "interaction_invalid",
-      path: "actionInterpretation.targetRefs",
-      message: "visible_actor_dialogue speaker target must not be Player.",
+      path: "actionInterpretation.supportActorNeed",
+      message: "supportActorNeed is allowed only for ordinary_support_actor_needed.",
     });
   }
   return issues;
@@ -313,6 +352,7 @@ export function buildFallbackClarificationGmRead(input: {
       method: null,
       targetRefs: [],
       interactionKind: "unsupported_or_unclear",
+      supportActorNeed: null,
     },
     uncertainty: {
       present: false,
@@ -376,10 +416,13 @@ export function buildGmReadSystemPrompt(): string {
     "GM Read is interpretation only. It must not narrate, mutate state, call tools, request an Oracle, create checklist steps, emit receipts, or decide physical possibility.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
-    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, unsupported_or_unclear.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, ordinary_support_actor_needed, unsupported_or_unclear.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
-    "Do not use visible_actor_dialogue for unseen roles such as an unnamed guard/vendor/guide/helper; that is unsupported or unclear until a later support-actor primitive exists.",
+    "Use ordinary_support_actor_needed only when the player needs one ordinary local current-scene role absent from SceneFrame.actors, with roleKind in the schema and supportActorNeed filled. Do not target an invented actor ref.",
+    "ordinary_support_actor_needed may cover ordinary local roles like vendor, guard, clerk, dockhand, guide, porter, witness, helper, laborer, courier, attendant, bystander, or crowd voice. It does not authorize dialogue content.",
+    "Do not use ordinary_support_actor_needed for named people, key NPCs, faction leaders, secret contacts, remote actors, persistent actors, hidden actors, family members, campaign-critical roles, or broad world creation; use clarification or unsupported_or_unclear instead.",
     "Every focalRefs, evidenceRefs, and actionInterpretation.targetRefs entry must be copied exactly from SceneFrame.citableRefs.",
+    "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",
     "Forecast is advisory trajectory without player intervention. It cannot authorize mutation or narration claims.",
     "Keep arrays short and omit all fields not defined by the schema.",

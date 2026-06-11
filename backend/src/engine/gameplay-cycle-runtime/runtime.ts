@@ -29,6 +29,7 @@ import {
   runCleanStage4Execution,
   type CleanStage4ExecutionRunResult,
   type Stage4DialogueRequestGenerator,
+  type Stage4SupportActorRequestGenerator,
 } from "./stage4-execution.js";
 import {
   assertFrozenApiProjection,
@@ -89,6 +90,7 @@ export interface CleanGameplayRuntimeOptions {
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
   oracleAdapter?: OracleAdapter;
   stage4DialogueRequestGenerator?: Stage4DialogueRequestGenerator;
+  stage4SupportActorRequestGenerator?: Stage4SupportActorRequestGenerator;
 }
 
 export interface CleanGameplayRuntimeCoreOptions {
@@ -100,11 +102,14 @@ export interface CleanGameplayRuntimeCoreOptions {
   judgeUncertaintyCandidateGenerator?: JudgeUncertaintyCandidateGenerator;
   oracleAdapter?: OracleAdapter;
   stage4DialogueRequestGenerator?: Stage4DialogueRequestGenerator;
+  stage4SupportActorRequestGenerator?: Stage4SupportActorRequestGenerator;
   runStage4Execution?: (input: {
     frame: AuthoritativeSceneFrame;
     checklist: NonNullable<GmActionChecklistRunResult["checklist"]>;
     dialogueProvider?: ProviderConfig;
     generateDialogueRequest?: Stage4DialogueRequestGenerator;
+    supportActorProvider?: ProviderConfig;
+    generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
   }) => Promise<CleanStage4ExecutionRunResult>;
   commitTurn?: (
     input: Omit<CommitCleanPlayerFacingTurnInput, "chat" | "store">,
@@ -367,6 +372,8 @@ export async function* processCleanGameplayTurnFromInput(
           checklist: actionChecklist.checklist,
           dialogueProvider: options.storytellerProvider ?? options.judgeProvider,
           generateDialogueRequest: options.stage4DialogueRequestGenerator,
+          supportActorProvider: options.storytellerProvider ?? options.judgeProvider,
+          generateSupportActorRequest: options.stage4SupportActorRequestGenerator,
         });
         for (const event of stage4Execution.publicEvents) {
           yield event;

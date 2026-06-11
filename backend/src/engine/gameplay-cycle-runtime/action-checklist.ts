@@ -558,24 +558,27 @@ function stepFor(input: {
   targetRefs: readonly string[];
   evidenceRefs: readonly string[];
   dependsOnStepIds?: readonly GmActionChecklistStepId[];
+  purpose?: string;
+  intendedSummary?: string;
+  expectedVisibleSummary?: string;
 }): GmActionChecklist["steps"][number] {
   const visibleRefs = uniqueStrings([input.actorRef, ...input.targetRefs]);
   const capability = EFFECT_TO_CAPABILITY[input.kind];
   return {
     stepId: CHECKLIST_STEP_IDS[input.index - 1] ?? "step-6",
-    purpose: `Plan ${input.kind} for later backend resolution.`,
+    purpose: input.purpose ?? `Plan ${input.kind} for later backend resolution.`,
     actorRef: input.actorRef,
     targetRefs: uniqueStrings(input.targetRefs),
     evidenceRefs: uniqueStrings(input.evidenceRefs),
     intended: {
       kind: input.kind,
-      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance"
+      stateOrEvidence: input.kind === "movement" || input.kind === "time_advance" || input.kind === "support_actor_create"
         ? "state"
         : input.kind === "dialogue_record"
           ? "terminal_player_visible"
           : "evidence",
       requiredCapabilityId: capability,
-      summary: `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
+      summary: input.intendedSummary ?? `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
     },
     disposition: {
       kind: "stage4_backend_resolution_required",
@@ -583,7 +586,7 @@ function stepFor(input: {
     },
     dependsOnStepIds: [...(input.dependsOnStepIds ?? [])],
     expectedVisibleEffect: {
-      summary: `${input.kind} may become visible only if later execution accepts it.`,
+      summary: input.expectedVisibleSummary ?? `${input.kind} may become visible only if later execution accepts it.`,
       visibleRefs,
     },
   };
@@ -636,6 +639,9 @@ export function buildDeterministicGmActionChecklist(input: {
       ))
       .find((actor) => Boolean(actor)) ?? null
     : null;
+  const supportActorNeed = input.gmRead.actionInterpretation.interactionKind === "ordinary_support_actor_needed"
+    ? input.gmRead.actionInterpretation.supportActorNeed
+    : null;
   const actionText = playerActionText(input);
 
   if (movementTarget && allowed.has("movement")) {
@@ -672,14 +678,6 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
-  } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
-    steps.push(stepFor({
-      index: 1,
-      kind: "observe_visible",
-      actorRef,
-      targetRefs: [sceneRef],
-      evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
-    }));
   } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
     steps.push(stepFor({
       index: 1,
@@ -687,6 +685,31 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: [dialogueSpeaker.ref],
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
+    }));
+  } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {
+    steps.push(stepFor({
+      index: 1,
+      kind: "support_actor_create",
+      actorRef,
+      targetRefs: [sceneRef],
+      evidenceRefs: uniqueStrings([
+        actorRef,
+        sceneRef,
+        input.frame.scene.currentLocation.ref,
+        ...supportActorNeed.evidenceRefs,
+        ...evidenceRefs,
+      ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase())),
+      purpose: `Plan ordinary current-scene support actor materialization for ${supportActorNeed.roleKind}.`,
+      intendedSummary: `Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=${supportActorNeed.roleKind}; requested role text: ${supportActorNeed.requestedRoleText}. It must not record dialogue or other consequences in this step.`,
+      expectedVisibleSummary: `If accepted, one visible temporary ${supportActorNeed.roleKind} may be materialized in the current scene only.`,
+    }));
+  } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
+    steps.push(stepFor({
+      index: 1,
+      kind: "observe_visible",
+      actorRef,
+      targetRefs: [sceneRef],
+      evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
   } else if (allowed.has("scene_beat_record") && sceneRef) {
     steps.push(stepFor({

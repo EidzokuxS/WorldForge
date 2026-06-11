@@ -151,6 +151,28 @@ function dialogueView(): CleanNarratorView {
   });
 }
 
+function supportActorView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I look for a local vendor in the market.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "support_actor_materialization_receipt",
+      claimKinds: ["visible_actor", "support_actor_materialization"],
+      text: "Local Vendor is visible as a vendor in Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Visible support actor: Local Vendor.", exact: true },
+        { factRef: "e1.f2", text: "Support role: vendor.", exact: true },
+        { factRef: "e1.f3", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f4", text: "Materialization result: created.", exact: true },
+      ],
+      limits: {
+        proves: ["visible temporary support actor label", "ordinary support role", "current-scene materialization or reuse"],
+        doesNotProve: ["dialogue content", "NPC private knowledge", "relationship change", "future relevance", "durable world fact"],
+      },
+    }],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -397,6 +419,33 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promotedTruth.status).toBe("rejected");
     if (promotedTruth.status !== "rejected") throw new Error("expected rejected");
     expect(promotedTruth.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("renders support actor materialization without inventing dialogue or services", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
+    const text = renderCleanNarrationFallback(supportActorView());
+
+    expect(text).toBe("Visible support actor: Local Vendor. Support role: vendor. Anchor scene: Market. Materialization result: created.");
+    expect(text).not.toMatch(/\bsays|offers|knows|service|future\b/iu);
+
+    const inventedDialogue = validateCleanNarrationCandidate({
+      view: supportActorView(),
+      candidate: {
+        ...movementCandidate("Local Vendor says: \"Fresh fruit here.\""),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "Local Vendor says: \"Fresh fruit here.\"",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["dialogue_response"],
+          auditStepIds: [],
+        }],
+        finalText: "Local Vendor says: \"Fresh fruit here.\"",
+      },
+    });
+    expect(inventedDialogue.status).toBe("rejected");
+    if (inventedDialogue.status !== "rejected") throw new Error("expected rejected");
+    expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

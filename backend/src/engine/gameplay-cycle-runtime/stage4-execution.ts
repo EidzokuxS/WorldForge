@@ -16,6 +16,7 @@ import {
 import {
   assertCleanStage4ExecutionResult,
   cleanStage4DialogueRequestEffectSchema,
+  cleanStage4SupportActorCreateEffectSchema,
   assertCleanStage4Receipt,
   assertCleanStage4Request,
   type AuthoritativeSceneFrame,
@@ -26,6 +27,9 @@ import {
 } from "./contracts.js";
 
 type Step = GmActionChecklist["steps"][number];
+type SupportActorCreateEffect = Extract<CleanStage4Request["effect"], { kind: "support_actor_create" }>;
+type SupportActorRoleKind = SupportActorCreateEffect["roleKind"];
+type SupportActorMaterializationResult = NonNullable<CleanStage4Receipt["publicResult"]["supportActor"]>;
 
 type PlayerRow = {
   id: string;
@@ -53,6 +57,17 @@ type ClockRow = {
 type LocationRow = {
   id: string;
   name: string;
+};
+
+type NpcSupportRow = {
+  id: string;
+  name: string;
+  persona: string;
+  tags: string;
+  derived_tags: string;
+  tier: "temporary" | "persistent" | "key";
+  current_location_id: string | null;
+  current_scene_location_id: string | null;
 };
 
 export interface CleanStage4ReceiptStore {
@@ -97,6 +112,31 @@ export interface Stage4DialogueRequestValidationIssue {
     | "private_term"
     | "schema_invalid"
     | "speaker_invalid"
+    | "uncited_ref"
+    | "unplanned_ref";
+  path: string;
+  message: string;
+}
+
+export interface Stage4SupportActorRequestCandidateRequest {
+  system: string;
+  prompt: string;
+  repairOf?: {
+    candidate: unknown;
+    issues: Stage4SupportActorRequestValidationIssue[];
+  };
+}
+
+export type Stage4SupportActorRequestGenerator =
+  (request: Stage4SupportActorRequestCandidateRequest) => Promise<unknown>;
+
+export interface Stage4SupportActorRequestValidationIssue {
+  code:
+    | "anchor_invalid"
+    | "backend_ref"
+    | "private_term"
+    | "role_collision"
+    | "schema_invalid"
     | "uncited_ref"
     | "unplanned_ref";
   path: string;
@@ -245,6 +285,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "route_check") return "route_check";
   if (kind === "movement") return "movement";
   if (kind === "dialogue_record") return "dialogue_record";
+  if (kind === "support_actor_create") return "support_actor_create";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
   return "scene_beat_record";
@@ -327,6 +368,7 @@ function baseReceipt(input: {
   visibleObservation?: CleanStage4Receipt["publicResult"]["visibleObservation"];
   sceneBeat?: CleanStage4Receipt["publicResult"]["sceneBeat"];
   dialogue?: CleanStage4Receipt["publicResult"]["dialogue"];
+  supportActor?: CleanStage4Receipt["publicResult"]["supportActor"];
   resultWorldVersion?: number;
   resultWorldTimeMinutes?: number;
   resultTick?: number;
@@ -336,6 +378,10 @@ function baseReceipt(input: {
   playerId?: string | null;
   fromLocationId?: string | null;
   destinationLocationId?: string | null;
+  supportActorId?: string | null;
+  supportActorOperation?: "inserted" | "reused" | null;
+  anchorLocationId?: string | null;
+  anchorSceneLocationId?: string | null;
   edgeIds?: string[];
   stateDeltaRefs?: string[];
   failure?: CleanStage4Receipt["failure"];
@@ -347,6 +393,8 @@ function baseReceipt(input: {
   const routeOptionsAccepted = accepted && input.capabilityId === "route_options";
   const sceneBeatAccepted = accepted && input.capabilityId === "scene_beat_record";
   const dialogueAccepted = accepted && input.capabilityId === "dialogue_record";
+  const supportActorAccepted = accepted && input.capabilityId === "support_actor_create";
+  const supportActorCreated = supportActorAccepted && input.supportActor?.resultKind === "created";
   return assertCleanStage4Receipt({
     version: "gameplay-runtime.stage4-receipt.v1",
     receiptId: `stage4-receipt-${randomUUID()}`,
@@ -381,6 +429,8 @@ function baseReceipt(input: {
                   ? "scene_beat_receipt"
                   : dialogueAccepted
                     ? "terminal_dialogue_receipt"
+                    : supportActorAccepted
+                      ? "support_actor_materialization_receipt"
                     : input.status === "skipped"
                       ? "skip_receipt"
                       : "failure_receipt",
@@ -388,7 +438,9 @@ function baseReceipt(input: {
         ? "player_location_and_world_clock"
         : timeAccepted
           ? "world_clock_only"
-          : "none",
+          : supportActorCreated
+            ? "current_scene_support_actor"
+            : "none",
       visibleResultAuthority: movementAccepted
         ? "may_claim_player_location_change"
         : timeAccepted
@@ -403,11 +455,13 @@ function baseReceipt(input: {
                   ? "may_acknowledge_scene_beat"
                   : dialogueAccepted
                     ? "may_quote_visible_dialogue_response"
+                    : supportActorAccepted
+                      ? "may_claim_visible_support_actor_materialized"
                     : input.status === "failed"
                       ? "failure_only"
                       : "none",
       maySupportNarrationClaim: accepted,
-      mayAuthorizeMutation: movementAccepted || timeAccepted,
+      mayAuthorizeMutation: movementAccepted || timeAccepted || supportActorCreated,
     },
     publicResult: {
       summary: input.summary,
@@ -419,11 +473,16 @@ function baseReceipt(input: {
       visibleObservation: input.visibleObservation ?? null,
       sceneBeat: input.sceneBeat ?? null,
       dialogue: input.dialogue ?? null,
+      supportActor: input.supportActor ?? null,
     },
     privateResult: {
       playerId: input.playerId ?? null,
       fromLocationId: input.fromLocationId ?? null,
       destinationLocationId: input.destinationLocationId ?? null,
+      supportActorId: input.supportActorId ?? null,
+      supportActorOperation: input.supportActorOperation ?? null,
+      anchorLocationId: input.anchorLocationId ?? null,
+      anchorSceneLocationId: input.anchorSceneLocationId ?? null,
       edgeIds: input.edgeIds ?? [],
       authorityTraceId: input.authorityTraceId ?? null,
       clockReceiptId: input.clockReceiptId ?? null,
@@ -909,6 +968,459 @@ async function buildDialogueRequest(input: {
   }
 }
 
+const SUPPORT_ROLE_LABELS: Record<SupportActorRoleKind, { actorLabel: string; roleLabel: string }> = {
+  attendant: { actorLabel: "Local Attendant", roleLabel: "attendant" },
+  bystander: { actorLabel: "Local Bystander", roleLabel: "bystander" },
+  clerk: { actorLabel: "Local Clerk", roleLabel: "clerk" },
+  courier: { actorLabel: "Local Courier", roleLabel: "courier" },
+  crowd_voice: { actorLabel: "Local Crowd Voice", roleLabel: "crowd voice" },
+  dockhand: { actorLabel: "Local Dockhand", roleLabel: "dockhand" },
+  guard: { actorLabel: "Local Guard", roleLabel: "guard" },
+  guide: { actorLabel: "Local Guide", roleLabel: "guide" },
+  helper: { actorLabel: "Local Helper", roleLabel: "helper" },
+  laborer: { actorLabel: "Local Laborer", roleLabel: "laborer" },
+  porter: { actorLabel: "Local Porter", roleLabel: "porter" },
+  vendor: { actorLabel: "Local Vendor", roleLabel: "vendor" },
+  witness: { actorLabel: "Local Witness", roleLabel: "witness" },
+};
+
+function supportActorLabels(roleKind: SupportActorRoleKind): { actorLabel: string; roleLabel: string } {
+  return SUPPORT_ROLE_LABELS[roleKind];
+}
+
+function safeParseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasTag(row: NpcSupportRow, tag: string): boolean {
+  return safeParseStringArray(row.tags).some((entry) => entry.toLowerCase() === tag.toLowerCase());
+}
+
+function isReusableSupportActor(input: {
+  row: NpcSupportRow;
+  roleKind: SupportActorRoleKind;
+  currentLocationId: string;
+  currentSceneLocationId: string;
+}): boolean {
+  return input.row.tier === "temporary"
+    && input.row.current_location_id === input.currentLocationId
+    && input.row.current_scene_location_id === input.currentSceneLocationId
+    && hasTag(input.row, "temporary-support")
+    && hasTag(input.row, "clean-runtime-support")
+    && hasTag(input.row, `support-role:${input.roleKind}`)
+    && hasTag(input.row, "current-scene")
+    && !hasTag(input.row, "hidden")
+    && !hasTag(input.row, "concealed")
+    && !hasTag(input.row, "disguised")
+    && !hasTag(input.row, "secret")
+    && !hasTag(input.row, "private")
+    && !hasTag(input.row, "remote")
+    && !hasTag(input.row, "persistent")
+    && !hasTag(input.row, "key");
+}
+
+function collectSupportActorPrivateTermIssues(input: {
+  frame: AuthoritativeSceneFrame;
+  candidate: unknown;
+}): Stage4SupportActorRequestValidationIssue[] {
+  const terms = uniqueStrings([
+    ...input.frame.privateGuards.forbiddenActorLabels,
+    ...input.frame.privateGuards.forbiddenPrivateTerms,
+    ...input.frame.forecast.forbiddenPrivateTerms,
+  ]);
+  if (terms.length === 0) return [];
+  const text = JSON.stringify(input.candidate).toLowerCase();
+  return terms.some((term) => text.includes(term.toLowerCase()))
+    ? [{
+      code: "private_term",
+      path: "<root>",
+      message: "Support actor request effect must not leak private frame guard terms.",
+    }]
+    : [];
+}
+
+function zodSupportIssue(issue: { path: PropertyKey[]; message: string }): Stage4SupportActorRequestValidationIssue {
+  return {
+    code: "schema_invalid",
+    path: issue.path.map(String).join(".") || "<root>",
+    message: issue.message,
+  };
+}
+
+export function validateSupportActorRequestEffectCandidate(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+  candidate: unknown;
+}): { status: "accepted"; effect: SupportActorCreateEffect; issues: [] } | {
+  status: "rejected";
+  issues: Stage4SupportActorRequestValidationIssue[];
+} {
+  const issues = collectSupportActorPrivateTermIssues({
+    frame: input.frame,
+    candidate: input.candidate,
+  });
+  const parsed = cleanStage4SupportActorCreateEffectSchema.safeParse(input.candidate);
+  if (!parsed.success) {
+    return {
+      status: "rejected",
+      issues: [...issues, ...parsed.error.issues.map(zodSupportIssue)],
+    };
+  }
+
+  const effect = parsed.data;
+  const citable = new Set(input.frame.citableRefs.map(normalizedRef));
+  const planned = new Set([
+    input.frame.player.ref,
+    input.frame.scene.currentScene.ref,
+    input.frame.scene.currentLocation.ref,
+    ...input.step.targetRefs,
+    ...input.step.evidenceRefs,
+  ].map(normalizedRef));
+  const refs = uniqueStrings([
+    effect.anchorRef,
+    ...effect.evidenceRefs,
+  ]);
+
+  if (normalizedRef(effect.anchorRef) !== normalizedRef(input.frame.scene.currentScene.ref)) {
+    issues.push({
+      code: "anchor_invalid",
+      path: "anchorRef",
+      message: "Support actor materialization must anchor exactly to the current SceneFrame scene ref.",
+    });
+  }
+
+  for (const ref of refs) {
+    if (!citable.has(normalizedRef(ref))) {
+      issues.push({
+        code: "uncited_ref",
+        path: "refs",
+        message: `Support actor request cited ref "${ref}" outside SceneFrame.citableRefs.`,
+      });
+    }
+    if (!planned.has(normalizedRef(ref))) {
+      issues.push({
+        code: "unplanned_ref",
+        path: "refs",
+        message: `Support actor request cited ref "${ref}" outside the accepted checklist step scope.`,
+      });
+    }
+    if (backendRefIssue(ref)) {
+      issues.push({
+        code: "backend_ref",
+        path: "refs",
+        message: `Support actor request cited backend-looking ref "${ref}".`,
+      });
+    }
+  }
+
+  const roleCollisionLabels = [
+    input.frame.player.label,
+    ...input.frame.actors.map((actor) => actor.label),
+  ].map((label) => label.trim().toLowerCase());
+  const modelRoleLabel = effect.roleLabel.trim().toLowerCase();
+  if (roleCollisionLabels.includes(modelRoleLabel)) {
+    issues.push({
+      code: "role_collision",
+      path: "roleLabel",
+      message: "Support actor request roleLabel must not collide with the Player or already-visible actor labels.",
+    });
+  }
+
+  if (issues.length > 0) {
+    return { status: "rejected", issues };
+  }
+  return { status: "accepted", effect, issues: [] };
+}
+
+function promptFrameForSupportActor(frame: AuthoritativeSceneFrame): unknown {
+  return {
+    version: frame.version,
+    frameId: frame.frameId,
+    turnId: frame.turnId,
+    base: frame.base,
+    playerAction: frame.playerAction,
+    scene: frame.scene,
+    player: frame.player,
+    actors: frame.actors.map((actor) => ({
+      ref: actor.ref,
+      label: actor.label,
+      role: actor.role,
+      visibleStatus: actor.visibleStatus,
+    })),
+    citableRefs: frame.citableRefs,
+  };
+}
+
+export function buildStage4SupportActorRequestSystemPrompt(): string {
+  return [
+    "You are WorldForge clean Stage 4 Support Actor Request.",
+    "Return only JSON matching the support_actor_create effect schema.",
+    "This is not narration. It proposes one bounded ordinary current-scene support actor presentation for backend validation.",
+    "Use only ordinary local roles allowed by the schema and anchorRef must be the current SceneFrame scene ref.",
+    "Do not create named people, key NPCs, faction leaders, secret contacts, hidden actors, remote actors, family members, persistent actors, or campaign-critical roles.",
+    "Do not include dialogue content, world facts, relationship changes, item state, route truth, future relevance, private knowledge, old tool ids, backend refs, or durable event claims.",
+    "Set identityBounds exactly to temporary/current_scene/minor_support/reactive_only/mayBecomePersistentHere=false.",
+    "Set reusePolicy to reuse_matching_temporary_current_scene_or_create and all forbiddenPayloads fields to false.",
+    "Use only refs from the accepted checklist step and SceneFrame.citableRefs.",
+  ].join("\n");
+}
+
+export function buildStage4SupportActorRequestPrompt(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+}): string {
+  return [
+    "Produce one support_actor_create effect for this accepted checklist step.",
+    "Required effect shape:",
+    "{ kind, authorityKind, anchorScope, anchorRef, roleKind, roleLabel, publicPresentation, identityBounds, reusePolicy, reason, evidenceRefs, forbiddenPayloads }",
+    "Accepted checklist step:",
+    JSON.stringify(input.step, null, 2),
+    "Authoritative SceneFrame:",
+    JSON.stringify(promptFrameForSupportActor(input.frame), null, 2),
+  ].join("\n\n");
+}
+
+function buildStage4SupportActorRepairPrompt(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+  candidate: unknown;
+  issues: Stage4SupportActorRequestValidationIssue[];
+}): string {
+  return [
+    "Repair the support_actor_create effect so it satisfies the clean P66 support actor contract.",
+    "Do not add unsupported fields, old tool ids, backend refs, dialogue, world facts, relationships, item state, route truth, future relevance, private knowledge, or durable events.",
+    "Validation issues:",
+    JSON.stringify(input.issues, null, 2),
+    "Original candidate:",
+    JSON.stringify(input.candidate, null, 2),
+    "Accepted checklist step:",
+    JSON.stringify(input.step, null, 2),
+    "Authoritative SceneFrame:",
+    JSON.stringify(promptFrameForSupportActor(input.frame), null, 2),
+  ].join("\n\n");
+}
+
+async function generateSupportActorEffectCandidate(input: {
+  provider: ProviderConfig;
+  request: Stage4SupportActorRequestCandidateRequest;
+}): Promise<unknown> {
+  const generated = await safeGenerateObject({
+    model: createModel(input.provider, { role: "storyteller", reasoningMode: "bypass" }),
+    schema: cleanStage4SupportActorCreateEffectSchema,
+    system: input.request.system,
+    prompt: input.request.prompt,
+    temperature: 0.2,
+    maxOutputTokens: 900,
+    mode: "native_json",
+    retries: 1,
+    allowTextFallback: false,
+    allowRepair: false,
+    strictSchema: true,
+  });
+  return generated.object;
+}
+
+function supportActorRequestFromEffect(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  effect: SupportActorCreateEffect;
+}): CleanStage4Request {
+  return assertCleanStage4Request({
+    version: "gameplay-runtime.stage4-request.v1",
+    requestId: `stage4-request-${randomUUID()}`,
+    campaignId: input.frame.campaignId,
+    turnId: input.frame.turnId,
+    frameId: input.frame.frameId,
+    checklistId: input.checklist.checklistId,
+    stepId: input.step.stepId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      checklistVersion: "gm-action-checklist.v1",
+      checklistId: input.checklist.checklistId,
+      checklistStepId: input.step.stepId,
+    },
+    base: input.frame.base,
+    author: "model_from_stage4_support_actor_request",
+    modelAuthored: true,
+    capabilityId: "support_actor_create",
+    effect: input.effect,
+  });
+}
+
+function placeholderSupportActorRequest(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+}): CleanStage4Request {
+  const labels = supportActorLabels("helper");
+  return supportActorRequestFromEffect({
+    ...input,
+    effect: {
+      kind: "support_actor_create",
+      authorityKind: "ordinary_current_scene_support_actor",
+      anchorScope: "current_scene",
+      anchorRef: input.frame.scene.currentScene.ref,
+      roleKind: "helper",
+      roleLabel: labels.roleLabel,
+      publicPresentation: {
+        publicSummary: "No accepted support actor request was generated.",
+        visibleCue: null,
+        voiceHint: null,
+      },
+      identityBounds: {
+        tier: "temporary",
+        persistence: "current_scene",
+        significance: "minor_support",
+        agency: "reactive_only",
+        mayBecomePersistentHere: false,
+      },
+      reusePolicy: "reuse_matching_temporary_current_scene_or_create",
+      reason: "Fallback placeholder for failed support actor request generation.",
+      evidenceRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, ...input.step.evidenceRefs]).slice(0, 12),
+      forbiddenPayloads: {
+        dialogueContent: false,
+        worldFact: false,
+        relationship: false,
+        itemState: false,
+        routeTruth: false,
+        futureRelevance: false,
+        privateKnowledge: false,
+      },
+    },
+  });
+}
+
+async function buildSupportActorRequest(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  provider?: ProviderConfig;
+  generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
+}): Promise<{ status: "accepted"; request: CleanStage4Request; issues: [] } | {
+  status: "failed";
+  request: CleanStage4Request;
+  issues: Stage4SupportActorRequestValidationIssue[];
+}> {
+  const system = buildStage4SupportActorRequestSystemPrompt();
+  const prompt = buildStage4SupportActorRequestPrompt({
+    frame: input.frame,
+    step: input.step,
+  });
+  const generator = input.generateSupportActorRequest
+    ?? (input.provider
+      ? ((request: Stage4SupportActorRequestCandidateRequest) => generateSupportActorEffectCandidate({
+        provider: input.provider as ProviderConfig,
+        request,
+      }))
+      : null);
+  if (!generator) {
+    return {
+      status: "failed",
+      request: placeholderSupportActorRequest(input),
+      issues: [{
+        code: "schema_invalid",
+        path: "<generation>",
+        message: "P66 support actor execution requires a Stage 4 support actor request generator.",
+      }],
+    };
+  }
+
+  let firstCandidate: unknown;
+  try {
+    firstCandidate = await generator({ system, prompt });
+  } catch (error) {
+    return {
+      status: "failed",
+      request: placeholderSupportActorRequest(input),
+      issues: [{
+        code: "schema_invalid",
+        path: "<generation>",
+        message: error instanceof Error ? error.message : String(error),
+      }],
+    };
+  }
+
+  const firstValidation = validateSupportActorRequestEffectCandidate({
+    frame: input.frame,
+    step: input.step,
+    candidate: firstCandidate,
+  });
+  if (firstValidation.status === "accepted") {
+    return {
+      status: "accepted",
+      request: supportActorRequestFromEffect({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        effect: firstValidation.effect,
+      }),
+      issues: [],
+    };
+  }
+
+  try {
+    const repairCandidate = await generator({
+      system,
+      prompt: buildStage4SupportActorRepairPrompt({
+        frame: input.frame,
+        step: input.step,
+        candidate: firstCandidate,
+        issues: firstValidation.issues,
+      }),
+      repairOf: {
+        candidate: firstCandidate,
+        issues: firstValidation.issues,
+      },
+    });
+    const repairValidation = validateSupportActorRequestEffectCandidate({
+      frame: input.frame,
+      step: input.step,
+      candidate: repairCandidate,
+    });
+    if (repairValidation.status === "accepted") {
+      return {
+        status: "accepted",
+        request: supportActorRequestFromEffect({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          effect: repairValidation.effect,
+        }),
+        issues: [],
+      };
+    }
+    return {
+      status: "failed",
+      request: placeholderSupportActorRequest(input),
+      issues: [...firstValidation.issues, ...repairValidation.issues],
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      request: placeholderSupportActorRequest(input),
+      issues: [
+        ...firstValidation.issues,
+        {
+          code: "schema_invalid",
+          path: "<repair>",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+}
+
 function clockLedgerReasonKind(reasonKind: "brief_local_action" | "wait" | "short_rest"): string {
   if (reasonKind === "short_rest") return "rest";
   if (reasonKind === "wait") return "wait";
@@ -1112,6 +1624,502 @@ async function executeDialogueRecord(input: {
   });
   input.store.insert(receipt);
   return receipt;
+}
+
+function supportActorMaterializationResult(input: {
+  effect: SupportActorCreateEffect;
+  resultKind: "created" | "reused";
+  actorLabel: string;
+  roleLabel: string;
+  frame: AuthoritativeSceneFrame;
+}): SupportActorMaterializationResult {
+  return {
+    type: "support_actor_materialization",
+    resultKind: input.resultKind,
+    actorRef: input.actorLabel,
+    actorLabel: input.actorLabel,
+    roleKind: input.effect.roleKind,
+    roleLabel: input.roleLabel,
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    publicSummary: input.effect.publicPresentation.publicSummary,
+    visibleCue: input.effect.publicPresentation.visibleCue,
+    identityBounds: {
+      tier: "temporary",
+      persistence: "current_scene",
+      significance: "minor_support",
+      agency: "reactive_only",
+    },
+    claimStatus: "visible_support_actor_materialization_only",
+  };
+}
+
+function supportActorCollisionMessage(): string {
+  return "Stage 4 support actor materialization could not be accepted for the current scene.";
+}
+
+async function executeSupportActorCreate(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  provider?: ProviderConfig;
+  generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const builtRequest = await buildSupportActorRequest({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    provider: input.provider,
+    generateSupportActorRequest: input.generateSupportActorRequest,
+  });
+  if (builtRequest.status === "failed") {
+    const receipt = failReceipt({
+      frame: input.frame,
+      checklist: input.checklist,
+      step: input.step,
+      request: builtRequest.request,
+      capabilityId: "support_actor_create",
+      kind: "invalid_backend_request",
+      message: `Stage 4 support actor request was not accepted: ${builtRequest.issues[0]?.message ?? "invalid support actor request"}`,
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const effect = builtRequest.request.effect;
+  if (effect.kind !== "support_actor_create") {
+    const receipt = failReceipt({
+      frame: input.frame,
+      checklist: input.checklist,
+      step: input.step,
+      request: builtRequest.request,
+      capabilityId: "support_actor_create",
+      kind: "invalid_backend_request",
+      message: "Stage 4 support actor request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  return withSqliteWriteLock("clean-stage4-support-actor-create", () => {
+    const db = getSqliteConnection();
+    const transaction = db.transaction(() => {
+      const player = readPlayer(input.frame);
+      const clock = readClock(input.frame.campaignId);
+      const current = validateFrameAndClock({ frame: input.frame, player, clock });
+      if (!current.ok || !player?.current_location_id || !player.current_scene_location_id) {
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "stale_frame_or_clock",
+          message: current.ok ? "Stage 4 current scene is unavailable for support actor materialization." : current.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const currentLocation = locationByLabel(input.frame, input.frame.scene.currentLocation.label);
+      const currentScene = locationByLabel(input.frame, input.frame.scene.currentScene.label);
+      if (
+        !currentLocation
+        || !currentScene
+        || player.current_location_id !== currentLocation.id
+        || player.current_scene_location_id !== currentScene.id
+      ) {
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 current scene no longer matches the SceneFrame.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const labels = supportActorLabels(effect.roleKind);
+      const actorLabel = labels.actorLabel;
+      const roleLabel = labels.roleLabel;
+      const normalizedActorLabel = actorLabel.trim().toLowerCase();
+      const visibleLabelCollision = [
+        input.frame.player.label,
+        ...input.frame.actors.map((actor) => actor.label),
+      ].some((label) => label.trim().toLowerCase() === normalizedActorLabel);
+      if (visibleLabelCollision) {
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "insufficient_grounding",
+          message: supportActorCollisionMessage(),
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const candidateRows = db.prepare(`
+        SELECT
+          id,
+          name,
+          persona,
+          tags,
+          derived_tags,
+          tier,
+          current_location_id,
+          current_scene_location_id
+        FROM npcs
+        WHERE campaign_id = ?
+      `).all(input.frame.campaignId) as NpcSupportRow[];
+      const sameNameRows = candidateRows.filter((row) => row.name.trim().toLowerCase() === normalizedActorLabel);
+      const reusableRows = candidateRows.filter((row) => isReusableSupportActor({
+        row,
+        roleKind: effect.roleKind,
+        currentLocationId: currentLocation.id,
+        currentSceneLocationId: currentScene.id,
+      }));
+      if (sameNameRows.length > 0) {
+        const exactNameReusableRows = sameNameRows.filter((row) => isReusableSupportActor({
+          row,
+          roleKind: effect.roleKind,
+          currentLocationId: currentLocation.id,
+          currentSceneLocationId: currentScene.id,
+        }));
+        if (sameNameRows.length === 1 && exactNameReusableRows.length === 1) {
+          const reusable = exactNameReusableRows[0];
+          const supportActor = supportActorMaterializationResult({
+            effect,
+            resultKind: "reused",
+            actorLabel: reusable.name,
+            roleLabel,
+            frame: input.frame,
+          });
+          const receipt = baseReceipt({
+            frame: input.frame,
+            checklist: input.checklist,
+            step: input.step,
+            request: builtRequest.request,
+            status: "accepted",
+            capabilityId: "support_actor_create",
+            summary: `${reusable.name} is already available as a ${roleLabel} in ${input.frame.scene.currentScene.label}.`,
+            visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, reusable.name]).slice(0, 12),
+            supportActor,
+            supportActorId: reusable.id,
+            supportActorOperation: "reused",
+            anchorLocationId: currentLocation.id,
+            anchorSceneLocationId: currentScene.id,
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "insufficient_grounding",
+          message: supportActorCollisionMessage(),
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      if (reusableRows.length === 1) {
+        const reusable = reusableRows[0];
+        const supportActor = supportActorMaterializationResult({
+          effect,
+          resultKind: "reused",
+          actorLabel: reusable.name,
+          roleLabel,
+          frame: input.frame,
+        });
+        const receipt = baseReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          status: "accepted",
+          capabilityId: "support_actor_create",
+          summary: `${reusable.name} is already available as a ${roleLabel} in ${input.frame.scene.currentScene.label}.`,
+          visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, reusable.name]).slice(0, 12),
+          supportActor,
+          supportActorId: reusable.id,
+          supportActorOperation: "reused",
+          anchorLocationId: currentLocation.id,
+          anchorSceneLocationId: currentScene.id,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      if (reusableRows.length > 1) {
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "insufficient_grounding",
+          message: supportActorCollisionMessage(),
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const receiptId = `stage4-receipt-${randomUUID()}`;
+      const actorId = `stage4-support-actor-${randomUUID()}`;
+      const authorityTraceId = `stage4-authority-${randomUUID()}`;
+      const resultWorldVersion = clock.world_version + 1;
+      const stateDeltaRefs = [`npc:${actorId}:created`, `scene:${currentScene.id}:support_actors`];
+      const now = Date.now();
+      const tags = [
+        "temporary-support",
+        "clean-runtime-support",
+        `support-role:${effect.roleKind}`,
+        "current-scene",
+        "minor-support",
+        "reactive-only",
+      ];
+      const characterRecord = {
+        identity: {
+          id: actorId,
+          campaignId: input.frame.campaignId,
+          role: "npc",
+          tier: "temporary",
+          displayName: actorLabel,
+          canonicalStatus: "original",
+          baseFacts: {
+            biography: effect.publicPresentation.publicSummary,
+            socialRole: [roleLabel],
+            hardConstraints: [
+              "Temporary current-scene support actor.",
+              "Reactive only; no persistent significance from creation.",
+            ],
+          },
+          behavioralCore: {
+            motives: [],
+            pressureResponses: [],
+            taboos: [],
+            attachments: [],
+            selfImage: effect.publicPresentation.publicSummary,
+          },
+          liveDynamics: {
+            attachments: [],
+            activeGoals: [],
+            beliefDrift: [],
+            currentStrains: [],
+            earnedChanges: [],
+          },
+          personality: {
+            summary: "",
+            voice: effect.publicPresentation.voiceHint ?? "",
+            decisionStyle: "",
+            worldview: "",
+            internalContradictions: [],
+            personalMythology: "",
+            sampleLines: [],
+          },
+        },
+        profile: {
+          species: "",
+          gender: "",
+          ageText: "",
+          appearance: effect.publicPresentation.visibleCue ?? "",
+          backgroundSummary: "",
+          personaSummary: effect.publicPresentation.publicSummary,
+        },
+        socialContext: {
+          factionId: null,
+          factionName: null,
+          homeLocationId: null,
+          homeLocationName: null,
+          currentLocationId: currentLocation.id,
+          currentLocationName: input.frame.scene.currentLocation.label,
+          relationshipRefs: [],
+          socialStatus: [roleLabel],
+          originMode: "resident",
+        },
+        motivations: {
+          shortTermGoals: [],
+          longTermGoals: [],
+          beliefs: [],
+          drives: [],
+          frictions: [],
+        },
+        capabilities: {
+          traits: [],
+          skills: [],
+          flaws: [],
+          specialties: [],
+          wealthTier: null,
+        },
+        state: {
+          hp: 1,
+          conditions: [],
+          statusFlags: [],
+          activityState: "active",
+        },
+        loadout: {
+          inventorySeed: [],
+          equippedItemRefs: [],
+          currencyNotes: "",
+          signatureItems: [],
+        },
+        startConditions: {},
+        provenance: {
+          sourceKind: "runtime",
+          importMode: null,
+          templateId: null,
+          archetypePrompt: null,
+          worldgenOrigin: null,
+          legacyTags: tags,
+        },
+      };
+      const update = db.prepare(`
+        UPDATE world_clocks
+        SET world_version = ?, updated_at = ?
+        WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+      `).run(
+        resultWorldVersion,
+        now,
+        input.frame.campaignId,
+        clock.world_version,
+        clock.world_time_minutes,
+      );
+      if (update.changes !== 1) {
+        const receipt = failReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: builtRequest.request,
+          capabilityId: "support_actor_create",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 support actor materialization found stale world clock state.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      db.prepare(`
+        INSERT INTO npcs (
+          id,
+          campaign_id,
+          name,
+          persona,
+          character_record,
+          derived_tags,
+          tags,
+          tier,
+          current_location_id,
+          current_scene_location_id,
+          goals,
+          beliefs,
+          unprocessed_importance,
+          inactive_ticks,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        actorId,
+        input.frame.campaignId,
+        actorLabel,
+        effect.publicPresentation.publicSummary,
+        JSON.stringify(characterRecord),
+        JSON.stringify(tags),
+        JSON.stringify(tags),
+        "temporary",
+        currentLocation.id,
+        currentScene.id,
+        JSON.stringify({ short_term: [], long_term: [] }),
+        "[]",
+        0,
+        0,
+        now,
+      );
+      db.prepare(`
+        INSERT INTO authority_traces (
+          id,
+          campaign_id,
+          operation,
+          source_entity_type,
+          source_entity_id,
+          base_world_version,
+          result_world_version,
+          world_time_minutes,
+          elapsed_world_time_minutes,
+          tool_result_id,
+          event_ids,
+          state_delta_refs,
+          witnesses,
+          metadata,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authorityTraceId,
+        input.frame.campaignId,
+        "gameplay-cycle-runtime.support_actor.materialize.v1",
+        "npc",
+        actorId,
+        clock.world_version,
+        resultWorldVersion,
+        clock.world_time_minutes,
+        0,
+        receiptId,
+        "[]",
+        JSON.stringify(stateDeltaRefs),
+        JSON.stringify(effect.evidenceRefs),
+        JSON.stringify({
+          checklistId: input.checklist.checklistId,
+          stepId: input.step.stepId,
+          capabilityId: "support_actor_create",
+          roleKind: effect.roleKind,
+          roleLabel,
+          anchorScope: "current_scene",
+          anchorRef: effect.anchorRef,
+          resultKind: "created",
+        }),
+        now,
+      );
+
+      const supportActor = supportActorMaterializationResult({
+        effect,
+        resultKind: "created",
+        actorLabel,
+        roleLabel,
+        frame: input.frame,
+      });
+      const receipt = baseReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: builtRequest.request,
+        status: "accepted",
+        capabilityId: "support_actor_create",
+        summary: `${actorLabel} is materialized as a ${roleLabel} in ${input.frame.scene.currentScene.label}.`,
+        visibleRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, actorLabel]).slice(0, 12),
+        supportActor,
+        resultWorldVersion,
+        mutationApplied: true,
+        authorityTraceId,
+        playerId: player.id,
+        supportActorId: actorId,
+        supportActorOperation: "inserted",
+        anchorLocationId: currentLocation.id,
+        anchorSceneLocationId: currentScene.id,
+        stateDeltaRefs,
+      });
+      const finalReceipt = assertCleanStage4Receipt({ ...receipt, receiptId });
+      input.store.insert(finalReceipt);
+      return finalReceipt;
+    });
+
+    return transaction();
+  });
 }
 
 async function executeTimeAdvance(input: {
@@ -1653,6 +2661,8 @@ export async function runCleanStage4Execution(input: {
   checklist: GmActionChecklist;
   dialogueProvider?: ProviderConfig;
   generateDialogueRequest?: Stage4DialogueRequestGenerator;
+  supportActorProvider?: ProviderConfig;
+  generateSupportActorRequest?: Stage4SupportActorRequestGenerator;
   store?: CleanStage4ReceiptStore;
 }): Promise<CleanStage4ExecutionRunResult> {
   if (!branchEligible(input.frame, input.checklist)) {
@@ -1688,6 +2698,7 @@ export async function runCleanStage4Execution(input: {
       "route_check",
       "movement",
       "dialogue_record",
+      "support_actor_create",
       "time_advance",
       "scene_beat_record",
     ];
@@ -1742,6 +2753,19 @@ export async function runCleanStage4Execution(input: {
         step,
         provider: input.dialogueProvider,
         generateDialogueRequest: input.generateDialogueRequest,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
+    if (step.intended.kind === "support_actor_create") {
+      const receipt = await executeSupportActorCreate({
+        frame: input.frame,
+        checklist: input.checklist,
+        step,
+        provider: input.supportActorProvider,
+        generateSupportActorRequest: input.generateSupportActorRequest,
         store,
       });
       receipts.push(receipt);
@@ -1804,6 +2828,7 @@ export async function runCleanStage4Execution(input: {
       locationChange: receipt.publicResult.locationChange,
       timeAdvance: receipt.publicResult.timeAdvance,
       dialogue: receipt.publicResult.dialogue,
+      supportActor: receipt.publicResult.supportActor,
     }));
   const execution = assertCleanStage4ExecutionResult({
     version: "gameplay-runtime.stage4-execution-result.v1",

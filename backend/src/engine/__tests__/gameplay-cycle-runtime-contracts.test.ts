@@ -25,6 +25,7 @@ import {
   oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
   cleanStage4DialogueRequestEffectSchema,
+  cleanStage4SupportActorCreateEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -49,7 +50,10 @@ import {
   runCleanGmActionChecklist,
   validateGmActionChecklistCandidate,
 } from "../gameplay-cycle-runtime/action-checklist.js";
-import type { Stage4ExecutionEvent } from "../gameplay-cycle-runtime/stage4-execution.js";
+import {
+  validateSupportActorRequestEffectCandidate,
+  type Stage4ExecutionEvent,
+} from "../gameplay-cycle-runtime/stage4-execution.js";
 import {
   buildCleanPublicTurnIds,
   commitCleanPlayerFacingTurn,
@@ -90,6 +94,12 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       "tool-schemas",
       "runtime-tool-input-schemas",
       "runtime-tool-descriptors",
+      "support_actor.create.v2",
+      "create_scene_extra",
+      "spawn_npc",
+      "runtime-executor",
+      "db-handlers",
+      "receipt-ledger",
       "narrator-packet",
       "narration-grounding-guard",
       "visible-narration-output-guard",
@@ -658,6 +668,7 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
       { capabilityId: "route_check", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "movement", evidenceAuthority: "terminal_receipt_required", allowed: true },
       { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      { capabilityId: "support_actor_create", evidenceAuthority: "terminal_receipt_required", allowed: true },
       { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
       { capabilityId: "scene_beat_record", evidenceAuthority: "observation_only", allowed: true },
     ],
@@ -1039,6 +1050,80 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
+  it("accepts ordinary_support_actor_needed only with bounded supportActorNeed and no visible actor target", () => {
+    const frame = minimalFrame({
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      citableRefs: ["Player", "Market", "Guide"],
+    });
+    const accepted = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player looks for an ordinary local vendor.",
+          playerIntent: "Find a local vendor.",
+          method: "look for",
+          targetRefs: ["Market"],
+          interactionKind: "ordinary_support_actor_needed",
+          supportActorNeed: {
+            roleKind: "vendor",
+            requestedRoleText: "local vendor",
+            currentScenePlausibility: "ordinary_local_role",
+            intendedUse: "presence_only",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+      },
+    });
+    expect(accepted.status).toBe("accepted");
+
+    const visibleTarget = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player asks Guide to become a vendor.",
+          playerIntent: "Use visible Guide as support actor.",
+          method: "ask",
+          targetRefs: ["Guide"],
+          interactionKind: "ordinary_support_actor_needed",
+          supportActorNeed: {
+            roleKind: "vendor",
+            requestedRoleText: "vendor",
+            currentScenePlausibility: "ordinary_local_role",
+            intendedUse: "presence_only",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+      },
+    });
+    expect(visibleTarget.status).toBe("rejected");
+    expect(visibleTarget.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
+
+    const missingNeed = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player looks for an ordinary local vendor.",
+          playerIntent: "Find a local vendor.",
+          method: "look for",
+          targetRefs: ["Market"],
+          interactionKind: "ordinary_support_actor_needed",
+        },
+      },
+    });
+    expect(missingNeed.status).toBe("rejected");
+  });
+
   it.each([
     "toolId",
     "toolName",
@@ -1286,6 +1371,43 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
   it("rejects procedural GM Read that tries to settle backend consequences as no-roll narration", () => {
     const frame = actionPlanFrame();
     const gmRead = actionPlanGmRead(frame);
+    const candidate = validJudgeUncertainty(frame, gmRead);
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects ordinary support actor materialization as no-roll narration", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I look for a local vendor in the market.",
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player looks for an ordinary local vendor.",
+        playerIntent: "Find a local vendor.",
+        method: "look for",
+        targetRefs: ["Market"],
+        interactionKind: "ordinary_support_actor_needed",
+        supportActorNeed: {
+          roleKind: "vendor",
+          requestedRoleText: "local vendor",
+          currentScenePlausibility: "ordinary_local_role",
+          intendedUse: "presence_only",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
     const candidate = validJudgeUncertainty(frame, gmRead);
 
     const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
@@ -2118,6 +2240,69 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
   });
 
+  it("deterministically produces only support_actor_create for ordinary support actor needs", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I look for a local vendor in the market.",
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player"],
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "Can one ordinary local vendor be materialized in the current scene?",
+      actionInterpretation: {
+        summary: "The player looks for an ordinary local vendor.",
+        playerIntent: "Find a local vendor.",
+        method: "look for",
+        targetRefs: ["Market"],
+        interactionKind: "ordinary_support_actor_needed",
+        supportActorNeed: {
+          roleKind: "vendor",
+          requestedRoleText: "local vendor",
+          currentScenePlausibility: "ordinary_local_role",
+          intendedUse: "presence_only",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Ordinary support actor materialization needs a receipt before narration.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-support-actor",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      actorRef: "Player",
+      targetRefs: ["Market"],
+      intended: {
+        kind: "support_actor_create",
+        requiredCapabilityId: "support_actor_create",
+        stateOrEvidence: "state",
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(result.checklist.steps.map((step) => step.intended.kind)).not.toContain("dialogue_record");
+    expect(result.checklist.steps[0]?.intended.summary).toContain("roleKind=vendor");
+  });
+
   it("falls back without repair when deterministic compile lacks a backend capability", async () => {
     const frame = actionPlanFrame({
       playerAction: "I move toward North Hall.",
@@ -2290,6 +2475,87 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     }).success).toBe(false);
   });
 
+  it("requires P66 support actor effects to stay bounded to ordinary current-scene materialization", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I look for a local vendor in the market.",
+      citableRefs: ["Player", "Market", "North Hall"],
+      privateGuards: {
+        forbiddenActorLabels: ["Hidden Patron"],
+        forbiddenPrivateTerms: [],
+      },
+    });
+    const supportStep: GmActionChecklist["steps"][number] = {
+      ...validActionChecklist(frame).steps[0],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...validActionChecklist(frame).steps[0].intended,
+        kind: "support_actor_create",
+        requiredCapabilityId: "support_actor_create",
+        stateOrEvidence: "state",
+      },
+    };
+    const base = {
+      kind: "support_actor_create" as const,
+      authorityKind: "ordinary_current_scene_support_actor" as const,
+      anchorScope: "current_scene" as const,
+      anchorRef: "Market",
+      roleKind: "vendor" as const,
+      roleLabel: "vendor",
+      publicPresentation: {
+        publicSummary: "An ordinary local vendor is available in the market.",
+        visibleCue: "The local vendor is close enough to be visible.",
+        voiceHint: null,
+      },
+      identityBounds: {
+        tier: "temporary" as const,
+        persistence: "current_scene" as const,
+        significance: "minor_support" as const,
+        agency: "reactive_only" as const,
+        mayBecomePersistentHere: false as const,
+      },
+      reusePolicy: "reuse_matching_temporary_current_scene_or_create" as const,
+      reason: "The player requested an ordinary local vendor.",
+      evidenceRefs: ["Player", "Market"],
+      forbiddenPayloads: {
+        dialogueContent: false as const,
+        worldFact: false as const,
+        relationship: false as const,
+        itemState: false as const,
+        routeTruth: false as const,
+        futureRelevance: false as const,
+        privateKnowledge: false as const,
+      },
+    };
+
+    expect(cleanStage4SupportActorCreateEffectSchema.safeParse(base).success).toBe(true);
+    expect(validateSupportActorRequestEffectCandidate({
+      frame,
+      step: supportStep,
+      candidate: base,
+    }).status).toBe("accepted");
+    expect(cleanStage4SupportActorCreateEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, dialogueContent: true },
+    }).success).toBe(false);
+    expect(validateSupportActorRequestEffectCandidate({
+      frame,
+      step: supportStep,
+      candidate: { ...base, anchorRef: "North Hall" },
+    }).status).toBe("rejected");
+    expect(validateSupportActorRequestEffectCandidate({
+      frame,
+      step: supportStep,
+      candidate: {
+        ...base,
+        publicPresentation: {
+          ...base.publicPresentation,
+          publicSummary: "Hidden Patron is available.",
+        },
+      },
+    }).status).toBe("rejected");
+  });
+
   it("accepts non-mutating terminal dialogue receipts with quote-only authority", () => {
     const frame = actionPlanFrame({
       actors: [{
@@ -2363,6 +2629,117 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(receipt.authority.evidenceAuthority).toBe("terminal_dialogue_receipt");
     expect(receipt.result).toMatchObject({ ...frame.base, mutationApplied: false });
     expect(receipt.publicResult.dialogue?.claimStatus).toBe("visible_speaker_response_only");
+  });
+
+  it("accepts support actor materialization receipts with created/reused mutation authority split", () => {
+    const frame = actionPlanFrame();
+    const checklist = {
+      ...validActionChecklist(frame),
+      steps: [{
+        ...validActionChecklist(frame).steps[0],
+        targetRefs: ["Market"],
+        evidenceRefs: ["Player", "Market"],
+        intended: {
+          ...validActionChecklist(frame).steps[0].intended,
+          kind: "support_actor_create" as const,
+          requiredCapabilityId: "support_actor_create" as const,
+          stateOrEvidence: "state" as const,
+        },
+      }],
+    };
+    const baseReceipt = {
+      ...acceptedMovementReceipt(frame, checklist),
+      receiptId: "stage4-receipt-support-actor",
+      requestId: "stage4-request-support-actor",
+      capabilityId: "support_actor_create",
+      result: { ...frame.base, worldVersion: frame.base.worldVersion + 1, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "support_actor_materialization_receipt",
+        mutationAuthority: "current_scene_support_actor",
+        visibleResultAuthority: "may_claim_visible_support_actor_materialized",
+        maySupportNarrationClaim: true,
+        mayAuthorizeMutation: true,
+      },
+      publicResult: {
+        summary: "Local Vendor is materialized as a vendor in Market.",
+        visibleRefs: ["Player", "Market", "Local Vendor"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: null,
+        supportActor: {
+          type: "support_actor_materialization",
+          resultKind: "created",
+          actorRef: "Local Vendor",
+          actorLabel: "Local Vendor",
+          roleKind: "vendor",
+          roleLabel: "vendor",
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          publicSummary: "An ordinary local vendor is available in the market.",
+          visibleCue: null,
+          identityBounds: {
+            tier: "temporary",
+            persistence: "current_scene",
+            significance: "minor_support",
+            agency: "reactive_only",
+          },
+          claimStatus: "visible_support_actor_materialization_only",
+        },
+      },
+      privateResult: {
+        playerId: "player-1",
+        fromLocationId: null,
+        destinationLocationId: null,
+        supportActorId: "npc-local-vendor",
+        supportActorOperation: "inserted",
+        anchorLocationId: "loc-market",
+        anchorSceneLocationId: "loc-market",
+        edgeIds: [],
+        authorityTraceId: "stage4-authority-support",
+        clockReceiptId: null,
+        stateDeltaRefs: ["npc:npc-local-vendor:created", "scene:loc-market:support_actors"],
+      },
+      failure: null,
+    };
+
+    const created = cleanStage4ReceiptSchema.parse(baseReceipt);
+    expect(created.publicResult.supportActor?.resultKind).toBe("created");
+    expect(created.authority.mutationAuthority).toBe("current_scene_support_actor");
+
+    const reused = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      receiptId: "stage4-receipt-support-actor-reuse",
+      result: { ...frame.base, mutationApplied: false },
+      authority: {
+        ...baseReceipt.authority,
+        mutationAuthority: "none",
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        ...baseReceipt.publicResult,
+        supportActor: {
+          ...baseReceipt.publicResult.supportActor,
+          resultKind: "reused",
+        },
+      },
+      privateResult: {
+        ...baseReceipt.privateResult,
+        supportActorOperation: "reused",
+        authorityTraceId: null,
+        stateDeltaRefs: [],
+      },
+    });
+    expect(reused.publicResult.supportActor?.resultKind).toBe("reused");
+    expect(reused.result.worldVersion).toBe(frame.base.worldVersion);
+
+    expect(cleanStage4ReceiptSchema.safeParse({
+      ...baseReceipt,
+      authority: { ...baseReceipt.authority, mutationAuthority: "none" },
+    }).success).toBe(false);
   });
 
   it("accepts a terminal movement receipt that owns player location and clock mutation", () => {
