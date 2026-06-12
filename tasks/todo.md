@@ -8,6 +8,32 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P127 post-SceneFrame-wording repair Shibuya/HQ burn-in:
+- Baseline: branch clean/synced after commit `9f6e7fa9` (`Remove SceneFrame wording from clean settlement evidence`).
+- Fresh clean-start clone `p126-scene-evidence-leak-proof-192145` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`; turns 1-2 were the P126 live repair proof and remained clean.
+- Continued the same clone one action at a time from actual post-frame state after turn 2.
+- Turn 3 artifact `output/clean-runtime-p127-shibuya-postfix-turn3-20260612192743/`: moved back to `Shibuya District`; accepted `movement`, clock/worldVersion +1, old stores 0.
+- Turn 4 artifact `output/clean-runtime-p127-shibuya-postfix-turn4-20260612192824/`: moved to `Abandoned Warehouse Hideout`; accepted `movement`, post-frame exposed exact-scene actor `Kenjaku`, old stores 0.
+- Turn 5 artifact `output/clean-runtime-p127-shibuya-postfix-turn5-20260612192857/`: generic visible-people observation; accepted `local_observation` `positive_list` for `Kenjaku`, no mutation/clock advance, old stores 0.
+- Turn 6 artifact `output/clean-runtime-p127-shibuya-postfix-turn6-20260612192932/`: asked `Kenjaku` why he was there; accepted `dialogue_record`, no mutation/clock advance, old stores 0.
+- Turn 7 artifact `output/clean-runtime-p127-shibuya-postfix-turn7-20260612193023/`: unfastened `Worn courier bag`; accepted `item_transfer` `unequip_inventory_item`, worldVersion +1 only, old stores 0.
+- Turn 8 artifact `output/clean-runtime-p127-shibuya-postfix-turn8-20260612193133/`: slung `Worn courier bag` back on; accepted `item_transfer` `equip_inventory_item`, worldVersion +1 only, old stores 0.
+- Turn 9 artifact `output/clean-runtime-p127-shibuya-postfix-turn9-20260612193214/`: checked `Burner phone` for visible notifications/calls; accepted `device_surface_observation` no-result, no mutation/clock advance, no raw facet/runtime leak, old stores 0.
+- Turn 10 artifact `output/clean-runtime-p127-shibuya-postfix-turn10-20260612193247/`: waited exactly 2 minutes; accepted `time_advance`, clock `worldTimeMinutes/currentTick 3 -> 5`, worldVersion +1, old stores 0.
+- Turn 11 artifact `output/clean-runtime-p127-shibuya-postfix-turn11-20260612193335/`: broad look in `Abandoned Warehouse Hideout`; direct scene snapshot only, no receipt/clock change, no `SceneFrame` wording leak, old stores 0.
+- Turn 12 artifact `output/clean-runtime-p127-shibuya-postfix-turn12-20260612193409/`: route check to `Shibuya District` without moving; accepted `route_check`, no mutation/clock advance, old stores 0.
+- Turn 13 artifact `output/clean-runtime-p127-shibuya-postfix-turn13-20260612193439/`: moved back to `Shibuya District`; accepted `movement`, clock/worldVersion +1, old stores 0.
+- Turn 14 artifact `output/clean-runtime-p127-shibuya-postfix-turn14-20260612193512/`: broad look in `Shibuya District`; direct scene snapshot only, no receipt/clock change, no `SceneFrame` wording leak, old stores 0.
+- Turn 15 artifact `output/clean-runtime-p127-shibuya-postfix-turn15-20260612193540/`: moved to `Jujutsu Headquarters`; accepted `movement`, clock/worldVersion +1, old stores 0.
+- Turn 16 artifact `output/clean-runtime-p127-shibuya-postfix-turn16-20260612193615/`: broad look in `Jujutsu Headquarters`; direct scene snapshot only, no receipt/clock change, no `SceneFrame` wording leak, old stores 0.
+- Turn 17 artifact `output/clean-runtime-p127-shibuya-postfix-turn17-20260612193651/`: moved to `Mission Assignment Office`; accepted `movement`, post-frame exposed exact-scene actor `Shimura Rei`, old stores 0.
+- Turn 18 artifact `output/clean-runtime-p127-shibuya-postfix-turn18-20260612193727/`: generic visible-people observation; accepted `local_observation` `positive_list` for `Shimura Rei`, no mutation/clock advance, old stores 0.
+- Turn 19 artifact `output/clean-runtime-p127-shibuya-postfix-turn19-20260612193818/`: asked `Shimura Rei` about assignments; accepted `dialogue_record`, no mutation/clock advance, old stores 0.
+- Turn 20 artifact `output/clean-runtime-p127-shibuya-postfix-turn20-20260612193902/`: held `Delivery manifest` ready without reading/moving; accepted `player_local_condition`, worldVersion +1 only, old stores 0.
+- Artifact sweep checked all 20 turn artifacts for clean runtime, old-store zero, multi-token narratives, and no public internal tokens (`SceneFrame`, `worldVersion`, `surface entry`, receipt/table names, `privateResult`, `reasoning`); result: 20 checked, 0 bad.
+- Current lane state after turn 20: scene `Mission Assignment Office`, clock `worldVersion=10/worldTimeMinutes=8/currentTick=8`, `clean_gameplay_turn_records=20`, `clean_gameplay_stage4_receipts=17`, `clean_gameplay_actor_conditions=1`, `authority_traces=10`, `turn_clock_ledger=7`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Status impact: this is a clean 20-turn post-repair burn-in from a zero-turn clone, but still diagnostic/acceptance-candidate evidence. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P126 clean settlement evidence SceneFrame wording leak:
 - Baseline: branch clean/synced after commit `495fb77f`.
 - Continued P125 burn-in clone `p124-rooftop-actors-proof-T15521` after turn 15. Pre-turn state: `Shibuya Back-Alley Meeting Point`, visible actor `Nishimura Koji`, clock `worldVersion=9/worldTimeMinutes=8/currentTick=8`, clean turn records 15, old v2/saga/narrator/oracle/simulation stores 0.
