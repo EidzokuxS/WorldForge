@@ -153,6 +153,66 @@ function targetKind(target: SceneFrame["targetCandidates"][number]): "actor" | "
   return "unknown";
 }
 
+type ItemTargetHolder = NonNullable<AuthoritativeSceneFrame["targets"][number]["holder"]>;
+
+function itemTargetHoldersById(input: {
+  campaignId: string;
+  playerId: string | null;
+  playerLabel: string;
+  visibleActorLabelsById: ReadonlyMap<string, string>;
+  visibleLocationIds: ReadonlySet<string>;
+  visibleLocationLabelsById: ReadonlyMap<string, string>;
+}): Map<string, ItemTargetHolder> {
+  const rows = getSqliteConnection()
+    .prepare(`
+      SELECT
+        i.id AS itemId,
+        i.owner_id AS ownerId,
+        i.location_id AS locationId,
+        i.equip_state AS equipState
+      FROM items i
+      WHERE i.campaign_id = ?
+    `)
+    .all(input.campaignId) as Array<{
+      itemId: string;
+      ownerId: string | null;
+      locationId: string | null;
+      equipState: string | null;
+    }>;
+  const holders = new Map<string, ItemTargetHolder>();
+  for (const row of rows) {
+    const equipState = row.equipState === "equipped" ? "equipped" : "carried";
+    if (row.ownerId && input.playerId && row.ownerId === input.playerId) {
+      holders.set(row.itemId, {
+        holderKind: "player",
+        holderLabel: input.playerLabel,
+        equipState,
+      });
+      continue;
+    }
+    const visibleActorLabel = row.ownerId ? input.visibleActorLabelsById.get(row.ownerId) : null;
+    if (visibleActorLabel) {
+      holders.set(row.itemId, {
+        holderKind: "visible_actor",
+        holderLabel: visibleActorLabel,
+        equipState,
+      });
+      continue;
+    }
+    const visibleLocationLabel = row.locationId && input.visibleLocationIds.has(row.locationId)
+      ? input.visibleLocationLabelsById.get(row.locationId)
+      : null;
+    if (visibleLocationLabel) {
+      holders.set(row.itemId, {
+        holderKind: "current_scene",
+        holderLabel: visibleLocationLabel,
+        equipState,
+      });
+    }
+  }
+  return holders;
+}
+
 function deviceKindForPublicItem(input: {
   label: string;
   tags?: readonly string[];
@@ -252,6 +312,23 @@ export async function buildAuthoritativeSceneFrame(
   const cleanLocalConditions = activeCleanPlayerLocalConditions(input.campaignId);
   const minorPoiTargets = activeCleanMinorPoiTargets(input.campaignId);
   const player = playerView(frame, cleanLocalConditions);
+  const playerActor = frame.roster.active.find((actor) => actor.type === "player");
+  const visibleActorLabelsById = new Map(
+    frame.targetCandidates
+      .filter((target) => target.type === "actor" && typeof target.actorId === "string")
+      .map((target) => [target.actorId!, firstText(target.label)] as const),
+  );
+  const visibleLocationLabelsById = new Map<string, string>();
+  if (frame.currentLocationId) visibleLocationLabelsById.set(frame.currentLocationId, currentLocationLabel);
+  if (frame.currentSceneScopeId) visibleLocationLabelsById.set(frame.currentSceneScopeId, currentSceneLabel);
+  const itemTargetHolders = itemTargetHoldersById({
+    campaignId: input.campaignId,
+    playerId: playerActor?.id ?? null,
+    playerLabel: player.label,
+    visibleActorLabelsById,
+    visibleLocationIds: new Set(visibleLocationLabelsById.keys()),
+    visibleLocationLabelsById,
+  });
   const actors = actorRows(frame);
   const movementOptions = frame.movementCandidates.map((candidate) => ({
     ref: firstText(candidate.label),
@@ -261,11 +338,17 @@ export async function buildAuthoritativeSceneFrame(
   }));
   const targets = frame.targetCandidates
     .filter((target) => firstText(target.label) !== player.label)
-    .map((target) => ({
-      ref: firstText(target.label),
-      label: firstText(target.label),
-      kind: targetKind(target),
-    }))
+    .map((target): AuthoritativeSceneFrame["targets"][number] => {
+      const holder = target.type === "item" && target.itemId
+        ? itemTargetHolders.get(target.itemId) ?? null
+        : null;
+      return {
+        ref: firstText(target.label),
+        label: firstText(target.label),
+        kind: targetKind(target),
+        ...(holder ? { holder } : {}),
+      };
+    })
     .concat(minorPoiTargets)
     .filter((target, index, allTargets) =>
       allTargets.findIndex((candidate) =>

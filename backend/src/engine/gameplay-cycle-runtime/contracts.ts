@@ -98,6 +98,11 @@ export const targetCandidateViewSchema = z.object({
   ref: modelSafeRef,
   label: shortText,
   kind: z.enum(["actor", "item", "location", "faction", "place_handle", "unknown"]),
+  holder: z.object({
+    holderKind: z.enum(["player", "visible_actor", "current_scene"]),
+    holderLabel: shortText,
+    equipState: z.enum(["carried", "equipped"]).nullable(),
+  }).nullable().optional(),
 });
 
 export const inventoryItemViewSchema = z.object({

@@ -3824,3 +3824,54 @@ Session: `gm-v1-consequenc-slice`.
     - Persisted settled evidence quote fact now ends exactly at the closing quote, with no external period: `Old Route Hand Sessik says: "... safer."`
   - Status impact:
     - P88 is a fresh post-fix diagnostic lane start, currently 3 clean turns. It adds 0% final acceptance until this lane or other fresh lanes reach about 60 clean manual turns each with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P88/P89 clean gameplay runtime Fallout Repair / Item Holder Grounding for Dialogue:
+  - Status:
+    - [x] Continued P88 one action at a time after inspecting post-turn state.
+    - [x] Found a player-facing contradiction after a clean item transfer when later dialogue lacked current holder state in the dialogue prompt.
+    - [x] Fixed the clean SceneFrame/Stage4 dialogue boundary by exposing model-safe item holder metadata for visible item targets.
+    - [x] Added focused Stage 4 regression coverage.
+    - [x] Ran a fresh P89 zero-turn live proof through movement, item transfer, and subsequent dialogue confirmation.
+  - Diagnostic failure:
+    - Fresh clone: `p88-postfix-dialogue-format-a`.
+    - Additional clean turns before failure:
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn4-20260612133900/`
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn5-20260612134100/`
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn6-20260612134300/`
+    - Turn 6 action: `I hand the Sealed lacquer message tube to Litha Corsen.`
+    - Turn 6 result: one accepted `item_transfer` receipt, item owner changed to NPC `Litha Corsen`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 2 -> 3`, no time/tick advance, old stores 0.
+    - Turn 7 artifact: `output/clean-runtime-p88-postfix-dialogue-format-turn7-20260612134600/`.
+    - Turn 7 action: `I ask Litha Corsen, "Do you have the sealed message tube now?"`
+    - Turn 7 DB state remained correct, but player-facing dialogue contradicted custody: Litha said she never had the tube and it went into the canal.
+    - Root cause: the subsequent-turn Stage 4 dialogue prompt saw the visible item target label but not the current holder/equip-state metadata, so the speaker model was not grounded against DB custody for the already-settled transfer.
+    - Status impact: P88 is diagnostic-invalid after turn 7 and adds 0% final acceptance.
+  - Fix:
+    - Clean `targetCandidateViewSchema` now allows optional holder metadata for item targets: holder kind, holder label, and carried/equipped state.
+    - Clean `buildAuthoritativeSceneFrame` enriches only currently visible item targets with holder metadata from authoritative item custody/equip-state rows.
+    - Holder display labels come from the already-public SceneFrame labels, not raw NPC DB names, so hidden/private actor labels are not exposed.
+    - Stage 4 dialogue prompt serializes item holder metadata and the dialogue system prompt requires quoted speech and summary to align with that current visible custody/equip-state evidence.
+  - Focused test:
+    - Added `exposes visible actor-held item state to dialogue request prompts` in `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts`.
+    - The test verifies an NPC-held `Brass Tube` appears in the authoritative SceneFrame as an item target with holder `{ holderKind: "visible_actor", holderLabel: "Guide", equipState: "carried" }`, and that the dialogue request prompt/system prompt expose the holder contract.
+  - Live proof:
+    - Fresh clone: `p89-holder-grounding-a`.
+    - Turn artifacts:
+      - `output/clean-runtime-p89-holder-grounding-turn1-20260612152300/`
+      - `output/clean-runtime-p89-holder-grounding-turn2-20260612152500/`
+      - `output/clean-runtime-p89-holder-grounding-turn3-20260612152700/`
+      - `output/clean-runtime-p89-holder-grounding-turn4-20260612152900/`
+    - Turn 1: movement from `Lowwater Bazaar` to `The Copper Tap`; accepted `movement`, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Turn 2: movement from `The Copper Tap` to `Slip Twelve Berth`; accepted `movement`, clock `1/1/1 -> 2/2/2`, old stores 0.
+    - Turn 3 action: `I hand the Sealed lacquer message tube to Litha Corsen.`
+    - Turn 3 result: one accepted `item_transfer` receipt, item owner became NPC `Litha Corsen`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 2 -> 3`, `worldTimeMinutes=2`, `currentTick=2`, no `turn_clock_ledger` row for the transfer, old stores 0.
+    - Turn 3 post-frame proof: target `Sealed lacquer message tube` carried holder metadata `{ holderKind: "visible_actor", holderLabel: "Litha Corsen", equipState: "carried" }`.
+    - Turn 4 action: `I ask Litha Corsen, "Do you have the sealed message tube now?"`
+    - Turn 4 result: one accepted `dialogue_record` receipt, `mutationAuthority="none"`, no clock/trace/ledger mutation, final clock stayed `worldVersion=3`, `worldTimeMinutes=2`, `currentTick=2`.
+    - Turn 4 player-facing text aligned with holder state: `Litha Corsen says: "Yes. It's right here."`
+    - Final DB proof: `Sealed lacquer message tube.owner_id` still equals Litha's NPC id, clean turn records 4, clean Stage 4 receipts 4, authority traces 3, turn clock ledger 2, and old v2/saga/narrator/oracle/simulation stores all stayed 0.
+  - Executed verification:
+    - `npm --prefix backend run typecheck` passed.
+    - Focused Stage 4 test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` -> 31 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 242 tests passed.
+  - Status impact:
+    - P89 is diagnostic fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

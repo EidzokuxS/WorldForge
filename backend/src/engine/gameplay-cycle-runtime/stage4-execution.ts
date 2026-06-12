@@ -1689,6 +1689,7 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
       ref: target.ref,
       label: target.label,
       kind: target.kind,
+      holder: target.holder ?? null,
     })),
     citableRefs: frame.citableRefs,
   };
@@ -1704,6 +1705,7 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
     "For silence outcomes, response.kind must be silence and quotedSpeech must be null.",
     "Do not include state deltas, world facts, relationship changes, item/condition/location/movement effects, memory, durable events, old tool ids, or backend refs.",
     "The response authorizes only what the visible speaker visibly says or does in this turn; it does not prove the speaker's claim is true.",
+    "Treat SceneFrame target holder metadata as current visible item custody/equip-state evidence; quotedSpeech and summary must align with that holder metadata.",
     "Response-language directives in the player action are UI preferences, not in-world language barriers unless explicit citable scene evidence says otherwise.",
     "Use only refs from the accepted checklist step and SceneFrame.citableRefs.",
   ].join("\n");

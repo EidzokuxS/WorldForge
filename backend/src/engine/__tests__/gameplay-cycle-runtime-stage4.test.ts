@@ -7,7 +7,11 @@ import { closeDb, connectDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { ensureCampaignInventoryAuthority } from "../../inventory/legacy-migration.js";
 import { buildAuthoritativeSceneFrame } from "../gameplay-cycle-runtime/frame.js";
-import { runCleanStage4Execution } from "../gameplay-cycle-runtime/stage4-execution.js";
+import {
+  buildStage4DialogueRequestPrompt,
+  buildStage4DialogueRequestSystemPrompt,
+  runCleanStage4Execution,
+} from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
   AuthoritativeSceneFrame,
   CleanStage4Receipt,
@@ -1679,6 +1683,75 @@ describe("clean Stage 4 executor DB contracts", () => {
         },
       },
     });
+  });
+
+  it("exposes visible actor-held item state to dialogue request prompts", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "npc-guide",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+
+    const inputFrame = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-visible-holder-dialogue",
+      idempotencyKey: "visible-holder-dialogue",
+      playerAction: {
+        submitted: "I ask Guide, \"Do you have the Brass Tube now?\"",
+        normalized: "I ask Guide, \"Do you have the Brass Tube now?\"",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-visible-holder-dialogue"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+
+    const brassTube = inputFrame.targets.find((target) => target.label === "Brass Tube");
+    expect(brassTube).toMatchObject({
+      kind: "item",
+      holder: {
+        holderKind: "visible_actor",
+        holderLabel: "Guide",
+        equipState: "carried",
+      },
+    });
+
+    const dialogueStep = {
+      ...checklistForKind("dialogue_record", inputFrame).steps[0]!,
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Guide", "Brass Tube", "Market"],
+    };
+    const prompt = buildStage4DialogueRequestPrompt({
+      frame: inputFrame,
+      step: dialogueStep,
+    });
+    const systemPrompt = buildStage4DialogueRequestSystemPrompt();
+    expect(systemPrompt).toContain("holder metadata");
+    expect(prompt).toContain('"label": "Brass Tube"');
+    expect(prompt).toContain('"holderKind": "visible_actor"');
+    expect(prompt).toContain('"holderLabel": "Guide"');
   });
 
   it("fails item_transfer without mutating when the visible actor target is not in the current scene", async () => {
