@@ -123,13 +123,33 @@ function timeView(): CleanNarratorView {
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["elapsed_time"],
-      text: "5 minute(s) pass.",
-      backendFacts: [{ factRef: "e1.f1", text: "5 minute(s) pass.", exact: true }],
+      text: "World clock advances by 5 minute(s).",
+      backendFacts: [{ factRef: "e1.f1", text: "World clock advances by 5 minute(s).", exact: true }],
       limits: {
         proves: ["elapsed world clock time"],
         doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
       },
     }],
+  });
+}
+
+function timeWithSceneFrameSnapshotView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I wait quietly in Market for 5 minutes, without moving or touching anything.",
+    acceptedEvidence: [
+      ...sceneFrameSnapshotView().acceptedEvidence,
+      {
+        ref: "e5",
+        authority: "terminal_mutation_receipt",
+        claimKinds: ["elapsed_time"],
+        text: "World clock advances by 5 minute(s).",
+        backendFacts: [{ factRef: "e5.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+        limits: {
+          proves: ["elapsed world clock time"],
+          doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
+        },
+      },
+    ],
   });
 }
 
@@ -730,8 +750,22 @@ describe("clean Stage 6 narration contracts", () => {
   it("falls back from P64 elapsed-time evidence without no-change claims", () => {
     const text = renderCleanNarrationFallback(timeView());
 
-    expect(text).toBe("5 minute(s) pass.");
+    expect(text).toBe("World clock advances by 5 minute(s).");
     expect(text).not.toMatch(/nothing changed|nothing happened|no visible changes|everything stayed/iu);
+  });
+
+  it("uses deterministic authority projection for standalone elapsed-time turns with snapshot context", async () => {
+    const result = await runCleanNarration({
+      narratorView: timeWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("standalone elapsed_time should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("World clock advances by 5 minute(s).");
+    expect(result.text).not.toMatch(/\b(remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
   it("renders route-options evidence without converting options into movement", () => {

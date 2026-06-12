@@ -755,15 +755,16 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "terminal_mutation_receipt" && receipt.publicResult.timeAdvance) {
       const evidenceId = nextEvidenceId(evidence);
       const time = receipt.publicResult.timeAdvance;
+      const elapsedText = `World clock advances by ${time.elapsedMinutes} minute(s).`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: `${time.elapsedMinutes} minute(s) pass.`,
+        text: elapsedText,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [fact(evidenceId, 1, `${time.elapsedMinutes} minute(s) pass.`)],
+        backendFacts: [fact(evidenceId, 1, elapsedText)],
         limits: {
           proves: ["elapsed world clock time"],
           doesNotProve: TIME_DOES_NOT_PROVE,

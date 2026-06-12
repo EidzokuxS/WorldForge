@@ -3915,3 +3915,41 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing narration stayed bounded to modeled/exposed no-surface evidence and did not claim true no-signal, no-message, no-call, instructions, or no-change.
   - Status impact:
     - P90 is diagnostic fallout repair only. The original `p90-shibuya-a` lane remains invalid from turn 6 and adds 0% final acceptance; future acceptance evidence must start from fresh zero-turn clones after this fix.
+
+- P91/P92 clean gameplay runtime Fallout Repair / Standalone Elapsed-Time Narration:
+  - Status:
+    - [x] Continued fresh Lowwater zero-turn diagnostic lane `p91-lowwater-a` one action at a time after inspecting post-turn state.
+    - [x] Found player-facing overreach on P91 turn 15 after a clean `time_advance` receipt.
+    - [x] Fixed Stage 6 elapsed-time projection and the accepted elapsed-time backend fact.
+    - [x] Added regression coverage for standalone `elapsed_time` plus SceneFrame snapshot context.
+    - [x] Re-ran focused clean-runtime tests and typecheck.
+    - [x] Ran a fresh P92 zero-turn live wait proof after the fix.
+  - Diagnostic lane:
+    - Fresh clone: `p91-lowwater-a`.
+    - Turns 1-14 stayed clean across direct scene snapshots, movement, route checks, dialogue, item transfer, item holder confirmation, local condition, local observation, and further movement.
+    - Turn 15 artifact: `output/clean-runtime-p91-lowwater-turn15-20260612192800/`.
+    - Turn 15 action: `I wait quietly at Resonance Tower for 5 minutes, without moving or touching anything.`
+    - Turn 15 DB state was clean: one accepted `time_advance` receipt, trace/ledger clock advance, old v2/saga/narrator/oracle/simulation stores stayed zero, final clock `worldVersion=7`, `worldTimeMinutes=9`, `currentTick=9`.
+    - Turn 15 player-facing narration was invalid: `Your Courier satchel remains visible in your inventory. Visible routes lead...` It combined a terminal elapsed-time receipt with pre-turn SceneFrame snapshot context and introduced a no-change/inventory/routes implication.
+    - Status impact: P91 is diagnostic-invalid from turn 15 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/narration.ts` now treats standalone `elapsed_time` as deterministic authority projection, so Stage 6 uses the receipt-owned clock fact rather than asking the model to combine elapsed time with SceneFrame context.
+    - `backend/src/engine/gameplay-cycle-runtime/settlement.ts` now emits the accepted elapsed-time backend fact as `World clock advances by N minute(s).`, which stays clock-only and satisfies the live runner multi-token gate.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` covers elapsed-time turns with additional SceneFrame snapshot evidence and asserts the model generator is not called.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` protects the updated accepted elapsed-time backend fact.
+  - Executed verification:
+    - GitNexus impact before editing `needsDeterministicAuthorityProjection`: LOW; direct caller `runCleanNarration`, no affected processes.
+    - GitNexus impact before editing `renderCleanNarrationFallback`: LOW; direct caller `runCleanNarration`, no affected processes.
+    - GitNexus impact before editing `buildCleanNarrationSystemPrompt`: LOW; direct caller `runCleanNarration`, no affected processes.
+    - GitNexus impact before editing `stage4Evidence`: LOW; direct caller `buildCleanSettledTurnPacket`, no affected processes.
+    - Narrow narration test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 27 tests passed.
+    - Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 244 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+  - Live repair proof:
+    - First fresh clone `p92-time-narration-a` produced safe clock-only text `5 minute(s) pass.`, but the existing live runner rejected it because its multi-token gate requires more than three tokens. This proof attempt is diagnostic-only.
+    - Fresh clone: `p92-time-narration-b`.
+    - Artifact: `output/clean-runtime-p92-time-narration-turn1-r2-20260612142200/`.
+    - Action: `I wait quietly in Lowwater Bazaar for 5 minutes, without moving or touching anything.`
+    - Result: player-facing narration `World clock advances by 5 minute(s).`; one accepted `time_advance` receipt; authority trace `gameplay-cycle-runtime.clock.advance.v1`; one `turn_clock_ledger` row with `delta_minutes=5` and `reason_kind=wait`; clock `0/0/0 -> 1/5/5`; old v2/saga/narrator/oracle/simulation stores stayed zero.
+  - Status impact:
+    - P92 is fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

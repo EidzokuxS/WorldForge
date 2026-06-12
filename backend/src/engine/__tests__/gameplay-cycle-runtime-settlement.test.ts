@@ -1460,7 +1460,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "route_options_receipt",
     ]);
     const elapsed = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("elapsed_time"));
-    expect(elapsed?.backendFacts[0]?.text).toBe("5 minute(s) pass.");
+    expect(elapsed?.backendFacts[0]?.text).toBe("World clock advances by 5 minute(s).");
     expect(elapsed?.limits.doesNotProve).toContain("offscreen events");
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "scene_observation_receipt");
     expect(observation?.claimKinds).toEqual([

@@ -143,6 +143,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For route_status, narrate route status only; never travel, arrival, current-scene change, or clock advance.",
     "For player_location_change, narrate only the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, narrate only the selected visible meaning; never add movement, discovery, mutation, or hidden facts.",
+    "For standalone elapsed_time, narrate only the accepted elapsed time fact; keep current-scene, inventory, route, offscreen, absence, and no-change claims out.",
     "For dialogue_response, narrate only that the visible speaker responded and what the accepted quote/summary says; never promote the speaker's claim into objective world truth.",
     "For support_actor_materialization, narrate only that the accepted visible temporary support actor/role is now present in the current scene; never invent dialogue, knowledge, relationships, services, or future relevance.",
     "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
@@ -305,10 +306,17 @@ function fallbackLanguage(view: CleanNarratorView): "ru" | "en" {
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
     && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
+  const hasPlayerLocationChange = view.acceptedEvidence.some((evidence) =>
+    evidence.claimKinds.includes("player_location_change")
+  );
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
+    || (
+      evidence.claimKinds.includes("elapsed_time")
+      && !hasPlayerLocationChange
+    )
     || evidence.authority === "route_options_receipt"
     || (
       onlySceneFrameSnapshotEvidence
