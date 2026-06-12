@@ -4733,3 +4733,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P135 raises the same Lowwater clone from 40/60 to 50/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P136 clean gameplay runtime Acceptance-Candidate Lane / P131 Continuation 50 -> 60:
+  - Plan:
+    - [x] Continue existing zero-turn clone `p131-lowwater-acceptance-20260612203318` from its clean turn-50 state.
+    - [x] Preflight current DB state: player at `Upper Dam Ruins`, no exact-scene NPCs, visible routes `Anchor Chain Pylon` and `Lowwater Bazaar`, `Charter Gallery` reachable through `Lowwater Bazaar` with visible actors `Auditor-Voice Maren Dael` and `Clerk Aldris`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 51-60 one action at a time from inspected post-turn state, covering route checks/options, movement back to `Lowwater Bazaar`, movement to `Charter Gallery`, current-scene actor refresh, visible dialogue, and movement to `Auditor Spire`.
+    - [x] Persist `turn-051/` through `turn-060/` artifacts plus root `db-verification-turn-051.json` through `db-verification-turn-060.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] Turn 51 route-check to `Lowwater Bazaar` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 52 movement to `Lowwater Bazaar` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Upper Dam Ruins -> Lowwater Bazaar`, clock `17/17/17 -> 18/18/18`, old stores zero.
+    - [x] Turn 53 route-options check from `Lowwater Bazaar` passed: accepted `route_options`, surfaced all eight route labels including `Charter Gallery`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 54 route-check to `Charter Gallery` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 55 movement to `Charter Gallery` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Lowwater Bazaar -> Charter Gallery`, clock `18/18/18 -> 19/19/19`, visible NPC DB surface contains `Auditor-Voice Maren Dael` and `Clerk Aldris`, old stores zero.
+    - [x] Turn 56 visible-actor observation at `Charter Gallery` passed: accepted `local_observation`, surfaced `Auditor-Voice Maren Dael` and `Clerk Aldris`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 57 dialogue with `Clerk Aldris` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 58 route-options check from `Charter Gallery` passed: accepted `route_options`, surfaced `Auditor Spire` and `Lowwater Bazaar`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 59 route-check to `Auditor Spire` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 60 movement to `Auditor Spire` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Charter Gallery -> Auditor Spire`, clock `19/19/19 -> 20/20/20`, current-scene NPC surface empty, old stores zero.
+  - Verification executed:
+    - [x] P131/P132/P133/P134/P135/P136 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-060.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 60: 60 clean turn records, 59 Stage4 receipts plus one clean `direct_scene` turn, 20 authority traces, 17 clock ledger rows, world clock `20/20/20`, player at `Auditor Spire`, current-scene NPC surface empty, visible routes `Charter Gallery` and `Lowwater Bazaar`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P136 completes the first 60-turn clean-runtime acceptance-candidate lane. It is still only one zero-turn clone, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
