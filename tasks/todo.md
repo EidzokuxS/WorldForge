@@ -4918,3 +4918,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
   - Status impact:
     - P142 completes the second clean-runtime 60-turn acceptance-candidate lane. Final acceptance remains incomplete until at least one more different zero-turn clone reaches about 60 clean manual turns.
+
+- P143 clean gameplay runtime Acceptance-Candidate Lane C / Fresh Clone 0 -> 10:
+  - Plan:
+    - [x] Create third independent clean-start clone `p143-lowwater-acceptance-c-20260612230321` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f` through manifest-driven clean-start clone.
+    - [x] Preflight zero-turn DB state: `chat_history=0`, `clean_gameplay_turn_records=0`, `clean_gameplay_stage4_receipts=0`, old v2/saga/narrator/oracle/simulation stores zero, clock `0/0/0`, player at `Lowwater Bazaar`, and initial visible routes/items documented.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 1-10 one action at a time from inspected post-turn state, covering route surface/checks, movement, current-scene actor refresh, dialogue, and bounded no-actor observation with no invalid/replayed/restored player-facing turn.
+    - [x] Persist `turn-001/` through `turn-010/` artifacts plus root `db-verification-turn-001.json` through `db-verification-turn-010.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p143-lowwater-acceptance-c-20260612230321/`; clone manifest digest `7c3305a4d594a0334614f913d490451f90930646e64ffdb29fa77e0e9eba5fba`.
+    - [x] Turn 1 route-options check from `Lowwater Bazaar` passed: all eight route labels surfaced, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 2 route-check to `Charter Gallery` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 3 movement to `Charter Gallery` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `0/0/0 -> 1/1/1`, visible NPC DB surface contains `Auditor-Voice Maren Dael` and `Clerk Aldris`, old stores zero.
+    - [x] Turn 4 visible-actor observation at `Charter Gallery` passed: surfaced `Auditor-Voice Maren Dael` and `Clerk Aldris`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 5 dialogue with `Clerk Aldris` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 6 route-options check from `Charter Gallery` passed: surfaced `Auditor Spire` and `Lowwater Bazaar`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 7 route-check to `Auditor Spire` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 8 movement to `Auditor Spire` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `1/1/1 -> 2/2/2`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 9 visible-actor observation at `Auditor Spire` passed: bounded no-match, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 10 route-options check from `Auditor Spire` passed: surfaced `Charter Gallery` and `Lowwater Bazaar`, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P143 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-010.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 10: 10 clean turn records, 10 Stage4 receipts, 2 authority traces, 2 clock ledger rows, world clock `2/2/2`, player at `Auditor Spire`, current-scene NPC surface empty, both items still equipped by `Mira Voss`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Status impact:
+    - P143 starts the third clean-runtime acceptance-candidate lane and is clean through 10/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
