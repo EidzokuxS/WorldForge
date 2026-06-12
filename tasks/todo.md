@@ -3547,3 +3547,24 @@ Session: `gm-v1-consequenc-slice`.
     - Turn 3 narration proof stayed within accepted item/dialogue evidence: `Sealed lacquer message tube item state changed: transferred_to_actor... Item transfer result: transferred_to_actor. Relay-Tech Dorin says: "Safe? In this water? I'll tuck it in my coat, dry as a bone. Go check your relay—but don't touch that desk tape.".`
   - Status impact:
     - P79 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P80 clean gameplay runtime Continued Burn-in / Drop Equipped Item To Current Scene:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P79.
+    - [x] Re-inspect actual post-P79 DB/frame before choosing the next action.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send exactly one manually chosen `/api/chat/action` that drops a current inventory/equipped item into the current scene.
+    - [x] Verify `drop_in_current_scene` settles as clean `item_transfer`: item owner cleared, item location becomes current scene, equip state becomes `carried`, `equipped_slot` clears, `worldVersion +1` only.
+    - [x] Verify no time/tick advance, no movement, no clock ledger, no old runtime stores, and player-facing narration stays within accepted item_state evidence.
+    - [x] Record diagnostic evidence and acceptance impact.
+  - Observed basis:
+    - Continued clean P79 r3 clone `p79-transfer-dialogue-r3-85038c` after 3 clean turns. Pre-turn state: `Transmission Basement`, clock `worldVersion/worldTimeMinutes/currentTick=3/2/2`, Player still had equipped `Courier satchel`; the `Sealed lacquer message tube` was owned by Relay-Tech Dorin from P79.
+  - Live proof:
+    - Action: `I set the Courier satchel down on the floor beside me, without opening it or moving.`
+    - Artifacts: `output/clean-runtime-p80-drop-item-20260612073228/`.
+    - Result: one accepted `item_transfer` receipt with result `dropped_in_scene`, authority `item_transfer_receipt`, mutation authority `item_custody_location_equip_state`, one new authority trace `gameplay-cycle-runtime.item_transfer.v1`, no new `turn_clock_ledger`, old v2/saga/narrator/oracle/simulation stores 0.
+    - DB proof: `Courier satchel` owner became `null`, `location_id` became current `Transmission Basement` scene id, `equip_state=carried`, `equipped_slot=null`, Player stayed in `Transmission Basement`, `worldVersion 3 -> 4`, `worldTimeMinutes=2`, `currentTick=2`.
+    - Post-turn frame proof: `Courier satchel` is exposed as a visible current-scene item target.
+    - Player-facing narration proof: `Courier satchel item state changed: dropped_in_scene. Item label: Courier satchel. Operation: drop_in_current_scene. Source: Mira Voss. Target: Transmission Basement. Final equip state: carried. Current scene anchor: Transmission Basement. Item transfer result: dropped_in_scene.`
+  - Status impact:
+    - P80 is diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
