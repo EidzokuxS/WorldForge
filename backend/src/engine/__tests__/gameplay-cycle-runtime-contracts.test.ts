@@ -1726,6 +1726,41 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
   });
 
+  it("rejects generic visible-actor observation when GM Read models it as target matching", () => {
+    const frame = localObservationFrame({
+      playerAction: "I look to see whether any people are visibly nearby.",
+    });
+    const candidate: GmRead = {
+      ...localObservationGmRead(frame),
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        summary: "The player asks who is visibly nearby.",
+        playerIntent: "List visible people nearby.",
+        targetRefs: ["Market"],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "people visibly nearby",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed.mode",
+      }),
+    ]));
+  });
+
   it("accepts device_status_observation only from exposed SceneFrame device surfaces", () => {
     const frame = deviceSurfaceFrame();
     const candidate = deviceSurfaceGmRead(frame);

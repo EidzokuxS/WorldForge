@@ -8,6 +8,47 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P122/P123/P124 clean current-scene actor visibility after sublocation movement:
+- Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `0ccafd62`.
+- Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P121 turn 7. Pre-turn DB inspection: current scene `Shibuya District`, clock `worldVersion=3/worldTimeMinutes=4/currentTick=4`, chat history length 14, clean turn records 7, Stage4 receipts 5, authority traces 3, clock ledger 3, and old v2/saga/narrator/oracle/simulation stores all 0.
+- P122 turn 8:
+  - Artifact: `output/clean-runtime-p122-shibuya-rooftop-turn8-20260612154002/`.
+  - Action: `I walk to Shibuya Rooftop Overlook.`
+  - Result: accepted exactly one `movement` receipt; authority trace `gameplay-cycle-runtime.player.move.v1`; one travel ledger row; clock advanced `worldVersion 3 -> 4`, `worldTimeMinutes/currentTick 4 -> 5`; player current scene became `Shibuya Rooftop Overlook`; DB current-scene NPC query showed `Sendo Atsushi`.
+  - Player-facing text: `You arrive at Shibuya Rooftop Overlook after 1 minute of travel.`
+  - Runner note: the first summary marked `ok=false` only because the local assertion expected `currentLocationName=Shibuya District`; existing movement semantics set both player current location and current scene to the sublocation. The receipt/DB/runtime invariants were clean.
+- P123 turn 9:
+  - Artifact: `output/clean-runtime-p123-shibuya-rooftop-actors-turn9-20260612154146/`.
+  - Action: `I stay on Shibuya Rooftop Overlook and look to see whether any people are visibly nearby, without moving.`
+  - Invalid result: DB before the turn had `Sendo Atsushi.current_scene_location_id = Shibuya Rooftop Overlook`, but the accepted `local_observation` receipt returned `resultKind=bounded_no_match` and player-facing text `No visible non-player actors are present in the current scene.`
+  - Mechanical invariants stayed clean: no mutation, no clock/ledger/trace writes, old stores 0. Player-facing truth was wrong, so the P118/P119/P120/P121/P122 lane is diagnostic-invalid from turn 9 and adds 0% final acceptance.
+- Root cause:
+  - Clean `buildAuthoritativeSceneFrame` trusted shared `buildSceneFrame` roster projection. After player movement into a sublocation, the player row used `current_location_id=current_scene_location_id=sublocation`, while persistent NPC rows store broad parent `current_location_id` plus exact `current_scene_location_id`. The clean frame lost exact-scene NPCs in that two-coordinate shape.
+  - GM Read also allowed generic visible-person queries to enter `localObservationNeed` as `mode=target_match` with `targetRef=null`, so generic `people visibly nearby` could string-match no concrete actor even when an actor surface existed.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/frame.ts` supplements clean frame actors from DB rows whose `npcs.current_scene_location_id` equals the player's current scene, dedupes them with shared-frame actors, and projects actor targets/citable refs for clean runtime only.
+  - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now instructs generic who/anyone/people/person/NPC visibility questions to use `localObservationNeed.mode=list_surface` over `visible_actor`, and rejects generic visible-actor target matching so repair can correct the typed plan.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` covers a player in a sublocation with `Sendo Atsushi` stored under parent broad location plus exact scene; refreshed clean SceneFrame exposes him in actors, targets, citable refs, and local observation returns `positive_list`.
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` rejects generic visible-actor observation modeled as `target_match`.
+- Executed verification:
+  - GitNexus impact before editing `actorRows`: LOW; direct caller `buildAuthoritativeSceneFrame`.
+  - GitNexus impact before editing shared `buildSceneFrame`: HIGH, so the fix avoided shared legacy/v2 frame code.
+  - GitNexus impact before editing `buildAuthoritativeSceneFrame`, `validateGmReadCandidate`, and `buildGmReadSystemPrompt`: LOW.
+  - Narrow contracts test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 181 tests passed.
+  - Narrow Stage4 test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` -> 34 tests passed.
+  - `npm --prefix backend run typecheck` passed.
+  - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 260 tests passed.
+- Live repair proof:
+  - Fresh clean-start clone `p124-rooftop-actors-proof-T15521` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+  - Preflight: chat history 0, clock `0/0/0`, player in `Shibuya District`, route to `Shibuya Rooftop Overlook`, `Sendo Atsushi` in that scene, and clean/old runtime stores all 0.
+  - Backend was run with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; proof server artifact `output/clean-runtime-p124-rooftop-actors-server-20260612185249/`; proof server stopped after verification.
+  - Turn 1 artifact: `output/clean-runtime-p124-rooftop-actors-turn1-20260612155508/`; movement to Rooftop accepted exactly one `movement`, trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock `0/0/0 -> 1/1/1`, old stores 0.
+  - Turn 2 artifact: `output/clean-runtime-p124-rooftop-actors-turn2-20260612155534/`; generic people visibility action accepted exactly one `local_observation`, `resultKind=positive_list`, `mode=list_surface`, matched `Sendo Atsushi`, no mutation, no trace/ledger, clock stayed `1/1/1`, old stores 0.
+  - Turn 2 player-facing text: `Current visible actors include: Sendo Atsushi. Observed visible actor Sendo Atsushi.`
+- Status impact:
+  - P124 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P121 clean Shibuya current-scene actor visibility diagnostic:
 - Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `1e0ee2f8`.
 - Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P120 turn 6. Pre-turn DB inspection: current scene `Shibuya District`, clock `worldVersion=3/worldTimeMinutes=4/currentTick=4`, `clean_gameplay_turn_records=6`, `clean_gameplay_stage4_receipts=4`, `authority_traces=3`, `turn_clock_ledger=3`, and old v2/saga/narrator/oracle/simulation stores all 0.

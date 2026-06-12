@@ -938,6 +938,134 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(sceneFrame.citableRefs).not.toContain("Sibling Scene Broker");
   });
 
+  it("exposes exact current-scene NPCs after the player moves into a sublocation", async () => {
+    const now = Date.now();
+    exec(
+      "INSERT INTO locations (id, campaign_id, name, description, kind, persistence, parent_location_id, tags, is_starting, connected_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "loc-rooftop",
+      CAMPAIGN_ID,
+      "Rooftop Overlook",
+      "A rooftop scene inside the market district.",
+      "persistent_sublocation",
+      "persistent",
+      "loc-market",
+      "[]",
+      0,
+      JSON.stringify(["loc-market"]),
+    );
+    exec(
+      "UPDATE players SET current_location_id = ?, current_scene_location_id = ? WHERE id = ?",
+      "loc-rooftop",
+      "loc-rooftop",
+      "player-1",
+    );
+    exec(
+      `INSERT INTO npcs (
+        id,
+        campaign_id,
+        name,
+        persona,
+        tags,
+        tier,
+        current_location_id,
+        goals,
+        beliefs,
+        unprocessed_importance,
+        inactive_ticks,
+        created_at,
+        character_record,
+        derived_tags,
+        current_scene_location_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      "npc-sendo",
+      CAMPAIGN_ID,
+      "Sendo Atsushi",
+      "A persistent NPC physically present on the rooftop.",
+      "[]",
+      "persistent",
+      "loc-market",
+      "{\"short_term\":[],\"long_term\":[]}",
+      "[]",
+      0,
+      0,
+      now,
+      "{}",
+      "[]",
+      "loc-rooftop",
+    );
+
+    const sceneFrame = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-current-scene-actor",
+      playerAction: {
+        submitted: "I look for people nearby.",
+        normalized: "I look for people nearby.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 0,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: tempRoot,
+          capturedAt: now,
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+      idempotencyKey: "current-scene-actor-clean-frame",
+    });
+
+    expect(sceneFrame.actors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Sendo Atsushi", role: "active" }),
+    ]));
+    expect(sceneFrame.targets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Sendo Atsushi", kind: "actor" }),
+    ]));
+    expect(sceneFrame.citableRefs).toContain("Sendo Atsushi");
+
+    const observationChecklist = checklistForKind("local_observation", sceneFrame);
+    observationChecklist.steps[0] = {
+      ...observationChecklist.steps[0]!,
+      targetRefs: ["Rooftop Overlook"],
+      evidenceRefs: ["Player", "Rooftop Overlook"],
+      intended: {
+        ...observationChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "people visibly nearby",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          anchorRef: "Rooftop Overlook",
+        },
+      },
+    };
+    const observation = await runCleanStage4Execution({
+      frame: sceneFrame,
+      checklist: observationChecklist,
+    });
+
+    expect(observation.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "Current visible actors include: Sendo Atsushi.",
+        localObservation: {
+          resultKind: "positive_list",
+          targetLabel: null,
+          matchedEntries: [expect.objectContaining({ surfaceKind: "visible_actor", label: "Sendo Atsushi" })],
+        },
+      },
+    });
+  });
+
   it("applies accepted movement and persists clean receipt authority transactionally", async () => {
     const inputFrame = frame();
     const result = await runCleanStage4Execution({

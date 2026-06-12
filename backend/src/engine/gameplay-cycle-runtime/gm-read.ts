@@ -177,6 +177,27 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function normalizedObservationQuery(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+}
+
+function isGenericVisibleActorQuery(value: string): boolean {
+  const normalized = normalizedObservationQuery(value);
+  const words = new Set(normalized.split(/[^a-z0-9]+/u).filter(Boolean));
+  return (
+    words.has("people")
+    || words.has("person")
+    || words.has("persons")
+    || words.has("anyone")
+    || words.has("someone")
+    || words.has("somebody")
+    || words.has("actors")
+    || words.has("npcs")
+    || words.has("npc")
+    || (words.has("who") && (words.has("visible") || words.has("nearby") || words.has("here")))
+  );
+}
+
 function publicDeviceFacetKinds(input: {
   frame: AuthoritativeSceneFrame;
   deviceRef: string;
@@ -563,6 +584,19 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localObservationNeed.targetRef",
         message: "list_surface local observations must not target one ref.",
+      });
+    }
+    if (
+      localObservationNeed.mode === "target_match"
+      && localObservationNeed.targetRef === null
+      && localObservationNeed.surfaceKinds.length === 1
+      && localObservationNeed.surfaceKinds[0] === "visible_actor"
+      && isGenericVisibleActorQuery(localObservationNeed.queryText)
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed.mode",
+        message: "Generic visible-actor/person presence questions must use mode=list_surface with targetRef=null.",
       });
     }
     if (
@@ -1168,6 +1202,7 @@ export function buildGmReadSystemPrompt(): string {
     "If the player establishes a current-scene place handle and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill minorPoiNeed for the handle part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
     "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details.",
     "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
+    "For who/anyone/people/person/NPC visible nearby or here, use localObservationNeed mode=list_surface, surfaceKinds=[\"visible_actor\"], targetRef=null, and allowBoundedNegative=true.",
     "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",
     "localObservationNeed does not authorize hidden discovery, concealed search, thorough room search, broad absence, item use/effects, phone or device status/messages, POI/storefront/landmark truth unless already exposed by a SceneFrame surface, route truth beyond route option/check receipts, world facts, mutation, dialogue content, or private facts.",
     "Use device_status_observation with deviceObservationNeed only for checking citable Player-carried/equipped or current-scene visible device surfaces from SceneFrame.deviceStatusSurfaces.",

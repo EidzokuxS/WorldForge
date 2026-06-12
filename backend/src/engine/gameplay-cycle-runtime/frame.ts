@@ -62,12 +62,49 @@ function stableFrameId(input: GameplayRuntimeTurnInput): string {
   return `frame-${hash}-${randomUUID().slice(0, 8)}`;
 }
 
-function actorRows(frame: SceneFrame): AuthoritativeSceneFrame["actors"] {
+type SceneActorView = AuthoritativeSceneFrame["actors"][number];
+
+function currentSceneNpcActorRows(campaignId: string): SceneActorView[] {
+  const rows = getSqliteConnection()
+    .prepare(`
+      SELECT
+        n.id AS id,
+        n.name AS name,
+        n.tier AS tier
+      FROM npcs n
+      INNER JOIN players p
+        ON p.campaign_id = n.campaign_id
+       AND p.current_scene_location_id = n.current_scene_location_id
+      WHERE n.campaign_id = ?
+      ORDER BY n.created_at ASC, n.id ASC
+    `)
+    .all(campaignId) as Array<{ id: string; name: string; tier: string }>;
+  return rows.map((row) => ({
+    ref: firstText(row.name, row.id),
+    label: firstText(row.name, row.id),
+    role: row.tier === "temporary" ? "support" : "active",
+    visibleStatus: {
+      hp: null,
+      conditions: [],
+    },
+  }));
+}
+
+function uniqueActorRows(actors: readonly SceneActorView[]): SceneActorView[] {
+  const byRef = new Map<string, SceneActorView>();
+  for (const actor of actors) {
+    const key = normalizedRef(actor.ref);
+    if (!byRef.has(key)) byRef.set(key, actor);
+  }
+  return [...byRef.values()].slice(0, 48);
+}
+
+function actorRows(frame: SceneFrame, campaignId: string): AuthoritativeSceneFrame["actors"] {
   const rows = [
     ...frame.roster.active.map((actor) => ({ actor, role: "active" as const })),
     ...frame.roster.support.map((actor) => ({ actor, role: "support" as const })),
   ];
-  return rows
+  const projected = rows
     .filter(({ actor }) => actor.type !== "player")
     .map(({ actor, role }) => ({
       ref: firstText(actor.label, actor.id),
@@ -78,6 +115,10 @@ function actorRows(frame: SceneFrame): AuthoritativeSceneFrame["actors"] {
         conditions: actor.statusConditions?.slice(0, 12) ?? [],
       },
     }));
+  return uniqueActorRows([
+    ...projected,
+    ...currentSceneNpcActorRows(campaignId),
+  ]);
 }
 
 function playerView(
@@ -329,7 +370,12 @@ export async function buildAuthoritativeSceneFrame(
     visibleLocationIds: new Set(visibleLocationLabelsById.keys()),
     visibleLocationLabelsById,
   });
-  const actors = actorRows(frame);
+  const actors = actorRows(frame, input.campaignId);
+  const actorTargets: AuthoritativeSceneFrame["targets"] = actors.map((actor) => ({
+    ref: actor.ref,
+    label: actor.label,
+    kind: "actor",
+  }));
   const movementOptions = frame.movementCandidates.map((candidate) => ({
     ref: firstText(candidate.label),
     label: firstText(candidate.label),
@@ -349,6 +395,7 @@ export async function buildAuthoritativeSceneFrame(
         ...(holder ? { holder } : {}),
       };
     })
+    .concat(actorTargets)
     .concat(minorPoiTargets)
     .filter((target, index, allTargets) =>
       allTargets.findIndex((candidate) =>
