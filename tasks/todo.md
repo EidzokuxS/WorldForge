@@ -4902,3 +4902,19 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P141 raises the second clean-runtime acceptance-candidate lane from 40/60 to 50/60. Final acceptance remains incomplete until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P142 clean gameplay runtime Acceptance-Candidate Lane B / P137 Continuation 50 -> 60:
+  - Plan:
+    - [x] Continue existing second zero-turn clone `p137-lowwater-acceptance-b-20260612215626` from its clean turn-50 state.
+    - [x] Preflight current DB state: player at `Lowwater Bazaar`, no exact-scene NPCs, all eight Lowwater routes visible; `Anchor Chain Pylon` has visible actors `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`; `Upper Dam Ruins` has no exact-scene NPCs; old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 51-60 one action at a time from inspected post-turn state, covering route check/movement to `Anchor Chain Pylon`, current-scene actor refresh, visible dialogue, route options/check to `Upper Dam Ruins`, movement there, no-actor observation, route check back to `Lowwater Bazaar`, and movement back.
+    - [x] Persist `turn-051/` through `turn-060/` artifacts plus root `db-verification-turn-051.json` through `db-verification-turn-060.json`.
+  - Evidence:
+    - [x] Full artifact sweep `db-verification-turn-001.json` through `db-verification-turn-060.json`: all `pass=true`, zero old v2/saga/narrator/oracle/simulation store rows, no single-token Oracle transcript/response output.
+    - [x] Final Lane B DB snapshot after turn 60: `worldVersion=17`, `worldTimeMinutes=14`, `currentTick=14`; player at `Lowwater Bazaar`; counts `clean_gameplay_turn_records=60`, `clean_gameplay_stage4_receipts=60`, `authority_traces=17`, `turn_clock_ledger=14`.
+    - [x] Authority trace shape remains clean runtime only: `gameplay-cycle-runtime.item_transfer.v1` count 3 and `gameplay-cycle-runtime.player.move.v1` count 14; old v2/saga/narrator/oracle/simulation stores remain zero.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Status impact:
+    - P142 completes the second clean-runtime 60-turn acceptance-candidate lane. Final acceptance remains incomplete until at least one more different zero-turn clone reaches about 60 clean manual turns.
