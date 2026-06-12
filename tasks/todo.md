@@ -3767,3 +3767,60 @@ Session: `gm-v1-consequenc-slice`.
     - Live repair assertion passed: repaired narration contains no `[hidden]`, no raw `movement_option`, and no raw `visible_target`.
   - Status impact:
     - P86 is diagnostic fallout repair. The P85 clone remains invalid for acceptance after turn 16; future acceptance evidence must start from a fresh zero-turn clone after this fix.
+
+- P87/P88 clean gameplay runtime Fallout Repair / Dialogue Quote Punctuation + Post-Fix Proof:
+  - Status:
+    - [x] Started from clean/synced branch `codex/rebuild-gm-turn-cycle`.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Continued fresh zero-turn P87 lane one action at a time after inspecting each post-turn frame.
+    - [x] Found deterministic dialogue fallback punctuation defect on P87 turn 14.
+    - [x] Fixed settlement dialogue quote fact formatting and added regression coverage.
+    - [x] Re-ran focused clean-runtime test suite.
+    - [x] Re-ran P69 fresh zero-turn item-transfer proof after the fix.
+    - [x] Started fresh P88 lane and verified live dialogue/persisted evidence no longer emits the extra punctuation.
+  - P87 diagnostic lane:
+    - Fresh clone: `p87-postfix-lane-a`.
+    - Clean state evidence through turn 13, then turn 14 exposed player-facing punctuation defect while DB/store invariants stayed clean.
+    - Turn artifacts:
+      - `output/clean-runtime-p87-postfix-lane-turn1-20260612123500/`
+      - `output/clean-runtime-p87-postfix-lane-turn2-20260612123700/`
+      - `output/clean-runtime-p87-postfix-lane-turn3-20260612123900/`
+      - `output/clean-runtime-p87-postfix-lane-turn4-20260612124100/`
+      - `output/clean-runtime-p87-postfix-lane-turn5-20260612125100/`
+      - `output/clean-runtime-p87-postfix-lane-turn6-20260612125200/`
+      - `output/clean-runtime-p87-postfix-lane-turn7-20260612125400/`
+      - `output/clean-runtime-p87-postfix-lane-turn8-20260612125600/`
+      - `output/clean-runtime-p87-postfix-lane-turn9-20260612130000/`
+      - `output/clean-runtime-p87-postfix-lane-turn10-20260612130200/`
+      - `output/clean-runtime-p87-postfix-lane-turn11-20260612130400/`
+      - `output/clean-runtime-p87-postfix-lane-turn12-20260612130600/`
+      - `output/clean-runtime-p87-postfix-lane-turn13-20260612130800/`
+      - `output/clean-runtime-p87-postfix-lane-turn14-20260612131000/`
+    - P87 turn 8 item-transfer proof: `Sealed lacquer message tube` owner changed from Player to NPC `Watch-Captain Ilara Rost`, exactly one accepted `item_transfer` receipt, authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 4 -> 5`, no time/tick advance, no `turn_clock_ledger`, old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - P87 turn 14 defect: player-facing dialogue fallback rendered `dark.".` because settlement backend fact always added an external period after `quotedSpeech`, even when the quote already ended with sentence punctuation.
+    - Status impact: P87 is diagnostic-invalid for final acceptance quality after turn 14. It remains useful regression evidence but adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/settlement.ts` now formats terminal dialogue quote facts with a single sentence ending inside the quote. Quotes ending in `.`, `?`, or `!` keep their punctuation; quotes without terminal punctuation receive a period before the closing quote.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` now protects the contract that accepted dialogue quotes ending in punctuation do not gain a trailing external period.
+  - Executed verification:
+    - GitNexus impact before editing `buildCleanSettledTurnPacket`: LOW, 0 direct callers, 0 affected processes.
+    - Narrow tests passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 42 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 241 tests passed.
+  - P69 fresh item-transfer proof after fix:
+    - Fresh clone: `p69-item-transfer-417f9c1f`.
+    - Artifact: `output/clean-runtime-p69-item-transfer-live-20260612092847/`.
+    - Action: `I hand the Brass Tube to Guide.`
+    - Result: one accepted `item_transfer` receipt, `Brass Tube.owner_id=p69-fixture-guide`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+  - P88 post-fix live dialogue proof:
+    - Fresh clone: `p88-postfix-dialogue-format-a`.
+    - Artifacts:
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn1-20260612133100/`
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn2-20260612133300/`
+      - `output/clean-runtime-p88-postfix-dialogue-format-turn3-20260612133500/`
+    - Turn 1 broad look: clean direct-scene snapshot, no receipts/traces/ledger, old stores 0, clock stayed `0/0/0`.
+    - Turn 2 movement to `The Copper Tap`: accepted `movement`, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Turn 3 visible dialogue with `Old Route Hand Sessik`: accepted `dialogue_record`, no clock advance, old stores 0.
+    - Persisted settled evidence quote fact now ends exactly at the closing quote, with no external period: `Old Route Hand Sessik says: "... safer."`
+  - Status impact:
+    - P88 is a fresh post-fix diagnostic lane start, currently 3 clean turns. It adds 0% final acceptance until this lane or other fresh lanes reach about 60 clean manual turns each with zero failed, replayed, restored, or invalid player-facing turns.

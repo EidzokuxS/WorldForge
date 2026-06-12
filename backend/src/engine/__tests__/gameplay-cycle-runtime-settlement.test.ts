@@ -791,7 +791,7 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const dialogue = packet.acceptedEvidence.find((entry) => entry.authority === "terminal_dialogue_receipt");
     expect(dialogue?.claimKinds).toEqual(["dialogue_response"]);
-    expect(dialogue?.backendFacts[1]?.text).toBe('Guide says: "The north stairs flooded before dawn.".');
+    expect(dialogue?.backendFacts[1]?.text).toBe('Guide says: "The north stairs flooded before dawn."');
     expect(dialogue?.limits.doesNotProve).toContain("truth of speaker claim");
     expect(dialogue?.limits.doesNotProve).toContain("durable world fact");
   });

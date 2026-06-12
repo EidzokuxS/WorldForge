@@ -91,6 +91,16 @@ const DIALOGUE_DOES_NOT_PROVE = [
   "absence or no-change",
 ];
 
+type CleanDialogueResult = NonNullable<CleanStage4Receipt["publicResult"]["dialogue"]>;
+
+function formatDialogueQuoteFact(dialogue: CleanDialogueResult): string {
+  const quotedSpeech = dialogue.quotedSpeech?.trim();
+  if (!quotedSpeech) return `${dialogue.speakerLabel} has a ${dialogue.outcomeKind} dialogue response.`;
+  const quoteAlreadyEndsSentence = /[.!?]$/.test(quotedSpeech);
+  const displayedQuote = quoteAlreadyEndsSentence ? quotedSpeech : `${quotedSpeech}.`;
+  return `${dialogue.speakerLabel} says: "${displayedQuote}"`;
+}
+
 const SUPPORT_ACTOR_DOES_NOT_PROVE = [
   "dialogue content",
   "NPC private knowledge",
@@ -582,9 +592,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "terminal_dialogue_receipt" && receipt.publicResult.dialogue) {
       const evidenceId = nextEvidenceId(evidence);
       const dialogue = receipt.publicResult.dialogue;
-      const quoteFact = dialogue.quotedSpeech
-        ? `${dialogue.speakerLabel} says: "${dialogue.quotedSpeech}".`
-        : `${dialogue.speakerLabel} has a ${dialogue.outcomeKind} dialogue response.`;
+      const quoteFact = formatDialogueQuoteFact(dialogue);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
