@@ -8,6 +8,25 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P125 Shibuya acceptance-candidate burn-in after current-scene actor fix:
+- Baseline: branch clean/synced after commit `e3856c5a` (`Fix clean current-scene actor visibility`).
+- Continued fresh zero-turn clone `p124-rooftop-actors-proof-T15521` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`; turns 1-2 came from the P124 repair proof and remained clean.
+- Turn 3 artifact `output/clean-runtime-p125-shibuya-turn3-20260612190338/`: asked visible actor `Sendo Atsushi` what he could see; accepted clean dialogue receipt, no mutation/clock advance, old stores 0.
+- Turn 4 artifact `output/clean-runtime-p125-shibuya-turn4-20260612190502/`: moved back to `Shibuya District`; accepted `movement`, clock/worldVersion advanced by 1, old stores 0.
+- Turn 5 artifact `output/clean-runtime-p125-shibuya-turn5-20260612190537/`: route check to `Shibuya Pedestrian Underpass` without moving; accepted `route_check`, no mutation/clock advance, old stores 0.
+- Turn 6 artifact `output/clean-runtime-p125-shibuya-turn6-20260612190610/`: moved to `Shibuya Pedestrian Underpass`; accepted `movement`, clock/worldVersion advanced by 1, old stores 0.
+- Turn 7 artifact `output/clean-runtime-p125-shibuya-turn7-20260612190654/`: checked `Burner phone` visible notifications/calls; accepted `device_surface_observation` no-result, no mutation/clock advance, no raw facet/runtime leak, old stores 0.
+- Turn 8 artifact `output/clean-runtime-p125-shibuya-turn8-20260612190726/`: waited exactly 3 minutes; accepted `time_advance`, clock `3 -> 6`, worldVersion +1, old stores 0.
+- Turn 9 artifact `output/clean-runtime-p125-shibuya-turn9-20260612190835/`: unfastened `Worn courier bag`; accepted `item_transfer` `unequip_inventory_item`, item became carried, worldVersion +1 only, old stores 0.
+- Turn 10 artifact `output/clean-runtime-p125-shibuya-turn10-20260612190936/`: slung `Worn courier bag` back on; accepted `item_transfer` `equip_inventory_item`, item became equipped, worldVersion +1 only, old stores 0.
+- Turn 11 artifact `output/clean-runtime-p125-shibuya-turn11-20260612191012/`: kept `Burner phone` ready in hand without checking screen; accepted `player_local_condition`, worldVersion +1 only, old stores 0.
+- Turn 12 artifact `output/clean-runtime-p125-shibuya-turn12-20260612191044/`: broad look in Underpass; direct scene snapshot only, no receipt/clock change, old stores 0.
+- Turn 13 artifact `output/clean-runtime-p125-shibuya-turn13-20260612191149/`: moved back to `Shibuya District`; accepted `movement`, clock/worldVersion advanced by 1, old stores 0.
+- Turn 14 artifact `output/clean-runtime-p125-shibuya-turn14-20260612191245/`: moved to `Shibuya Back-Alley Meeting Point`; accepted `movement`, post-frame exposed exact-scene actor `Nishimura Koji`, old stores 0.
+- Turn 15 artifact `output/clean-runtime-p125-shibuya-turn15-20260612191331/`: generic visible-people observation in Back-Alley; accepted `local_observation` `positive_list` for `Nishimura Koji`, no mutation/clock advance, old stores 0.
+- Current lane state after turn 15: scene `Shibuya Back-Alley Meeting Point`, clock `worldVersion=9/worldTimeMinutes=8/currentTick=8`, `clean_gameplay_turn_records=15`, `clean_gameplay_stage4_receipts=14`, `clean_gameplay_actor_conditions=1`, `authority_traces=9`, `turn_clock_ledger=6`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Status impact: this is a clean 15-turn acceptance-candidate burn-in from a zero-turn clone, not final acceptance. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P122/P123/P124 clean current-scene actor visibility after sublocation movement:
 - Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `0ccafd62`.
 - Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P121 turn 7. Pre-turn DB inspection: current scene `Shibuya District`, clock `worldVersion=3/worldTimeMinutes=4/currentTick=4`, chat history length 14, clean turn records 7, Stage4 receipts 5, authority traces 3, clock ledger 3, and old v2/saga/narrator/oracle/simulation stores all 0.
