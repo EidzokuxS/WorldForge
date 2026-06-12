@@ -4624,3 +4624,31 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck`
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
     - [x] P131 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-010.json` all `pass=true`, `runtime=gameplay-cycle-runtime`, multi-token narrative, and old stores zero.
+
+- P132 clean gameplay runtime Acceptance-Candidate Lane / P131 Continuation 10 -> 20:
+  - Plan:
+    - [x] Continue the existing zero-turn clone `p131-lowwater-acceptance-20260612203318` from its clean turn-10 state instead of restarting evidence.
+    - [x] Preflight the current DB state: player at `Transmission Basement`, exact visible actors `Relay-Tech Dorin` and `Venn the Borrowed`, available routes `Resonance Tower` and `Silt Warrens`, equipped items still owned by the player, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true`, `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`, and fail fast on any non-clean `done.runtime`, old-store write, one-token narrative, replay/restore, or verifier miss.
+    - [x] Execute turns 11-20 one action at a time from inspected post-turn state, prioritizing item transfer, dialogue after transfer, route options/checks, movement refresh, and observation in the new scene.
+    - [x] Persist `turn-011/` through `turn-020/` artifacts plus root `db-verification-turn-011.json` through `db-verification-turn-020.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] P132 preflight artifact: `p132-preflight-current-state.json`.
+    - [x] Turn 11 item transfer to `Relay-Tech Dorin` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, `Sealed lacquer message tube` owner changed to `Relay-Tech Dorin`, equip state `carried`, worldVersion `4 -> 5`, no time/tick/ledger advance, old stores zero. Corrected only the verifier's trace lookup shape for item-transfer traces.
+    - [x] Turn 12 dialogue with `Relay-Tech Dorin` after item transfer passed: accepted `dialogue_record`, no mutation/clock/ledger/trace, item custody stayed with `Relay-Tech Dorin`, old stores zero. Corrected only the verifier's over-strict expectation that the quoted reply repeat the full item label.
+    - [x] Turn 13 route-options check from `Transmission Basement` passed: accepted `route_options`, surfaced `Resonance Tower` and `Silt Warrens`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 14 route-check to `Resonance Tower` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 15 movement to `Resonance Tower` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Transmission Basement -> Resonance Tower`, clock `5/5/5 -> 6/6/6`, old stores zero.
+    - [x] Turn 16 visible-actor observation at `Resonance Tower` passed: accepted `local_observation` with `bounded_no_match`, no mutation/clock/ledger/trace, old stores zero. Corrected only the verifier's over-strict expectation that the narrative repeat the scene label.
+    - [x] Turn 17 route-options check from `Resonance Tower` passed: accepted `route_options`, surfaced `Ground-Floor Barricade`, `Lowwater Bazaar`, `Silt Warrens`, and `Transmission Basement`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 18 movement to `Ground-Floor Barricade` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Resonance Tower -> Ground-Floor Barricade`, clock `6/6/6 -> 7/7/7`, old stores zero.
+    - [x] Turn 19 visible-actor observation at `Ground-Floor Barricade` passed: accepted `local_observation`, surfaced `Watch-Captain Ilara Rost`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 20 dialogue with `Watch-Captain Ilara Rost` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+  - Verification executed:
+    - [x] P131/P132 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-020.json` all `pass=true`, `runtime=gameplay-cycle-runtime`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 20: 20 clean turn records, 20 Stage4 receipts, 7 authority traces, 6 clock ledger rows, world clock `7/7/7`, player at `Ground-Floor Barricade`, `Sealed lacquer message tube` carried by `Relay-Tech Dorin`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P132 raises the same Lowwater clone from 10/60 to 20/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
