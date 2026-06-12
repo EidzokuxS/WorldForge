@@ -6,6 +6,27 @@ Working branch/worktree: `codex/rebuild-gm-turn-cycle` in normal worktree `R:\Pr
 Canonical architecture source: `docs/gm-turn-architecture-review-2026-05-03.md`.
 Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem_fixes_latency_memory_v5.md`.
 
+## Current Session Focus 2026-06-12
+
+P105/P106 clean local observation player-facing leak:
+- Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean and `npm --prefix backend run typecheck` passed before continuing live burn-in.
+- P105 fresh zero-turn diagnostic lane `p105-acceptance-a-d69ea071` reached 12 mechanically clean turns across direct scene, equip/unequip item_transfer, movement, give-to-visible-actor item_transfer, dialogue, route_check, and movement.
+- P105 turn 13 action `I stay in Resonance Tower and look to see whether anyone is visibly nearby, without touching anything.` produced a mechanically accepted `local_observation` receipt but leaked player-facing internal text: `No matching current SceneFrame observation surface entry... frame/worldVersion...`. This invalidates P105 as acceptance evidence from turn 13; it remains diagnostic only.
+- Root cause: Stage4 `local_observation` public summary and Settlement backend facts used internal `SceneFrame/worldVersion/surface entry` language, and deterministic Stage6 projection faithfully printed those accepted facts.
+- Fix:
+  - Stage4 now renders `local_observation` summaries as player-safe typed evidence, including the empty-visible-actor case: `No visible non-player actors are present in the current scene.`
+  - Settlement now projects local observation backend facts without `SceneFrame`, `worldVersion`, enum underscores, or backend-ref-like `actor:` formatting.
+  - Stage6 deterministic projection for `local_observation` omits audit-style `Checked current ...` facts from the player-facing sentence while preserving receipt grounding.
+  - Stage6 prompt contract now forbids mentioning `SceneFrame/worldVersion` for bounded local observation negatives.
+- Verification:
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 77 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 251 tests.
+  - Fresh zero-turn proof clone `p106-local-observation-no-leak-03334e6d`, artifact `output/clean-runtime-p106-local-observation-no-leak-turn1-20260612160416/`.
+  - P106 action `I stay where I am and look to see whether anyone is visibly nearby, without touching anything.` returned `No visible non-player actors are present in the current scene.`
+  - P106 DB: one accepted `local_observation` receipt, no mutation, clock stayed `worldVersion=0/worldTimeMinutes=0/currentTick=0`, old v2/saga/narrator/oracle/simulation stores stayed 0.
+- Status: local observation leak fixed and live-proven. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.

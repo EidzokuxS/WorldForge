@@ -185,11 +185,41 @@ const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
 ];
 
 function localObservationSurfaceKindLabel(kind: string): string {
-  return kind.replace(/_/gu, " ");
+  switch (kind) {
+    case "current_scene": return "current scene";
+    case "current_location": return "current location";
+    case "visible_actor": return "visible actor";
+    case "visible_target": return "visible target";
+    case "inventory_item": return "inventory item";
+    case "visible_fact": return "visible fact";
+    case "movement_option": return "route option";
+    default: return kind.replace(/_/gu, " ");
+  }
+}
+
+function localObservationSurfaceKindPluralLabel(kind: string): string {
+  switch (kind) {
+    case "current_scene": return "the current scene";
+    case "current_location": return "the current location";
+    case "visible_actor": return "visible actors";
+    case "visible_target": return "visible targets";
+    case "inventory_item": return "inventory items";
+    case "visible_fact": return "visible facts";
+    case "movement_option": return "route options";
+    default: return localObservationSurfaceKindLabel(kind);
+  }
 }
 
 function localObservationSurfaceEntryLabel(entry: { surfaceKind: string; label: string }): string {
   return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
+}
+
+function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
+  const labels = uniqueStrings(kinds.map(localObservationSurfaceKindPluralLabel));
+  if (labels.length === 0) return "current visible entries";
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
 const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
@@ -491,13 +521,13 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, observation.summary),
-          fact(evidenceId, 2, `Searched current SceneFrame surfaces: ${observation.searchedSurfaceKinds.map(localObservationSurfaceKindLabel).join(", ")}.`),
+          fact(evidenceId, 2, `Checked current ${localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds)}.`),
           ...matchFacts,
         ],
         limits: {
           proves: boundedNegative
-            ? ["bounded no-match against enumerated exposed current SceneFrame observation surfaces"]
-            : ["matching exposed current SceneFrame observation surface entries"],
+            ? ["bounded no-match against enumerated current visible entries"]
+            : ["matching current visible entries"],
           doesNotProve: LOCAL_OBSERVATION_DOES_NOT_PROVE,
         },
       });

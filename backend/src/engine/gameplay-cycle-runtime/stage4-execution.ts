@@ -2603,11 +2603,43 @@ function normalizeObservationMatch(value: string): string {
 }
 
 function localObservationSurfaceKindLabel(kind: LocalObservationSurfaceKind): string {
-  return kind.replace(/_/gu, " ");
+  switch (kind) {
+    case "current_scene": return "current scene";
+    case "current_location": return "current location";
+    case "visible_actor": return "visible actor";
+    case "visible_target": return "visible target";
+    case "inventory_item": return "inventory item";
+    case "visible_fact": return "visible fact";
+    case "movement_option": return "route option";
+  }
+}
+
+function localObservationSurfaceKindPluralLabel(kind: LocalObservationSurfaceKind): string {
+  switch (kind) {
+    case "current_scene": return "the current scene";
+    case "current_location": return "the current location";
+    case "visible_actor": return "visible actors";
+    case "visible_target": return "visible targets";
+    case "inventory_item": return "inventory items";
+    case "visible_fact": return "visible facts";
+    case "movement_option": return "route options";
+  }
 }
 
 function localObservationSurfaceEntryLabel(entry: Pick<LocalObservationSurfaceEntry, "surfaceKind" | "label">): string {
   return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
+}
+
+function localObservationSurfaceGroupLabel(kinds: readonly LocalObservationSurfaceKind[]): string {
+  const labels = uniqueStrings(kinds.map(localObservationSurfaceKindPluralLabel));
+  if (labels.length === 0) return "current visible entries";
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
+  return kinds.length === 1 && kinds[0] === "visible_actor";
 }
 
 function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: string): boolean {
@@ -2637,23 +2669,28 @@ function localObservationSummary(input: {
   resultKind: LocalObservationResult["resultKind"];
   matchedEntries: readonly LocalObservationSurfaceEntry[];
 }): string {
+  const surfaceGroup = localObservationSurfaceGroupLabel(input.effect.surfaceKinds);
   if (input.resultKind === "bounded_no_match") {
-    return `No matching current SceneFrame observation surface entry is exposed for "${input.effect.queryText}" at this frame/worldVersion.`;
+    return isOnlyVisibleActorSurface(input.effect.surfaceKinds)
+      ? "No visible non-player actors are present in the current scene."
+      : `Current ${surfaceGroup} show no match for "${input.effect.queryText}".`;
   }
   const labels = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).slice(0, 6).join(", ");
   if (input.resultKind === "positive_list") {
     return labels.length > 0
-      ? `Current SceneFrame observation surface exposes: ${labels}.`
-      : `No entries are exposed by the requested current SceneFrame observation surfaces.`;
+      ? `Current ${surfaceGroup} include: ${labels}.`
+      : isOnlyVisibleActorSurface(input.effect.surfaceKinds)
+        ? "No visible non-player actors are present in the current scene."
+        : `Current ${surfaceGroup} include no entries.`;
   }
   const matchedSurfaceLabels = input.matchedEntries
     .map(localObservationSurfaceEntryLabel)
     .slice(0, 6)
     .join(", ");
   if (input.resultKind === "ambiguous_match") {
-    return `Current SceneFrame observation surface has multiple exposed matches: ${matchedSurfaceLabels}.`;
+    return `Multiple current visible matches are available: ${matchedSurfaceLabels}.`;
   }
-  return `Current SceneFrame observation surface exposes ${matchedSurfaceLabels}.`;
+  return `Current visible match: ${matchedSurfaceLabels}.`;
 }
 
 function localObservationResult(input: {

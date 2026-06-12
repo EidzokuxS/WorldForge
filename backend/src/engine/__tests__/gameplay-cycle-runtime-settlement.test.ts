@@ -445,7 +445,7 @@ function localObservationReceipt(inputFrame = frame(), inputChecklist = checklis
       mayAuthorizeMutation: false,
     },
     publicResult: {
-      summary: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+      summary: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
       visibleRefs: ["Player", "Market"],
       routeStatus: null,
       locationChange: null,
@@ -464,7 +464,7 @@ function localObservationReceipt(inputFrame = frame(), inputChecklist = checklis
         anchorSceneLabel: "Market",
         anchorLocationLabel: "Market",
         boundedNegative: true,
-        summary: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
+        summary: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
         claimStatus: "bounded_current_scene_observation_only",
       },
       sceneBeat: null,
@@ -938,11 +938,11 @@ describe("clean Stage 5 settlement contracts", () => {
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
-      "Searched current SceneFrame surfaces: visible actor, visible target.",
+      "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
+      "Checked current visible actors and visible targets.",
     ]);
     expect(observation?.limits.proves).toEqual([
-      "bounded no-match against enumerated exposed current SceneFrame observation surfaces",
+      "bounded no-match against enumerated current visible entries",
     ]);
     expect(observation?.limits.doesNotProve).toEqual(expect.arrayContaining([
       "hidden discovery",
@@ -967,7 +967,7 @@ describe("clean Stage 5 settlement contracts", () => {
       ...localObservationReceipt(inputFrame, inputChecklist),
       publicResult: {
         ...localObservationReceipt(inputFrame, inputChecklist).publicResult,
-        summary: "Current SceneFrame observation surface exposes: North Hall.",
+        summary: "Current route options and visible targets include: North Hall.",
         visibleRefs: ["Player", "Market", "North Hall"],
         localObservation: {
           type: "local_observation",
@@ -984,7 +984,7 @@ describe("clean Stage 5 settlement contracts", () => {
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
           boundedNegative: false,
-          summary: "Current SceneFrame observation surface exposes: North Hall.",
+          summary: "Current route options and visible targets include: North Hall.",
           claimStatus: "bounded_current_scene_observation_only",
         },
       },
@@ -997,14 +997,15 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Current SceneFrame observation surface exposes: North Hall.",
-      "Searched current SceneFrame surfaces: movement option, visible target.",
+      "Current route options and visible targets include: North Hall.",
+      "Checked current route options and visible targets.",
       "Observed visible target North Hall.",
-      "Observed movement option North Hall.",
+      "Observed route option North Hall.",
     ]);
     expect(JSON.stringify(observation)).not.toContain("[hidden]");
     expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
+    expect(JSON.stringify(observation)).not.toContain("SceneFrame");
   });
 
   it("settles device_surface_observation receipts as bounded public device surface evidence only", () => {

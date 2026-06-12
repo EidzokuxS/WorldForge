@@ -149,7 +149,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For player_local_condition, narrate only the accepted Player current-scene posture/readiness condition operation; never add HP, damage, healing, combat, stealth, cover, item, movement, route, world-fact, relationship, dialogue, NPC, absence, or no-change claims.",
     "For item_state, narrate only the accepted item custody/location/equip-state operation; never add item creation, discovery, inspection, use, damage, container contents, barter value, NPC consent/reaction, relationship, route, location, condition, dialogue, private knowledge, absence, or no-change claims.",
     "For minor_poi_handle, narrate only the accepted visible current-scene place handle label/kind as a target handle; never add actors, services, inventory, business facts, readable text, route truth, movement destination, location reveal, hidden discovery, world facts, dialogue, absence, or no-change claims.",
-    "For local_observation, narrate only the accepted exposed current SceneFrame observation result. For bounded_visibility_negative, say only that no matching entry was exposed by the enumerated current SceneFrame surfaces at this frame/worldVersion; never claim broad absence, hidden absence, discovery failure, no-change, route truth, device status, item effects, or world facts.",
+    "For local_observation, narrate only the accepted current visible observation result. For bounded_visibility_negative, say only that current visible entries showed no matching visible result; never mention SceneFrame/worldVersion and never claim broad absence, hidden absence, discovery failure, no-change, route truth, device status, item effects, or world facts.",
     "For device_surface_observation, narrate only the accepted modeled public device surface facet(s), or the bounded current-frame no-surface result. Never claim hidden/private message contents, true no-message/no-call/no-signal, instructions, message/call generation, network truth, device use, hacking, route/location truth, world facts, dialogue, or no-change.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
@@ -398,7 +398,12 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
     evidence.claimKinds.includes("local_observation")
   );
   if (localObservation) {
-    return localObservation.backendFacts.map((entry) => entry.text).join(" ");
+    const narratableFacts = localObservation.backendFacts.filter((entry) =>
+      !entry.text.startsWith("Checked current ")
+    );
+    return (narratableFacts.length > 0 ? narratableFacts : localObservation.backendFacts)
+      .map((entry) => entry.text)
+      .join(" ");
   }
 
   const observation = view.acceptedEvidence.find((evidence) =>

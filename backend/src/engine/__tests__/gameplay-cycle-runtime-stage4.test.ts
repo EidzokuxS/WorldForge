@@ -2367,7 +2367,7 @@ describe("clean Stage 4 executor DB contracts", () => {
     });
     expect(positive.execution?.visibleResults[0]?.localObservation?.resultKind).toBe("positive_match");
     expect(positive.execution?.receipts[0]?.publicResult.summary).toBe(
-      "Current SceneFrame observation surface exposes visible actor Guide.",
+      "Current visible match: visible actor Guide.",
     );
 
     const listSurfaceFrame: AuthoritativeSceneFrame = {
@@ -2406,7 +2406,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current SceneFrame observation surface exposes: North Hall.",
+        summary: "Current route options and visible targets include: North Hall.",
         localObservation: {
           resultKind: "positive_list",
           matchedEntries: [
@@ -2455,7 +2455,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current SceneFrame observation surface exposes visible target central telegraph desk.",
+        summary: "Current visible match: visible target central telegraph desk.",
         localObservation: {
           resultKind: "positive_match",
           queryText: "visible marks or moving parts on the central telegraph desk",
@@ -2514,7 +2514,47 @@ describe("clean Stage 4 executor DB contracts", () => {
         },
       },
     });
-    expect(noMatch.execution?.receipts[0]?.publicResult.summary).toContain("No matching current SceneFrame observation surface entry is exposed");
+    expect(noMatch.execution?.receipts[0]?.publicResult.summary).toBe(
+      "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
+    );
+    expect(noMatch.execution?.receipts[0]?.publicResult.summary).not.toMatch(/SceneFrame|worldVersion/u);
+
+    const emptyVisibleActorsFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-empty-visible-actors",
+      turnId: "clean-turn-stage4-local-observation-empty-visible-actors",
+      playerAction: "I look to see whether anyone is visibly nearby.",
+      actors: [],
+      targets: [],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const emptyVisibleActorsChecklist = checklistForKind("local_observation", emptyVisibleActorsFrame);
+    emptyVisibleActorsChecklist.steps[0] = {
+      ...emptyVisibleActorsChecklist.steps[0]!,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...emptyVisibleActorsChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "anyone visibly nearby",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const emptyVisibleActors = await runCleanStage4Execution({
+      frame: emptyVisibleActorsFrame,
+      checklist: emptyVisibleActorsChecklist,
+    });
+
+    expect(emptyVisibleActors.execution?.receipts[0]?.publicResult.summary).toBe(
+      "No visible non-player actors are present in the current scene.",
+    );
+    expect(emptyVisibleActors.execution?.receipts[0]?.publicResult.summary).not.toMatch(/SceneFrame|worldVersion|surface/u);
 
     const clock = getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
