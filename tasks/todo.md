@@ -3419,3 +3419,39 @@ Session: `gm-v1-consequenc-slice`.
     - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 232 tests passed.
   - Status impact:
     - P75 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P76 clean gameplay runtime Continued Burn-in / Post-Movement Route Anchor:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P75.
+    - [x] Re-inspect the actual current DB/frame for the clean P75 retry clone before choosing the next action.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send exactly one manually chosen `/api/chat/action` from the observed post-P75 state, then inspect the frozen post-turn DB/frame.
+    - [x] If the route-check slice stays clean, choose the next action from that observed state only.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record diagnostic evidence and acceptance impact.
+  - Purpose:
+    - Continue from the clean P75 Silt Warrens frame into route-check anchoring after movement: route feasibility from the actual current scene must settle as route evidence only, with no movement, no clock/world advance, and no old runtime stores.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic evidence:
+    - Continued clean P75 retry clone `p75-postmove-r3-091505` from actual post-P75 state: 2 clean turns, scene `Silt Warrens`, `worldVersion/worldTimeMinutes/currentTick=1/1/1`, old stores 0, visible route option `Transmission Basement`.
+    - Turn 3 route inquiry `I check whether the visible route from Silt Warrens to Transmission Basement is open and legal, without moving.` was clean: one accepted `route_check`, no authority trace, no clock ledger row, no Player movement, no old stores, and clock stayed `1/1/1`.
+    - Turn 4 movement to `Transmission Basement` was clean: one accepted `movement`, `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, Player moved to `Transmission Basement`, `worldVersion/worldTimeMinutes/currentTick 1 -> 2`, old stores 0, and the post-frame exposed visible actors `Venn the Borrowed` and `Relay-Tech Dorin`.
+    - Turn 5 visible-actor dialogue was invalid before the fix: Stage 4 accepted `dialogue_record` and the settled packet contained `terminal_dialogue_receipt` with Dorin's quote, but player-facing narration showed only deterministic scene snapshot facts and omitted the dialogue answer.
+    - Root cause: P75 made every `visible_target` / `movement_option` evidence kind trigger deterministic Stage 6 projection. Stage 4 dialogue packets also include scene snapshot route/target evidence, so the dialogue receipt was accepted but bypassed by scene-only deterministic narration.
+  - Fix:
+    - Stage 6 now treats scene-frame `visible_target` / `movement_option` as deterministic projection only when the narrator view contains only `scene_frame_snapshot` evidence, which is the direct-scene broad-look contract.
+    - Receipt-owned turns keep their own authority priority: `route_options_receipt` remains deterministic, while `dialogue_record` and other Stage 4 receipts can use model narration and fallback to their receipt-specific facts.
+  - Final clean diagnostic slice:
+    - Fresh retry clone `p76-route-anchor-r2-093008` was created from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; precheck was clean with `Lowwater Bazaar`, `worldVersion/worldTimeMinutes/currentTick=0/0/0`, and old stores 0. Artifacts are under `output/clean-runtime-p76-route-anchor-r2-20260612093008/`.
+    - Retry turn 1 moved to `Silt Warrens`: one `movement`, one `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Retry turn 2 broad look stayed direct/no-receipt and narrated current scene/place, inventory, visible targets, and route options including `Transmission Basement`; clock stayed `1/1/1`.
+    - Retry turn 3 route inquiry accepted exactly one `route_check`, no trace/ledger, no movement, clock stayed `1/1/1`, and old stores stayed 0.
+    - Retry turn 4 moved to `Transmission Basement`: one `movement`, one `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock `1/1/1 -> 2/2/2`, old stores 0, actors `Venn the Borrowed` and `Relay-Tech Dorin` visible.
+    - Retry turn 5 visible dialogue accepted exactly one `dialogue_record`, no trace/ledger, clock stayed `2/2/2`, old stores stayed 0, and player-facing narration contained Dorin's quoted answer rather than scene-only snapshot text.
+  - Executed verification:
+    - GitNexus impact was run before edits on `needsDeterministicAuthorityProjection` and `renderCleanNarrationFallback`; both reported LOW risk with direct caller `runCleanNarration`.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed -> 23 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 233 tests passed.
+  - Status impact:
+    - P76 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

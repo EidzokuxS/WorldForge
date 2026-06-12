@@ -83,6 +83,24 @@ function movementCandidate(text = "You move to North Hall."): CleanNarrationCand
   };
 }
 
+function dialogueCandidate(): CleanNarrationCandidate {
+  return {
+    version: "gameplay-runtime.clean-narration-candidate.v1",
+    packetId: "cgpacket_test",
+    turnId: "clean-turn-1",
+    language: "en",
+    sentences: [{
+      kind: "accepted_evidence",
+      text: 'Guide says: "The north stairs flooded before dawn."',
+      evidenceRefs: ["e5"],
+      backendFactRefs: ["e5.f2"],
+      claimKinds: ["dialogue_response"],
+      auditStepIds: [],
+    }],
+    finalText: 'Guide says: "The north stairs flooded before dawn."',
+  };
+}
+
 function routeView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -198,6 +216,31 @@ function dialogueView(): CleanNarratorView {
         doesNotProve: ["truth of speaker claim", "durable world fact", "NPC private knowledge beyond the utterance"],
       },
     }],
+  });
+}
+
+function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
+  const snapshot = sceneFrameSnapshotView().acceptedEvidence;
+  return movementView({
+    playerAction: 'I ask Guide, "What happened upstairs?"',
+    acceptedEvidence: [
+      ...snapshot,
+      {
+        ref: "e5",
+        authority: "terminal_dialogue_receipt",
+        claimKinds: ["dialogue_response"],
+        text: 'Guide says: "The north stairs flooded before dawn."',
+        backendFacts: [
+          { factRef: "e5.f1", text: "Speaker: Guide.", exact: true },
+          { factRef: "e5.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e5.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+        ],
+        limits: {
+          proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+          doesNotProve: ["truth of speaker claim", "durable world fact", "movement", "arrival"],
+        },
+      },
+    ],
   });
 }
 
@@ -673,6 +716,33 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promotedTruth.status).toBe("rejected");
     if (promotedTruth.status !== "rejected") throw new Error("expected rejected");
     expect(promotedTruth.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("keeps scene snapshot route and target evidence from overriding dialogue receipts", async () => {
+    let called = false;
+    const result = await runCleanNarration({
+      narratorView: dialogueWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        called = true;
+        return dialogueCandidate();
+      },
+    });
+
+    expect(called).toBe(true);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Guide says: "The north stairs flooded before dawn."');
+
+    const fallback = await runCleanNarration({
+      narratorView: dialogueWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("force fallback");
+      },
+    });
+
+    expect(fallback.source).toBe("fallback_generation_error");
+    expect(fallback.text).toBe('Guide says: "The north stairs flooded before dawn."');
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {

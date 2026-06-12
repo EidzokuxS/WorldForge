@@ -303,11 +303,19 @@ function fallbackLanguage(view: CleanNarratorView): "ru" | "en" {
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
+  const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
+    && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("minor_poi_handle")
-    || evidence.claimKinds.includes("visible_target")
-    || evidence.claimKinds.includes("movement_option")
+    || evidence.authority === "route_options_receipt"
+    || (
+      onlySceneFrameSnapshotEvidence
+      && (
+        evidence.claimKinds.includes("visible_target")
+        || evidence.claimKinds.includes("movement_option")
+      )
+    )
     || evidence.claimKinds.includes("device_surface_observation")
   );
 }
@@ -353,13 +361,13 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
     return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
   }
 
-  const hasSceneFrameRouteOrTarget = view.acceptedEvidence.some((evidence) =>
-    evidence.authority === "scene_frame_snapshot"
-    && (
+  const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
+    && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
+  const hasSceneFrameRouteOrTarget = onlySceneFrameSnapshotEvidence
+    && view.acceptedEvidence.some((evidence) =>
       evidence.claimKinds.includes("visible_target")
       || evidence.claimKinds.includes("movement_option")
-    )
-  );
+    );
   const sceneFrameSnapshotFacts = hasSceneFrameRouteOrTarget
     ? view.acceptedEvidence
       .filter((evidence) => evidence.authority === "scene_frame_snapshot")
