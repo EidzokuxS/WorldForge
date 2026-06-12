@@ -3999,3 +3999,43 @@ Session: `gm-v1-consequenc-slice`.
     - Post-proof DB still has `Sealed lacquer message tube.owner_id` equal to Litha's NPC id; the condition narration did not claim item custody, inventory, routes, no-change, or NPC/private facts.
   - Status impact:
     - P95 is fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P96/P97 clean gameplay runtime Fallout Repair / Typed Time Passage Duration:
+  - Status:
+    - [x] Continued fresh Lowwater diagnostic lane `p96-lowwater-a` after P95.
+    - [x] Reached nine clean turns across broad look, movement, item transfer, local condition, holder-grounded dialogue, route check, and elapsed-time observation.
+    - [x] Found a real contract failure on P96 turn 10: player requested 3 minutes, but checklist/Stage4 settled 5 minutes.
+    - [x] Fixed the root cause by carrying typed elapsed minutes from GM Read through checklist into the Stage 4 time_advance request.
+    - [x] Added regressions and reran focused clean-runtime tests plus typecheck.
+    - [x] Ran a fresh P97 live proof on a zero-turn clone.
+  - Diagnostic lane:
+    - Fresh clone: `p96-lowwater-a`.
+    - Turns 1-9 stayed clean; artifacts include `output/clean-runtime-p96-lowwater-turn1-20260612151000/` through `output/clean-runtime-p96-lowwater-turn9-20260612144354/`.
+    - Turn 10 artifact: `output/clean-runtime-p96-lowwater-turn10-20260612144421/`.
+    - Turn 10 action: `I wait quietly in Silt Warrens for 3 minutes, staying where I am and touching nothing.`
+    - Turn 10 invalid result: one accepted `time_advance` receipt advanced `worldTimeMinutes/currentTick` by 5, and narration said `World clock advances by 5 minute(s).` This contradicted the explicit player duration.
+    - Root cause: GM Read only carried `interactionKind=time_passage`; checklist had no typed duration plan, so Stage 4 request construction hardcoded `elapsedMinutes: 5`.
+    - Status impact: P96 is diagnostic-invalid from turn 10 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/contracts.ts` now defines `timePassageNeed` on GM Read action interpretation and `timeAdvancePlan` on checklist steps.
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now prompts, validates, and ref-checks typed elapsed-time needs before checklist planning.
+    - `backend/src/engine/gameplay-cycle-runtime/action-checklist.ts` now copies `timePassageNeed` into a typed `timeAdvancePlan`.
+    - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now builds `time_advance` requests from `timeAdvancePlan` instead of a local hardcoded duration.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` rejects `time_passage` without `timePassageNeed` and verifies a ten-minute GM Read produces a ten-minute checklist `timeAdvancePlan`.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` verifies Stage 4 applies a three-minute `timeAdvancePlan` to receipt, clock, and ledger.
+  - Executed verification:
+    - GitNexus impact before editing `buildDeterministicGmActionChecklist`: LOW; direct caller `runCleanGmActionChecklist`, no affected processes.
+    - GitNexus impact before editing `requestEffectForStep`: LOW; direct caller `requestForStep`, affected process `runCleanStage4Execution`.
+    - GitNexus impact before editing `buildGmReadSystemPrompt`: LOW; direct caller `runCleanGmRead`, no affected processes.
+    - `gmReadActionInterpretationSchema` was not indexed as a GitNexus symbol, so contract fallout was verified through focused tests and typecheck.
+    - `npm --prefix backend run typecheck` passed.
+    - Narrow tests passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` -> 204 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 248 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p97-time-duration-bba4c3ae` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Artifact: `output/clean-runtime-p97-time-duration-turn1-20260612145248/`.
+    - Action: `I wait quietly in Lowwater Bazaar for 3 minutes, staying where I am and touching nothing.`
+    - Result: player-facing narration `World clock advances by 3 minute(s).`; one accepted `time_advance` receipt; `publicResult.timeAdvance.elapsedMinutes=3`; authority trace `gameplay-cycle-runtime.clock.advance.v1`; one `turn_clock_ledger` row with `delta_minutes=3` and `reason_kind=wait`; clock `0/0/0 -> 1/3/3`; old v2/saga/narrator/oracle/simulation stores stayed zero.
+  - Status impact:
+    - P97 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

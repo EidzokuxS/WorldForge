@@ -292,6 +292,17 @@ function checklistForKind(
             },
           }
           : {}),
+        ...(kind === "time_advance"
+          ? {
+            timeAdvancePlan: {
+              actorRef: "Player" as const,
+              sceneRef: "Market",
+              elapsedMinutes: 5,
+              reasonKind: "wait" as const,
+              requestedDurationText: "a few minutes",
+            },
+          }
+          : {}),
         ...(kind === "local_observation"
           ? {
             localObservationPlan: {
@@ -1028,6 +1039,52 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
     expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 5 });
+  });
+
+  it("uses the checklist timeAdvancePlan duration for accepted time advance", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I wait here for 3 minutes.",
+    };
+    const plannedChecklist = checklistForKind("time_advance", inputFrame);
+    plannedChecklist.steps[0]!.intended.timeAdvancePlan = {
+      actorRef: "Player",
+      sceneRef: "Market",
+      elapsedMinutes: 3,
+      reasonKind: "wait",
+      requestedDurationText: "3 minutes",
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: plannedChecklist,
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.publicEvents).toEqual([{
+      type: "state_update",
+      data: {
+        type: "time_advance",
+        elapsedMinutes: 3,
+        reasonKind: "wait",
+      },
+    }]);
+    const receipt = result.execution?.receipts[0];
+    expect(receipt?.publicResult.timeAdvance).toEqual({
+      type: "time_advance",
+      elapsedMinutes: 3,
+      reasonKind: "wait",
+    });
+
+    const clock = getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clock).toEqual({ worldVersion: 1, worldTimeMinutes: 3, currentTick: 3 });
+
+    const ledger = getSqliteConnection()
+      .prepare("SELECT reason_kind AS reasonKind, delta_minutes AS deltaMinutes FROM turn_clock_ledger WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { reasonKind: string; deltaMinutes: number };
+    expect(ledger).toEqual({ reasonKind: "wait", deltaMinutes: 3 });
   });
 
   it("accepts modeled public device surface facets without mutating world state", async () => {

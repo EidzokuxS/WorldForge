@@ -8,6 +8,7 @@ import {
   cleanItemTransferSourceKindSchema,
   cleanItemTransferTargetKindSchema,
   cleanMinorPoiKindSchema,
+  cleanTimeAdvanceReasonKindSchema,
   gmReadSchema,
   gmReadActionInterpretationSchema,
   type AuthoritativeSceneFrame,
@@ -83,12 +84,21 @@ const gmReadGenerationMinorPoiNeedSchema = z.object({
   evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
 }).strict();
 
+const gmReadGenerationTimePassageNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  elapsedMinutes: z.number().int().min(1).max(60),
+  reasonKind: cleanTimeAdvanceReasonKindSchema,
+  requestedDurationText: gmReadGenerationShortText,
+  evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
+}).strict();
+
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
   liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
   actionInterpretation: gmReadActionInterpretationSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
+    timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
   }).strict(),
   interpretationRationale: gmReadGenerationRepairableText,
 }).passthrough();
@@ -280,6 +290,7 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...(read.actionInterpretation.minorPoiNeed?.anchorRef
       ? [read.actionInterpretation.minorPoiNeed.anchorRef]
       : []),
+    ...(read.actionInterpretation.timePassageNeed?.evidenceRefs ?? []),
     ...(read.actionInterpretation.localObservationNeed?.evidenceRefs ?? []),
     ...(read.actionInterpretation.localObservationNeed?.targetRef
       ? [read.actionInterpretation.localObservationNeed.targetRef]
@@ -341,6 +352,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
   const minorPoiNeed = read.actionInterpretation.minorPoiNeed ?? null;
+  const timePassageNeed = read.actionInterpretation.timePassageNeed ?? null;
   const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
   const deviceObservationNeed = read.actionInterpretation.deviceObservationNeed ?? null;
   const sceneRefs = new Set([
@@ -351,6 +363,14 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     .map((surface) => surface.deviceRef.toLowerCase()));
   const minorPoiSurface = frame.currentScenePlaceHandleSurface ?? null;
   const allowedMinorPoiKinds = new Set(minorPoiSurface?.allowedPlaceKinds ?? []);
+
+  if (read.actionInterpretation.interactionKind !== "time_passage" && timePassageNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.timePassageNeed",
+      message: "timePassageNeed is allowed only for time_passage.",
+    });
+  }
 
   if (localConditionNeed) {
     const targetRef = localConditionNeed.targetRef?.toLowerCase() ?? null;
@@ -565,6 +585,59 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.minorPoiNeed",
         message: "current_scene_observation must not include minorPoiNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "time_passage") {
+    if (timePassageNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.timePassageNeed",
+        message: "time_passage requires timePassageNeed with explicit elapsedMinutes.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "time_passage must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "time_passage must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "time_passage must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "time_passage must not include minorPoiNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "time_passage must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "time_passage must not include deviceObservationNeed.",
       });
     }
     return issues;
@@ -1034,6 +1107,8 @@ export function buildGmReadSystemPrompt(): string {
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
     "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, or where it leads, including wording like without moving / do not go yet.",
     "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, or otherwise change current scene/location.",
+    "Use time_passage only when the player waits, rests, pauses, watches, stands by, or otherwise lets time pass in the current scene without movement or another state change. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
+    "For time_passage, copy an explicit requested duration exactly into timePassageNeed.elapsedMinutes when the action gives minutes. For vague brief waits such as a few minutes, set elapsedMinutes=5 and requestedDurationText to the vague duration phrase.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
@@ -1066,6 +1141,7 @@ export function buildGmReadSystemPrompt(): string {
     "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For item_transfer or compound itemTransferNeed, itemTransferNeed.itemRef, targetRef, and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "For minor_poi_create or compound minorPoiNeed, minorPoiNeed.anchorRef and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
+    "For time_passage, timePassageNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "For localObservationNeed, evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For deviceObservationNeed, deviceRef and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",

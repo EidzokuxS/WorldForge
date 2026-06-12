@@ -371,6 +371,12 @@ export const cleanDeviceSurfaceObservationResultKindSchema = z.enum([
   "no_requested_surface",
 ]);
 
+export const cleanTimeAdvanceReasonKindSchema = z.enum([
+  "brief_local_action",
+  "wait",
+  "short_rest",
+]);
+
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
   playerIntent: shortText,
@@ -426,6 +432,13 @@ export const gmReadActionInterpretationSchema = z.object({
     placeLabel: shortText,
     placeKind: cleanMinorPoiKindSchema,
     anchorRef: modelSafeRef,
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  timePassageNeed: z.object({
+    actorRef: z.literal("Player"),
+    elapsedMinutes: z.number().int().min(1).max(60),
+    reasonKind: cleanTimeAdvanceReasonKindSchema,
+    requestedDurationText: shortText,
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
   localObservationNeed: z.object({
@@ -801,6 +814,13 @@ export const gmActionChecklistStepSchema = z.object({
       anchorRef: modelSafeRef,
       reusePolicy: z.literal("reuse_matching_current_scene_place_handle_or_create"),
     }).strict().nullable().optional(),
+    timeAdvancePlan: z.object({
+      actorRef: z.literal("Player"),
+      sceneRef: modelSafeRef,
+      elapsedMinutes: z.number().int().min(1).max(60),
+      reasonKind: cleanTimeAdvanceReasonKindSchema,
+      requestedDurationText: shortText,
+    }).strict().nullable().optional(),
     localObservationPlan: z.object({
       actorRef: z.literal("Player"),
       mode: cleanLocalObservationModeSchema,
@@ -830,7 +850,22 @@ export const gmActionChecklistStepSchema = z.object({
     summary: shortText,
     visibleRefs: z.array(modelSafeRef).min(1).max(8),
   }).strict(),
-}).strict();
+}).strict().superRefine((step, ctx) => {
+  if (step.intended.kind === "time_advance" && !step.intended.timeAdvancePlan) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "timeAdvancePlan"],
+      message: "time_advance checklist steps require a typed timeAdvancePlan.",
+    });
+  }
+  if (step.intended.kind !== "time_advance" && step.intended.timeAdvancePlan != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "timeAdvancePlan"],
+      message: "timeAdvancePlan is allowed only for time_advance checklist steps.",
+    });
+  }
+});
 
 export const gmActionChecklistSchema = z.object({
   version: z.literal("gm-action-checklist.v1"),

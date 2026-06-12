@@ -1272,6 +1272,58 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
+  it("requires time_passage to carry a typed elapsed-minute need before checklist planning", () => {
+    const frame = minimalFrame({
+      playerAction: "I wait here for 3 minutes.",
+      citableRefs: ["Player", "Market"],
+    });
+    const missingNeed = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player waits in place.",
+          playerIntent: "Wait here for 3 minutes.",
+          method: "wait",
+          targetRefs: ["Market"],
+          interactionKind: "time_passage",
+        },
+      },
+    });
+    expect(missingNeed.status).toBe("rejected");
+    if (missingNeed.status !== "rejected") throw new Error("expected rejected");
+    expect(missingNeed.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.timePassageNeed",
+      }),
+    ]));
+
+    const accepted = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player waits in place.",
+          playerIntent: "Wait here for 3 minutes.",
+          method: "wait",
+          targetRefs: ["Market"],
+          interactionKind: "time_passage",
+          timePassageNeed: {
+            actorRef: "Player",
+            elapsedMinutes: 3,
+            reasonKind: "wait",
+            requestedDurationText: "3 minutes",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+      },
+    });
+    expect(accepted.status).toBe("accepted");
+  });
+
   it.each([
     ["hand", "I hand the Brass Tube to Guide."],
     ["give", "I give the Brass Tube to Guide."],
@@ -2738,6 +2790,13 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         method: null,
         targetRefs: ["Market"],
         interactionKind: "time_passage",
+        timePassageNeed: {
+          actorRef: "Player",
+          elapsedMinutes: 10,
+          reasonKind: "wait",
+          requestedDurationText: "ten minutes",
+          evidenceRefs: ["Player", "Market"],
+        },
       },
     };
     const judgment: JudgeUncertainty = {
@@ -2769,6 +2828,13 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "time_advance",
         requiredCapabilityId: "time_advance",
         stateOrEvidence: "state",
+        timeAdvancePlan: {
+          actorRef: "Player",
+          sceneRef: "Market",
+          elapsedMinutes: 10,
+          reasonKind: "wait",
+          requestedDurationText: "ten minutes",
+        },
       },
       disposition: {
         kind: "stage4_backend_resolution_required",

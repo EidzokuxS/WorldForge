@@ -842,6 +842,7 @@ function stepFor(input: {
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   minorPoiPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["minorPoiPlan"]>;
+  timeAdvancePlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["timeAdvancePlan"]>;
   localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
   deviceObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>;
   purpose?: string;
@@ -873,6 +874,9 @@ function stepFor(input: {
   }
   if (input.minorPoiPlan) {
     intended.minorPoiPlan = input.minorPoiPlan;
+  }
+  if (input.timeAdvancePlan) {
+    intended.timeAdvancePlan = input.timeAdvancePlan;
   }
   if (input.localObservationPlan) {
     intended.localObservationPlan = input.localObservationPlan;
@@ -953,6 +957,7 @@ export function buildDeterministicGmActionChecklist(input: {
   const localConditionNeed = input.gmRead.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = input.gmRead.actionInterpretation.itemTransferNeed ?? null;
   const minorPoiNeed = input.gmRead.actionInterpretation.minorPoiNeed ?? null;
+  const timePassageNeed = input.gmRead.actionInterpretation.timePassageNeed ?? null;
   const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     ? input.gmRead.actionInterpretation.localObservationNeed ?? null
     : null;
@@ -1189,14 +1194,32 @@ export function buildDeterministicGmActionChecklist(input: {
     && allowed.has("time_advance")
     && sceneRef
     && input.gmRead.actionInterpretation.interactionKind === "time_passage"
+    && timePassageNeed
     && wantsExplicitWait(actionText)
   ) {
+    const timeEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...timePassageNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
     steps.push(stepFor({
       index: 1,
       kind: "time_advance",
       actorRef,
       targetRefs: [sceneRef],
-      evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
+      evidenceRefs: timeEvidenceRefs,
+      timeAdvancePlan: {
+        actorRef: "Player",
+        sceneRef,
+        elapsedMinutes: timePassageNeed.elapsedMinutes,
+        reasonKind: timePassageNeed.reasonKind,
+        requestedDurationText: timePassageNeed.requestedDurationText,
+      },
+      purpose: `Plan Player time passage for ${timePassageNeed.requestedDurationText}.`,
+      intendedSummary: `Stage 4 must advance only the world clock by ${timePassageNeed.elapsedMinutes} minute(s) before narration may claim elapsed time. This does not authorize movement, scene changes, item state, dialogue, NPC reactions, world facts, absence, or no-change.`,
+      expectedVisibleSummary: `If accepted, only ${timePassageNeed.elapsedMinutes} minute(s) of elapsed time may be visible.`,
     }));
   } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
     const dialogueStepInput: Parameters<typeof stepFor>[0] = {

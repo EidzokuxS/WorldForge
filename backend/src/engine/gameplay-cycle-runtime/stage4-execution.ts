@@ -511,12 +511,16 @@ function requestEffectForStep(input: {
     };
   }
   if (input.capabilityId === "time_advance") {
+    const plan = input.step.intended.timeAdvancePlan;
+    if (!plan) {
+      throw new Error("time_advance Stage4 request requires checklist intended.timeAdvancePlan.");
+    }
     return {
       kind: "time_advance",
       actorRef: "Player",
-      sceneRef: input.frame.scene.currentScene.ref,
-      elapsedMinutes: 5,
-      reasonKind: "wait",
+      sceneRef: plan.sceneRef,
+      elapsedMinutes: plan.elapsedMinutes,
+      reasonKind: plan.reasonKind,
       evidenceRefs: input.step.evidenceRefs,
     };
   }
