@@ -2982,11 +2982,71 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     const prompt = buildJudgeUncertaintySystemPrompt();
 
     expect(prompt).toContain("admission layer");
+    expect(prompt).toContain("Accepted GM Read is the typed player-intent");
     expect(prompt).toContain("must not narrate");
     expect(prompt).toContain("mutate state");
     expect(prompt).toContain("roll dice");
     expect(prompt).toContain("gm-read uncertain is a signal");
     expect(prompt).toContain("backend-owned consequences");
+  });
+
+  it("builds Judge/Uncertainty prompts from accepted GM Read without raw player action", async () => {
+    const rawMarker = "RAW_JUDGE_MARKER_NEVER_PROMPT";
+    const frame = minimalFrame({ playerAction: `I ask while saying ${rawMarker}.` });
+    const gmRead = validGmRead(frame);
+    const prompts: string[] = [];
+
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async (request) => {
+        prompts.push(request.prompt);
+        return validJudgeUncertainty(frame, gmRead);
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Accepted GM Read");
+    expect(prompts[0]).toContain(gmRead.actionInterpretation.playerIntent);
+    expect(prompts[0]).not.toContain(rawMarker);
+    expect(prompts[0]).not.toContain('"playerAction"');
+  });
+
+  it("keeps Judge/Uncertainty repair prompts on accepted GM Read instead of raw player action", async () => {
+    const rawMarker = "RAW_JUDGE_REPAIR_MARKER_NEVER_PROMPT";
+    const frame = minimalFrame({ playerAction: `I ask while saying ${rawMarker}.` });
+    const gmRead = validGmRead(frame);
+    const prompts: string[] = [];
+    let callCount = 0;
+
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async (request) => {
+        prompts.push(request.prompt);
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            ...validJudgeUncertainty(frame, gmRead),
+            toolInput: { effect: "smuggled" },
+          };
+        }
+        return validJudgeUncertainty(frame, gmRead);
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(true);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("Accepted GM Read");
+    expect(prompts[1]).toContain(gmRead.actionInterpretation.playerIntent);
+    for (const prompt of prompts) {
+      expect(prompt).not.toContain(rawMarker);
+      expect(prompt).not.toContain('"playerAction"');
+    }
   });
 
   it("repairs once locally, then accepts only a validated Judge/Uncertainty packet", async () => {

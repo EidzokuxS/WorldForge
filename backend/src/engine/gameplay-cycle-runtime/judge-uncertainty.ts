@@ -630,7 +630,6 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     campaignId: frame.campaignId,
     turnId: frame.turnId,
     base: frame.base,
-    playerAction: frame.playerAction,
     player: frame.player,
     scene: frame.scene,
     actors: frame.actors,
@@ -668,6 +667,7 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "Return only a JSON object matching judge-uncertainty.v1.",
     "This layer decides physical possibility, check need, difficulty, stakes, and optional Oracle admission only.",
     "It must not narrate, mutate state, call tools, create checklist steps, emit receipts, roll dice, calculate chance, or choose an Oracle result.",
+    "Accepted GM Read is the typed player-intent and interaction contract for this layer. Use it with SceneFrame capabilities and refs to choose admission.",
     "GM Read is interpretation context only. gm-read uncertain is a signal, not permission to roll.",
     "Use nextStep=oracle_roll only for true visible uncertainty that needs a random outcome before downstream consequences.",
     "Use nextStep=action_plan for backend-owned consequences; do not include effect kinds, tool names, checklist steps, or payloads.",
@@ -696,7 +696,7 @@ export function buildJudgeUncertaintyPrompt(input: {
   gmRead: GmRead;
 }): string {
   return [
-    "Judge the player action against this authoritative SceneFrame and accepted GM Read.",
+    "Judge the accepted GM Read against this authoritative SceneFrame.",
     "Return judge-uncertainty.v1 JSON. Do not add extra fields.",
     "Authoritative SceneFrame:",
     JSON.stringify(promptFrame(input.frame), null, 2),

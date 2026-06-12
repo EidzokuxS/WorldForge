@@ -46,6 +46,12 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Stage4 support actor prompts now include a `Support actor task card` and a SceneFrame snapshot without raw `playerAction`; request validation requires model-authored `roleKind` and `anchorRef` to match `supportActorPlan`.
   - [x] Regression tests capture real request/repair generator prompts through `runCleanStage4Execution` and prove the raw player action marker is absent while the typed plan is present.
   - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 272 passed.
+- P158 Judge typed-admission prompt contract:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/judge-uncertainty.ts`: Judge prompt still exposed raw `frame.playerAction` inside its SceneFrame, although GM Read owns player-intent interpretation before Judge.
+  - [x] Judge prompt now describes accepted GM Read as the typed player-intent and interaction contract, and the model task is to judge accepted GM Read against SceneFrame capabilities/refs.
+  - [x] Judge prompt/repair prompt SceneFrame no longer includes raw `playerAction`; regression tests capture real `runCleanJudgeUncertainty` request and repair prompts and prove raw action markers are absent while accepted GM Read remains present.
+  - [x] GitNexus detect_changes reported LOW risk: changed `buildJudgeUncertaintySystemPrompt` and `buildJudgeUncertaintyPrompt`, affected processes 0.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 274 passed.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.
