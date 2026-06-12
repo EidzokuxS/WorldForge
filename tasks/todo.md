@@ -8,6 +8,24 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P119 clean Shibuya diagnostic burn-in continuation:
+- Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `89f4262e`.
+- Continued existing clean proof clone `p118-clean-device-surface-no-leak-181129` one action at a time after inspecting actual DB state: current scene `Shibuya District`, clock `worldVersion=0/worldTimeMinutes=0/currentTick=0`, `clean_gameplay_turn_records=2`, `clean_gameplay_stage4_receipts=1`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Backend was started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; proof server stopped after verification.
+- Turn 3:
+  - Artifact: `output/clean-runtime-p119-shibuya-burnin-turn3-20260612181900/`.
+  - Action: `I walk to Shibuya Pedestrian Underpass.`
+  - Result: `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> state_update -> settled-turn-packet -> narrative -> finalizing_turn -> done`.
+  - Accepted exactly one `movement` receipt; player scene became `Shibuya Pedestrian Underpass`; authority trace `gameplay-cycle-runtime.player.move.v1`; one travel ledger row; clock advanced `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0 -> 1`; old v2/saga/narrator/oracle/simulation stores stayed 0.
+  - Player-facing text: `You arrive at Shibuya Pedestrian Underpass after 1 minute of travel.`
+- Turn 4:
+  - Artifact: `output/clean-runtime-p119-shibuya-burnin-turn4-20260612181930/`.
+  - Action: `I stay in Shibuya Pedestrian Underpass and look around, taking stock of visible people, items, and routes.`
+  - Result: clean direct scene snapshot after movement; no Stage4 receipt; no new trace/ledger; clock stayed `worldVersion=1/worldTimeMinutes=1/currentTick=1`; old stores stayed 0.
+  - Player-facing text exposed current scene/place, carried inventory, visible target `Shibuya District`, and route option back to `Shibuya District`.
+- Status impact:
+  - P119 adds two mechanically and player-facing clean diagnostic turns to the P118 Shibuya lane. This is still diagnostic evidence only and adds 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P117/P118 clean device-surface player-facing no-result wording:
 - Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean/synced before continuing; GitNexus context/impact before editing `deviceSurfaceObservationResult`, `stage4Evidence`, and `buildCleanNarrationSystemPrompt` reported LOW risk.
 - P117 fresh diagnostic lane `p117-shibuya-acceptance-a-175504` reached turn 1 cleanly, then turn 2 action `I check the Burner phone screen for any visible notifications or calls, without moving.` accepted one `device_surface_observation` no-result receipt but printed backend wording to the player: `frame/worldVersion` plus raw facet ids `notification_indicator`, `call_indicator`, and `screen_state`. P117 is diagnostic-invalid from turn 2.
