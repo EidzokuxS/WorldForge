@@ -1478,7 +1478,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
   });
 
   it("normalizes operation-owned item_transfer source and target kind drift before validation", () => {
-    const frame = itemTransferActionPlanFrame({
+    const unequipFrame = itemTransferActionPlanFrame({
       playerAction: "I unfasten the Brass Tube from my shoulder and carry it in one hand.",
       inventory: [{
         ref: "Brass Tube",
@@ -1487,8 +1487,8 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         tags: [],
       }],
     });
-    const candidate: GmRead = {
-      ...validGmRead(frame),
+    const unequipCandidate: GmRead = {
+      ...validGmRead(unequipFrame),
       path: "procedural",
       situationSummary: "The player is changing an equipped inventory item's equip state.",
       liveSceneQuestion: "Which bounded item equip-state transition must Stage 4 settle?",
@@ -1514,20 +1514,21 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       },
       interpretationRationale: "Removing an equipped item from its worn slot changes item equip state.",
     };
-    const nearMiss = {
-      ...candidate,
+    const unequipNearMiss = {
+      ...unequipCandidate,
       actionInterpretation: {
-        ...candidate.actionInterpretation,
+        ...unequipCandidate.actionInterpretation,
         itemTransferNeed: {
-          ...candidate.actionInterpretation.itemTransferNeed!,
+          ...unequipCandidate.actionInterpretation.itemTransferNeed!,
           sourceKind: "player_equipment",
+          targetKind: "Player",
         },
       },
     };
 
-    expect(gmReadModelGenerationSchema.safeParse(nearMiss).success).toBe(true);
-    expect(gmReadSchema.safeParse(nearMiss).success).toBe(false);
-    const result = validateGmReadCandidate({ frame, candidate: nearMiss });
+    expect(gmReadModelGenerationSchema.safeParse(unequipNearMiss).success).toBe(true);
+    expect(gmReadSchema.safeParse(unequipNearMiss).success).toBe(false);
+    const result = validateGmReadCandidate({ frame: unequipFrame, candidate: unequipNearMiss });
 
     expect(result.status).toBe("accepted");
     if (result.status !== "accepted") throw new Error("expected accepted");
@@ -1536,6 +1537,66 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       sourceKind: "player_inventory",
       targetKind: "player_inventory",
       equipSlot: null,
+    });
+
+    const equipFrame = itemTransferActionPlanFrame({
+      playerAction: "I sling the Brass Tube back onto my shoulder.",
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+    });
+    const equipCandidate: GmRead = {
+      ...validGmRead(equipFrame),
+      path: "procedural",
+      situationSummary: "The player is changing a carried inventory item's equip state.",
+      liveSceneQuestion: "Which bounded item equip-state transition must Stage 4 settle?",
+      focalRefs: ["Player", "Brass Tube"],
+      evidenceRefs: ["Player", "Brass Tube", "Market"],
+      actionInterpretation: {
+        summary: "The player equips Brass Tube onto their shoulder.",
+        playerIntent: "Equip Brass Tube.",
+        method: "sling onto shoulder",
+        targetRefs: ["Brass Tube", "Player"],
+        interactionKind: "item_transfer",
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "equip_inventory_item",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          targetKind: "player_equipment",
+          targetRef: "Player",
+          equipSlot: "equipped",
+          requestedItemText: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+        },
+      },
+      interpretationRationale: "Moving a carried item onto the body changes equip state.",
+    };
+    const equipNearMiss = {
+      ...equipCandidate,
+      actionInterpretation: {
+        ...equipCandidate.actionInterpretation,
+        itemTransferNeed: {
+          ...equipCandidate.actionInterpretation.itemTransferNeed!,
+          targetKind: "Player",
+        },
+      },
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(equipNearMiss).success).toBe(true);
+    expect(gmReadSchema.safeParse(equipNearMiss).success).toBe(false);
+    const equipResult = validateGmReadCandidate({ frame: equipFrame, candidate: equipNearMiss });
+
+    expect(equipResult.status).toBe("accepted");
+    if (equipResult.status !== "accepted") throw new Error("expected accepted");
+    expect(equipResult.read.actionInterpretation.itemTransferNeed).toMatchObject({
+      operation: "equip_inventory_item",
+      sourceKind: "player_inventory",
+      targetKind: "player_equipment",
+      equipSlot: "equipped",
     });
   });
 

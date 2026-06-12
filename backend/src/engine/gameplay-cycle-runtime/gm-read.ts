@@ -67,15 +67,6 @@ type CleanItemTransferOperation = z.infer<typeof cleanItemTransferOperationSchem
 type CleanItemTransferSourceKind = z.infer<typeof cleanItemTransferSourceKindSchema>;
 type CleanItemTransferTargetKind = z.infer<typeof cleanItemTransferTargetKindSchema>;
 
-const gmReadGenerationItemTransferSourceKindSchema = z.union([
-  cleanItemTransferSourceKindSchema,
-  cleanItemTransferTargetKindSchema,
-]);
-const gmReadGenerationItemTransferTargetKindSchema = z.union([
-  cleanItemTransferTargetKindSchema,
-  cleanItemTransferSourceKindSchema,
-]);
-
 const ITEM_TRANSFER_OPERATION_SHAPE: Record<CleanItemTransferOperation, {
   sourceKind: CleanItemTransferSourceKind;
   targetKind: CleanItemTransferTargetKind;
@@ -92,8 +83,8 @@ const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
   operation: cleanItemTransferOperationSchema,
   itemRef: gmReadGenerationModelSafeRef,
-  sourceKind: gmReadGenerationItemTransferSourceKindSchema,
-  targetKind: gmReadGenerationItemTransferTargetKindSchema,
+  sourceKind: gmReadGenerationModelSafeRef,
+  targetKind: gmReadGenerationModelSafeRef,
   targetRef: gmReadGenerationModelSafeRef,
   equipSlot: z.enum(["equipped", "carried"]).nullable(),
   requestedItemText: gmReadGenerationShortText,

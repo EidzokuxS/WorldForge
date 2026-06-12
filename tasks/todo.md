@@ -47,6 +47,23 @@ P107/P108 GM Read item_transfer enum-drift checkpoint:
   - P108 turn 2 accepted one `item_transfer` receipt with operation `unequip_inventory_item`; `Courier satchel` became `equipState=carried`; `worldVersion` advanced `0 -> 1`; `worldTimeMinutes/currentTick` stayed `0`; no turn clock ledger row; old v2/saga/narrator/oracle/simulation stores stayed 0.
 - Status: enum-drift GM Read fallout fixed and live-proven. Final acceptance remains 0%.
 
+P108/P109 GM Read item_transfer free-string targetKind checkpoint:
+- Continuing P108 after the prior fix exposed a second neighboring failure. P108 turn 3 action `I sling the Courier satchel back onto my shoulder.` failed before GM Read validation because `gmReadModelGenerationSchema` still rejected a model-authored `itemTransferNeed.targetKind` value outside the enum domain. Runtime again fell back to a clarification-style scene snapshot; `Courier satchel` stayed `carried`. P108 is diagnostic-invalid from turn 3.
+- Root cause: `sourceKind` and `targetKind` are fully operation-owned for `item_transfer`, so the model-generation schema should not be the contract owner for their final enum values. Strict final validation should canonicalize them from `operation`, while `equipSlot` remains a semantic field that can still reject wrong values.
+- Fix:
+  - `gmReadModelGenerationSchema` now accepts short strings for `itemTransferNeed.sourceKind` and `targetKind`.
+  - `normalizeGmReadCandidateForValidation` still canonicalizes both fields from `itemTransferNeed.operation` before strict `gmReadSchema` validation.
+  - Contract test now covers both unequip source/target drift and equip targetKind drift.
+- Verification:
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` passed: 175 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 252 tests.
+  - Fresh live proof clone `p109-equip-after-observation-0b5231f4`, artifacts `output/clean-runtime-p109-equip-after-observation-turn1-20260612162017/`, `output/clean-runtime-p109-equip-after-observation-turn2-20260612162047/`, and `output/clean-runtime-p109-equip-after-observation-turn3-20260612162114/`.
+  - P109 turn 1 accepted empty visible-roster `local_observation`.
+  - P109 turn 2 accepted `item_transfer` `unequip_inventory_item`; `Courier satchel` became `carried`; `worldVersion 0 -> 1`; time/tick stayed 0.
+  - P109 turn 3 accepted `item_transfer` `equip_inventory_item`; `Courier satchel` became `equipped`; `worldVersion 1 -> 2`; time/tick stayed 0; old v2/saga/narrator/oracle/simulation stores stayed 0.
+- Status: operation-owned item_transfer shape normalization is fixed through equip-after-observation live proof. Final acceptance remains 0%.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.
