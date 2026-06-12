@@ -1846,6 +1846,57 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
     expect(positive.execution?.visibleResults[0]?.localObservation?.resultKind).toBe("positive_match");
+    expect(positive.execution?.receipts[0]?.publicResult.summary).toBe(
+      "Current SceneFrame observation surface exposes visible_actor: Guide.",
+    );
+
+    const placeHandleFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-place-handle",
+      turnId: "clean-turn-stage4-local-observation-place-handle",
+      playerAction: "I examine the central telegraph desk for visible marks or moving parts.",
+      targets: [
+        ...inputFrame.targets,
+        { ref: "central_telegraph_desk", label: "central telegraph desk", kind: "place_handle" },
+      ],
+      citableRefs: [...inputFrame.citableRefs, "central_telegraph_desk"],
+    };
+    const placeHandleChecklist = checklistForKind("local_observation", placeHandleFrame);
+    placeHandleChecklist.steps[0] = {
+      ...placeHandleChecklist.steps[0]!,
+      targetRefs: ["central_telegraph_desk", "Market"],
+      evidenceRefs: ["Player", "Market", "central_telegraph_desk"],
+      intended: {
+        ...placeHandleChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "visible marks or moving parts on the central telegraph desk",
+          targetRef: "central_telegraph_desk",
+          surfaceKinds: ["visible_target"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const placeHandle = await runCleanStage4Execution({
+      frame: placeHandleFrame,
+      checklist: placeHandleChecklist,
+    });
+    expect(placeHandle.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.",
+        localObservation: {
+          resultKind: "positive_match",
+          queryText: "visible marks or moving parts on the central telegraph desk",
+          targetLabel: "central telegraph desk",
+          matchedEntries: [expect.objectContaining({ surfaceKind: "visible_target", label: "central telegraph desk" })],
+        },
+      },
+    });
+    expect(placeHandle.execution?.receipts[0]?.publicResult.summary).not.toMatch(/visible marks|moving parts/iu);
 
     const noMatchFrame: AuthoritativeSceneFrame = {
       ...inputFrame,

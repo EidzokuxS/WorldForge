@@ -2613,10 +2613,14 @@ function localObservationSummary(input: {
       ? `Current SceneFrame observation surface exposes: ${labels}.`
       : `No entries are exposed by the requested current SceneFrame observation surfaces.`;
   }
+  const matchedSurfaceLabels = input.matchedEntries
+    .map((entry) => `${entry.surfaceKind}: ${entry.label}`)
+    .slice(0, 6)
+    .join(", ");
   if (input.resultKind === "ambiguous_match") {
-    return `Current SceneFrame observation surface has multiple exposed matches for "${input.effect.queryText}": ${labels}.`;
+    return `Current SceneFrame observation surface has multiple exposed matches: ${matchedSurfaceLabels}.`;
   }
-  return `Current SceneFrame observation surface exposes ${labels} for "${input.effect.queryText}".`;
+  return `Current SceneFrame observation surface exposes ${matchedSurfaceLabels}.`;
 }
 
 function localObservationResult(input: {

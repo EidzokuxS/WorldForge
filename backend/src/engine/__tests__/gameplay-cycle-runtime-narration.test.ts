@@ -414,6 +414,43 @@ function localObservationView(): CleanNarratorView {
   });
 }
 
+function positiveLocalObservationView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I examine the central telegraph desk for visible marks or moving parts.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "local_observation_receipt",
+      claimKinds: ["local_observation", "visible_target"],
+      text: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.", exact: true },
+        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible_target.", exact: true },
+        { factRef: "e1.f3", text: "Observed visible_target: central telegraph desk.", exact: true },
+      ],
+      limits: {
+        proves: ["matching exposed current SceneFrame observation surface entries"],
+        doesNotProve: [
+          "hidden discovery",
+          "concealed or thorough search result",
+          "private facts",
+          "broad absence",
+          "offscreen facts",
+          "future non-discoverability",
+          "item use or effects",
+          "item state change",
+          "phone or device status",
+          "route truth beyond route option/check receipts",
+          "location reveal",
+          "world fact",
+          "dialogue content",
+          "mutation",
+          "no-change",
+        ],
+      },
+    }],
+  });
+}
+
 function deviceSurfaceObservationView(): CleanNarratorView {
   return movementView({
     playerAction: "I check whether the Burner phone has a message.",
@@ -914,6 +951,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.status).toBe("rejected");
     if (unsupported.status !== "rejected") throw new Error("expected rejected");
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("deterministically projects positive local_observation without copying request details", async () => {
+    const result = await runCleanNarration({
+      narratorView: positiveLocalObservationView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("local_observation should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe(
+      "Current SceneFrame observation surface exposes visible_target: central telegraph desk. Searched current SceneFrame surfaces: visible_target. Observed visible_target: central telegraph desk.",
+    );
+    expect(result.text).not.toMatch(/visible marks|moving parts|touch|move/iu);
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {

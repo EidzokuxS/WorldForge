@@ -308,6 +308,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("minor_poi_handle")
+    || evidence.claimKinds.includes("local_observation")
     || evidence.authority === "route_options_receipt"
     || (
       onlySceneFrameSnapshotEvidence

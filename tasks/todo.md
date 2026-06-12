@@ -3481,3 +3481,38 @@ Session: `gm-v1-consequenc-slice`.
     - Live `/api/chat/action` proof passed with strict DB delta assertions for receipt, authority trace, minor POI row, clock, old stores, and post-frame target/citable refs.
   - Status impact:
     - P77 is diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P78 clean gameplay runtime Continued Burn-in / Place-Handle Observation:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P77.
+    - [x] Re-inspect the actual current DB/frame after the P77 place-handle creation.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send exactly one manually chosen `/api/chat/action` that uses the newly created `central_telegraph_desk` handle as the visible local target.
+    - [x] Verify the turn does not move the Player or advance time/tick, does not use old runtime stores, and produces player-facing narration grounded in accepted evidence for the requested local observation.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record diagnostic evidence and acceptance impact.
+  - Purpose:
+    - Prove or expose the next gap in the P72 contract: a place handle created in one turn must be usable as a future visible local target in a later turn, especially for a safe observation that should not create movement, route truth, world facts, or item/device state.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic failure:
+    - Continued P77 clone `p76-route-anchor-r2-093008` first P78 action accepted one `local_observation` receipt and kept state clean, but player-facing narration overstated the receipt: `Observing the central telegraph desk exposes visible marks or moving parts on the central telegraph desk.`
+    - Root cause: positive `local_observation` receipt summary copied the player query into accepted backendFacts (`exposes X for "query"`), so Stage 6 could treat request details as settled result content.
+    - Artifact: `output/clean-runtime-p78-place-handle-observation-20260612094458/turn7/summary.json`.
+  - Fix:
+    - Changed positive/ambiguous `local_observation` summaries to expose only matched current SceneFrame surface entries (`surfaceKind: label`), leaving the query as private/request context inside the receipt result rather than accepted fact text.
+    - Added deterministic Stage 6 projection for `local_observation` evidence, matching existing bounded authority projections for receipt-owned state/evidence primitives.
+    - Added regression coverage for a place-handle observation query containing unsupported detail words (`visible marks` / `moving parts`).
+  - Executed verification:
+    - `npm --prefix backend run typecheck` passed.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 51 tests.
+    - Requested focused suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 234 tests.
+  - Live proof after fix:
+    - Fresh clean-start clone `p78-place-handle-r2-065526` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`; precheck: chat 0, clean runtime stores 0, old v2/saga/narrator/simulation stores 0, authority traces 0, ledger 0, clock `0/0/0`, scene `Lowwater Bazaar`.
+    - Turn 1 moved to `Silt Warrens`: one accepted `movement`, authority trace, ledger, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Turn 2 moved to `Transmission Basement`: one accepted `movement`, authority trace, ledger, clock `1/1/1 -> 2/2/2`, old stores 0.
+    - Turn 3 created `central_telegraph_desk`: one accepted `minor_poi_create`, one active `clean_gameplay_minor_pois` row, authority trace `gameplay-cycle-runtime.minor_poi_create.v1`, clock `2/2/2 -> 3/2/2`, no new ledger, old stores 0.
+    - Turn 4 action `I examine the central telegraph desk from a safe distance, looking for visible marks or moving parts, without touching it or moving.` accepted one `local_observation` receipt; clock stayed `3/2/2`, no new authority trace, no ledger, old stores 0, Player stayed in `Transmission Basement`.
+    - Turn 4 receipt summary/narration were bounded to the handle surface: `Current SceneFrame observation surface exposes visible_target: central telegraph desk. Searched current SceneFrame surfaces: visible_target. Observed visible_target: central telegraph desk.`
+    - Artifacts are under `output/clean-runtime-p78-place-handle-observation-r2-20260612095334/`.
+  - Status impact:
+    - P78 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
