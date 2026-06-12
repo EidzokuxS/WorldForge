@@ -1278,6 +1278,7 @@ export function buildGmReadSystemPrompt(): string {
     "If the player unfastens, takes off, removes, unslings, or otherwise moves an equipped inventory item out of its worn/equipped slot, use item_transfer with operation=unequip_inventory_item even when the action also says the Player will hold, carry, or grip the item afterward.",
     "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
     "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
+    "Spoken confirmation after transfer, such as \"Do you have it now?\", is visible_actor_dialogue with itemTransferNeed; playerIntent names the requested spoken confirmation.",
     "Use minor_poi_create only for one ordinary public visible current-scene place handle named or pointed out by the player: a stall, counter, bench, landmark, signage, cover, doorway, alcove, workstation, notice_board, or other_place. It creates/reuses only a SceneFrame target handle, not a location or route.",
     "minorPoiNeed.placeLabel is the visible handle label the player is establishing. minorPoiNeed.anchorRef must be the current scene/location ref from SceneFrame.citableRefs. placeKind must be allowed by SceneFrame.currentScenePlaceHandleSurface.allowedPlaceKinds.",
     "minor_poi_create does not authorize actors, services, inventory, business facts, readable sign text, hidden discovery, search result, absence, no-change, world fact, location reveal, movement option, legal destination, route truth, or dialogue content.",
@@ -1310,9 +1311,31 @@ export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
   const itemTransferCue = firstInventoryItem && firstVisibleActor
     ? [
       "Current-frame item_transfer cue:",
-      "When the player hands, gives, passes, offers, or transfers a SceneFrame.inventory item to a SceneFrame.actors visible non-player actor, choose interactionKind=item_transfer unless the same action asks for spoken response content.",
-      "Use path=procedural, targetRefs=[itemRef,targetRef], and fill itemTransferNeed with operation=give_to_visible_actor, sourceKind=player_inventory, targetKind=visible_actor, equipSlot=null.",
-      "For this frame, a valid handoff example shape is:",
+      "When the player hands, gives, passes, offers, or transfers a SceneFrame.inventory item to a SceneFrame.actors visible non-player actor and also asks, tells, says, or requests spoken confirmation, choose interactionKind=visible_actor_dialogue.",
+      "For compound transfer plus speech, use path=procedural, targetRefs=[speakerRef], and fill itemTransferNeed with operation=give_to_visible_actor, sourceKind=player_inventory, targetKind=visible_actor, equipSlot=null.",
+      "Verification wording such as \"Do you have it now?\" counts as spoken confirmation.",
+      "For this frame, a valid compound handoff plus confirmation example shape is:",
+      JSON.stringify({
+        path: "procedural",
+        actionInterpretation: {
+          interactionKind: "visible_actor_dialogue",
+          playerIntent: `Hand ${firstInventoryItem} to ${firstVisibleActor}, then ask for spoken confirmation.`,
+          targetRefs: [firstVisibleActor],
+          itemTransferNeed: {
+            actorRef: "Player",
+            operation: "give_to_visible_actor",
+            itemRef: firstInventoryItem,
+            sourceKind: "player_inventory",
+            targetKind: "visible_actor",
+            targetRef: firstVisibleActor,
+            equipSlot: null,
+            requestedItemText: firstInventoryItem,
+            evidenceRefs: ["Player", firstInventoryItem, firstVisibleActor, frame.scene.currentScene.ref],
+          },
+        },
+      }, null, 2),
+      "For a standalone physical handoff, choose interactionKind=item_transfer.",
+      "For this frame, a valid standalone handoff example shape is:",
       JSON.stringify({
         path: "procedural",
         actionInterpretation: {

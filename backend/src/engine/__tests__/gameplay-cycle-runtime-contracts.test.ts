@@ -2203,6 +2203,30 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("\"equipSlot\": null");
   });
 
+  it("exposes a current-frame cue for compound handoff plus spoken confirmation", () => {
+    const prompt = buildGmReadPrompt(minimalFrame({
+      playerAction: 'I hand the Brass Tube to Guide, then ask, "Do you have it now?"',
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    }));
+
+    expect(buildGmReadSystemPrompt()).toContain("Spoken confirmation after transfer");
+    expect(prompt).toContain("choose interactionKind=visible_actor_dialogue");
+    expect(prompt).toContain("valid compound handoff plus confirmation example shape");
+    expect(prompt).toContain("\"interactionKind\": \"visible_actor_dialogue\"");
+    expect(prompt).toContain("\"playerIntent\": \"Hand Brass Tube to Guide, then ask for spoken confirmation.\"");
+    expect(prompt).toContain("\"targetRefs\": [\n      \"Guide\"\n    ]");
+    expect(prompt).toContain("\"interactionKind\": \"item_transfer\"");
+    expect(prompt).toContain("\"itemRef\": \"Brass Tube\"");
+    expect(prompt).toContain("\"targetRef\": \"Guide\"");
+    expect(prompt).toContain("\"equipSlot\": null");
+  });
+
   it("repairs once locally, then accepts only a validated GM Read", async () => {
     const frame = minimalFrame();
     const calls: string[] = [];
@@ -2582,6 +2606,64 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
       noRollReason: {
         code: "backend_receipt_required",
         explanation: "Item transfer needs a clean item_transfer receipt before narration.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
+  });
+
+  it("requires compound visible dialogue plus item transfer to use backend action-plan admission", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: 'I hand the Brass Tube to Guide, then ask, "Do you have it now?"',
+    });
+    const gmRead: GmRead = {
+      ...itemTransferGmRead(frame),
+      liveSceneQuestion: "Which item state must settle before Guide can visibly answer?",
+      actionInterpretation: {
+        ...itemTransferGmRead(frame).actionInterpretation,
+        summary: "The player hands Brass Tube to Guide and asks for spoken confirmation.",
+        playerIntent: "Hand Brass Tube to Guide, then ask for spoken confirmation.",
+        method: "hand and ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+    };
+    const blockedUnsupported: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      physicalPossibility: "unsupported_by_runtime",
+      checkNeed: "blocked_unsupported",
+      nextStep: "block_no_mutation",
+      actorRefs: ["Player"],
+      targetRefs: ["Guide", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      possibilityRationale: "The candidate treated the supported compound primitive as unsupported.",
+      checkRationale: "The candidate blocked instead of admitting backend receipts.",
+      noRollReason: {
+        code: "unsupported_runtime_scope",
+        explanation: "The candidate treated compound transfer plus dialogue as unsupported.",
+        evidenceRefs: ["Player", "Guide", "Brass Tube"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: blockedUnsupported });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "branch_invalid",
+        path: "checkNeed",
+      }),
+    ]));
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      checkRationale: "Compound item transfer plus visible dialogue needs backend receipts with refreshed frame binding.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Stage 4 must settle item transfer before recording Guide's visible response.",
         evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
       },
     };

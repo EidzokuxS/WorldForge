@@ -6,6 +6,39 @@ Working branch/worktree: `codex/rebuild-gm-turn-cycle` in normal worktree `R:\Pr
 Canonical architecture source: `docs/gm-turn-architecture-review-2026-05-03.md`.
 Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem_fixes_latency_memory_v5.md`.
 
+## Current Session Focus 2026-06-13
+
+P155 primitive-owned clean runtime architecture pass:
+- Objective:
+  - Finish the clean gameplay-cycle runtime as a primitive-owned architecture. Every player turn flows through explicit ownership: player intent -> typed admission -> primitive checklist/request -> backend-owned receipt -> settlement evidence -> bounded narration projection.
+  - Give the model one concrete job inside the active primitive: choose an admissible interpretation, fill a narrow request, record a visible utterance, or phrase narration from accepted evidence.
+  - Keep state truth in backend receipts, dialogue truth in utterance receipts, player-facing truth in settlement evidence, and final prose in bounded narration projection.
+- Work plan:
+  - [x] Build a primitive ownership matrix for the clean runtime modules: GM Read, Judge, Oracle, Checklist, Stage4 request/execution, settlement, narration, turn persistence, and `/api/chat/action` boundary.
+  - [ ] For each current primitive, map the contract path: admission -> checklist/request -> receipt -> settlement claim/limits -> narration projection -> live proof evidence.
+  - [x] Mark any primitive step where rich prompt context still carries gameplay meaning that should live in a typed request, receipt field, settlement claim, or narration view.
+  - [ ] Promote the first concrete gap into code with GitNexus impact, focused contract tests, live proof, docs, detect_changes, commit/push, and post-commit `npx gitnexus analyze --embeddings`.
+  - [ ] Use P69/P153/P154 item-transfer plus dialogue as the first proof slice of the architecture: current item holder state comes from item receipts; dialogue records a speaker utterance; settlement composes accepted evidence; narration projects the accepted facts.
+  - [ ] After architecture gaps are closed, restart final acceptance on fresh post-repair zero-turn clones with manual-chosen turns.
+- P155 diagnostic evidence:
+  - [x] Fresh clone `p155-post-p154-acceptance-d-20260613` from `p69-item-transfer-045651` started at chat history 0, clock `0/0/0`, Player carrying `Brass Tube`, visible `Guide`, and old runtime stores at 0.
+  - [x] Manual-chosen action: `I hand the Brass Tube to Guide, then ask, "Do you have it now?"`
+  - [x] Runtime committed one accepted `item_transfer` receipt, owner became `Guide`, worldVersion advanced `0 -> 1`, world time/current tick stayed `0/0`, authority trace was `gameplay-cycle-runtime.item_transfer.v1`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+  - [x] Diagnostic conclusion: typed GM Read admission treated the compound action as a single item-transfer primitive, so Checklist received one primitive and Stage4 recorded one receipt. The clean fix is a GM Read compound-admission contract that maps handoff plus spoken confirmation to `visible_actor_dialogue` with `itemTransferNeed`, which then lets Checklist compile `item_transfer -> dialogue_record` with `item_transfer_state` refresh binding.
+  - [x] Repair slice: GitNexus impact for `buildGmReadSystemPrompt`, `buildGmReadPrompt`, and `validateGmReadCandidate` was LOW; `gm-read.ts` now exposes a current-frame compound handoff-plus-confirmation example; `gameplay-cycle-runtime-contracts.test.ts` guards that prompt contract.
+  - [x] Second diagnostic clone `p155-compound-transfer-dialogue-proof-20260613` proved GM Read reached the compound intent, then Judge admitted `block_no_mutation`; no Stage4 receipts were produced and the turn settled as a scene snapshot. Root contract gap: supported `visible_actor_dialogue` with present `dialogue_record` capability, plus compound `itemTransferNeed` with present `item_transfer`, must reach `backend_action_plan_needed`.
+  - [x] Judge repair slice: GitNexus impact for `branchIssues`, `validateJudgeUncertaintyCandidate`, and `buildJudgeUncertaintySystemPrompt` was LOW; Judge validation now rejects supported compound visible-dialogue as blocked/unsupported and prompts action-plan admission for both receipts.
+  - [x] Executed verification after repair: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 270 passed.
+  - [x] Live repair proof artifact: `output/clean-runtime-p155-compound-transfer-dialogue-proof-r2-20260613/`.
+  - [x] Fresh zero-turn clone `p155-compound-transfer-dialogue-proof-r2-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
+  - [x] Manual-chosen action: `I hand the Brass Tube to Guide, then ask, "Do you have it now?"`
+  - [x] Live result: `done.runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, chat history `0 -> 2`, one turn record, two accepted Stage4 receipts (`item_transfer`, `dialogue_record`), `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, no turn clock ledger row, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old stores all 0.
+  - [x] Player-facing text was multi-token and projected both accepted facts: `Brass Tube item state changed... Guide says: "I have it now."`
+- Acceptance constraints:
+  - Old `gameplay-cycle-v2` stays forensic-only.
+  - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.
+  - Banlists, semantic regexes, and prompt-policing proposals trigger a primitive contract audit.
+
 ## Current Session Focus 2026-06-12
 
 P154 dialogue task-card repair and P69 item-transfer live proof:
