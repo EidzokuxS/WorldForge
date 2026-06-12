@@ -174,6 +174,14 @@ const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
   "no-change",
 ];
 
+function localObservationSurfaceKindLabel(kind: string): string {
+  return kind.replace(/_/gu, " ");
+}
+
+function localObservationSurfaceEntryLabel(entry: { surfaceKind: string; label: string }): string {
+  return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
+}
+
 const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
   "hidden or private message contents",
   "true absence of messages, calls, or signal",
@@ -461,7 +469,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
       const matchFacts = observation.matchedEntries.slice(0, 6).map((entry, index) =>
-        fact(evidenceId, index + 3, `Observed ${entry.surfaceKind}: ${entry.label}.`)
+        fact(evidenceId, index + 3, `Observed ${localObservationSurfaceEntryLabel(entry)}.`)
       );
       evidence.push({
         evidenceId,
@@ -473,7 +481,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, observation.summary),
-          fact(evidenceId, 2, `Searched current SceneFrame surfaces: ${observation.searchedSurfaceKinds.join(", ")}.`),
+          fact(evidenceId, 2, `Searched current SceneFrame surfaces: ${observation.searchedSurfaceKinds.map(localObservationSurfaceKindLabel).join(", ")}.`),
           ...matchFacts,
         ],
         limits: {

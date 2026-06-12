@@ -2215,8 +2215,56 @@ describe("clean Stage 4 executor DB contracts", () => {
     });
     expect(positive.execution?.visibleResults[0]?.localObservation?.resultKind).toBe("positive_match");
     expect(positive.execution?.receipts[0]?.publicResult.summary).toBe(
-      "Current SceneFrame observation surface exposes visible_actor: Guide.",
+      "Current SceneFrame observation surface exposes visible actor Guide.",
     );
+
+    const listSurfaceFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-list-surface",
+      turnId: "clean-turn-stage4-local-observation-list-surface",
+      playerAction: "I look around for visible routes and current local targets.",
+      actors: [],
+      targets: [{ ref: "North Hall", label: "North Hall", kind: "location" }],
+      movementOptions: [{ ref: "North Hall", label: "North Hall", connected: true, travelCost: 3 }],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const listSurfaceChecklist = checklistForKind("local_observation", listSurfaceFrame);
+    listSurfaceChecklist.steps[0] = {
+      ...listSurfaceChecklist.steps[0]!,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market", "North Hall"],
+      intended: {
+        ...listSurfaceChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "visible routes and current local targets",
+          targetRef: null,
+          surfaceKinds: ["movement_option", "visible_target"],
+          allowBoundedNegative: false,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const listSurface = await runCleanStage4Execution({
+      frame: listSurfaceFrame,
+      checklist: listSurfaceChecklist,
+    });
+    expect(listSurface.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "Current SceneFrame observation surface exposes: North Hall.",
+        localObservation: {
+          resultKind: "positive_list",
+          matchedEntries: [
+            expect.objectContaining({ surfaceKind: "visible_target", label: "North Hall" }),
+            expect.objectContaining({ surfaceKind: "movement_option", label: "North Hall" }),
+          ],
+          searchedSurfaceKinds: ["movement_option", "visible_target"],
+        },
+      },
+    });
 
     const placeHandleFrame: AuthoritativeSceneFrame = {
       ...inputFrame,
@@ -2255,7 +2303,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.",
+        summary: "Current SceneFrame observation surface exposes visible target central telegraph desk.",
         localObservation: {
           resultKind: "positive_match",
           queryText: "visible marks or moving parts on the central telegraph desk",

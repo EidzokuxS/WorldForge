@@ -412,7 +412,7 @@ function localObservationView(): CleanNarratorView {
       text: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
       backendFacts: [
         { factRef: "e1.f1", text: "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.", exact: true },
-        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible_actor, visible_target.", exact: true },
+        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible actor, visible target.", exact: true },
       ],
       limits: {
         proves: ["bounded no-match against enumerated exposed current SceneFrame observation surfaces"],
@@ -445,11 +445,11 @@ function positiveLocalObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "local_observation_receipt",
       claimKinds: ["local_observation", "visible_target"],
-      text: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.",
+      text: "Current SceneFrame observation surface exposes visible target central telegraph desk.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current SceneFrame observation surface exposes visible_target: central telegraph desk.", exact: true },
-        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible_target.", exact: true },
-        { factRef: "e1.f3", text: "Observed visible_target: central telegraph desk.", exact: true },
+        { factRef: "e1.f1", text: "Current SceneFrame observation surface exposes visible target central telegraph desk.", exact: true },
+        { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: visible target.", exact: true },
+        { factRef: "e1.f3", text: "Observed visible target central telegraph desk.", exact: true },
       ],
       limits: {
         proves: ["matching exposed current SceneFrame observation surface entries"],
@@ -970,7 +970,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
     const text = renderCleanNarrationFallback(localObservationView());
 
-    expect(text).toBe("No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion. Searched current SceneFrame surfaces: visible_actor, visible_target.");
+    expect(text).toBe("No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion. Searched current SceneFrame surfaces: visible actor, visible target.");
     expect(text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
 
     const unsupported = validateCleanNarrationCandidate({
@@ -1004,9 +1004,42 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe(
-      "Current SceneFrame observation surface exposes visible_target: central telegraph desk. Searched current SceneFrame surfaces: visible_target. Observed visible_target: central telegraph desk.",
+      "Current SceneFrame observation surface exposes visible target central telegraph desk. Searched current SceneFrame surfaces: visible target. Observed visible target central telegraph desk.",
     );
     expect(result.text).not.toMatch(/visible marks|moving parts|touch|move/iu);
+  });
+
+  it("deterministically projects local_observation movement options without hidden placeholders", async () => {
+    const result = await runCleanNarration({
+      narratorView: movementView({
+        playerAction: "I look around for visible routes.",
+        acceptedEvidence: [{
+          ref: "e1",
+          authority: "local_observation_receipt",
+          claimKinds: ["local_observation"],
+          text: "Current SceneFrame observation surface exposes: North Hall.",
+          backendFacts: [
+            { factRef: "e1.f1", text: "Current SceneFrame observation surface exposes: North Hall.", exact: true },
+            { factRef: "e1.f2", text: "Searched current SceneFrame surfaces: movement option, visible target.", exact: true },
+            { factRef: "e1.f3", text: "Observed movement option North Hall.", exact: true },
+          ],
+          limits: {
+            proves: ["matching exposed current SceneFrame observation surface entries"],
+            doesNotProve: ["route truth beyond route option/check receipts", "movement", "no-change"],
+          },
+        }],
+      }),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("local_observation should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Current SceneFrame observation surface exposes: North Hall. Searched current SceneFrame surfaces: movement option, visible target. Observed movement option North Hall.");
+    expect(result.text).not.toContain("[hidden]");
+    expect(result.text).not.toContain("movement_option");
+    expect(result.text).not.toContain("visible_target");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {

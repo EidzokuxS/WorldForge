@@ -2580,6 +2580,14 @@ function normalizeObservationMatch(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
+function localObservationSurfaceKindLabel(kind: LocalObservationSurfaceKind): string {
+  return kind.replace(/_/gu, " ");
+}
+
+function localObservationSurfaceEntryLabel(entry: Pick<LocalObservationSurfaceEntry, "surfaceKind" | "label">): string {
+  return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
+}
+
 function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: string): boolean {
   const query = normalizeObservationMatch(queryText);
   if (query.length === 0) return false;
@@ -2610,14 +2618,14 @@ function localObservationSummary(input: {
   if (input.resultKind === "bounded_no_match") {
     return `No matching current SceneFrame observation surface entry is exposed for "${input.effect.queryText}" at this frame/worldVersion.`;
   }
-  const labels = input.matchedEntries.map((entry) => entry.label).slice(0, 6).join(", ");
+  const labels = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).slice(0, 6).join(", ");
   if (input.resultKind === "positive_list") {
     return labels.length > 0
       ? `Current SceneFrame observation surface exposes: ${labels}.`
       : `No entries are exposed by the requested current SceneFrame observation surfaces.`;
   }
   const matchedSurfaceLabels = input.matchedEntries
-    .map((entry) => `${entry.surfaceKind}: ${entry.label}`)
+    .map(localObservationSurfaceEntryLabel)
     .slice(0, 6)
     .join(", ");
   if (input.resultKind === "ambiguous_match") {

@@ -939,7 +939,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
       "No matching current SceneFrame observation surface entry is exposed for \"Violet Astrolabe\" at this frame/worldVersion.",
-      "Searched current SceneFrame surfaces: visible_actor, visible_target.",
+      "Searched current SceneFrame surfaces: visible actor, visible target.",
     ]);
     expect(observation?.limits.proves).toEqual([
       "bounded no-match against enumerated exposed current SceneFrame observation surfaces",
@@ -953,6 +953,58 @@ describe("clean Stage 5 settlement contracts", () => {
       "no-change",
     ]));
     expect(JSON.stringify(view)).not.toContain("secret");
+  });
+
+  it("settles local_observation movement-option facts with player-safe display labels", () => {
+    const inputFrame = frame({
+      playerAction: "I look around for visible routes and local targets.",
+      targets: [{ ref: "North Hall", label: "North Hall", kind: "location" }],
+      movementOptions: [{ ref: "North Hall", label: "North Hall", connected: true, travelCost: 1 }],
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...localObservationReceipt(inputFrame, inputChecklist),
+      publicResult: {
+        ...localObservationReceipt(inputFrame, inputChecklist).publicResult,
+        summary: "Current SceneFrame observation surface exposes: North Hall.",
+        visibleRefs: ["Player", "Market", "North Hall"],
+        localObservation: {
+          type: "local_observation",
+          surfaceVersion: "scene_frame_current_observation_surface.v1",
+          resultKind: "positive_list",
+          mode: "list_surface",
+          queryText: "visible routes and local targets",
+          targetLabel: null,
+          matchedEntries: [
+            { surfaceKind: "visible_target", label: "North Hall", detail: "location target" },
+            { surfaceKind: "movement_option", label: "North Hall", detail: "movement option label only" },
+          ],
+          searchedSurfaceKinds: ["movement_option", "visible_target"],
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          boundedNegative: false,
+          summary: "Current SceneFrame observation surface exposes: North Hall.",
+          claimStatus: "bounded_current_scene_observation_only",
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Current SceneFrame observation surface exposes: North Hall.",
+      "Searched current SceneFrame surfaces: movement option, visible target.",
+      "Observed visible target North Hall.",
+      "Observed movement option North Hall.",
+    ]);
+    expect(JSON.stringify(observation)).not.toContain("[hidden]");
+    expect(JSON.stringify(observation)).not.toContain("movement_option");
+    expect(JSON.stringify(observation)).not.toContain("visible_target");
   });
 
   it("settles device_surface_observation receipts as bounded public device surface evidence only", () => {

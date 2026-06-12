@@ -3727,3 +3727,43 @@ Session: `gm-v1-consequenc-slice`.
       - Item-transfer turn stayed bounded to item state change and did not invent inspection results, consent, reaction, contents, document truth, or no-change claims.
   - Status impact:
     - P85 is an acceptance-candidate burn-in shape, not final acceptance. It adds 0% final acceptance until this or another fresh lane reaches about 60 clean manual turns and the project has several different clean zero-turn worlds/clones at that level.
+
+- P86 clean gameplay runtime Fallout Repair / Local Observation Surface Display Leak:
+  - Status:
+    - [x] Continued P85 clone `p85-acceptance-candidate-a` one turn at a time after inspecting the post-turn frame.
+    - [x] Reached 15 clean consecutive turns, then stopped at the first invalid player-facing turn.
+    - [x] Classified the lane as diagnostic-invalid after turn 16; it cannot count toward final acceptance.
+    - [x] Fixed the root cause at clean local_observation public evidence projection, without weakening backend-ref fences.
+    - [x] Added focused Stage 4, settlement, and narration regression coverage.
+    - [x] Ran a live repair proof on the invalid clone to verify the exact player-facing leak is gone.
+  - Diagnostic continuation before failure:
+    - Turn 11 artifact: `output/clean-runtime-p85-acceptance-candidate-turn11-20260612120400/`; visible dialogue with `Watch-Captain Ilara Rost`, one accepted `dialogue_record`, no clock advance, old stores 0.
+    - Turn 12 artifact: `output/clean-runtime-p85-acceptance-candidate-turn12-20260612120600/`; wait 5 minutes, one accepted `time_advance`, authority trace `gameplay-cycle-runtime.clock.advance.v1`, clock `5/4/4 -> 6/9/9`, old stores 0.
+    - Turn 13 artifact: `output/clean-runtime-p85-acceptance-candidate-turn13-20260612120800/`; visible dialogue with `Watch-Captain Ilara Rost`, one accepted `dialogue_record`, no clock advance, old stores 0.
+    - Turn 14 artifact: `output/clean-runtime-p85-acceptance-candidate-turn14-20260612121000/`; movement back to `Resonance Tower`, one accepted `movement`, clock `6/9/9 -> 7/10/10`, old stores 0.
+    - Turn 15 artifact: `output/clean-runtime-p85-acceptance-candidate-turn15-20260612121200/`; Player local condition `hands visible`, one accepted `condition_set`, authority trace `gameplay-cycle-runtime.player.condition_set.v1`, `worldVersion 7 -> 8`, no time/tick advance, old stores 0.
+  - Diagnostic failure:
+    - Turn 16 artifact: `output/clean-runtime-p85-acceptance-candidate-turn16-20260612121400/`.
+    - Action: `I look around Resonance Tower again for visible routes and current local targets, while staying where I am.`
+    - DB/SSE path settled cleanly with one `local_observation` receipt, no mutation, no old stores, and no restore/replay, but player-facing narration was invalid because local_observation backend facts leaked sanitized surface enum text:
+      - `Searched current SceneFrame surfaces: [hidden], visible_target.`
+      - `Observed [hidden]: Ground-Floor Barricade.`
+    - Root cause: the receipt correctly carried machine surface kinds such as `movement_option`, but settlement/narrator fallback exposed raw enum/namespace-shaped strings in public facts; the leakage sanitizer converted `movement_option` to `[hidden]`, and colon formatting such as `visible_actor:` also trips backend-ref fences.
+  - Fix:
+    - Stage 4 local_observation summaries now render matched surface kinds as player-safe display phrases without namespace-colon shape, e.g. `visible actor Guide` and `visible target central telegraph desk`.
+    - Stage 4 `positive_list` summaries dedupe exposed labels while keeping typed matched entries intact, so one route/target label does not repeat in the human summary.
+    - Settlement local_observation backend facts now render searched/matched surface kinds as display phrases, e.g. `movement option` and `visible target`, while preserving typed receipt enums in the structured result.
+    - Regression coverage now checks mixed `visible_target` + `movement_option` evidence does not contain `[hidden]`, `movement_option`, or `visible_target` in public narrator-facing facts.
+  - Live repair proof:
+    - Artifact: `output/clean-runtime-p86-local-observation-hidden-leak-fix-20260612122000/`.
+    - Repeated the same local observation action on the already-invalid P85 clone for diagnostic proof only.
+    - Result: one accepted `local_observation` receipt, no mutation, no clock/ledger/trace change, old stores 0.
+    - Player-facing narration now says: `Searched current SceneFrame surfaces: movement option, visible target... Observed movement option Ground-Floor Barricade.`
+    - The repaired narration contains no `[hidden]`, no raw `movement_option`, and no raw `visible_target`.
+  - Executed verification:
+    - `npm --prefix backend run typecheck` passed.
+    - Focused Stage 4/settlement/narration regression suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 72 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 241 tests passed.
+    - Live repair assertion passed: repaired narration contains no `[hidden]`, no raw `movement_option`, and no raw `visible_target`.
+  - Status impact:
+    - P86 is diagnostic fallout repair. The P85 clone remains invalid for acceptance after turn 16; future acceptance evidence must start from a fresh zero-turn clone after this fix.
