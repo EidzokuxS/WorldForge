@@ -336,6 +336,30 @@ function itemStateView(): CleanNarratorView {
   });
 }
 
+function itemStateWithDialogueView(): CleanNarratorView {
+  return movementView({
+    playerAction: 'I hand the Brass Tube to Guide and ask, "Can you hold this?"',
+    acceptedEvidence: [
+      ...itemStateView().acceptedEvidence,
+      {
+        ref: "e2",
+        authority: "terminal_dialogue_receipt",
+        claimKinds: ["dialogue_response"],
+        text: 'Guide says: "The north stairs flooded before dawn."',
+        backendFacts: [
+          { factRef: "e2.f1", text: "Speaker: Guide.", exact: true },
+          { factRef: "e2.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+        ],
+        limits: {
+          proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+          doesNotProve: ["truth of speaker claim", "durable world fact", "NPC consent or reaction"],
+        },
+      },
+    ],
+  });
+}
+
 function minorPoiHandleView(): CleanNarratorView {
   return movementView({
     playerAction: "I mark the Tea Stall as a place to meet.",
@@ -883,6 +907,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
     expect(result.text).not.toMatch(/\bsays|accepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
+  });
+
+  it("deterministically composes item_state with accepted dialogue_response", async () => {
+    const result = await runCleanNarration({
+      narratorView: itemStateWithDialogueView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("item_state plus dialogue_response should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe('Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor. Guide says: "The north stairs flooded before dawn."');
+    expect(result.text).toContain("Item transfer result: transferred_to_actor.");
+    expect(result.text).toContain('Guide says: "The north stairs flooded before dawn."');
+    expect(result.text).not.toMatch(/\baccepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
   });
 
   it("renders minor_poi_handle evidence without route, location, service, sign-text, or no-change claims", () => {

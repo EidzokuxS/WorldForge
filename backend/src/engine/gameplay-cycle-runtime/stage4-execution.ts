@@ -1092,10 +1092,12 @@ function visibleActorTarget(input: {
       current_location_id: string | null;
       current_scene_location_id: string | null;
     }>;
-  const currentRows = rows.filter((row) =>
-    row.current_location_id === input.currentLocationId
-    && row.current_scene_location_id === input.currentSceneLocationId
-  );
+  const currentRows = rows.filter((row) => {
+    if (row.current_scene_location_id === input.currentSceneLocationId) return true;
+    return input.currentLocationId === input.currentSceneLocationId
+      && row.current_location_id === input.currentLocationId
+      && row.current_scene_location_id === null;
+  });
   if (currentRows.length !== 1) {
     return { ok: false, message: "Stage 4 item_transfer could not resolve exactly one visible actor target row." };
   }

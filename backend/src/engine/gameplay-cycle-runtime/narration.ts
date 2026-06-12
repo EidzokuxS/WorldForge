@@ -409,6 +409,17 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   const itemState = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("item_state")
   );
+  const dialogue = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("dialogue_response")
+  );
+  if (itemState && dialogue) {
+    const itemStateText = itemState.backendFacts.map((entry) => entry.text).join(" ");
+    const quoteFact = dialogue.backendFacts.find((entry) =>
+      entry.text.includes(" says: ") || entry.text.includes("dialogue response")
+    );
+    const dialogueText = quoteFact?.text ?? dialogue.text;
+    return [itemStateText, dialogueText].filter((text) => normalizeText(text).length > 0).join(" ");
+  }
   if (itemState) {
     return itemState.backendFacts.map((entry) => entry.text).join(" ");
   }
@@ -420,9 +431,6 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
     return minorPoiHandle.backendFacts.map((entry) => entry.text).join(" ");
   }
 
-  const dialogue = view.acceptedEvidence.find((evidence) =>
-    evidence.claimKinds.includes("dialogue_response")
-  );
   if (dialogue) {
     const quoteFact = dialogue.backendFacts.find((entry) =>
       entry.text.includes(" says: ") || entry.text.includes("dialogue response")

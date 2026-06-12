@@ -1224,6 +1224,55 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(ledgerCount.count).toBe(0);
   });
 
+  it("transfers to an actor visible by current_scene_location_id even when broad location differs", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      locationId: "loc-north-hall",
+      sceneLocationId: "loc-market",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const inputFrame = itemTransferFrame();
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: itemTransferChecklist(inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      publicResult: {
+        itemTransfer: {
+          resultKind: "transferred_to_actor",
+          itemLabel: "Brass Tube",
+          targetLabel: "Guide",
+        },
+      },
+      privateResult: {
+        nextOwnerId: "npc-guide",
+      },
+    });
+    const item = getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState FROM items WHERE id = ?")
+      .get("item-brass-tube") as { ownerId: string | null; locationId: string | null; equipState: string };
+    expect(item).toEqual({
+      ownerId: "npc-guide",
+      locationId: null,
+      equipState: "carried",
+    });
+  });
+
   it("executes item_transfer then dialogue_record only after a refreshed SceneFrame reflects item state", async () => {
     insertNpc({
       id: "npc-guide",

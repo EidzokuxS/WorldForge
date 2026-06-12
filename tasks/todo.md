@@ -3516,3 +3516,34 @@ Session: `gm-v1-consequenc-slice`.
     - Artifacts are under `output/clean-runtime-p78-place-handle-observation-r2-20260612095334/`.
   - Status impact:
     - P78 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P79 clean gameplay runtime Continued Burn-in / Compound Item Transfer + Dialogue:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P78.
+    - [x] Re-inspect actual post-P78 DB/frame before choosing the next action.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send exactly one manually chosen `/api/chat/action` that combines giving a current inventory item to a visible actor with a dialogue request.
+    - [x] Verify Stage 3/4 split into `item_transfer` followed by dependent `dialogue_record`, with refreshed item state available to the dialogue step.
+    - [x] Verify item owner changes to the visible actor, `worldVersion +1` only, no time/tick advance, no movement, no old runtime stores, and player-facing narration stays within accepted item/dialogue evidence.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record diagnostic evidence and acceptance impact.
+  - Observed basis:
+    - Continued clean P78-r2 clone `p78-place-handle-r2-065526` after 4 clean turns. Frame inspection artifact: `output/clean-runtime-p79-frame-inspect-20260612070520/frame.json`.
+    - Current frame: `Transmission Basement`, clock `worldVersion/worldTimeMinutes/currentTick=3/2/2`, visible actors `Venn the Borrowed` and `Relay-Tech Dorin`, inventory includes `Courier satchel` and `Sealed lacquer message tube`, movement options `Resonance Tower` and `Silt Warrens`, active place handle `central_telegraph_desk`, old runtime stores 0.
+  - Purpose:
+    - Prove or expose the next composition gap in the clean runtime: a same-turn item handoff plus dialogue must use backend-owned item transfer first, refresh state, then settle visible dialogue without old v2/tool handlers or narrator-invented consent/reaction.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic fallout fixed:
+    - First live attempt on continued P78-r2 clone exposed Stage 4 target resolution fallout: Relay-Tech Dorin was visible by `current_scene_location_id=Transmission Basement` while broad `current_location_id=Resonance Tower`, so strict broad+scene matching rejected the visible actor. Fixed `visibleActorTarget` to accept current-scene-visible actor rows and preserve broad-location fallback only for broad-scene rows.
+    - Fresh r2 clone `p79-transfer-dialogue-r2-071145` then proved DB mutation/receipts were clean, but player-facing narration was invalid because deterministic `item_state` projection swallowed the accepted same-turn `dialogue_response`. Fixed Stage 6 fallback to compose accepted `item_state` backend facts plus accepted dialogue quote when both authorities exist.
+  - Verification:
+    - Typecheck passed.
+    - Focused suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 236 tests passed.
+    - Fresh r3 zero-turn clone `p79-transfer-dialogue-r3-85038c`, artifacts `output/clean-runtime-p79-compound-transfer-dialogue-r3-20260612072530/`.
+    - Turn 1 moved Lowwater Bazaar -> Silt Warrens: one accepted `movement`, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Turn 2 moved Silt Warrens -> Transmission Basement: one accepted `movement`, clock `1/1/1 -> 2/2/2`, old stores 0.
+    - Turn 3 action `I hand the Sealed lacquer message tube to Relay-Tech Dorin and ask, "Can you keep this safe while I check the relay?"` produced accepted `item_transfer` then accepted dependent `dialogue_record` on a refreshed frame.
+    - Turn 3 DB proof: tube owner became Relay-Tech Dorin, final equip state `carried`, `worldVersion 2 -> 3`, `worldTimeMinutes=2`, `currentTick=2`, no `turn_clock_ledger`, one new authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Turn 3 narration proof stayed within accepted item/dialogue evidence: `Sealed lacquer message tube item state changed: transferred_to_actor... Item transfer result: transferred_to_actor. Relay-Tech Dorin says: "Safe? In this water? I'll tuck it in my coat, dry as a bone. Go check your relay—but don't touch that desk tape.".`
+  - Status impact:
+    - P79 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
