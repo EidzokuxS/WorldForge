@@ -5053,3 +5053,32 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
   - Status impact:
     - P147 raises the third clean-runtime acceptance-candidate lane from 40/60 to 50/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
+
+- P148 clean gameplay runtime Acceptance-Candidate Lane C / P143 Continuation 50 -> 60:
+  - Plan:
+    - [x] Continue existing third zero-turn clone `p143-lowwater-acceptance-c-20260612230321` from its clean turn-50 state.
+    - [x] Preflight current DB state: player at `Lowwater Bazaar`, no exact-scene NPCs, all eight Lowwater routes visible; `Anchor Chain Pylon` has visible actors `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`; `Upper Dam Ruins` has no exact-scene NPCs; old stores zero.
+    - [x] Reuse stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 51-60 one action at a time from inspected post-turn state, covering route check/movement to `Anchor Chain Pylon`, current-scene actor refresh, visible dialogue, route options/check to `Upper Dam Ruins`, movement there, bounded no-actor observation, route check back to `Lowwater Bazaar`, and movement back.
+    - [x] Persist `turn-051/` through `turn-060/` artifacts plus root `db-verification-turn-051.json` through `db-verification-turn-060.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p143-lowwater-acceptance-c-20260612230321/`; preflight artifact `p148-preflight-current-state.json`.
+    - [x] Turn 51 route-check to `Anchor Chain Pylon` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 52 movement to `Anchor Chain Pylon` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `14/11/11 -> 15/12/12`, visible NPC DB surface contains `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`, old stores zero.
+    - [x] Turn 53 visible-actor observation at `Anchor Chain Pylon` passed: surfaced `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 54 dialogue with `Dam-Speaker Yara` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 55 route-options check from `Anchor Chain Pylon` passed: surfaced `Lowwater Bazaar` and `Upper Dam Ruins`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 56 route-check to `Upper Dam Ruins` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 57 movement to `Upper Dam Ruins` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `15/12/12 -> 16/13/13`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 58 visible-actor observation at `Upper Dam Ruins` passed: bounded no-match, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 59 route-check to `Lowwater Bazaar` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 60 movement to `Lowwater Bazaar` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `16/13/13 -> 17/14/14`, current-scene NPC surface empty, old stores zero.
+  - Verification executed:
+    - [x] P143/P144/P145/P146/P147/P148 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-060.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 60: 60 clean turn records, 60 Stage4 receipts, 17 authority traces, 14 clock ledger rows, world clock `17/14/14`, player at `Lowwater Bazaar`, current-scene NPC surface empty, `Sealed lacquer message tube` still carried by `Litha Corsen`, old stores zero.
+    - [x] Authority trace shape remains clean runtime only: `gameplay-cycle-runtime.item_transfer.v1` count 3 and `gameplay-cycle-runtime.player.move.v1` count 14.
+    - [x] 3-lane smoke audit: Lane A `p131-lowwater-acceptance-20260612203318`, Lane B `p137-lowwater-acceptance-b-20260612215626`, and Lane C `p143-lowwater-acceptance-c-20260612230321` each have 60 clean turn records, all available verification artifacts pass, and DB old v2/saga/narrator/oracle/simulation stores are zero.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Status impact:
+    - P148 completes the third clean-runtime 60-turn acceptance-candidate lane. The 3x60 clean-runtime smoke criterion now has Lane A, Lane B, and Lane C evidence, pending separate full-goal acceptance audit.
