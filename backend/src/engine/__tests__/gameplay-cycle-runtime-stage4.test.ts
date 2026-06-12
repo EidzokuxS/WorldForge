@@ -1955,10 +1955,13 @@ describe("clean Stage 4 executor DB contracts", () => {
       step: dialogueStep,
     });
     const systemPrompt = buildStage4DialogueRequestSystemPrompt();
-    expect(systemPrompt).toContain("holder metadata");
+    expect(systemPrompt).toContain("Dialogue task card as the job contract");
+    expect(systemPrompt).toContain("currentItemHolders is the complete evidence basis");
+    expect(prompt).toContain("Dialogue task card:");
+    expect(prompt).toContain('"currentItemHolders"');
     expect(prompt).toContain('"label": "Brass Tube"');
-    expect(prompt).toContain('"holderKind": "visible_actor"');
-    expect(prompt).toContain('"holderLabel": "Guide"');
+    expect(prompt).toContain('"currentHolderKind": "visible_actor"');
+    expect(prompt).toContain('"currentHolderLabel": "Guide"');
   });
 
   it("fails item_transfer without mutating when the visible actor target is not in the current scene", async () => {

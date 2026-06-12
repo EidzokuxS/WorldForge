@@ -8,6 +8,29 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P154 dialogue task-card repair and P69 item-transfer live proof:
+- Trigger:
+  - P153 turn 13 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn13-20260613/` was diagnostic-invalid at player-facing content: the DB/receipt path stayed clean, but `Pike` quote added unsupported item provenance/history: `Yara has it. She's been carrying it since we got here.`
+  - This exposed a task-contract gap: the Stage 4 `dialogue_record` prompt had holder metadata, but the checklist step still looked like a generic capability request rather than a concrete speaker-response job.
+- Changes:
+  - [x] `backend/src/engine/gameplay-cycle-runtime/action-checklist.ts` now gives visible-actor dialogue steps a concrete purpose and intended summary: record one named speaker's direct visible response to the Player intent.
+  - [x] `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now sends a `Dialogue task card` before the SceneFrame: job, player request, checklist task, speaker, addressee, allowed evidence refs, current item holder evidence, and response authority.
+  - [x] The Stage 4 dialogue prompt language now describes positive authority boundaries instead of relying on provenance/history ban wording.
+  - [x] `promptFrameForDialogue` no longer duplicates raw `playerAction`; the player request is scoped inside the dialogue task card.
+- Verification executed:
+  - [x] GitNexus impact before edits: `buildDeterministicGmActionChecklist`, `validateGmActionChecklistCandidate`, `buildStage4DialogueRequestPrompt`, `promptFrameForDialogue`, `buildDialogueRequest`, and `validateDialogueRequestEffectCandidate` all LOW risk.
+  - [x] `npm --prefix backend run typecheck`.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`268 passed`).
+- Live P69 proof:
+  - [x] Artifact root: `output/clean-runtime-p154-guide-item-transfer-proof-20260613/`.
+  - [x] Fresh clean-start clone: source `p69-item-transfer-045651` -> clone `p154-guide-item-transfer-proof-20260613`; chat history 0, clock `0/0/0`, `Guide` visible in `Lowwater Bazaar`, Player carries `Brass Tube`, old stores all 0.
+  - [x] Manual-chosen action after precheck: `I hand the Brass Tube to Guide.`
+  - [x] SSE result: `done.runtime=gameplay-cycle-runtime`, `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, `mutationApplied=true`, `settled=true`, chat history `0 -> 2`.
+  - [x] DB verification: exactly one accepted `item_transfer` receipt with `item_transfer_receipt` / `item_custody_location_equip_state`; `Brass Tube.owner_id` is `Guide`; one authority trace `gameplay-cycle-runtime.item_transfer.v1` linked by `tool_result_id`; no turn clock ledger row; no old v2/saga/narrator/oracle/simulation rows.
+- Status impact:
+  - [x] P154 repairs the P153 turn-13 root cause at the Stage4 dialogue task contract and re-proves P69 item_transfer through live `/api/chat/action`.
+  - [ ] P153 remains diagnostic-invalid from turn 13; continue acceptance/burn-in only from fresh zero-turn clones after this fix.
+
 P153 manual-chosen Lowwater burn-in:
 - Baseline: branch clean/synced after commit `1733d7d6` (`Clamp Stage4 failure diagnostics`).
 - Source preflight:
@@ -24,6 +47,9 @@ P153 manual-chosen Lowwater burn-in:
   - Turn 8 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn8-20260613/`: moved to `Upper Dam Ruins`; one accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock/worldVersion advanced `2/1/1 -> 3/2/2`, old stores 0.
   - Turn 9 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn9-20260613/`: visible-actor observation at `Upper Dam Ruins`; one accepted `local_observation` bounded no-match, no mutation/clock advance, old stores 0.
   - Turn 10 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn10-20260613/`: waited exactly 2 minutes at `Upper Dam Ruins`; one accepted `time_advance`, authority trace for clock advance, one wait ledger row, clock/worldVersion advanced `3/2/2 -> 4/4/4`, old stores 0.
+  - Turn 11 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn11-20260613/`: route check back to `Anchor Chain Pylon` without moving; accepted `route_check`, no mutation/clock advance, old stores 0.
+  - Turn 12 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn12-20260613/`: moved back to `Anchor Chain Pylon`; accepted `movement`, clock/worldVersion advanced `4/4/4 -> 5/5/5`, old stores 0.
+  - Turn 13 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn13-20260613/`: asked `Pike` who currently had `Brass Tube`; DB/receipt path stayed clean, but the accepted quote added unsupported provenance/history, so the lane is diagnostic-invalid from turn 13.
 - Artifact sweep:
   - Checked all 10 P153 turn artifacts for `done.runtime=gameplay-cycle-runtime`, `narrative` + `done`, multi-token player-facing text, no old-store writes, no restore/replay ledger rows, and no public internal tokens (`stage4-receipt`, `settled_turn_packet`, `narrator_attempt`, `turn_saga`, `gameplay_cycle_v2`, `privateResult`, `reasoning`, `SceneFrame`, `worldVersion`, `surface entry`); result: 10 checked, 0 bad.
   - Current lane state after turn 10: scene `Upper Dam Ruins`, clock `worldVersion=4/worldTimeMinutes=4/currentTick=4`, `clean_gameplay_turn_records=10`, `clean_gameplay_stage4_receipts=9`, `authority_traces=4`, `turn_clock_ledger=3`, and old v2/saga/narrator/oracle/simulation stores all 0.
@@ -368,7 +394,7 @@ P111/P112 Stage4 dialogue item-custody grounding checkpoint:
   - The model-authored `dialogue_record` quote pulled plausible custody history and processing lore into the receipt, so Stage 6 faithfully projected an already-bad terminal dialogue receipt.
 - Fix:
   - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now projects a prompt-safe dialogue SceneFrame with current scene/location labels, actors, visible targets, target holder/equip-state metadata, and citable refs, while omitting rich scene descriptions, `visibleFacts`, and `recentLocalFacts`.
-  - Stage 4 dialogue system prompt now states the item-custody boundary: current holder/status answers must come from target holder metadata and must not add acquisition history, seizure/provenance, inspection/logging, contents, policy, future custody, or reasons unless those exact facts are present in the prompt-safe frame.
+  - Stage 4 dialogue now places a Dialogue task card before the SceneFrame, with job, speaker, addressee, player request, allowed evidence refs, currentItemHolders, and response authority. Current holder/status answers use currentItemHolders as the complete evidence basis.
   - No old v2 path, raw-action regex guard, or semantic fallback was added.
 - Regression coverage:
   - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` verifies item-custody dialogue prompts preserve target holder metadata while excluding rich scene prose that could seed unsupported provenance/processing.

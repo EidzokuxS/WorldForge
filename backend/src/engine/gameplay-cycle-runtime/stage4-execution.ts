@@ -1696,7 +1696,6 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
     frameId: frame.frameId,
     turnId: frame.turnId,
     base: frame.base,
-    playerAction: frame.playerAction,
     scene: {
       currentLocation: {
         ref: frame.scene.currentLocation.ref,
@@ -1724,20 +1723,78 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
   };
 }
 
+function dialogueTaskCard(input: {
+  frame: AuthoritativeSceneFrame;
+  step: Step;
+}): unknown {
+  const speaker = input.frame.actors.find((actor) =>
+    actor.role !== "player"
+    && input.step.targetRefs.some((ref) => normalizedRef(ref) === normalizedRef(actor.ref))
+  ) ?? null;
+  const stepRefs = new Set([
+    ...input.step.targetRefs,
+    ...input.step.evidenceRefs,
+  ].map(normalizedRef));
+  const currentItemHolders = input.frame.targets
+    .filter((target) =>
+      target.kind === "item"
+      && target.holder
+      && stepRefs.has(normalizedRef(target.ref))
+    )
+    .map((target) => ({
+      itemRef: target.ref,
+      itemLabel: target.label,
+      currentHolderKind: target.holder?.holderKind ?? null,
+      currentHolderLabel: target.holder?.holderLabel ?? null,
+      currentEquipState: target.holder?.equipState ?? null,
+    }));
+  return {
+    job: "record_one_visible_speaker_response",
+    capabilityId: "dialogue_record",
+    playerRequest: input.frame.playerAction,
+    checklistPurpose: input.step.purpose,
+    checklistTask: input.step.intended.summary,
+    expectedVisibleEffect: input.step.expectedVisibleEffect,
+    speaker: speaker
+      ? {
+        ref: speaker.ref,
+        label: speaker.label,
+        role: speaker.role,
+      }
+      : null,
+    addressee: {
+      ref: input.frame.player.ref,
+      label: input.frame.player.label,
+    },
+    allowedEvidenceRefs: uniqueStrings([
+      input.frame.player.ref,
+      ...input.step.targetRefs,
+      ...input.step.evidenceRefs,
+    ]),
+    currentItemHolders,
+    responseAuthority: {
+      evidenceKind: "visible_speaker_response_content",
+      truthStatus: "speaker_response_only",
+      stateAuthority: "state_facts_remain_with_backend_receipts",
+    },
+  };
+}
+
 export function buildStage4DialogueRequestSystemPrompt(): string {
   return [
     "You are WorldForge clean Stage 4 Dialogue Request.",
     "Return only JSON matching the dialogue_record effect schema.",
-    "This is not narration. It creates exactly one visible speaker-response payload for backend validation.",
-    "The speaker must be one already-visible non-player actor from SceneFrame.actors and the addressee must include Player.",
+    "Create exactly one visible speaker-response payload for backend validation.",
+    "Use Dialogue task card as the job contract: speaker, addressee, player request, checklist task, allowed evidence refs, and response authority.",
+    "The speaker field must name one already-visible non-player actor from SceneFrame.actors, and addresseeRefs must include Player.",
     "For non-silence outcomes, response.kind must be speech and quotedSpeech is required.",
     "For silence outcomes, response.kind must be silence and quotedSpeech must be null.",
-    "Do not include state deltas, world facts, relationship changes, item/condition/location/movement effects, memory, durable events, old tool ids, or backend refs.",
-    "The response authorizes only what the visible speaker visibly says or does in this turn; it does not prove the speaker's claim is true.",
-    "Treat SceneFrame target holder metadata as current visible item custody/equip-state evidence; quotedSpeech and summary must align with that holder metadata.",
-    "When answering about current item custody or holder status, answer only from target holder metadata; do not add acquisition history, seizure/provenance, inspection/logging, contents, policy, future custody, or reasons unless those exact facts are present in this prompt-safe frame.",
-    "Response-language directives in the player action are UI preferences, not in-world language barriers unless explicit citable scene evidence says otherwise.",
-    "Use only refs from the accepted checklist step and SceneFrame.citableRefs.",
+    "response.summary restates the same visible response content in one concise sentence.",
+    "stateEffects.appliesState is false for this clean dialogue task.",
+    "World-state, relationship, item, condition, location, movement, memory, and durable-event authority belongs to backend receipts; dialogue stores visible response content.",
+    "For current item holder/custody answers, Dialogue task card currentItemHolders is the complete evidence basis for quotedSpeech and summary.",
+    "Response-language directives in playerRequest are UI preferences; in-world language barriers require citable scene evidence.",
+    "Use refs from allowedEvidenceRefs and SceneFrame.citableRefs.",
   ].join("\n");
 }
 
@@ -1750,6 +1807,8 @@ export function buildStage4DialogueRequestPrompt(input: {
     "Produce one dialogue_record effect for this accepted checklist step.",
     "Required effect shape:",
     "{ kind, authorityKind, speakerRef, addresseeRefs, outcomeKind, response, languageBasis, evidenceRefs, stateEffects }",
+    "Dialogue task card:",
+    JSON.stringify(dialogueTaskCard(input), null, 2),
     input.dependencyResolution?.materializedSpeaker
       ? [
         "Resolved materialized-speaker dependency:",
@@ -1791,7 +1850,9 @@ function buildStage4DialogueRepairPrompt(input: {
 }): string {
   return [
     "Repair the dialogue_record effect so it satisfies the clean P65 dialogue contract.",
-    "Do not add unsupported fields, old tool ids, backend refs, mutations, world facts, memory, or state deltas.",
+    "Use the Dialogue task card fields as the complete job contract for the repaired effect.",
+    "Dialogue task card:",
+    JSON.stringify(dialogueTaskCard(input), null, 2),
     input.dependencyResolution?.materializedSpeaker
       ? `This is dependent support-actor dialogue; speakerRef must be ${input.dependencyResolution.materializedSpeaker.actorRef}.`
       : input.dependencyResolution?.playerLocalCondition

@@ -965,6 +965,7 @@ export function buildDeterministicGmActionChecklist(input: {
     ? input.gmRead.actionInterpretation.deviceObservationNeed ?? null
     : null;
   const actionText = playerActionText(input);
+  const dialoguePlayerIntent = input.gmRead.actionInterpretation.playerIntent.trim().replace(/[.!?]+$/u, "");
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
   let itemTransferStepId: GmActionChecklistStepId | null = null;
@@ -1228,6 +1229,9 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: [dialogueSpeaker.ref],
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
+      purpose: `Record ${dialogueSpeaker.ref}'s direct visible response to Player intent: ${dialoguePlayerIntent}.`,
+      intendedSummary: `Stage 4 must request one dialogue_record for ${dialogueSpeaker.ref}'s direct response to Player. The accepted receipt proves visible response content only.`,
+      expectedVisibleSummary: `If accepted, only ${dialogueSpeaker.ref}'s visible response content may become player-facing dialogue evidence.`,
     };
     const dependsOnStepIds: GmActionChecklistStepId[] = [];
     const dependencyBindings: NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]> = [];
@@ -1270,8 +1274,8 @@ export function buildDeterministicGmActionChecklist(input: {
     if (dependencyBindings.length > 0) {
       dialogueStepInput.dependsOnStepIds = dependsOnStepIds;
       dialogueStepInput.dependencyBindings = dependencyBindings;
-      dialogueStepInput.purpose = "Record one visible response only after prior state-bearing steps are settled and the SceneFrame is refreshed.";
-      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after post-dependency authoritative SceneFrame refresh reflects accepted Player local condition, item state, or minor place-handle requirements.";
+      dialogueStepInput.purpose = `Record ${dialogueSpeaker.ref}'s direct visible response to Player intent after prior state-bearing steps settle: ${dialoguePlayerIntent}.`;
+      dialogueStepInput.intendedSummary = `Stage 4 must request one dialogue_record for ${dialogueSpeaker.ref}'s direct response after the post-dependency authoritative SceneFrame reflects accepted Player local condition, item state, or minor place-handle requirements. The accepted receipt proves visible response content only.`;
     }
     steps.push(stepFor(dialogueStepInput));
   } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {

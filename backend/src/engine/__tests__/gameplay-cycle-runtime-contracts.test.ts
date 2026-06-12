@@ -3832,6 +3832,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
     expect(result.checklist.steps[1]).toMatchObject({
       stepId: "step-2",
+      purpose: "Record Guide's direct visible response to Player intent after prior state-bearing steps settle: Hand Brass Tube to Guide, then ask what it is.",
       targetRefs: ["Guide"],
       dependsOnStepIds: ["step-1"],
       dependencyBindings: [{
@@ -3847,6 +3848,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "dialogue_record",
         requiredCapabilityId: "dialogue_record",
         stateOrEvidence: "terminal_player_visible",
+        summary: "Stage 4 must request one dialogue_record for Guide's direct response after the post-dependency authoritative SceneFrame reflects accepted Player local condition, item state, or minor place-handle requirements. The accepted receipt proves visible response content only.",
       },
     });
     expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
@@ -4980,15 +4982,17 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     });
     const system = buildStage4DialogueRequestSystemPrompt();
 
-    expect(prompt).toContain('"holderKind": "visible_actor"');
-    expect(prompt).toContain('"holderLabel": "Guide"');
-    expect(prompt).toContain('"equipState": "carried"');
+    expect(prompt).toContain("Dialogue task card:");
+    expect(prompt).toContain('"currentItemHolders"');
+    expect(prompt).toContain('"currentHolderKind": "visible_actor"');
+    expect(prompt).toContain('"currentHolderLabel": "Guide"');
+    expect(prompt).toContain('"currentEquipState": "carried"');
     expect(prompt).not.toContain("guards seize brass courier gear");
     expect(prompt).not.toContain("Guards log contents before releasing courier gear.");
     expect(prompt).not.toContain("A guard seized a satchel here earlier.");
-    expect(system).toContain("answer only from target holder metadata");
-    expect(system).toContain("acquisition history");
-    expect(system).toContain("inspection/logging");
+    expect(system).toContain("Dialogue task card as the job contract");
+    expect(system).toContain("currentItemHolders is the complete evidence basis");
+    expect(system).toContain("dialogue stores visible response content");
   });
 
   it("accepts support actor materialization receipts with created/reused mutation authority split", () => {
