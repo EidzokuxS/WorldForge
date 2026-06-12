@@ -3624,3 +3624,33 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing narration stayed bounded to accepted item state: drop said only `dropped_in_scene`; pickup said only `picked_up`; neither added contents, item use, dialogue, reaction, consent, or no-change claims.
   - Status impact:
     - P82 is diagnostic regression proof for the P81 compatibility-projection repair. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P83 clean gameplay runtime Item Transfer Equip/Unequip Proof:
+  - Status:
+    - [x] Started from a clean tree after committed/pushed P82.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Added focused Stage 4 regression coverage for `equip_inventory_item` followed by `unequip_inventory_item`.
+    - [x] Ran real `/api/chat/action` equip, stopped backend, restarted backend, called `/api/campaigns/:id/load`, verified inventory authority preserved the equipped projection, then ran real `/api/chat/action` unequip.
+    - [x] Verified no old gameplay-cycle-v2/saga/narrator/oracle/simulation stores were used.
+  - Purpose:
+    - Close the remaining P69 live-proof gap for item equip-state transitions: Player-owned carried item -> equipped item -> carried item, all through clean `item_transfer` authority with refreshed compatibility projection across reload.
+    - Keep this as diagnostic primitive evidence only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Focused test:
+    - Added `equips and unequips a Player inventory item through clean item_transfer authority` in `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts`.
+    - The test verifies accepted `item_transfer` receipts for `equip_inventory_item` and `unequip_inventory_item`, exact item row owner/location/equip state, player compatibility projection refresh, `worldVersion 0 -> 1 -> 2`, no time/tick advance, no ledger rows, and clean authority traces.
+  - Live proof:
+    - Fresh clone: `p83-equip-unequip-395a8e28`.
+    - Artifacts: `output/clean-runtime-p83-equip-reload-unequip-20260612081512/`.
+    - Turn 1 action: `I equip the Courier satchel, wearing it over my shoulder, without opening it or moving.`
+    - Turn 1 result: exactly one accepted `item_transfer` receipt, operation `equip_inventory_item`, result `equipped`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, old stores 0.
+    - Reload proof: `post-load-inventory-authority-check.json` shows exactly one Player-owned `Courier satchel`, `equip_state=equipped`, `equipped_slot=equipped`, `playerLoadout.equippedItemRefs=["Courier satchel"]`, and `players.equipped_items=["Courier satchel"]`.
+    - Turn 2 action: `I remove the Courier satchel from its equipped shoulder position and carry it instead, without opening it or moving.`
+    - Turn 2 result: exactly one accepted `item_transfer` receipt, operation `unequip_inventory_item`, result `unequipped`, one new authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 1 -> 2`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, old stores 0.
+    - Final DB proof: exactly one `Courier satchel` row, owner Player, `location_id=null`, `equip_state=carried`, `equipped_slot=null`; final counts are two clean turn records, two Stage4 receipts, two authority traces, zero clock ledger rows, and zero old runtime rows.
+    - Player-facing narration stayed bounded to accepted item state: equip said only `equipped`; unequip said only `unequipped`; neither added contents, item use, dialogue, reaction, consent, or no-change claims.
+    - Discarded diagnostic wording: an earlier unequip phrase containing `keep it in my hands` correctly routed to P68 `player_local_condition/gripping_held_item`, so it was not counted as P83 item-transfer evidence.
+  - Executed verification:
+    - `npm --prefix backend run typecheck` passed.
+    - Focused suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 239 tests passed.
+  - Status impact:
+    - P83 is diagnostic primitive proof for P69 equip/unequip composition. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

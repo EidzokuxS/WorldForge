@@ -1399,6 +1399,199 @@ describe("clean Stage 4 executor DB contracts", () => {
     });
   });
 
+  it("equips and unequips a Player inventory item through clean item_transfer authority", async () => {
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const buildFrame = (worldVersion: number, equipState: "carried" | "equipped"): AuthoritativeSceneFrame => ({
+      ...itemTransferFrame(worldVersion),
+      frameId: `frame-stage4-equip-${worldVersion}`,
+      turnId: `clean-turn-stage4-equip-${worldVersion}`,
+      playerAction: equipState === "carried"
+        ? "I sling the Brass Tube on my shoulder."
+        : "I remove the Brass Tube from my shoulder and carry it instead.",
+      actors: [],
+      targets: [],
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState,
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "Brass Tube"],
+    });
+    const buildChecklist = (
+      inputFrame: AuthoritativeSceneFrame,
+      operation: "equip_inventory_item" | "unequip_inventory_item",
+      targetEquipState: "carried" | "equipped",
+      targetEquippedSlot: "equipped" | null,
+    ): GmActionChecklist => {
+      const base = checklistForKind("item_transfer", inputFrame);
+      const step = base.steps[0]!;
+      return {
+        ...base,
+        turnIntent: {
+          playerIntent: operation === "equip_inventory_item"
+            ? "Equip Brass Tube."
+            : "Unequip Brass Tube.",
+          admittedConsequenceNeed: "Item equip state requires backend receipt authority.",
+        },
+        steps: [{
+          ...step,
+          targetRefs: ["Brass Tube", "Player", "Market"],
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+          intended: {
+            kind: "item_transfer",
+            stateOrEvidence: "state",
+            requiredCapabilityId: "item_transfer",
+            summary: `Stage 4 must ${operation === "equip_inventory_item" ? "equip" : "unequip"} Brass Tube through backend item authority.`,
+            itemTransferPlan: {
+              actorRef: "Player",
+              operation,
+              itemRef: "Brass Tube",
+              sourceKind: "player_inventory",
+              targetKind: operation === "equip_inventory_item" ? "player_equipment" : "player_inventory",
+              targetRef: "Player",
+              targetEquipState,
+              targetEquippedSlot,
+              anchorRef: "Market",
+            },
+          },
+          expectedVisibleEffect: {
+            summary: "Accepted item transfer receipt only.",
+            visibleRefs: ["Player", "Brass Tube", "Market"],
+          },
+        }],
+      };
+    };
+
+    const equipFrame = buildFrame(0, "carried");
+    const equipResult = await runCleanStage4Execution({
+      frame: equipFrame,
+      checklist: buildChecklist(equipFrame, "equip_inventory_item", "equipped", "equipped"),
+    });
+
+    expect(equipResult.status).toBe("executed");
+    expect(equipResult.execution?.mutationApplied).toBe(true);
+    expect(equipResult.execution?.resultWorldVersion).toBe(1);
+    expect(equipResult.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "item_transfer_receipt",
+        mutationAuthority: "item_custody_location_equip_state",
+        visibleResultAuthority: "may_claim_item_state_change",
+      },
+      publicResult: {
+        itemTransfer: {
+          operation: "equip_inventory_item",
+          resultKind: "equipped",
+          itemLabel: "Brass Tube",
+          targetLabel: "Mira Voss",
+          finalOwnerKind: "player",
+          finalLocationKind: "none",
+          finalEquipState: "equipped",
+          finalEquippedSlot: "equipped",
+        },
+      },
+      privateResult: {
+        itemId: "item-brass-tube",
+        itemOperation: "equip_inventory_item",
+        previousOwnerId: "player-1",
+        nextOwnerId: "player-1",
+        previousEquipState: "carried",
+        nextEquipState: "equipped",
+        nextEquippedSlot: "equipped",
+      },
+    });
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube")).toEqual({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "equipped",
+      });
+    const equippedProjection = getSqliteConnection()
+      .prepare("SELECT character_record AS characterRecord, equipped_items AS equippedItems FROM players WHERE id = ?")
+      .get("player-1") as { characterRecord: string; equippedItems: string };
+    expect(JSON.parse(equippedProjection.equippedItems)).toEqual(["Brass Tube"]);
+    expect(JSON.parse(equippedProjection.characterRecord).loadout).toMatchObject({
+      inventorySeed: ["Brass Tube"],
+      equippedItemRefs: ["Brass Tube"],
+    });
+
+    const unequipFrame = buildFrame(1, "equipped");
+    const unequipResult = await runCleanStage4Execution({
+      frame: unequipFrame,
+      checklist: buildChecklist(unequipFrame, "unequip_inventory_item", "carried", null),
+    });
+
+    expect(unequipResult.status).toBe("executed");
+    expect(unequipResult.execution?.mutationApplied).toBe(true);
+    expect(unequipResult.execution?.resultWorldVersion).toBe(2);
+    expect(unequipResult.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 2, worldTimeMinutes: 0, mutationApplied: true },
+      publicResult: {
+        itemTransfer: {
+          operation: "unequip_inventory_item",
+          resultKind: "unequipped",
+          itemLabel: "Brass Tube",
+          targetLabel: "Mira Voss",
+          finalOwnerKind: "player",
+          finalLocationKind: "none",
+          finalEquipState: "carried",
+          finalEquippedSlot: null,
+        },
+      },
+      privateResult: {
+        itemId: "item-brass-tube",
+        itemOperation: "unequip_inventory_item",
+        previousOwnerId: "player-1",
+        nextOwnerId: "player-1",
+        previousEquipState: "equipped",
+        nextEquipState: "carried",
+        nextEquippedSlot: null,
+      },
+    });
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube")).toEqual({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+    const carriedProjection = getSqliteConnection()
+      .prepare("SELECT character_record AS characterRecord, equipped_items AS equippedItems FROM players WHERE id = ?")
+      .get("player-1") as { characterRecord: string; equippedItems: string };
+    expect(JSON.parse(carriedProjection.equippedItems)).toEqual([]);
+    expect(JSON.parse(carriedProjection.characterRecord).loadout).toMatchObject({
+      inventorySeed: ["Brass Tube"],
+      equippedItemRefs: [],
+    });
+    expect(getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ worldVersion: 2, worldTimeMinutes: 0, currentTick: 0 });
+    expect(getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM turn_clock_ledger WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ count: 0 });
+    expect(getSqliteConnection()
+      .prepare("SELECT operation FROM authority_traces WHERE campaign_id = ? ORDER BY created_at")
+      .all(CAMPAIGN_ID)).toEqual([
+        { operation: "gameplay-cycle-runtime.item_transfer.v1" },
+        { operation: "gameplay-cycle-runtime.item_transfer.v1" },
+      ]);
+  });
+
   it("executes item_transfer then dialogue_record only after a refreshed SceneFrame reflects item state", async () => {
     insertNpc({
       id: "npc-guide",
