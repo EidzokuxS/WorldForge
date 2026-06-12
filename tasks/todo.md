@@ -3455,3 +3455,29 @@ Session: `gm-v1-consequenc-slice`.
     - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 233 tests passed.
   - Status impact:
     - P76 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P77 clean gameplay runtime Continued Burn-in / Scene-Described Place Handle:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P76.
+    - [x] Re-inspect the actual current DB/frame for the clean P76 retry clone before choosing the next action.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send exactly one manually chosen `/api/chat/action` from the observed `Transmission Basement` frame.
+    - [x] Verify scene-described local place-handle creation creates only a clean minor POI handle: `worldVersion +1`, no time/tick advance, no movement, no old stores, post-frame target/citable ref present.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record diagnostic evidence and acceptance impact.
+  - Purpose:
+    - Exercise P72 `minor_poi_create` outside the initial market scene by creating a future-usable local target from the current scene's public description: the central telegraph desk in `Transmission Basement`.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic evidence:
+    - Continued clean P76 retry clone `p76-route-anchor-r2-093008` after 5 clean turns. Baseline before P77: scene `Transmission Basement`, visible actors `Venn the Borrowed` and `Relay-Tech Dorin`, scene description includes the central telegraph desk, no existing clean minor POIs, `worldVersion/worldTimeMinutes/currentTick=2/2/2`, old stores 0.
+    - Live action `I pick out the central telegraph desk as a visible local place target in this room, without touching it or moving.` accepted exactly one `minor_poi_create` receipt.
+    - DB proof: one active `clean_gameplay_minor_pois` row `central_telegraph_desk`, kind `workstation`, anchored to `Transmission Basement`, one authority trace `gameplay-cycle-runtime.minor_poi_create.v1`, no new clock ledger row, no Player location change, old v2/saga/narrator/oracle/simulation stores 0.
+    - Clock proof: `worldVersion 2 -> 3`, `worldTimeMinutes=2`, `currentTick=2`; the handle creation advanced world version only.
+    - Post-turn `SceneFrame.targets` includes `central telegraph desk` with kind `place_handle`, and `citableRefs` includes `central_telegraph_desk`. Movement options remain `Resonance Tower` and `Silt Warrens`; the handle did not become a route destination.
+    - Player-facing narration stayed bounded to the handle contract: visible current-scene place handle created, label/kind/anchor/result, and explicitly not a movement destination.
+    - Artifacts are under `output/clean-runtime-p77-place-handle-20260612093829/`.
+  - Executed verification:
+    - No runtime code changed in P77; this was a live composition proof of the existing P72 primitive after P76.
+    - Live `/api/chat/action` proof passed with strict DB delta assertions for receipt, authority trace, minor POI row, clock, old stores, and post-frame target/citable refs.
+  - Status impact:
+    - P77 is diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
