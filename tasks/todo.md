@@ -5026,3 +5026,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
   - Status impact:
     - P146 raises the third clean-runtime acceptance-candidate lane from 30/60 to 40/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
+
+- P147 clean gameplay runtime Acceptance-Candidate Lane C / P143 Continuation 40 -> 50:
+  - Plan:
+    - [x] Continue existing third zero-turn clone `p143-lowwater-acceptance-c-20260612230321` from its clean turn-40 state.
+    - [x] Preflight current DB state: player at `Resonance Tower`, no exact-scene NPCs, visible routes `Ground-Floor Barricade`, `Lowwater Bazaar`, `Silt Warrens`, and `Transmission Basement`; `Ground-Floor Barricade` has visible actor `Watch-Captain Ilara Rost`; old stores zero.
+    - [x] Reuse stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 41-50 one action at a time from inspected post-turn state, covering route check/movement to `Ground-Floor Barricade`, current-scene actor refresh, visible dialogue, route options/check back to `Resonance Tower`, movement back, route check/movement to `Lowwater Bazaar`, and route surface refresh there.
+    - [x] Persist `turn-041/` through `turn-050/` artifacts plus root `db-verification-turn-041.json` through `db-verification-turn-050.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p143-lowwater-acceptance-c-20260612230321/`; preflight artifact `p147-preflight-current-state.json`.
+    - [x] Turn 41 route-check to `Ground-Floor Barricade` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 42 movement to `Ground-Floor Barricade` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `11/8/8 -> 12/9/9`, visible NPC DB surface contains `Watch-Captain Ilara Rost`, old stores zero.
+    - [x] Turn 43 visible-actor observation at `Ground-Floor Barricade` passed: surfaced `Watch-Captain Ilara Rost`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 44 dialogue with `Watch-Captain Ilara Rost` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 45 route-options check from `Ground-Floor Barricade` passed: surfaced `Resonance Tower`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 46 route-check to `Resonance Tower` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 47 movement to `Resonance Tower` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `12/9/9 -> 13/10/10`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 48 route-check to `Lowwater Bazaar` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 49 movement to `Lowwater Bazaar` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `13/10/10 -> 14/11/11`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 50 route-options check from `Lowwater Bazaar` passed: all eight route labels surfaced, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P143/P144/P145/P146/P147 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-050.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 50: 50 clean turn records, 50 Stage4 receipts, 14 authority traces, 11 clock ledger rows, world clock `14/11/11`, player at `Lowwater Bazaar`, current-scene NPC surface empty, `Sealed lacquer message tube` still carried by `Litha Corsen`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Status impact:
+    - P147 raises the third clean-runtime acceptance-candidate lane from 40/60 to 50/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
