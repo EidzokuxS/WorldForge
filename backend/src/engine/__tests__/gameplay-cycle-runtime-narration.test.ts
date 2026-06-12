@@ -308,6 +308,39 @@ function playerLocalConditionView(): CleanNarratorView {
   });
 }
 
+function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I keep both hands visible while staying in Market, without moving or touching anything.",
+    acceptedEvidence: [
+      ...sceneFrameSnapshotView().acceptedEvidence,
+      {
+        ref: "e5",
+        authority: "player_local_condition_receipt",
+        claimKinds: ["player_local_condition"],
+        text: "Player is hands visible. Current scene anchor: Market.",
+        backendFacts: [
+          { factRef: "e5.f1", text: "Player is hands visible.", exact: true },
+          { factRef: "e5.f2", text: "Condition key: hands_visible.", exact: true },
+          { factRef: "e5.f3", text: "Current scene anchor: Market.", exact: true },
+          { factRef: "e5.f4", text: "Condition result: applied.", exact: true },
+          { factRef: "e5.f5", text: "Condition target: Market.", exact: true },
+        ],
+        limits: {
+          proves: ["Player current-scene local posture/readiness condition operation"],
+          doesNotProve: [
+            "item custody or equip state",
+            "movement",
+            "route truth",
+            "world fact",
+            "dialogue content",
+            "absence or no-change beyond the accepted local condition operation",
+          ],
+        },
+      },
+    ],
+  });
+}
+
 function itemStateView(): CleanNarratorView {
   return movementView({
     playerAction: "I hand the Brass Tube to Guide.",
@@ -892,6 +925,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedHp.status).toBe("rejected");
     if (inventedHp.status !== "rejected") throw new Error("expected rejected");
     expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("keeps player_local_condition deterministic when snapshot context includes inventory and routes", async () => {
+    const result = await runCleanNarration({
+      narratorView: playerLocalConditionWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("player_local_condition should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe(
+      "Player is hands visible. Condition key: hands_visible. Current scene anchor: Market. Condition result: applied. Condition target: Market.",
+    );
+    expect(result.text).not.toMatch(/\b(inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {

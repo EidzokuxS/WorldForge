@@ -3953,3 +3953,49 @@ Session: `gm-v1-consequenc-slice`.
     - Result: player-facing narration `World clock advances by 5 minute(s).`; one accepted `time_advance` receipt; authority trace `gameplay-cycle-runtime.clock.advance.v1`; one `turn_clock_ledger` row with `delta_minutes=5` and `reason_kind=wait`; clock `0/0/0 -> 1/5/5`; old v2/saga/narrator/oracle/simulation stores stayed zero.
   - Status impact:
     - P92 is fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P93/P95 clean gameplay runtime Fallout Repair / Player Local Condition Narration + GM Read Null Question:
+  - Status:
+    - [x] Started fresh post-P92 zero-turn diagnostic lane `p93-lowwater-a`.
+    - [x] Reached seven clean turns, then found player-facing overreach on a `condition_set` turn after item transfer.
+    - [x] Fixed standalone `player_local_condition` Stage 6 projection to deterministic authority projection.
+    - [x] During live repair proof, found GM Read nullable `liveSceneQuestion` fallout that downgraded a valid local condition action into clarification/snapshot.
+    - [x] Fixed GM Read generation/validation to tolerate and canonicalize nullable `liveSceneQuestion`.
+    - [x] Added focused regression tests, reran focused clean-runtime suite and typecheck.
+    - [x] Ran a fresh P95 live proof through movement -> item transfer -> condition.
+  - Diagnostic lane:
+    - Fresh clone: `p93-lowwater-a`.
+    - Turns 1-7 stayed clean across broad look, movement, dialogue, route check, movement, item transfer, and holder-grounded dialogue.
+    - Turn 8 artifact: `output/clean-runtime-p93-lowwater-turn8-20260612144400/`.
+    - Turn 8 action: `I keep both hands visible while staying at Slip Twelve Berth, without moving or touching anything.`
+    - Turn 8 DB state was clean: one accepted `condition_set` receipt, one condition row, authority trace `gameplay-cycle-runtime.player.condition_set.v1`, no clock ledger mutation, old v2/saga/narrator/oracle/simulation stores stayed zero.
+    - Turn 8 player-facing narration was invalid because model Stage 6 combined the condition receipt with SceneFrame context: `Your courier satchel and a sealed lacquer message tube are at hand. Routes lead...` The tube was already owned by `Litha Corsen`, so this implied a false player/item state.
+    - Status impact: P93 is diagnostic-invalid from turn 8 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/narration.ts` now treats `player_local_condition` as deterministic authority projection, so receipt-owned local posture/readiness conditions cannot pick up inventory, routes, item state, no-change, or scene snapshot prose from model narration.
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now lets the model-generation schema accept `liveSceneQuestion: null` and canonicalizes it before strict GM Read validation to `Which current-scene consequence should be resolved?`.
+    - The nullable question fix is limited to non-authoritative prompt text; interaction kind, refs, localConditionNeed, and branch invariants remain strict.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` now covers `player_local_condition` with surrounding SceneFrame snapshot context and asserts the model generator is not called.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` now covers nullable `liveSceneQuestion` on a `player_local_condition` GM Read candidate and verifies `runCleanGmRead` accepts without repair/fallback.
+  - Executed verification:
+    - GitNexus impact before editing `needsDeterministicAuthorityProjection`: LOW; direct caller `runCleanNarration`, no affected processes.
+    - GitNexus impact before editing `validateGmReadCandidate`: LOW; direct caller `runCleanGmRead`, no affected processes.
+    - GitNexus impact before editing `generateGmReadCandidate`: LOW; direct caller `runCleanGmRead`, no affected processes.
+    - GitNexus impact before editing `runCleanGmRead`: LOW; no upstream affected symbols.
+    - Narrow tests passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 199 tests passed.
+    - Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 246 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+  - Live repair proof:
+    - Fresh clone: `p95-condition-narration-a`.
+    - Artifacts:
+      - `output/clean-runtime-p95-condition-narration-turn1-20260612150000/`
+      - `output/clean-runtime-p95-condition-narration-turn2-20260612150200/`
+      - `output/clean-runtime-p95-condition-narration-turn3-20260612150400/`
+    - Turn 1: movement from `Lowwater Bazaar` to `Slip Twelve Berth`; accepted `movement`, trace/ledger clock advance, old stores zero.
+    - Turn 2: handed `Sealed lacquer message tube` to `Litha Corsen`; accepted `item_transfer`, item owner became Litha, worldVersion +1 only, old stores zero.
+    - Turn 3: `hands_visible` condition accepted with `condition_set`, one condition row, authority trace `gameplay-cycle-runtime.player.condition_set.v1`, no clock ledger mutation, and old stores zero.
+    - Turn 3 player-facing narration stayed bounded to condition facts only: `Player is hands visible. Condition key: hands_visible. Current scene anchor: Slip Twelve Berth. Condition result: applied. Condition target: Slip Twelve Berth.`
+    - Post-proof DB still has `Sealed lacquer message tube.owner_id` equal to Litha's NPC id; the condition narration did not claim item custody, inventory, routes, no-change, or NPC/private facts.
+  - Status impact:
+    - P95 is fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

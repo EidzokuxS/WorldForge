@@ -1368,6 +1368,52 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
   });
 
+  it("canonicalizes nullable GM Read liveSceneQuestion before player_local_condition validation", async () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I keep both hands visible while staying in place.",
+    });
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player is setting a local visible posture in the current scene.",
+      liveSceneQuestion: null,
+      focalRefs: ["Player"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player keeps both hands visible without moving.",
+        playerIntent: "Keep both hands visible.",
+        method: "hands_visible",
+        targetRefs: ["Player"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "hands_visible",
+          requestedPostureText: "both hands visible",
+          targetKind: "visible_scene_anchor",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "Visible local posture requires a bounded Player condition receipt.",
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => candidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.liveSceneQuestion).toBe("Which current-scene consequence should be resolved?");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("hands_visible");
+    expect(result.repairAttempted).toBe(false);
+  });
+
   it("accepts targeted current-scene local observation without turning it into item, movement, or scene beat authority", () => {
     const frame = localObservationFrame();
     const candidate = localObservationGmRead(frame);

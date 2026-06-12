@@ -313,6 +313,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
     evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
+    || evidence.claimKinds.includes("player_local_condition")
     || (
       evidence.claimKinds.includes("elapsed_time")
       && !hasPlayerLocationChange

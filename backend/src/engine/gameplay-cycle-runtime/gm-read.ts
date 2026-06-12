@@ -61,6 +61,7 @@ const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|p
 const gmReadGenerationModelSafeRef = z.string().trim().min(1).max(120);
 const gmReadGenerationShortText = z.string().trim().min(1).max(500);
 const gmReadGenerationRepairableText = z.string().trim().min(1).max(2000);
+const DEFAULT_GM_READ_LIVE_SCENE_QUESTION = "Which current-scene consequence should be resolved?";
 
 const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
@@ -84,7 +85,7 @@ const gmReadGenerationMinorPoiNeedSchema = z.object({
 
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
-  liveSceneQuestion: gmReadGenerationRepairableText,
+  liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
   actionInterpretation: gmReadActionInterpretationSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
@@ -179,6 +180,14 @@ function normalizeGmReadDeviceNoSurfaceAdmission(input: {
         allowNoSurface: true,
       },
     },
+  };
+}
+
+function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
+  if (!isRecord(candidate) || candidate.liveSceneQuestion !== null) return candidate;
+  return {
+    ...candidate,
+    liveSceneQuestion: DEFAULT_GM_READ_LIVE_SCENE_QUESTION,
   };
 }
 
@@ -903,7 +912,8 @@ export function validateGmReadCandidate(input: {
     ...collectPrivateTermIssues(input.candidate, privateTerms),
   ];
 
-  const parsed = gmReadSchema.safeParse(input.candidate);
+  const candidateForValidation = normalizeGmReadCandidateForValidation(input.candidate);
+  const parsed = gmReadSchema.safeParse(candidateForValidation);
   let parsedRead: GmRead | null = null;
   if (!parsed.success) {
     issues.push(...parsed.error.issues.map(zodIssue));
