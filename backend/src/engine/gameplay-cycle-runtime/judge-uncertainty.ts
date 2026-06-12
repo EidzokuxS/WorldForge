@@ -438,6 +438,30 @@ function branchIssues(input: {
     );
   }
   if (
+    gmRead.actionInterpretation.interactionKind === "movement_intent"
+    && gmRead.actionInterpretation.targetRefs.some((targetRef) =>
+      frame.movementOptions.some((option) => option.ref.toLowerCase() === targetRef.toLowerCase())
+    )
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
+  ) {
+    add(
+      "checkNeed",
+      "Movement to an exposed SceneFrame movement option requires backend_action_plan_needed so Stage 4 can issue the terminal movement receipt.",
+    );
+  }
+  if (
+    gmRead.actionInterpretation.interactionKind === "route_inquiry"
+    && gmRead.actionInterpretation.targetRefs.some((targetRef) =>
+      frame.movementOptions.some((option) => option.ref.toLowerCase() === targetRef.toLowerCase())
+    )
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
+  ) {
+    add(
+      "checkNeed",
+      "Route inquiry for an exposed SceneFrame movement option requires backend_action_plan_needed so Stage 4 can issue the route-check receipt.",
+    );
+  }
+  if (
     gmRead.actionInterpretation.interactionKind === "ordinary_support_actor_needed"
     && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
     && judgment.checkNeed === "no_roll_needed"
@@ -664,6 +688,8 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "Use nextStep=action_plan for backend-owned consequences; do not include effect kinds, tool names, checklist steps, or payloads.",
     "When GM Read path is procedural and SceneFrame shows allowed receipt-required backend capabilities, do not use settle_no_roll; admit backend_action_plan_needed with noRollReason.code=backend_receipt_required unless a true Oracle roll or combat boundary is required.",
     "When GM Read actionInterpretation.interactionKind is visible_actor_dialogue, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible speaker response receipt.",
+    "When GM Read actionInterpretation.interactionKind is movement_intent and targetRefs includes a SceneFrame.movementOptions ref, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns movement and clock mutation through a terminal movement receipt.",
+    "When GM Read actionInterpretation.interactionKind is route_inquiry and targetRefs includes a SceneFrame.movementOptions ref, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the route-check receipt.",
     "When GM Read actionInterpretation.interactionKind is ordinary_support_actor_needed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the support actor materialization receipt. Do not call Oracle for ordinary support actor availability.",
     "When GM Read actionInterpretation.interactionKind is player_local_condition, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the Player local condition receipt. Do not call Oracle for uncontested posture/readiness.",
     "When GM Read actionInterpretation.interactionKind is item_transfer, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the item transfer receipt. Do not call Oracle for ordinary uncontested give/drop/pickup/equip/unequip.",

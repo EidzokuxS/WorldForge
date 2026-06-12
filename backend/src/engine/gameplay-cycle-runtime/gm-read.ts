@@ -415,6 +415,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const visibleItemRefs = new Set(frame.targets
     .filter((target) => target.kind === "item")
     .map((target) => target.ref.toLowerCase()));
+  const movementOptionRefs = new Set(frame.movementOptions.map((option) => option.ref.toLowerCase()));
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
   const minorPoiNeed = read.actionInterpretation.minorPoiNeed ?? null;
@@ -752,6 +753,114 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.minorPoiNeed",
         message: "device_status_observation must not include minorPoiNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "route_inquiry") {
+    const invalidTargets = loweredTargets.filter((target) => !movementOptionRefs.has(target));
+    if (invalidTargets.length > 0) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+        message: "route_inquiry targetRefs must cite visible SceneFrame.movementOptions, or stay empty for broad route-option questions.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "route_inquiry must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "route_inquiry must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "route_inquiry must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "route_inquiry must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "route_inquiry must not include deviceObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "route_inquiry must not include minorPoiNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "movement_intent") {
+    const movementTargets = loweredTargets.filter((target) => movementOptionRefs.has(target));
+    if (movementTargets.length !== 1 || loweredTargets.length !== 1) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+        message: "movement_intent requires exactly one targetRef copied from SceneFrame.movementOptions.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "movement_intent must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "movement_intent must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "movement_intent must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "movement_intent must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "movement_intent must not include deviceObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "movement_intent must not include minorPoiNeed.",
       });
     }
     return issues;
@@ -1174,7 +1283,9 @@ export function buildGmReadSystemPrompt(): string {
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
     "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, or where it leads, including wording like without moving / do not go yet.",
-    "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, or otherwise change current scene/location.",
+    "route_inquiry targetRefs must cite SceneFrame.movementOptions when the question targets one route, or stay empty for broad route-option questions.",
+    "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, walk back to, return to, or otherwise change current scene/location.",
+    "movement_intent requires exactly one targetRef copied from SceneFrame.movementOptions. If the destination is not an exposed movement option, use clarification or unsupported_or_unclear.",
     "Use time_passage only when the player waits, rests, pauses, watches, stands by, or otherwise lets time pass in the current scene without movement or another state change. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
     "For time_passage, copy an explicit requested duration exactly into timePassageNeed.elapsedMinutes when the action gives minutes. For vague brief waits such as a few minutes, set elapsedMinutes=5 and requestedDurationText to the vague duration phrase.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
@@ -1251,10 +1362,28 @@ export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
       }, null, 2),
     ].join("\n")
     : "Current-frame item_transfer cue: no inventory-to-visible-actor handoff example is available in this SceneFrame.";
+  const firstMovementOption = frame.movementOptions[0]?.ref ?? null;
+  const movementCue = firstMovementOption
+    ? [
+      "Current-frame movement cue:",
+      "When the player says to walk, go, head, return, travel, enter, leave, follow, take a route, or move to a SceneFrame.movementOptions entry, choose interactionKind=movement_intent.",
+      "Use path=procedural, targetRefs=[destinationRef], and copy the destination ref exactly from movementOptions. Route-status questions with without moving / do not go yet use interactionKind=route_inquiry instead.",
+      "For this frame, a valid movement example shape is:",
+      JSON.stringify({
+        path: "procedural",
+        actionInterpretation: {
+          interactionKind: "movement_intent",
+          targetRefs: [firstMovementOption],
+          method: "walk",
+        },
+      }, null, 2),
+    ].join("\n")
+    : "Current-frame movement cue: no movement_intent target is available because SceneFrame.movementOptions is empty.";
   return [
     "Interpret the player action against this authoritative SceneFrame.",
     "Return gm-read.v1 JSON. Do not add extra fields.",
     itemTransferCue,
+    movementCue,
     JSON.stringify(promptFrame(frame), null, 2),
   ].join("\n\n");
 }

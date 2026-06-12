@@ -1277,6 +1277,113 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
+  it("binds explicit walk-back travel to one exposed movement option before Judge or Checklist", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I walk back to Jujutsu Headquarters.",
+      scene: {
+        currentLocation: { ref: "Mission Assignment Office", label: "Mission Assignment Office", description: null },
+        currentScene: { ref: "Mission Assignment Office", label: "Mission Assignment Office", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      actors: [{
+        ref: "Shimura Rei",
+        label: "Shimura Rei",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      movementOptions: [{
+        ref: "Jujutsu Headquarters",
+        label: "Jujutsu Headquarters",
+        connected: true,
+        travelCost: 1,
+      }],
+      targets: [
+        { ref: "Shimura Rei", label: "Shimura Rei", kind: "actor" },
+        { ref: "Jujutsu Headquarters", label: "Jujutsu Headquarters", kind: "location" },
+      ],
+      citableRefs: ["Player", "Mission Assignment Office", "Shimura Rei", "Jujutsu Headquarters"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "uncertain",
+      situationSummary: "The player is in Mission Assignment Office with a visible route to Jujutsu Headquarters.",
+      liveSceneQuestion: "Which movement destination must be resolved?",
+      focalRefs: ["Player", "Jujutsu Headquarters"],
+      evidenceRefs: ["Player", "Mission Assignment Office", "Jujutsu Headquarters"],
+      actionInterpretation: {
+        summary: "The player intends to walk back to Jujutsu Headquarters.",
+        playerIntent: "Travel to Jujutsu Headquarters.",
+        method: "walk back",
+        targetRefs: ["Jujutsu Headquarters"],
+        interactionKind: "movement_intent",
+      },
+      interpretationRationale: "The action names one exposed movement option as a destination.",
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "movement_intent",
+      targetRefs: ["Jujutsu Headquarters"],
+    });
+
+    const noMovementOption = validateGmReadCandidate({
+      frame: { ...frame, movementOptions: [] },
+      candidate,
+    });
+    expect(noMovementOption.status).toBe("rejected");
+    if (noMovementOption.status !== "rejected") throw new Error("expected rejected");
+    expect(noMovementOption.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+      }),
+    ]));
+  });
+
+  it("accepts route_inquiry for a visible route while preserving the no-movement distinction", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I check whether the route to Jujutsu Headquarters is open, without moving.",
+      movementOptions: [{
+        ref: "Jujutsu Headquarters",
+        label: "Jujutsu Headquarters",
+        connected: true,
+        travelCost: 1,
+      }],
+      citableRefs: ["Player", "Market", "Guide", "Jujutsu Headquarters"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Which visible route status must be checked?",
+      focalRefs: ["Player", "Jujutsu Headquarters"],
+      evidenceRefs: ["Player", "Market", "Jujutsu Headquarters"],
+      actionInterpretation: {
+        summary: "The player asks whether the visible route is open without moving.",
+        playerIntent: "Check route status without moving.",
+        method: "check route",
+        targetRefs: ["Jujutsu Headquarters"],
+        interactionKind: "route_inquiry",
+      },
+      interpretationRationale: "The wording asks for route status and explicitly excludes movement.",
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate }).status).toBe("accepted");
+    expect(validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...candidate,
+        actionInterpretation: {
+          ...candidate.actionInterpretation,
+          targetRefs: ["Guide"],
+        },
+      },
+    }).status).toBe("rejected");
+  });
+
   it("requires time_passage to carry a typed elapsed-minute need before checklist planning", () => {
     const frame = minimalFrame({
       playerAction: "I wait here for 3 minutes.",
@@ -2314,6 +2421,92 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         }),
       ]),
     );
+  });
+
+  it("requires exposed movement_intent to use action_plan even when GM Read path is uncertain", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I walk back to Jujutsu Headquarters.",
+      scene: {
+        currentLocation: { ref: "Mission Assignment Office", label: "Mission Assignment Office", description: null },
+        currentScene: { ref: "Mission Assignment Office", label: "Mission Assignment Office", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [{
+        ref: "Jujutsu Headquarters",
+        label: "Jujutsu Headquarters",
+        connected: true,
+        travelCost: 1,
+      }],
+      targets: [{ ref: "Jujutsu Headquarters", label: "Jujutsu Headquarters", kind: "location" }],
+      citableRefs: ["Player", "Mission Assignment Office", "Jujutsu Headquarters"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      path: "uncertain",
+      situationSummary: "The player names a visible route destination.",
+      liveSceneQuestion: "Which movement destination must be resolved?",
+      focalRefs: ["Player", "Jujutsu Headquarters"],
+      evidenceRefs: ["Player", "Mission Assignment Office", "Jujutsu Headquarters"],
+      actionInterpretation: {
+        summary: "The player intends to walk back to Jujutsu Headquarters.",
+        playerIntent: "Travel to Jujutsu Headquarters.",
+        method: "walk back",
+        targetRefs: ["Jujutsu Headquarters"],
+        interactionKind: "movement_intent",
+      },
+      interpretationRationale: "The target is one exposed SceneFrame movement option.",
+    };
+    const clarification: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "uncertain",
+      },
+      physicalPossibility: "underspecified",
+      checkNeed: "clarification_needed",
+      nextStep: "ask_clarification",
+      actorRefs: ["Player"],
+      targetRefs: ["Jujutsu Headquarters"],
+      evidenceRefs: ["Player", "Mission Assignment Office", "Jujutsu Headquarters"],
+      possibilityRationale: "The target is visible but the candidate asks for clarification.",
+      checkRationale: "The candidate asks for clarification instead of admitting the backend movement receipt.",
+      noRollReason: {
+        code: "insufficient_specificity",
+        explanation: "The movement target was treated as insufficiently specific.",
+        evidenceRefs: ["Player", "Jujutsu Headquarters"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: clarification });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "branch_invalid",
+        path: "checkNeed",
+      }),
+    ]));
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "uncertain",
+      },
+      actorRefs: ["Player"],
+      targetRefs: ["Jujutsu Headquarters"],
+      evidenceRefs: ["Player", "Mission Assignment Office", "Jujutsu Headquarters"],
+      checkRationale: "Movement to an exposed destination needs backend movement receipt authority.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Stage 4 must issue the terminal movement receipt before narration can claim arrival.",
+        evidenceRefs: ["Player", "Jujutsu Headquarters"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
   });
 
   it("rejects ordinary support actor materialization as no-roll narration", () => {

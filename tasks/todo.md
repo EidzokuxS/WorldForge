@@ -4513,3 +4513,48 @@ Session: `gm-v1-consequenc-slice`.
     - DB proof: `Courier satchel` and `Sealed lacquer message tube` both ended with `equip_state=equipped`, `equipped_slot=equipped`; both authority traces use `gameplay-cycle-runtime.item_transfer.v1`.
   - Status impact:
     - P104 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P128/P129 clean gameplay runtime Fallout Repair / Explicit Walk-Back Movement Admission:
+  - Status:
+    - [x] Continued post-P127 Shibuya diagnostic lane and found a real movement admission miss on turn 22.
+    - [x] Fixed GM Read movement/route target validation against `SceneFrame.movementOptions`.
+    - [x] Fixed Judge/Uncertainty branch validation so exposed `movement_intent` and targeted `route_inquiry` require backend action-plan receipts.
+    - [x] Added focused regressions for explicit `walk back` movement, `without moving` route checks, and `ask_clarification` drift on valid movement intent.
+    - [x] Re-ran typecheck and focused clean-runtime tests.
+    - [x] Ran a fresh clean-runtime live repair proof on a zero-turn clone.
+  - Diagnostic lane:
+    - Fresh clone: `p126-scene-evidence-leak-proof-192145`.
+    - Turn 21 artifact: `output/clean-runtime-p128-shibuya-postfix-turn21-20260612194238/`.
+    - Turn 21 action: `I check whether the route to Jujutsu Headquarters is open, without moving.`
+    - Turn 21 stayed clean: one `route_check` receipt, no mutation, no clock advance, old stores zero.
+    - Turn 22 artifact: `output/clean-runtime-p128-shibuya-postfix-turn22-20260612194344/`.
+    - Turn 22 action: `I walk back to Jujutsu Headquarters.`
+    - Turn 22 invalid result: GM Read recognized intent as travel, but path stayed `uncertain`; Judge chose `ask_clarification`; settlement produced a broad scene snapshot instead of a `movement` checklist/Stage4 receipt. Player remained in `Mission Assignment Office`.
+    - Status impact: P128 is diagnostic-invalid from turn 22 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now requires `movement_intent` to cite exactly one visible `SceneFrame.movementOptions` ref and requires `route_inquiry` target refs to cite movement options when targeted.
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now prompts with a current-frame movement cue, including `walk back` / `return to`, while preserving `without moving` as `route_inquiry`.
+    - `backend/src/engine/gameplay-cycle-runtime/judge-uncertainty.ts` now rejects `ask_clarification`, no-roll, or other non-action-plan branches for exposed movement targets; route checks over exposed route targets likewise require the route-check receipt path.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` accepts `I walk back to Jujutsu Headquarters.` as `movement_intent` only when `Jujutsu Headquarters` is a movement option.
+    - The same file accepts `I check whether the route to Jujutsu Headquarters is open, without moving.` as `route_inquiry` and rejects non-route targets for route inquiries.
+    - The same file rejects Judge `ask_clarification` for `path=uncertain` plus exposed `movement_intent`, and accepts the backend action-plan branch.
+  - Executed verification:
+    - GitNexus impact before editing `validateGmReadCandidate`: LOW; direct caller `runCleanGmRead`.
+    - GitNexus impact before editing `buildGmReadSystemPrompt`: LOW; direct caller `runCleanGmRead`.
+    - GitNexus impact before editing `buildGmReadPrompt`: LOW; direct caller `runCleanGmRead`.
+    - GitNexus impact before editing `validateJudgeUncertaintyCandidate`: LOW; direct caller `runCleanJudgeUncertainty`.
+    - GitNexus impact before editing `buildJudgeUncertaintySystemPrompt`: LOW; direct caller `runCleanJudgeUncertainty`.
+    - Narrow contracts test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 184 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 263 tests passed.
+  - Live repair proof:
+    - Negative harness attempt: `output/clean-runtime-p129-movement-repair-proof-20260612195247/` on clone `p129-movement-repair-proof-195403` was invalid because backend was started without `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`; it populated old `turn_sagas`/`settled_turn_packets` and is not clean-runtime evidence.
+    - Valid clean proof: `output/clean-runtime-p129-movement-repair-proof-clean-20260612200033/` on fresh clone `p129-clean-movement-repair-proof-200057` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+    - Turn 1: `I walk to Jujutsu Headquarters.` -> accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, travel ledger, old stores zero.
+    - Turn 2: `I walk to Mission Assignment Office.` -> accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, travel ledger, old stores zero.
+    - Turn 3: `I check whether the route to Jujutsu Headquarters is open, without moving.` -> accepted `route_check`, no mutation, no worldVersion/time/tick advance, old stores zero.
+    - Turn 4: `I walk back to Jujutsu Headquarters.` -> accepted `movement`; scene changed `Mission Assignment Office -> Jujutsu Headquarters`; worldVersion/time/tick `2/2/2 -> 3/3/3`; one movement receipt; one authority trace `gameplay-cycle-runtime.player.move.v1`; one `turn_clock_ledger` row `reason_kind=travel`; old v2/saga/narrator/oracle/simulation stores stayed zero.
+    - DB verification artifact: `output/clean-runtime-p129-movement-repair-proof-clean-20260612200033/db-verification.json` with `pass=true`.
+  - Status impact:
+    - P129 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
