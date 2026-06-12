@@ -1432,6 +1432,63 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(rejected.issues.some((issue) => issue.code === "interaction_invalid")).toBe(true);
   });
 
+  it("canonicalizes empty modeled device surfaces to bounded no-surface admission", async () => {
+    const base = deviceSurfaceFrame();
+    const frame = deviceSurfaceFrame({
+      playerAction: "I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators, without moving.",
+      deviceStatusSurfaces: [{
+        ...base.deviceStatusSurfaces![0]!,
+        availableFacetKinds: [],
+        facets: [],
+      }],
+    });
+    const candidate: GmRead = {
+      ...deviceSurfaceGmRead(frame),
+      actionInterpretation: {
+        ...deviceSurfaceGmRead(frame).actionInterpretation,
+        playerIntent: "Check Burner phone visible screen indicators.",
+        deviceObservationNeed: {
+          ...deviceSurfaceGmRead(frame).actionInterpretation.deviceObservationNeed!,
+          requestedFacetText: "signal bars, message notifications, and missed-call indicators",
+          facetKinds: ["signal_indicator", "notification_indicator", "call_indicator"],
+          allowNoSurface: false,
+        },
+      },
+    };
+
+    const readResult = validateGmReadCandidate({ frame, candidate });
+
+    expect(readResult.status).toBe("accepted");
+    if (readResult.status !== "accepted") throw new Error("expected accepted");
+    expect(readResult.read.actionInterpretation.deviceObservationNeed?.allowNoSurface).toBe(true);
+
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, readResult.read),
+      actorRefs: ["Player"],
+      targetRefs: ["Burner phone"],
+      evidenceRefs: ["Player", "Market", "Burner phone"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Device surface observation needs a clean device_surface_observation receipt before narration.",
+        evidenceRefs: ["Player", "Burner phone", "Market"],
+      },
+    };
+
+    const checklist = await runCleanGmActionChecklist({
+      frame,
+      gmRead: readResult.read,
+      judgment,
+      checklistId: "gm-action-checklist-device-nosurface",
+    });
+
+    expect(checklist.status).toBe("accepted");
+    if (checklist.status !== "accepted") throw new Error("expected accepted");
+    expect(checklist.checklist.steps[0]?.intended.deviceObservationPlan).toMatchObject({
+      facetKinds: ["signal_indicator", "notification_indicator", "call_indicator"],
+      allowNoSurface: true,
+    });
+  });
+
   it("rejects localObservationNeed when the target ref is outside the requested exposed surface", () => {
     const frame = localObservationFrame();
     const candidate: GmRead = {

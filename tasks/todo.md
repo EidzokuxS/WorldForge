@@ -3875,3 +3875,43 @@ Session: `gm-v1-consequenc-slice`.
     - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 242 tests passed.
   - Status impact:
     - P89 is diagnostic fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P90 clean gameplay runtime Fallout Repair / Device Surface No-Surface Admission:
+  - Status:
+    - [x] Started from clean/synced branch `codex/rebuild-gm-turn-cycle`.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Attempted Grand Quayside zero-turn clone setup, but the source database was missing `turn_sagas`; no gameplay turn was executed, so this is setup/source-suitability fallout only.
+    - [x] Started fresh Shibuya zero-turn diagnostic lane `p90-shibuya-a` and reached five clean turns before the first invalid receipt.
+    - [x] Classified P90 as diagnostic-invalid from turn 6; it cannot count toward final acceptance.
+    - [x] Fixed the root cause at GM Read validation/canonicalization and reran focused clean-runtime tests.
+    - [x] Ran a fresh post-fix zero-turn device-surface proof and verified DB invariants.
+  - Diagnostic lane before failure:
+    - Turn 1 artifact: `output/clean-runtime-p90-shibuya-turn1-20260612133859/`; broad look in `Shibuya District`, direct scene snapshot only, no receipts/traces/ledger, old stores 0, clock `0/0/0`.
+    - Turn 2 artifact: `output/clean-runtime-p90-shibuya-turn2-20260612134002/`; movement to `Shibuya Pedestrian Underpass`, one accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, clock `0/0/0 -> 1/1/1`, old stores 0.
+    - Turn 3 artifact: `output/clean-runtime-p90-shibuya-turn3-20260612134112/`; broad look in `Shibuya Pedestrian Underpass`, direct scene snapshot only, no new receipt/trace/ledger, old stores 0.
+    - Turn 4 artifact: `output/clean-runtime-p90-shibuya-turn4-20260612134203/`; route check back to `Shibuya District`, one accepted `route_check`, no mutation/clock advance, old stores 0.
+    - Turn 5 artifact: `output/clean-runtime-p90-shibuya-turn5-20260612134309/`; movement back to `Shibuya District`, one accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, clock `1/1/1 -> 2/2/2`, old stores 0.
+  - Diagnostic failure:
+    - Turn 6 artifact: `output/clean-runtime-p90-shibuya-turn6-20260612134406/`.
+    - Action: `I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators, without moving.`
+    - Runtime settled with `done`, no old v2/saga/narrator/oracle/simulation rows, and no clock mutation, but Stage 4 inserted a failed `device_surface_observation` receipt: `bounded no-surface evidence was not admitted`.
+    - Player-facing narration fell back to generic SceneFrame snapshot and did not answer the requested phone-surface check, so the lane is invalid from turn 6.
+    - Root cause under repair: live SceneFrame exposes phone-like inventory items as citable device surfaces with zero modeled public facets; the clean P71 contract requires accepted bounded `no_requested_surface`, but GM Read/Checklist let model-authored `allowNoSurface=false` reach Stage 4.
+  - Fix:
+    - `validateGmReadCandidate` now canonicalizes `deviceObservationNeed.allowNoSurface` from the authoritative SceneFrame. If the requested device surface has zero requested publicSafe modeled facets, the accepted GM Read uses `allowNoSurface=true`.
+    - Stage 4 remains strict: a direct backend request with `allowNoSurface=false` and no requested public facet still fails. The upstream GM Read boundary now owns the P71 no-surface admission contract before Checklist copies the plan.
+    - Added a contracts regression for the live P90 shape: empty modeled `Burner phone` surface, requested `signal_indicator`, `notification_indicator`, and `call_indicator`, model-authored `allowNoSurface=false`, accepted GM Read/checklist plan with `allowNoSurface=true`.
+  - Executed verification:
+    - GitNexus impact before editing `interactionIssues`: LOW; direct caller `validateGmReadCandidate`, indirect caller `runCleanGmRead`, no indexed processes.
+    - Narrow contract test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 170 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 243 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p71-clone-device-surface-20260612t105203` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+    - Artifact: `output/p71-live-device-surface-20260612t105203/`.
+    - Action: `I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators.`
+    - Result: one accepted `device_surface_observation` receipt, `publicResult.deviceSurfaceObservation.resultKind=no_requested_surface`, requested facets `signal_indicator, message_indicator, call_indicator`, `mutationApplied=false`, no authority trace, no clock ledger, and final clock stayed `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`.
+    - Old runtime stores stayed zero: `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs`.
+    - Player-facing narration stayed bounded to modeled/exposed no-surface evidence and did not claim true no-signal, no-message, no-call, instructions, or no-change.
+  - Status impact:
+    - P90 is diagnostic fallout repair only. The original `p90-shibuya-a` lane remains invalid from turn 6 and adds 0% final acceptance; future acceptance evidence must start from fresh zero-turn clones after this fix.

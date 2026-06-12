@@ -144,6 +144,44 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function publicDeviceFacetKinds(input: {
+  frame: AuthoritativeSceneFrame;
+  deviceRef: string;
+}): Set<string> {
+  const surface = (input.frame.deviceStatusSurfaces ?? []).find((candidate) =>
+    candidate.deviceRef.toLowerCase() === input.deviceRef.toLowerCase()
+  );
+  return new Set((surface?.facets ?? [])
+    .filter((facet) => facet.publicSafe)
+    .map((facet) => facet.facetKind));
+}
+
+function normalizeGmReadDeviceNoSurfaceAdmission(input: {
+  frame: AuthoritativeSceneFrame;
+  read: GmRead;
+}): GmRead {
+  const need = input.read.actionInterpretation.deviceObservationNeed ?? null;
+  if (!need || need.allowNoSurface) return input.read;
+
+  const publicFacetKinds = publicDeviceFacetKinds({
+    frame: input.frame,
+    deviceRef: need.deviceRef,
+  });
+  const hasRequestedPublicFacet = need.facetKinds.some((kind) => publicFacetKinds.has(kind));
+  if (hasRequestedPublicFacet) return input.read;
+
+  return {
+    ...input.read,
+    actionInterpretation: {
+      ...input.read.actionInterpretation,
+      deviceObservationNeed: {
+        ...need,
+        allowNoSurface: true,
+      },
+    },
+  };
+}
+
 function zodIssue(issue: z.core.$ZodIssue): GmReadValidationIssue {
   return {
     code: "schema_invalid",
@@ -870,10 +908,13 @@ export function validateGmReadCandidate(input: {
   if (!parsed.success) {
     issues.push(...parsed.error.issues.map(zodIssue));
   } else {
-    parsedRead = parsed.data;
-    issues.push(...frameMismatchIssues(parsed.data, input.frame));
-    issues.push(...refValidationIssues(parsed.data, input.frame));
-    issues.push(...interactionIssues(parsed.data, input.frame));
+    parsedRead = normalizeGmReadDeviceNoSurfaceAdmission({
+      frame: input.frame,
+      read: parsed.data,
+    });
+    issues.push(...frameMismatchIssues(parsedRead, input.frame));
+    issues.push(...refValidationIssues(parsedRead, input.frame));
+    issues.push(...interactionIssues(parsedRead, input.frame));
   }
 
   if (issues.length > 0) {
