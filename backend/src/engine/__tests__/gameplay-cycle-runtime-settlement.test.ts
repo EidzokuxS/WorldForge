@@ -515,7 +515,7 @@ function deviceSurfaceObservationReceipt(inputFrame = frame(), inputChecklist = 
       mayAuthorizeMutation: false,
     },
     publicResult: {
-      summary: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      summary: "Current visible device surface for Burner phone exposes no requested message indicator.",
       visibleRefs: ["Player", "Burner phone", "Market"],
       routeStatus: null,
       locationChange: null,
@@ -535,7 +535,7 @@ function deviceSurfaceObservationReceipt(inputFrame = frame(), inputChecklist = 
         anchorSceneLabel: "Market",
         anchorLocationLabel: "Market",
         boundedNoSurface: true,
-        summary: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+        summary: "Current visible device surface for Burner phone exposes no requested message indicator.",
         claimStatus: "bounded_current_frame_device_surface_only",
       },
       sceneBeat: null,
@@ -1031,13 +1031,13 @@ describe("clean Stage 5 settlement contracts", () => {
     const deviceSurface = packet.acceptedEvidence.find((entry) => entry.authority === "device_surface_observation_receipt");
     expect(deviceSurface?.claimKinds).toEqual(["device_surface_observation", "device_surface_unavailable"]);
     expect(deviceSurface?.backendFacts.map((entry) => entry.text)).toEqual([
-      "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      "Current visible device surface for Burner phone exposes no requested message indicator.",
       "Device: Burner phone.",
-      "Requested facets: message_indicator.",
-      "No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.",
+      "Requested surface facets: message indicator.",
+      "Current visible device surface exposes no requested message indicator for Burner phone.",
     ]);
     expect(deviceSurface?.limits.proves).toEqual([
-      "bounded no modeled/exposed requested device surface at this frame/worldVersion",
+      "bounded current visible device surface result for requested facets",
       "requested device label",
     ]);
     expect(deviceSurface?.limits.doesNotProve).toEqual(expect.arrayContaining([
@@ -1049,7 +1049,8 @@ describe("clean Stage 5 settlement contracts", () => {
       "broad absence or no-change",
     ]));
     expect(JSON.stringify(view)).not.toContain("privateResult");
-    expect(JSON.stringify(view)).not.toMatch(/no messages|no calls|no signal|nothing changed|no change/iu);
+    expect(JSON.stringify(deviceSurface)).not.toMatch(/frame\/worldVersion|message_indicator/iu);
+    expect(JSON.stringify(view)).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change/iu);
   });
 
   it("settles support actor materialization as visible actor presence only", () => {

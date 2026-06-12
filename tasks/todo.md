@@ -8,6 +8,33 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P117/P118 clean device-surface player-facing no-result wording:
+- Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean/synced before continuing; GitNexus context/impact before editing `deviceSurfaceObservationResult`, `stage4Evidence`, and `buildCleanNarrationSystemPrompt` reported LOW risk.
+- P117 fresh diagnostic lane `p117-shibuya-acceptance-a-175504` reached turn 1 cleanly, then turn 2 action `I check the Burner phone screen for any visible notifications or calls, without moving.` accepted one `device_surface_observation` no-result receipt but printed backend wording to the player: `frame/worldVersion` plus raw facet ids `notification_indicator`, `call_indicator`, and `screen_state`. P117 is diagnostic-invalid from turn 2.
+- Root cause:
+  - Stage4 `deviceFacetSummary` wrote internal layer text into public receipt summary.
+  - Settlement `stage4Evidence` copied raw facet enum ids and `frame/worldVersion` into exact backend facts.
+  - Stage6 deterministic authority projection printed the accepted backend facts exactly.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now renders device facet enum values through player-safe display labels and summarizes no-result as current visible device-surface evidence.
+  - `backend/src/engine/gameplay-cycle-runtime/settlement.ts` now projects requested/unavailable device facets through display labels and uses current-visible-surface limits.
+  - `backend/src/engine/gameplay-cycle-runtime/narration.ts` prompt contract now describes the bounded current visible device-surface no-result.
+  - Regression tests assert no player-facing `frame/worldVersion` or raw facet enum strings in summaries/fallback text, while typed receipt fields remain structured.
+- Verification:
+  - `npm --prefix backend run typecheck` passed.
+  - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 258 tests passed.
+- Live proof:
+  - First proof attempt `p118-device-surface-no-leak-180413` is invalid evidence: backend was started without `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true`, so `/api/chat/action` used the legacy route (`frame/local-consequences`) and wrote legacy stores.
+  - Fresh clean proof clone `p118-clean-device-surface-no-leak-181129` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+  - Artifact: `output/clean-runtime-p118-clean-device-surface-no-leak-181129/`.
+  - Turn 1 broad look ran through `gameplay-cycle-runtime`, emitted clean direct scene snapshot, wrote one clean turn record, no Stage4 receipt, and kept clock `0/0/0`.
+  - Turn 2 action `I check the Burner phone screen for any visible notifications or calls, without moving.` ran through `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> settled-turn-packet -> narrative -> finalizing_turn -> done`.
+  - Turn 2 accepted exactly one `device_surface_observation` receipt with `resultKind=no_requested_surface`, `boundedNoSurface=true`, `mutationAuthority=none`, no observed facets, no mutation, and clock stayed `worldVersion=0/worldTimeMinutes=0/currentTick=0`.
+  - Player-facing text: `Current visible device surface for Burner phone exposes no requested notification indicator, call indicator, and screen state. Device: Burner phone. Requested surface facets: notification indicator, call indicator, and screen state. Current visible device surface exposes no requested notification indicator, call indicator, and screen state for Burner phone.`
+  - Final DB counts: `clean_gameplay_turn_records=2`, `clean_gameplay_stage4_receipts=1`, and `authority_traces`, `turn_clock_ledger`, old v2/saga/narrator/oracle/simulation stores all stayed 0.
+- Status impact:
+  - Device-surface no-result leak fixed and live-proven. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P115/P116 clean runtime GM Read transport-failure boundary:
 - Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean/synced and `npm --prefix backend run typecheck` passed before continuing.
 - P115 fresh diagnostic lane `p115-acceptance-a-173029` reached seven clean turns across broad look, route_check, movement, visible-actor dialogue, item_transfer, holder-grounded dialogue, and player-local condition.

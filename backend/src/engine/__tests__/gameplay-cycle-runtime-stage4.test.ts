@@ -1182,8 +1182,8 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
     const summary = result.execution?.receipts[0]?.publicResult.summary ?? "";
-    expect(summary).toContain("No modeled/exposed device surface facet");
-    expect(summary).not.toMatch(/no messages|no calls|no signal|nothing changed|no change/iu);
+    expect(summary).toBe("Current visible device surface for Burner phone exposes no requested message indicator.");
+    expect(summary).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change/iu);
     const clock = getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };

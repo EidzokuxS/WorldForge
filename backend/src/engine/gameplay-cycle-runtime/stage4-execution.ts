@@ -2844,6 +2844,27 @@ function uniqueDeviceFacetKinds(kinds: readonly DeviceFacetKind[]): DeviceFacetK
   return uniqueStrings(kinds) as DeviceFacetKind[];
 }
 
+function deviceFacetKindLabel(kind: DeviceFacetKind): string {
+  switch (kind) {
+    case "screen_state": return "screen state";
+    case "power_indicator": return "power indicator";
+    case "battery_indicator": return "battery indicator";
+    case "signal_indicator": return "signal indicator";
+    case "notification_indicator": return "notification indicator";
+    case "message_indicator": return "message indicator";
+    case "call_indicator": return "call indicator";
+    default: return String(kind).replace(/_/gu, " ");
+  }
+}
+
+function deviceFacetKindListLabel(kinds: readonly DeviceFacetKind[]): string {
+  const labels = uniqueDeviceFacetKinds(kinds).map(deviceFacetKindLabel);
+  if (labels.length === 0) return "requested device surface facets";
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
 function deviceSurfaceForEffect(input: {
   frame: AuthoritativeSceneFrame;
   effect: DeviceSurfaceObservationEffect;
@@ -2862,16 +2883,17 @@ function deviceFacetSummary(input: {
   unavailableFacetKinds: readonly DeviceFacetKind[];
 }): string {
   if (input.resultKind === "no_requested_surface") {
-    return `No modeled/exposed device surface facet is available for ${input.surface.deviceLabel} (${input.effect.requestedFacetText}) at this frame/worldVersion.`;
+    const unavailable = deviceFacetKindListLabel(input.unavailableFacetKinds);
+    return `Current visible device surface for ${input.surface.deviceLabel} exposes no requested ${unavailable}.`;
   }
   const observed = input.observedFacets
     .map((facet) => `${facet.displayLabel}: ${facet.valueText}`)
     .slice(0, 6)
     .join("; ");
   if (input.resultKind === "partial_facets_observed") {
-    return `Modeled/exposed device surface for ${input.surface.deviceLabel}: ${observed}. Unavailable requested facet(s): ${input.unavailableFacetKinds.join(", ")}.`;
+    return `Modeled public device surface for ${input.surface.deviceLabel}: ${observed}. Unavailable requested surface facets: ${deviceFacetKindListLabel(input.unavailableFacetKinds)}.`;
   }
-  return `Modeled/exposed device surface for ${input.surface.deviceLabel}: ${observed}.`;
+  return `Modeled public device surface for ${input.surface.deviceLabel}: ${observed}.`;
 }
 
 function deviceSurfaceObservationResult(input: {

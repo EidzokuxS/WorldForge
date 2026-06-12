@@ -559,16 +559,16 @@ function deviceSurfaceObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "device_surface_observation_receipt",
       claimKinds: ["device_surface_observation", "device_surface_unavailable"],
-      text: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.",
+      text: "Current visible device surface for Burner phone exposes no requested message indicator.",
       backendFacts: [
-        { factRef: "e1.f1", text: "No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion.", exact: true },
+        { factRef: "e1.f1", text: "Current visible device surface for Burner phone exposes no requested message indicator.", exact: true },
         { factRef: "e1.f2", text: "Device: Burner phone.", exact: true },
-        { factRef: "e1.f3", text: "Requested facets: message_indicator.", exact: true },
-        { factRef: "e1.f4", text: "No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.", exact: true },
+        { factRef: "e1.f3", text: "Requested surface facets: message indicator.", exact: true },
+        { factRef: "e1.f4", text: "Current visible device surface exposes no requested message indicator for Burner phone.", exact: true },
       ],
       limits: {
         proves: [
-          "bounded no modeled/exposed requested device surface at this frame/worldVersion",
+          "bounded current visible device surface result for requested facets",
           "requested device label",
         ],
         doesNotProve: [
@@ -1171,8 +1171,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
     const text = renderCleanNarrationFallback(deviceSurfaceObservationView());
 
-    expect(text).toBe("No modeled/exposed device surface facet is available for Burner phone (message indicator) at this frame/worldVersion. Device: Burner phone. Requested facets: message_indicator. No modeled/exposed device surface for requested facet(s): message_indicator at this frame/worldVersion.");
-    expect(text).not.toMatch(/private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
+    expect(text).toBe("Current visible device surface for Burner phone exposes no requested message indicator. Device: Burner phone. Requested surface facets: message indicator. Current visible device surface exposes no requested message indicator for Burner phone.");
+    expect(text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
 
     const unsupported = validateCleanNarrationCandidate({
       view: deviceSurfaceObservationView(),
@@ -1204,8 +1204,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toContain("No modeled/exposed device surface facet");
-    expect(result.text).not.toMatch(/no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
+    expect(result.text).toContain("Current visible device surface");
+    expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {

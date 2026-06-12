@@ -222,6 +222,27 @@ function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function deviceFacetKindLabel(kind: string): string {
+  switch (kind) {
+    case "screen_state": return "screen state";
+    case "power_indicator": return "power indicator";
+    case "battery_indicator": return "battery indicator";
+    case "signal_indicator": return "signal indicator";
+    case "notification_indicator": return "notification indicator";
+    case "message_indicator": return "message indicator";
+    case "call_indicator": return "call indicator";
+    default: return kind.replace(/_/gu, " ");
+  }
+}
+
+function deviceFacetKindListLabel(kinds: readonly string[]): string {
+  const labels = uniqueStrings(kinds.map(deviceFacetKindLabel));
+  if (labels.length === 0) return "requested device surface facets";
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
 const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
   "hidden or private message contents",
   "true absence of messages, calls, or signal",
@@ -543,8 +564,10 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const facetFacts = observation.observedFacets.slice(0, 5).map((facet, index) =>
         fact(evidenceId, index + 4, `${facet.displayLabel}: ${facet.valueText}.`)
       );
+      const requestedFacetText = deviceFacetKindListLabel(observation.requestedFacetKinds);
+      const unavailableFacetText = deviceFacetKindListLabel(observation.unavailableFacetKinds);
       const unavailableFacts = observation.unavailableFacetKinds.length > 0
-        ? [fact(evidenceId, facetFacts.length + 4, `No modeled/exposed device surface for requested facet(s): ${observation.unavailableFacetKinds.join(", ")} at this frame/worldVersion.`)]
+        ? [fact(evidenceId, facetFacts.length + 4, `Current visible device surface exposes no requested ${unavailableFacetText} for ${observation.deviceLabel}.`)]
         : [];
       evidence.push({
         evidenceId,
@@ -557,14 +580,14 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         backendFacts: boundedBackendFacts([
           fact(evidenceId, 1, observation.summary),
           fact(evidenceId, 2, `Device: ${observation.deviceLabel}.`),
-          fact(evidenceId, 3, `Requested facets: ${observation.requestedFacetKinds.join(", ")}.`),
+          fact(evidenceId, 3, `Requested surface facets: ${requestedFacetText}.`),
           ...facetFacts,
           ...unavailableFacts,
         ]),
         limits: {
           proves: noSurface
-            ? ["bounded no modeled/exposed requested device surface at this frame/worldVersion", "requested device label"]
-            : ["modeled public device surface facets", "requested device label", "current frame/worldVersion device surface anchor"],
+            ? ["bounded current visible device surface result for requested facets", "requested device label"]
+            : ["modeled public device surface facets", "requested device label", "current visible device surface anchor"],
           doesNotProve: DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE,
         },
       });
