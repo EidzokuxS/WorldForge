@@ -250,6 +250,7 @@ export interface Stage4SupportActorRequestValidationIssue {
     | "anchor_invalid"
     | "backend_ref"
     | "private_term"
+    | "plan_mismatch"
     | "role_collision"
     | "schema_invalid"
     | "uncited_ref"
@@ -2191,6 +2192,7 @@ export function validateSupportActorRequestEffectCandidate(input: {
   }
 
   const effect = parsed.data;
+  const plan = input.step.intended.supportActorPlan ?? null;
   const citable = new Set(input.frame.citableRefs.map(normalizedRef));
   const planned = new Set([
     input.frame.player.ref,
@@ -2210,6 +2212,28 @@ export function validateSupportActorRequestEffectCandidate(input: {
       path: "anchorRef",
       message: "Support actor materialization must anchor exactly to the current SceneFrame scene ref.",
     });
+  }
+  if (!plan) {
+    issues.push({
+      code: "plan_mismatch",
+      path: "step.intended.supportActorPlan",
+      message: "Support actor materialization requires a typed supportActorPlan from Checklist.",
+    });
+  } else {
+    if (effect.roleKind !== plan.roleKind) {
+      issues.push({
+        code: "plan_mismatch",
+        path: "roleKind",
+        message: `Support actor roleKind must match checklist supportActorPlan roleKind ${plan.roleKind}.`,
+      });
+    }
+    if (normalizedRef(effect.anchorRef) !== normalizedRef(plan.anchorRef)) {
+      issues.push({
+        code: "plan_mismatch",
+        path: "anchorRef",
+        message: "Support actor anchorRef must match checklist supportActorPlan anchorRef.",
+      });
+    }
   }
 
   for (const ref of refs) {
@@ -2261,7 +2285,6 @@ function promptFrameForSupportActor(frame: AuthoritativeSceneFrame): unknown {
     frameId: frame.frameId,
     turnId: frame.turnId,
     base: frame.base,
-    playerAction: frame.playerAction,
     scene: frame.scene,
     player: frame.player,
     actors: frame.actors.map((actor) => ({
@@ -2274,11 +2297,40 @@ function promptFrameForSupportActor(frame: AuthoritativeSceneFrame): unknown {
   };
 }
 
+function supportActorTaskCard(input: {
+  step: Step;
+}): unknown {
+  const plan = input.step.intended.supportActorPlan;
+  return {
+    job: "propose_one_ordinary_current_scene_support_actor_materialization",
+    capabilityId: "support_actor_create",
+    supportActorPlan: plan
+      ? {
+        roleKind: plan.roleKind,
+        requestedRoleText: plan.requestedRoleText,
+        anchorRef: plan.anchorRef,
+        intendedUse: plan.intendedUse,
+        reusePolicy: plan.reusePolicy,
+      }
+      : null,
+    checklistPurpose: input.step.purpose,
+    checklistTask: input.step.intended.summary,
+    expectedVisibleEffect: input.step.expectedVisibleEffect,
+    allowedEvidenceRefs: input.step.evidenceRefs,
+    materializationAuthority: {
+      evidenceKind: "visible_current_scene_support_actor_materialization",
+      identityBounds: "temporary/current_scene/minor_support/reactive_only",
+      stateAuthority: "backend_materialization_receipt_only",
+    },
+  };
+}
+
 export function buildStage4SupportActorRequestSystemPrompt(): string {
   return [
     "You are WorldForge clean Stage 4 Support Actor Request.",
     "Return only JSON matching the support_actor_create effect schema.",
     "This is not narration. It proposes one bounded ordinary current-scene support actor presentation for backend validation.",
+    "Use Support actor task card as the job contract: roleKind, requestedRoleText, anchorRef, intendedUse, allowed evidence refs, and materialization authority.",
     "Use only ordinary local roles allowed by the schema and anchorRef must be the current SceneFrame scene ref.",
     "Do not create named people, key NPCs, faction leaders, secret contacts, hidden actors, remote actors, family members, persistent actors, or campaign-critical roles.",
     "Do not include dialogue content, world facts, relationship changes, item state, route truth, future relevance, private knowledge, old tool ids, backend refs, or durable event claims.",
@@ -2298,6 +2350,8 @@ export function buildStage4SupportActorRequestPrompt(input: {
     "{ kind, authorityKind, anchorScope, anchorRef, roleKind, roleLabel, publicPresentation, identityBounds, reusePolicy, reason, evidenceRefs, forbiddenPayloads }",
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
+    "Support actor task card:",
+    JSON.stringify(supportActorTaskCard({ step: input.step }), null, 2),
     "Authoritative SceneFrame:",
     JSON.stringify(promptFrameForSupportActor(input.frame), null, 2),
   ].join("\n\n");
@@ -2318,6 +2372,8 @@ function buildStage4SupportActorRepairPrompt(input: {
     JSON.stringify(input.candidate, null, 2),
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
+    "Support actor task card:",
+    JSON.stringify(supportActorTaskCard({ step: input.step }), null, 2),
     "Authoritative SceneFrame:",
     JSON.stringify(promptFrameForSupportActor(input.frame), null, 2),
   ].join("\n\n");

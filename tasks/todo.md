@@ -40,6 +40,12 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Checklist now compiles those primitives from typed GM Read admission: `route_inquiry` with no concrete movement target -> `route_options`; `time_passage` plus `timePassageNeed` -> `time_advance`; generic `current_scene_observation` without `localObservationNeed` -> `observe_visible`.
   - [x] Contract tests now prove raw wording independence by using neutral player/GM prose while typed `interactionKind` drives `route_options`, `time_advance`, and `observe_visible`.
   - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 270 passed.
+- P157 support-actor typed Stage4 task contract:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts`: `promptFrameForSupportActor` still exposed raw `frame.playerAction` to the Stage4 support actor generator, while the primitive job only needs a bounded current-scene materialization request.
+  - [x] Checklist now carries typed `supportActorPlan` (`roleKind`, `requestedRoleText`, `anchorRef`, `intendedUse`, `reusePolicy`) for `support_actor_create` steps, and checklist validation requires the plan on support actor steps only.
+  - [x] Stage4 support actor prompts now include a `Support actor task card` and a SceneFrame snapshot without raw `playerAction`; request validation requires model-authored `roleKind` and `anchorRef` to match `supportActorPlan`.
+  - [x] Regression tests capture real request/repair generator prompts through `runCleanStage4Execution` and prove the raw player action marker is absent while the typed plan is present.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 272 passed.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.

@@ -797,6 +797,18 @@ export const gmActionChecklistStepSchema = z.object({
       anchorRef: modelSafeRef,
       reusePolicy: z.literal("reuse_matching_current_scene_place_handle_or_create"),
     }).strict().nullable().optional(),
+    supportActorPlan: z.object({
+      actorRef: z.literal("Player"),
+      roleKind: cleanSupportActorRoleKindSchema,
+      requestedRoleText: shortText,
+      anchorRef: modelSafeRef,
+      intendedUse: z.enum([
+        "presence_only",
+        "dialogue_requested_but_not_yet_recorded",
+        "service_requested_but_not_yet_resolved",
+      ]),
+      reusePolicy: z.literal("reuse_matching_temporary_current_scene_or_create"),
+    }).strict().nullable().optional(),
     timeAdvancePlan: z.object({
       actorRef: z.literal("Player"),
       sceneRef: modelSafeRef,
@@ -846,6 +858,20 @@ export const gmActionChecklistStepSchema = z.object({
       code: "custom",
       path: ["intended", "timeAdvancePlan"],
       message: "timeAdvancePlan is allowed only for time_advance checklist steps.",
+    });
+  }
+  if (step.intended.kind === "support_actor_create" && !step.intended.supportActorPlan) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "supportActorPlan"],
+      message: "support_actor_create checklist steps require a typed supportActorPlan.",
+    });
+  }
+  if (step.intended.kind !== "support_actor_create" && step.intended.supportActorPlan != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "supportActorPlan"],
+      message: "supportActorPlan is allowed only for support_actor_create checklist steps.",
     });
   }
 });

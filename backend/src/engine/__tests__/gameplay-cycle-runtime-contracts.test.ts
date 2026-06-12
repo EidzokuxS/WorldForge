@@ -4583,6 +4583,14 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
         kind: "support_actor_create",
         requiredCapabilityId: "support_actor_create",
         stateOrEvidence: "state",
+        supportActorPlan: {
+          actorRef: "Player",
+          roleKind: "vendor",
+          requestedRoleText: "local vendor",
+          anchorRef: "Market",
+          intendedUse: "presence_only",
+          reusePolicy: "reuse_matching_temporary_current_scene_or_create",
+        },
       },
     };
     const base = {

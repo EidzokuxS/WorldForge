@@ -298,6 +298,9 @@ function refIssues(input: {
     ...(step.intended.minorPoiPlan
       ? [step.intended.minorPoiPlan.anchorRef]
       : []),
+    ...(step.intended.supportActorPlan
+      ? [step.intended.supportActorPlan.anchorRef]
+      : []),
     ...(step.intended.localObservationPlan
       ? [
           ...(step.intended.localObservationPlan.targetRef ? [step.intended.localObservationPlan.targetRef] : []),
@@ -475,6 +478,29 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         code: "step_invalid",
         path: `steps.${index}.intended.minorPoiPlan`,
         message: "minorPoiPlan is allowed only on minor_poi_create steps.",
+      });
+    }
+    if (step.intended.kind === "support_actor_create") {
+      if (!step.intended.supportActorPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.supportActorPlan`,
+          message: "support_actor_create steps require a typed supportActorPlan.",
+        });
+      }
+      const plan = step.intended.supportActorPlan;
+      if (plan && ![...step.targetRefs, ...step.evidenceRefs].some((ref) => ref.toLowerCase() === plan.anchorRef.toLowerCase())) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.supportActorPlan.anchorRef`,
+          message: "supportActorPlan.anchorRef must be included in step target/evidence refs.",
+        });
+      }
+    } else if (step.intended.supportActorPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.supportActorPlan`,
+        message: "supportActorPlan is allowed only on support_actor_create steps.",
       });
     }
     if (step.intended.kind === "local_observation") {
@@ -815,6 +841,7 @@ function stepFor(input: {
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   minorPoiPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["minorPoiPlan"]>;
+  supportActorPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["supportActorPlan"]>;
   timeAdvancePlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["timeAdvancePlan"]>;
   localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
   deviceObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>;
@@ -847,6 +874,9 @@ function stepFor(input: {
   }
   if (input.minorPoiPlan) {
     intended.minorPoiPlan = input.minorPoiPlan;
+  }
+  if (input.supportActorPlan) {
+    intended.supportActorPlan = input.supportActorPlan;
   }
   if (input.timeAdvancePlan) {
     intended.timeAdvancePlan = input.timeAdvancePlan;
@@ -1270,6 +1300,14 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: [sceneRef],
       evidenceRefs: supportEvidenceRefs,
+      supportActorPlan: {
+        actorRef: "Player",
+        roleKind: supportActorNeed.roleKind,
+        requestedRoleText: supportActorNeed.requestedRoleText,
+        anchorRef: sceneRef,
+        intendedUse: supportActorNeed.intendedUse,
+        reusePolicy: "reuse_matching_temporary_current_scene_or_create",
+      },
       purpose: `Plan ordinary current-scene support actor materialization for ${supportActorNeed.roleKind}.`,
       intendedSummary: `Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=${supportActorNeed.roleKind}; requested role text: ${supportActorNeed.requestedRoleText}. This step must not record dialogue or other consequences.`,
       expectedVisibleSummary: `If accepted, one visible temporary ${supportActorNeed.roleKind} may be materialized in the current scene only.`,

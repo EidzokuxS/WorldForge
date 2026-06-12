@@ -292,6 +292,18 @@ function checklistForKind(
             },
           }
           : {}),
+        ...(kind === "support_actor_create"
+          ? {
+            supportActorPlan: {
+              actorRef: "Player" as const,
+              roleKind: "vendor" as const,
+              requestedRoleText: "local vendor",
+              anchorRef: "Market",
+              intendedUse: "presence_only" as const,
+              reusePolicy: "reuse_matching_temporary_current_scene_or_create" as const,
+            },
+          }
+          : {}),
         ...(kind === "time_advance"
           ? {
             timeAdvancePlan: {
@@ -2935,6 +2947,74 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(refreshed.citableRefs).toContain("Local Vendor");
   });
 
+  it("builds support actor request prompts from typed plan without raw player action", async () => {
+    const rawMarker = "RAW_STAGE4_SUPPORT_MARKER_NEVER_PROMPT";
+    const inputFrame = {
+      ...frame(),
+      playerAction: `I ask for a local vendor while saying ${rawMarker}.`,
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const prompts: string[] = [];
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async (request) => {
+        prompts.push(request.prompt);
+        return supportActorEffect("vendor");
+      },
+    });
+
+    expect(result.status).toBe("executed");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Support actor task card");
+    expect(prompts[0]).toContain('"supportActorPlan"');
+    expect(prompts[0]).toContain('"roleKind": "vendor"');
+    expect(prompts[0]).not.toContain(rawMarker);
+    expect(prompts[0]).not.toContain('"playerAction"');
+  });
+
+  it("keeps support actor repair prompts on the typed plan contract", async () => {
+    const rawMarker = "RAW_STAGE4_SUPPORT_REPAIR_MARKER_NEVER_PROMPT";
+    const inputFrame = {
+      ...frame(),
+      playerAction: `I ask for a local vendor while saying ${rawMarker}.`,
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const prompts: string[] = [];
+    let callCount = 0;
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async (request) => {
+        prompts.push(request.prompt);
+        callCount += 1;
+        return callCount === 1
+          ? supportActorEffect("guide")
+          : supportActorEffect("vendor");
+      },
+    });
+
+    expect(result.status).toBe("executed");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("Support actor task card");
+    expect(prompts[1]).toContain('"supportActorPlan"');
+    expect(prompts[1]).toContain('"roleKind": "vendor"');
+    for (const prompt of prompts) {
+      expect(prompt).not.toContain(rawMarker);
+      expect(prompt).not.toContain('"playerAction"');
+    }
+  });
+
   it("stores support actors under the scene parent broad location so refreshed SceneFrame exposes them", async () => {
     const now = Date.now();
     exec(
@@ -2991,10 +3071,35 @@ describe("clean Stage 4 executor DB contracts", () => {
       ],
       citableRefs: ["Player", "The Copper Tap"],
     };
+    const guideChecklist = checklistForKind("support_actor_create", inputFrame);
+    const guideStep = guideChecklist.steps[0]!;
 
     const result = await runCleanStage4Execution({
       frame: inputFrame,
-      checklist: checklistForKind("support_actor_create", inputFrame),
+      checklist: {
+        ...guideChecklist,
+        steps: [{
+          ...guideStep,
+          targetRefs: ["The Copper Tap"],
+          evidenceRefs: ["Player", "The Copper Tap"],
+          intended: {
+            ...guideStep.intended,
+            summary: "Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=guide; requested role text: local guide.",
+            supportActorPlan: {
+              actorRef: "Player",
+              roleKind: "guide",
+              requestedRoleText: "local guide",
+              anchorRef: "The Copper Tap",
+              intendedUse: "presence_only",
+              reusePolicy: "reuse_matching_temporary_current_scene_or_create",
+            },
+          },
+          expectedVisibleEffect: {
+            summary: "If accepted, one visible temporary guide may be materialized in the current scene only.",
+            visibleRefs: ["Player", "The Copper Tap"],
+          },
+        }],
+      },
       generateSupportActorRequest: async () => ({
         ...supportActorEffect("guide"),
         anchorRef: "The Copper Tap",
