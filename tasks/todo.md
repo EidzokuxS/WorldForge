@@ -8,6 +8,24 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P120 clean Shibuya time-passage diagnostic burn-in:
+- Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `55965133`.
+- Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P119 turn 4. Pre-turn DB inspection: current scene `Shibuya Pedestrian Underpass`, clock `worldVersion=1/worldTimeMinutes=1/currentTick=1`, `clean_gameplay_turn_records=4`, `clean_gameplay_stage4_receipts=2`, `authority_traces=1`, `turn_clock_ledger=1`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Backend was started with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; proof server stopped after verification.
+- Turn 5:
+  - Artifact: `output/clean-runtime-p120-shibuya-time-burnin-turn5-20260612182530/`.
+  - Action: `I wait exactly 2 minutes in Shibuya Pedestrian Underpass, staying where I am and touching nothing.`
+  - Result: `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> state_update -> settled-turn-packet -> narrative -> finalizing_turn -> done`.
+  - Accepted exactly one `time_advance` receipt with `elapsedMinutes=2`, `reasonKind=wait`, `mutationAuthority=world_clock_only`; player scene stayed `Shibuya Pedestrian Underpass`; authority trace `gameplay-cycle-runtime.clock.advance.v1`; one wait ledger row; clock advanced `worldVersion 1 -> 2`, `worldTimeMinutes/currentTick 1 -> 3`; old stores stayed 0.
+  - Player-facing text: `World clock advances by 2 minute(s).`
+- Turn 6:
+  - Artifact: `output/clean-runtime-p120-shibuya-time-burnin-turn6-20260612182630/`.
+  - Action: `I walk back to Shibuya District.`
+  - Result: accepted exactly one `movement` receipt; player scene became `Shibuya District`; authority trace `gameplay-cycle-runtime.player.move.v1`; one travel ledger row; clock advanced `worldVersion 2 -> 3`, `worldTimeMinutes/currentTick 3 -> 4`; old stores stayed 0.
+  - Player-facing text: `You arrive at Shibuya District after 1 minute of travel.`
+- Status impact:
+  - P118/P119/P120 Shibuya diagnostic lane is clean through 6 turns across direct scene, device no-result, movement, direct scene refresh, time advance, and movement-after-time composition. This remains 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P119 clean Shibuya diagnostic burn-in continuation:
 - Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `89f4262e`.
 - Continued existing clean proof clone `p118-clean-device-surface-no-leak-181129` one action at a time after inspecting actual DB state: current scene `Shibuya District`, clock `worldVersion=0/worldTimeMinutes=0/currentTick=0`, `clean_gameplay_turn_records=2`, `clean_gameplay_stage4_receipts=1`, and old v2/saga/narrator/oracle/simulation stores all 0.
