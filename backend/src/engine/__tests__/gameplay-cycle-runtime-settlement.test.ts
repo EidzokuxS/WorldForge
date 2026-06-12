@@ -10,6 +10,7 @@ import {
   type CleanStage4Receipt,
   type GameplayRuntimeTurnInput,
   type GmActionChecklist,
+  type GmRead,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   buildCleanNarratorView,
@@ -149,6 +150,32 @@ function checklist(inputFrame = frame()): GmActionChecklist {
       settledTruth: false,
       publicExposure: "stage_summary_only",
     },
+  };
+}
+
+function directGmRead(inputFrame = frame()): GmRead {
+  return {
+    version: "gm-read.v1",
+    frameId: inputFrame.frameId,
+    turnId: inputFrame.turnId,
+    path: "direct",
+    situationSummary: "The player is in the current visible scene.",
+    liveSceneQuestion: "What does the player observe from here?",
+    focalRefs: ["Player"],
+    evidenceRefs: ["Player", inputFrame.scene.currentScene.ref],
+    actionInterpretation: {
+      summary: "The player observes the current scene without changing it.",
+      playerIntent: "Observe the scene.",
+      method: null,
+      targetRefs: [inputFrame.scene.currentScene.ref],
+      interactionKind: "current_scene_observation",
+    },
+    uncertainty: {
+      present: false,
+      question: null,
+      basis: null,
+    },
+    interpretationRationale: "The action only asks for current visible context.",
   };
 }
 
@@ -580,6 +607,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
 
 function buildPacket(input: {
   frame?: AuthoritativeSceneFrame;
+  gmRead?: GmRead | null;
   checklist?: GmActionChecklist | null;
   execution?: CleanStage4ExecutionResult | null;
 } = {}) {
@@ -589,7 +617,7 @@ function buildPacket(input: {
     turn: inputTurn,
     publicPacketId: buildCleanPublicTurnIds(inputTurn).publicPacketId,
     frame: inputFrame,
-    gmRead: null,
+    gmRead: input.gmRead ?? null,
     judgment: null,
     oracleSettlement: null,
     actionChecklist: input.checklist ?? null,
@@ -619,6 +647,35 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
     expect(JSON.stringify(view)).not.toContain("privateResult");
     expect(packet.acceptedEvidence[0]?.limits.doesNotProve).toContain("no-change");
+  });
+
+  it("settles direct scene snapshots with visible targets and movement options for broad look actions", () => {
+    const inputFrame = frame({
+      playerAction: "I look around for visible objects, exits, and local targets.",
+      targets: [
+        { ref: "Notice Board", label: "Notice Board", kind: "place_handle" },
+        { ref: "North Hall", label: "North Hall", kind: "location" },
+      ],
+      inventory: [{ ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "North Hall", "Notice Board", "Courier satchel"],
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      gmRead: directGmRead(inputFrame),
+      checklist: null,
+      execution: null,
+    });
+    const view = buildCleanNarratorView(packet);
+
+    expect(packet.settlementKind).toBe("direct_scene");
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    const targetEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_target"));
+    expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toContain("Visible target: Notice Board (place_handle).");
+    expect(targetEvidence?.limits.doesNotProve).toContain("movement");
+    const routeEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("movement_option"));
+    expect(routeEvidence?.backendFacts.map((entry) => entry.text)).toContain("Route option: North Hall (connected, 1 minute(s)).");
+    expect(routeEvidence?.limits.doesNotProve).toContain("arrival");
   });
 
   it("settles route_check into route status only", () => {

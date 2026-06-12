@@ -131,6 +131,56 @@ function routeOptionsView(): CleanNarratorView {
   });
 }
 
+function sceneFrameSnapshotView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I look around to see visible objects and exits, without moving.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["current_scene", "current_location"],
+      text: "Current scene is Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current scene is Market.", exact: true },
+        { factRef: "e1.f2", text: "Current place is Market.", exact: true },
+      ],
+      limits: {
+        proves: ["current scene label"],
+        doesNotProve: ["hidden areas", "movement", "arrival"],
+      },
+    }, {
+      ref: "e2",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["inventory_status"],
+      text: "Courier satchel is visible in the inventory snapshot.",
+      backendFacts: [{ factRef: "e2.f1", text: "Inventory item: Courier satchel.", exact: true }],
+      limits: {
+        proves: ["inventory item label only"],
+        doesNotProve: ["item contents", "item use", "ownership transfer"],
+      },
+    }, {
+      ref: "e3",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_target"],
+      text: "Visible current-frame targets include Notice Board.",
+      backendFacts: [{ factRef: "e3.f1", text: "Visible target: Notice Board (place_handle).", exact: true }],
+      limits: {
+        proves: ["visible target labels exposed by the current SceneFrame snapshot"],
+        doesNotProve: ["hidden targets", "movement", "arrival", "absence of other targets"],
+      },
+    }, {
+      ref: "e4",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["movement_option"],
+      text: "Visible route options include North Hall.",
+      backendFacts: [{ factRef: "e4.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      limits: {
+        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "absence of other routes"],
+      },
+    }],
+  });
+}
+
 function dialogueView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -585,6 +635,20 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(text).toBe("Route option: North Hall (connected, 1 minute(s)).");
     expect(text).not.toMatch(/\b(move|arrive|travel to|you go)\b/iu);
+  });
+
+  it("uses deterministic authority projection for direct scene targets and exits", async () => {
+    const result = await runCleanNarration({
+      narratorView: sceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("scene_frame_snapshot route/target facts should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Current scene is Market. Current place is Market. Inventory item: Courier satchel. Visible target: Notice Board (place_handle). Route option: North Hall (connected, 1 minute(s)).");
+    expect(result.text).not.toMatch(/\b(move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {

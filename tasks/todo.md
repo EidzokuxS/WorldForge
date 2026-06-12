@@ -3385,3 +3385,37 @@ Session: `gm-v1-consequenc-slice`.
     - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 230 tests passed.
   - Status impact:
     - P74 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P75 clean gameplay runtime Adaptive Burn-in / Post-Movement Frame Continuity:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P74.
+    - [x] Create a fresh zero-turn clean-start clone and inspect actual current SceneFrame/movement candidates before turn 1.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send one manually chosen `/api/chat/action` at a time from the observed state.
+    - [x] First verify a clean movement into a visible destination, then inspect the post-movement SceneFrame before choosing the next action.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record retry diagnostic evidence after fixing direct scene snapshot narration.
+  - Purpose:
+    - Continue from the P74 route/movement fix into the next acceptance-critical surface: post-movement SceneFrame refresh, citable refs, visible actors/items/routes, and follow-up action planning.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic evidence:
+    - Fresh clone `p75-postmove-085621` precheck was zero-turn clean: chat 0, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0, `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, scene `Lowwater Bazaar`, movement option `Silt Warrens` visible.
+    - Turn 1 action `I take the visible route to Silt Warrens now.` was clean: one accepted `movement` receipt, `gameplay-cycle-runtime.player.move.v1`, one travel clock ledger row, Player moved to `Silt Warrens`, `worldVersion/worldTimeMinutes/currentTick 0 -> 1`, old stores stayed 0, and the post-turn SceneFrame exposed Silt Warrens targets/routes.
+    - Turn 2 broad look action was invalid before the fix: no mutation occurred and stores stayed clean, but player-facing narration reported only current scene/inventory and omitted visible exits/routes/local targets even though the post-turn SceneFrame exposed them.
+    - Root cause: direct-scene settlement built `scene_frame_snapshot` evidence for current scene, actors, visible facts, and inventory, but omitted `frame.targets` and `frame.movementOptions`. Stage 6 therefore had no accepted evidence for exits/local targets and could not reliably narrate them.
+  - Fix:
+    - `sceneEvidence` now emits bounded direct-scene `visible_target` evidence from current `SceneFrame.targets`, excluding duplicate inventory refs and limiting claims against hidden targets, discovery, route legality, movement, services, inventory contents, and absence.
+    - `sceneEvidence` now emits bounded direct-scene `movement_option` evidence from current `SceneFrame.movementOptions`, limiting claims against hidden routes, route safety, movement, arrival, elapsed travel time, and absence of other routes.
+    - Stage 6 treats `scene_frame_snapshot` route/target evidence as deterministic authority projection and renders the full snapshot facts: current scene/place, inventory items, visible targets, and route options.
+  - Final clean diagnostic slice:
+    - Fresh retry clone `p75-postmove-r3-091505` precheck was zero-turn clean with the same Lowwater Bazaar movement surface; artifacts are under `output/clean-runtime-p75-postmove-burnin-r3-20260612091505/`.
+    - Retry turn 1 accepted exactly one `movement` receipt, wrote `gameplay-cycle-runtime.player.move.v1`, wrote one travel clock ledger row, moved Player to `Silt Warrens`, advanced `worldVersion/worldTimeMinutes/currentTick 0 -> 1`, and kept old v2/saga/narrator/oracle/simulation stores at 0.
+    - Retry turn 2 broad look settled as `direct_scene` with no new Stage 4 receipt, no new authority trace, no new clock ledger row, no Player movement, and `worldVersion/worldTimeMinutes/currentTick` stayed `1/1/1`.
+    - Retry turn 2 player-facing text was grounded in accepted `scene_frame_snapshot` evidence and included current scene/place, inventory items, visible target labels (`Lowwater Bazaar`, `Resonance Tower`, `Slip Twelve Berth`, `The Copper Tap`, `Transmission Basement`), and route options with travel costs.
+    - Next candidate action family from the clean Silt Warrens frame: route check/movement among the exposed exits, or a local-support/dialogue probe if the next observed frame exposes a valid current-scene role.
+  - Executed verification:
+    - GitNexus impact was run before edits on `sceneEvidence`, `needsDeterministicAuthorityProjection`, and `renderCleanNarrationFallback`; each reported LOW risk with the expected direct clean-runtime caller.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 232 tests passed.
+  - Status impact:
+    - P75 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

@@ -306,6 +306,8 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("minor_poi_handle")
+    || evidence.claimKinds.includes("visible_target")
+    || evidence.claimKinds.includes("movement_option")
     || evidence.claimKinds.includes("device_surface_observation")
   );
 }
@@ -349,6 +351,22 @@ export function renderCleanNarrationFallback(view: CleanNarratorView): string {
   );
   if (routeOptions) {
     return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
+  }
+
+  const hasSceneFrameRouteOrTarget = view.acceptedEvidence.some((evidence) =>
+    evidence.authority === "scene_frame_snapshot"
+    && (
+      evidence.claimKinds.includes("visible_target")
+      || evidence.claimKinds.includes("movement_option")
+    )
+  );
+  const sceneFrameSnapshotFacts = hasSceneFrameRouteOrTarget
+    ? view.acceptedEvidence
+      .filter((evidence) => evidence.authority === "scene_frame_snapshot")
+      .flatMap((evidence) => evidence.backendFacts.map((entry) => entry.text))
+    : [];
+  if (sceneFrameSnapshotFacts.length > 0) {
+    return sceneFrameSnapshotFacts.join(" ");
   }
 
   const deviceSurfaceObservation = view.acceptedEvidence.find((evidence) =>

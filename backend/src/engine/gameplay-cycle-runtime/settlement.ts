@@ -323,6 +323,54 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       },
     });
   }
+
+  const inventoryRefs = new Set(frame.inventory.map((item) => item.ref.toLowerCase()));
+  const visibleTargets = frame.targets
+    .filter((target) => !inventoryRefs.has(target.ref.toLowerCase()))
+    .slice(0, 6);
+  if (visibleTargets.length > 0) {
+    const targetEvidenceId = nextEvidenceId(evidence);
+    evidence.push({
+      evidenceId: targetEvidenceId,
+      sourceKind: "scene_frame",
+      sourceRef: frame.frameId,
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_target"],
+      text: `Visible current-frame targets include ${visibleTargets.map((target) => target.label).join(", ")}.`,
+      visibleRefs: visibleTargets.map((target) => target.ref),
+      backendFacts: boundedBackendFacts(visibleTargets.map((target, index) =>
+        fact(targetEvidenceId, index + 1, `Visible target: ${target.label} (${target.kind}).`)
+      )),
+      limits: {
+        proves: ["visible target labels in the SceneFrame snapshot"],
+        doesNotProve: ["hidden targets", "discovery", "route legality", "movement", "services", "inventory contents", "absence of other targets"],
+      },
+    });
+  }
+
+  if (frame.movementOptions.length > 0) {
+    const routeEvidenceId = nextEvidenceId(evidence);
+    evidence.push({
+      evidenceId: routeEvidenceId,
+      sourceKind: "scene_frame",
+      sourceRef: frame.frameId,
+      authority: "scene_frame_snapshot",
+      claimKinds: ["movement_option"],
+      text: `Visible route options include ${frame.movementOptions.slice(0, 6).map((option) => option.label).join(", ")}.`,
+      visibleRefs: frame.movementOptions.slice(0, 6).map((option) => option.ref),
+      backendFacts: boundedBackendFacts(frame.movementOptions.slice(0, 8).map((option, index) =>
+        fact(
+          routeEvidenceId,
+          index + 1,
+          `Route option: ${option.label} (${option.connected ? "connected" : "not connected"}${option.travelCost === null ? "" : `, ${option.travelCost} minute(s)`}).`,
+        )
+      )),
+      limits: {
+        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "elapsed travel time", "absence of other routes"],
+      },
+    });
+  }
 }
 
 function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: CleanSettledEvidence[]): void {
