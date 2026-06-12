@@ -34,6 +34,12 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide, then ask, "Do you have it now?"`
   - [x] Live result: `done.runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, chat history `0 -> 2`, one turn record, two accepted Stage4 receipts (`item_transfer`, `dialogue_record`), `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, no turn clock ledger row, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old stores all 0.
   - [x] Player-facing text was multi-token and projected both accepted facts: `Brass Tube item state changed... Guide says: "I have it now."`
+- P156 Checklist typed-admission cleanup:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/action-checklist.ts`: deterministic Checklist still read raw player/GM prose through `playerActionText`, `wantsRouteOptions`, `wantsVisibleObservation`, and `wantsExplicitWait` before compiling `route_options`, `observe_visible`, and `time_advance`.
+  - [x] GitNexus impact before edits was LOW for `buildDeterministicGmActionChecklist`, `wantsRouteOptions`, `wantsVisibleObservation`, and `wantsExplicitWait`; direct caller path stays inside `runCleanGmActionChecklist`.
+  - [x] Checklist now compiles those primitives from typed GM Read admission: `route_inquiry` with no concrete movement target -> `route_options`; `time_passage` plus `timePassageNeed` -> `time_advance`; generic `current_scene_observation` without `localObservationNeed` -> `observe_visible`.
+  - [x] Contract tests now prove raw wording independence by using neutral player/GM prose while typed `interactionKind` drives `route_options`, `time_advance`, and `observe_visible`.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 270 passed.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.

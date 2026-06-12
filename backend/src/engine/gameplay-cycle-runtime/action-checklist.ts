@@ -804,33 +804,6 @@ function allowedCapabilities(frame: AuthoritativeSceneFrame): Set<GameplayRuntim
   );
 }
 
-function playerActionText(input: {
-  frame: AuthoritativeSceneFrame;
-  gmRead: GmRead;
-}): string {
-  return [
-    input.frame.playerAction,
-    input.gmRead.actionInterpretation.playerIntent,
-    input.gmRead.actionInterpretation.summary,
-    input.gmRead.liveSceneQuestion,
-  ].join(" ").toLowerCase();
-}
-
-function wantsRouteOptions(text: string): boolean {
-  return /\b(where can i go|where to go|available routes|route options|exits|paths|ways out|directions)\b/u.test(text)
-    || /(?:куда|выход|выходы|маршрут|маршруты|пути|дорог[аи])/.test(text);
-}
-
-function wantsVisibleObservation(text: string): boolean {
-  return /\b(look around|look|observe|scan|inspect|examine|listen|take stock|what do i see|who is here|what is visible)\b/u.test(text)
-    || /(?:осмотр|осмотреть|смотрю|огляд|оглядеться|наблюда|слуша|кто здесь|что видно)/.test(text);
-}
-
-function wantsExplicitWait(text: string): boolean {
-  return /\b(wait|rest|watch|pass time|stand by|stay here|pause)\b/u.test(text)
-    || /(?:жду|подожд|отдых|стою|остаюсь|пауза)/.test(text);
-}
-
 function stepFor(input: {
   index: number;
   kind: GmActionChecklistEffectKind;
@@ -964,7 +937,6 @@ export function buildDeterministicGmActionChecklist(input: {
   const deviceObservationNeed = input.gmRead.actionInterpretation.interactionKind === "device_status_observation"
     ? input.gmRead.actionInterpretation.deviceObservationNeed ?? null
     : null;
-  const actionText = playerActionText(input);
   const dialoguePlayerIntent = input.gmRead.actionInterpretation.playerIntent.trim().replace(/[.!?]+$/u, "");
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
@@ -1181,7 +1153,14 @@ export function buildDeterministicGmActionChecklist(input: {
       evidenceRefs: uniqueStrings([actorRef, movementTarget.ref, ...evidenceRefs]),
       dependsOnStepIds: movementTarget.connected ? [] : steps.map((step) => step.stepId),
     }));
-  } else if (steps.length === 0 && !dialogueSpeaker && allowed.has("route_options") && sceneRef && wantsRouteOptions(actionText)) {
+  } else if (
+    steps.length === 0
+    && !dialogueSpeaker
+    && allowed.has("route_options")
+    && sceneRef
+    && input.gmRead.actionInterpretation.interactionKind === "route_inquiry"
+    && !movementTarget
+  ) {
     steps.push(stepFor({
       index: 1,
       kind: "route_options",
@@ -1196,7 +1175,6 @@ export function buildDeterministicGmActionChecklist(input: {
     && sceneRef
     && input.gmRead.actionInterpretation.interactionKind === "time_passage"
     && timePassageNeed
-    && wantsExplicitWait(actionText)
   ) {
     const timeEvidenceRefs = uniqueStrings([
       actorRef,
@@ -1321,7 +1299,12 @@ export function buildDeterministicGmActionChecklist(input: {
     }
   } else if (steps.length > 0) {
     // A standalone state/evidence primitive has already produced the complete step set.
-  } else if (allowed.has("observe_visible") && sceneRef && wantsVisibleObservation(actionText)) {
+  } else if (
+    allowed.has("observe_visible")
+    && sceneRef
+    && input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
+    && !localObservationNeed
+  ) {
     steps.push(stepFor({
       index: 1,
       kind: "observe_visible",

@@ -3444,6 +3444,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
 
   it("deterministically produces time_advance checklist when no admitted movement target exists", async () => {
     const frame = actionPlanFrame({
+      playerAction: "I let the moment breathe for ten minutes.",
       movementOptions: [],
       capabilities: [
         { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
@@ -3453,9 +3454,10 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     const gmRead: GmRead = {
       ...actionPlanGmRead(frame),
       evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "How much current-scene time should elapse?",
       actionInterpretation: {
-        summary: "The player waits in the current scene.",
-        playerIntent: "Wait in the current scene for ten minutes.",
+        summary: "The player lets ten current-scene minutes elapse.",
+        playerIntent: "Let ten current-scene minutes elapse.",
         method: null,
         targetRefs: ["Market"],
         interactionKind: "time_passage",
@@ -3521,14 +3523,14 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
 
   it("deterministically produces route_options checklist from implemented clean capability only", async () => {
     const frame = actionPlanFrame({
-      playerAction: "I check the available routes from here.",
+      playerAction: "I ask for the current choices from here.",
     });
     const gmRead: GmRead = {
       ...actionPlanGmRead(frame),
-      liveSceneQuestion: "Which visible route options can the player inspect?",
+      liveSceneQuestion: "Which current-scene choices can be listed?",
       actionInterpretation: {
-        summary: "The player asks which routes are available from the current scene.",
-        playerIntent: "Check visible route options.",
+        summary: "The player asks which current-scene choices can be listed.",
+        playerIntent: "List current-scene choices.",
         method: null,
         targetRefs: ["Market"],
         interactionKind: "route_inquiry",
@@ -3560,14 +3562,14 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
 
   it("deterministically produces observe_visible checklist without mutation authority", async () => {
     const frame = actionPlanFrame({
-      playerAction: "I look around the current market.",
+      playerAction: "I take in the current market.",
     });
     const gmRead: GmRead = {
       ...actionPlanGmRead(frame),
-      liveSceneQuestion: "What can the player see in the current scene?",
+      liveSceneQuestion: "Which current-scene details are present?",
       actionInterpretation: {
-        summary: "The player asks to observe the current visible scene.",
-        playerIntent: "Look around the current scene.",
+        summary: "The player requests current-scene surface details.",
+        playerIntent: "Get current-scene surface details.",
         method: null,
         targetRefs: ["Market"],
         interactionKind: "current_scene_observation",
