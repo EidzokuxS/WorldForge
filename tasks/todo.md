@@ -3679,3 +3679,51 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing phone narration stayed bounded to the receipt: no modeled/exposed device surface for requested facets at the current frame/worldVersion. It did not invent no-message, no-call, no-signal, no-change, or instruction claims.
   - Status impact:
     - P84 is cross-source diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P85 clean gameplay runtime Acceptance-Candidate Burn-in / Lowwater 10-Turn Lane:
+  - Status:
+    - [x] Started from a clean tree after committed/pushed P84.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Created a fresh clean-start clone from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - [x] Sent real `/api/chat/action` turns one at a time, choosing each next action only after inspecting the actual post-turn frame/state.
+    - [x] Reached 10 consecutive clean turns with zero failed, replayed, restored, or invalid player-facing turns.
+    - [x] Verified no old gameplay-cycle-v2/saga/narrator/oracle/simulation stores were used.
+  - Purpose:
+    - Move from isolated primitive proofs toward a lane-shaped acceptance candidate on the Lowwater source: broad scene scans, modeled movement, visible-actor dialogue, and a modeled item transfer all in one fresh clone.
+    - Keep this as a 10-turn burn-in only. It is not final acceptance credit until the lane reaches about 60 clean turns and two other different zero-turn worlds/clones do the same.
+  - Live proof:
+    - Fresh clone: `p85-acceptance-candidate-a`.
+    - Turn artifacts:
+      - `output/clean-runtime-p85-acceptance-candidate-turn1-20260612113400/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn2-20260612113600/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn3-20260612113800/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn4-20260612114000/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn5-20260612114400/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn6-20260612114700/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn7-20260612115000/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn8-20260612115200/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn9-20260612115400/`
+      - `output/clean-runtime-p85-acceptance-candidate-turn10-20260612115600/`
+    - Turn path:
+      - Turn 1: broad look in `Lowwater Bazaar`; clean direct-scene snapshot, no receipt/trace/ledger, clock `0/0/0`.
+      - Turn 2: movement to `Silt Warrens`; accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, clock `0/0/0 -> 1/1/1`.
+      - Turn 3: broad look in `Silt Warrens`; clean direct-scene snapshot, no new receipt/trace/ledger.
+      - Turn 4: movement to `Transmission Basement`; accepted `movement`, clock `1/1/1 -> 2/2/2`.
+      - Turn 5: visible dialogue with `Relay-Tech Dorin`; accepted `dialogue_record`, no clock advance, no route/movement mutation from quoted NPC advice.
+      - Turn 6: movement to `Resonance Tower`; accepted `movement`, clock `2/2/2 -> 3/3/3`.
+      - Turn 7: broad look in `Resonance Tower`; clean direct-scene snapshot, no new receipt/trace/ledger.
+      - Turn 8: movement to `Ground-Floor Barricade`; accepted `movement`, clock `3/3/3 -> 4/4/4`.
+      - Turn 9: visible dialogue with `Watch-Captain Ilara Rost`; accepted `dialogue_record`, no clock advance.
+      - Turn 10: item transfer `Sealed lacquer message tube` to `Watch-Captain Ilara Rost`; accepted `item_transfer`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 4 -> 5`, no time/tick advance.
+    - Final DB proof:
+      - `clean_gameplay_turn_records=10`, `clean_gameplay_stage4_receipts=7`, `authority_traces=5`, `turn_clock_ledger=4`.
+      - Final clock `worldVersion=5`, `worldTimeMinutes=4`, `currentTick=4`.
+      - Old stores stayed zero: `gameplay_cycle_v2_packets`, `settled_turn_packets`, `turn_sagas`, `turn_saga_events`, `narrator_attempts`, `oracle_decisions`, `simulation_proposals`, and `simulation_jobs`.
+      - Final frame: Player remained at `Ground-Floor Barricade`, `Courier satchel` remained in Player inventory, `Watch-Captain Ilara Rost` remained visible, and `Sealed lacquer message tube` remained a citable current-scene item target after transfer.
+    - Player-facing narration proof:
+      - Broad-look turns projected only current SceneFrame scene/place, inventory, visible targets, and route options.
+      - Movement turns claimed only accepted arrivals/travel time.
+      - Dialogue turns kept NPC route/procedure statements inside speaker quotes.
+      - Item-transfer turn stayed bounded to item state change and did not invent inspection results, consent, reaction, contents, document truth, or no-change claims.
+  - Status impact:
+    - P85 is an acceptance-candidate burn-in shape, not final acceptance. It adds 0% final acceptance until this or another fresh lane reaches about 60 clean manual turns and the project has several different clean zero-turn worlds/clones at that level.
