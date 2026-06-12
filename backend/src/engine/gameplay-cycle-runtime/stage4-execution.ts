@@ -1697,7 +1697,16 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
     turnId: frame.turnId,
     base: frame.base,
     playerAction: frame.playerAction,
-    scene: frame.scene,
+    scene: {
+      currentLocation: {
+        ref: frame.scene.currentLocation.ref,
+        label: frame.scene.currentLocation.label,
+      },
+      currentScene: {
+        ref: frame.scene.currentScene.ref,
+        label: frame.scene.currentScene.label,
+      },
+    },
     player: frame.player,
     actors: frame.actors.map((actor) => ({
       ref: actor.ref,
@@ -1726,6 +1735,7 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
     "Do not include state deltas, world facts, relationship changes, item/condition/location/movement effects, memory, durable events, old tool ids, or backend refs.",
     "The response authorizes only what the visible speaker visibly says or does in this turn; it does not prove the speaker's claim is true.",
     "Treat SceneFrame target holder metadata as current visible item custody/equip-state evidence; quotedSpeech and summary must align with that holder metadata.",
+    "When answering about current item custody or holder status, answer only from target holder metadata; do not add acquisition history, seizure/provenance, inspection/logging, contents, policy, future custody, or reasons unless those exact facts are present in this prompt-safe frame.",
     "Response-language directives in the player action are UI preferences, not in-world language barriers unless explicit citable scene evidence says otherwise.",
     "Use only refs from the accepted checklist step and SceneFrame.citableRefs.",
   ].join("\n");

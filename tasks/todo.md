@@ -92,6 +92,31 @@ P109/P110 Judge generation repairability checkpoint:
   - DB proof: `Brass Tube.owner_id=p69-fixture-guide`, post-frame holder `visible_actor/Guide`, worldVersion `0 -> 1`, worldTime/currentTick stayed `0`, no turn_clock_ledger row, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old v2/saga/narrator/oracle/simulation stores stayed zero.
 - Status: Judge generation repairability fix and P69 live handoff proof are complete. Actor-held item -> Player transfer remains outside current P69 scope. Final acceptance remains 0%.
 
+P111/P112 Stage4 dialogue item-custody grounding checkpoint:
+- Continued fresh diagnostic lane `p111-acceptance-a-164209` after P110.
+- P111 reached 21 clean turns across direct scene snapshot, route checks, movement, visible-actor dialogue, player-local condition, time advance, minor POI handles, local observation, item equip/unequip, and two visible-actor item transfers.
+- P111 turn 22 action `I ask Watch-Captain Ilara Rost, "Do you have the Courier satchel now?"` is diagnostic-invalid despite mechanically clean DB state: accepted `dialogue_record`, no mutation/clock, old stores zero, but player-facing quoted speech invented unsupported item provenance/processing (`seized it at the checkpoint`, `logging the contents`) after the player had just handed the satchel over.
+- Root cause:
+  - Stage 4 dialogue generation received rich scene prose/facts plus target holder metadata.
+  - The model-authored `dialogue_record` quote pulled plausible custody history and processing lore into the receipt, so Stage 6 faithfully projected an already-bad terminal dialogue receipt.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now projects a prompt-safe dialogue SceneFrame with current scene/location labels, actors, visible targets, target holder/equip-state metadata, and citable refs, while omitting rich scene descriptions, `visibleFacts`, and `recentLocalFacts`.
+  - Stage 4 dialogue system prompt now states the item-custody boundary: current holder/status answers must come from target holder metadata and must not add acquisition history, seizure/provenance, inspection/logging, contents, policy, future custody, or reasons unless those exact facts are present in the prompt-safe frame.
+  - No old v2 path, raw-action regex guard, or semantic fallback was added.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` verifies item-custody dialogue prompts preserve target holder metadata while excluding rich scene prose that could seed unsupported provenance/processing.
+- Verification:
+  - GitNexus impact before editing `buildStage4DialogueRequestSystemPrompt`: LOW; direct caller `buildDialogueRequest`, then `executeDialogueRecord`, then `runCleanStage4Execution`.
+  - GitNexus impact before editing `promptFrameForDialogue`: LOW; direct callers `buildStage4DialogueRequestPrompt` and `buildStage4DialogueRepairPrompt`.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 254 tests.
+- Live repair proof:
+  - Fresh clone `p112-dialogue-item-proof-171055` from source fixture `p69-item-transfer-045651`.
+  - Turn 1 artifact `output/clean-runtime-p112-dialogue-item-proof-turn1-20260612171055/`: `I hand the Brass Tube to Guide.` accepted one `item_transfer` receipt, trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 0 -> 1`, time/tick stayed `0/0`, no ledger, old v2/saga/narrator/oracle/simulation stores zero.
+  - Turn 2 artifact `output/clean-runtime-p112-dialogue-item-proof-turn2-20260612171200/`: `I ask Guide, "Do you have the Brass Tube now?"` accepted one `dialogue_record`, quote `I do. It's right here.`, `worldVersion/worldTime/currentTick` stayed `1/0/0`, no traces/ledger, old stores zero.
+  - DB proof after turn 2: `Brass Tube.owner_id=p69-fixture-guide`, holder `visible_actor/Guide`, `equip_state=carried`, `equipped_slot=null`.
+- Status: Stage4 dialogue item-custody grounding fallout fixed and live-proven. P111 is diagnostic-invalid from turn 22. P112 is a two-turn repair proof only. Final acceptance remains 0%.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.

@@ -59,6 +59,8 @@ import {
   validateGmActionChecklistCandidate,
 } from "../gameplay-cycle-runtime/action-checklist.js";
 import {
+  buildStage4DialogueRequestPrompt,
+  buildStage4DialogueRequestSystemPrompt,
   validateSupportActorRequestEffectCandidate,
   type Stage4ExecutionEvent,
 } from "../gameplay-cycle-runtime/stage4-execution.js";
@@ -4579,6 +4581,86 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(receipt.authority.evidenceAuthority).toBe("terminal_dialogue_receipt");
     expect(receipt.result).toMatchObject({ ...frame.base, mutationApplied: false });
     expect(receipt.publicResult.dialogue?.claimStatus).toBe("visible_speaker_response_only");
+  });
+
+  it("keeps item-custody dialogue prompts holder-grounded without rich scene prose", () => {
+    const frame = actionPlanFrame({
+      playerAction: 'I ask Guide, "Do you have the Courier satchel now?"',
+      scene: {
+        currentLocation: {
+          ref: "Market",
+          label: "Market",
+          description: "A checkpoint where guards seize brass courier gear and log contents.",
+        },
+        currentScene: {
+          ref: "Market",
+          label: "Market",
+          description: "A checkpoint where guards seize brass courier gear and log contents.",
+        },
+        visibleFacts: [{
+          factId: "visible-fact-1",
+          summary: "Guards log contents before releasing courier gear.",
+          source: "test",
+          tick: null,
+        }],
+        recentLocalFacts: [{
+          factId: "recent-fact-1",
+          summary: "A guard seized a satchel here earlier.",
+          source: "test",
+          tick: null,
+        }],
+      },
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [
+        { ref: "Guide", label: "Guide", kind: "actor" },
+        {
+          ref: "Courier satchel",
+          label: "Courier satchel",
+          kind: "item",
+          holder: {
+            holderKind: "visible_actor",
+            holderLabel: "Guide",
+            equipState: "carried",
+          },
+        },
+      ],
+      citableRefs: ["Player", "Market", "Guide", "Courier satchel"],
+    });
+    const checklist = {
+      ...validActionChecklist(frame),
+      steps: [{
+        ...validActionChecklist(frame).steps[0],
+        targetRefs: ["Guide", "Courier satchel"],
+        evidenceRefs: ["Player", "Guide", "Courier satchel"],
+        intended: {
+          ...validActionChecklist(frame).steps[0].intended,
+          kind: "dialogue_record" as const,
+          requiredCapabilityId: "dialogue_record" as const,
+          stateOrEvidence: "terminal_player_visible" as const,
+        },
+      }],
+    };
+
+    const prompt = buildStage4DialogueRequestPrompt({
+      frame,
+      step: checklist.steps[0],
+    });
+    const system = buildStage4DialogueRequestSystemPrompt();
+
+    expect(prompt).toContain('"holderKind": "visible_actor"');
+    expect(prompt).toContain('"holderLabel": "Guide"');
+    expect(prompt).toContain('"equipState": "carried"');
+    expect(prompt).not.toContain("guards seize brass courier gear");
+    expect(prompt).not.toContain("Guards log contents before releasing courier gear.");
+    expect(prompt).not.toContain("A guard seized a satchel here earlier.");
+    expect(system).toContain("answer only from target holder metadata");
+    expect(system).toContain("acquisition history");
+    expect(system).toContain("inspection/logging");
   });
 
   it("accepts support actor materialization receipts with created/reused mutation authority split", () => {
