@@ -57,8 +57,34 @@ const NORMALIZED_FORBIDDEN_SETTLEMENT_KEYS = new Set(
 
 const UUID_LIKE_REF = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|packet|receipt|route|scene|turn|world)[_:]/i;
+const judgeGenerationRepairableText = z.string().trim().min(1).max(2000);
 
-const judgeUncertaintyGenerationSchema = judgeUncertaintySchema
+const judgeDifficultyGenerationSchema = judgeUncertaintySchema.shape.difficulty.unwrap().extend({
+  basis: judgeGenerationRepairableText,
+});
+
+const judgeOracleAdmissionGenerationSchema = judgeUncertaintySchema.shape.oracleAdmission.unwrap().extend({
+  question: judgeGenerationRepairableText,
+  stakes: judgeGenerationRepairableText,
+  outcomeMeanings: judgeUncertaintySchema.shape.oracleAdmission.unwrap().shape.outcomeMeanings.extend({
+    strong_hit: judgeGenerationRepairableText,
+    weak_hit: judgeGenerationRepairableText,
+    miss: judgeGenerationRepairableText,
+  }),
+});
+
+const judgeNoRollReasonGenerationSchema = judgeUncertaintySchema.shape.noRollReason.unwrap().extend({
+  explanation: judgeGenerationRepairableText,
+});
+
+export const judgeUncertaintyGenerationSchema = judgeUncertaintySchema
+  .extend({
+    possibilityRationale: judgeGenerationRepairableText,
+    checkRationale: judgeGenerationRepairableText,
+    difficulty: judgeDifficultyGenerationSchema.nullable(),
+    oracleAdmission: judgeOracleAdmissionGenerationSchema.nullable(),
+    noRollReason: judgeNoRollReasonGenerationSchema.nullable(),
+  })
   .partial({
     difficulty: true,
     oracleAdmission: true,

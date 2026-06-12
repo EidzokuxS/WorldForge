@@ -64,6 +64,34 @@ P108/P109 GM Read item_transfer free-string targetKind checkpoint:
   - P109 turn 3 accepted `item_transfer` `equip_inventory_item`; `Courier satchel` became `equipped`; `worldVersion 1 -> 2`; time/tick stayed 0; old v2/saga/narrator/oracle/simulation stores stayed 0.
 - Status: operation-owned item_transfer shape normalization is fixed through equip-after-observation live proof. Final acceptance remains 0%.
 
+P109/P110 Judge generation repairability checkpoint:
+- Continued live diagnostic lane `p109-equip-after-observation-0b5231f4` after the equip proof.
+- P109 turn 4 route_check from `Lowwater Bazaar` to `Slip Twelve Berth` stayed clean: one accepted `route_check`, no mutation, no clock advance, old stores zero.
+- P109 turn 5 movement to `Slip Twelve Berth` stayed clean: accepted `movement`, worldVersion `2 -> 3`, worldTime/currentTick `0 -> 1`, one travel ledger row, old stores zero.
+- P109 turn 6 item_transfer to visible `Litha Corsen` stayed clean: one accepted `item_transfer`, `Sealed lacquer message tube.owner_id` became Litha's NPC id, worldVersion `3 -> 4`, time/tick stayed `1/1`, trace `gameplay-cycle-runtime.item_transfer.v1`, old stores zero.
+- P109 turn 7 holder-grounded dialogue stayed clean: accepted `dialogue_record`, Litha answered she had the tube, no mutation/clock/trace changes, post-frame still showed `Sealed lacquer message tube` held by `visible_actor/Litha Corsen`.
+- P109 turn 8 action `I ask Litha Corsen, "Please hand the Sealed lacquer message tube back to me," and I take it when she offers it.` is diagnostic-invalid: runtime returned HTTP ok, but produced no receipt/checklist/stage4 and player-facing narration degraded to a scene snapshot. P109 is invalid from turn 8 and adds 0% final acceptance.
+- Root cause:
+  - The action asked for an actor-held item -> Player transfer, which is outside the current P69 operation set (`give/drop/pickup/equip/unequip`, with pickup only current-scene item).
+  - Live backend log showed Judge native JSON failed before validation because `checkRationale` exceeded the strict 500-character final contract; `runCleanJudgeUncertainty` then emitted `fallback_clarification`, so the player-facing result became a safe scene-frame-only packet.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/judge-uncertainty.ts` now exports a repair-friendly `judgeUncertaintyGenerationSchema` with relaxed prose limits for `possibilityRationale`, `checkRationale`, `noRollReason.explanation`, and Oracle/difficulty prose.
+  - Final `judgeUncertaintySchema` remains strict; overlong model prose now reaches validation/repair instead of falling directly into fallback clarification.
+  - This is generation repairability only; it does not add actor-held-item transfer semantics or a fallback semantic patch.
+- Verification:
+  - GitNexus impact before editing `generateJudgeUncertaintyCandidate`: LOW; direct caller `runCleanJudgeUncertainty`.
+  - GitNexus impact before editing `runCleanJudgeUncertainty`: LOW; no indexed upstream callers.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` passed: 176 tests.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 253 tests.
+- Live proof:
+  - First attempted P110 proof from `SOURCE_CAMPAIGN_ID=30e161da-db4b-4d8c-ab93-154fab7aa03f` was invalid as a P69 proof because the source pre-frame did not contain `Brass Tube` or visible `Guide`; it produced a scene snapshot and no receipt.
+  - Correct source fixture found: `p69-item-transfer-045651`, with `chatHistory=0`, `cleanRecords=0`, `Brass Tube` owned by Player, and visible `Guide`.
+  - Fresh clone `p110-brass-guide-proof-163752`, artifact `output/clean-runtime-p110-brass-guide-proof-20260612163752/`.
+  - Action `I hand the Brass Tube to Guide.` accepted one `item_transfer` receipt with operation `give_to_visible_actor`.
+  - DB proof: `Brass Tube.owner_id=p69-fixture-guide`, post-frame holder `visible_actor/Guide`, worldVersion `0 -> 1`, worldTime/currentTick stayed `0`, no turn_clock_ledger row, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old v2/saga/narrator/oracle/simulation stores stayed zero.
+- Status: Judge generation repairability fix and P69 live handoff proof are complete. Actor-held item -> Player transfer remains outside current P69 scope. Final acceptance remains 0%.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.

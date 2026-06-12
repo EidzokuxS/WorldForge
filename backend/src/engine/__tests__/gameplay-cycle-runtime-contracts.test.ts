@@ -45,6 +45,7 @@ import {
 } from "../gameplay-cycle-runtime/gm-read.js";
 import {
   buildJudgeUncertaintySystemPrompt,
+  judgeUncertaintyGenerationSchema,
   runCleanJudgeUncertainty,
   validateJudgeUncertaintyCandidate,
 } from "../gameplay-cycle-runtime/judge-uncertainty.js";
@@ -2188,6 +2189,34 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(result.status).toBe("accepted");
     expect(JSON.stringify(candidate)).not.toContain("toolId");
     expect(JSON.stringify(candidate)).not.toContain("effectKind");
+  });
+
+  it("keeps overlong Judge rationale repairable during model generation while final packets stay strict", () => {
+    const frame = itemTransferActionPlanFrame();
+    const gmRead = itemTransferGmRead(frame);
+    const longRationale = [
+      "The player is asking for a backend-owned item custody transition involving a visible actor and a visible item.",
+      "The runtime must not narrate this from scene-frame evidence alone because the item owner and holder state require an item_transfer receipt before player-facing narration may claim completion.",
+      "This text is intentionally verbose enough to exceed the final shortText contract so generation can pass it to validation and repair instead of falling directly into fallback clarification.",
+      "The repaired candidate should preserve the action_plan branch and shorten the prose.",
+    ].join(" ");
+    const candidate: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      checkRationale: longRationale,
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: longRationale,
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+
+    expect(longRationale.length).toBeGreaterThan(500);
+    expect(judgeUncertaintyGenerationSchema.safeParse(candidate).success).toBe(true);
+    expect(judgeUncertaintySchema.safeParse(candidate).success).toBe(false);
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate }).status).toBe("rejected");
   });
 
   it("rejects procedural GM Read that tries to settle backend consequences as no-roll narration", () => {
