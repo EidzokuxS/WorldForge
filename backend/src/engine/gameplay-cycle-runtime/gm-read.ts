@@ -63,13 +63,37 @@ const gmReadGenerationModelSafeRef = z.string().trim().min(1).max(120);
 const gmReadGenerationShortText = z.string().trim().min(1).max(500);
 const gmReadGenerationRepairableText = z.string().trim().min(1).max(2000);
 const DEFAULT_GM_READ_LIVE_SCENE_QUESTION = "Which current-scene consequence should be resolved?";
+type CleanItemTransferOperation = z.infer<typeof cleanItemTransferOperationSchema>;
+type CleanItemTransferSourceKind = z.infer<typeof cleanItemTransferSourceKindSchema>;
+type CleanItemTransferTargetKind = z.infer<typeof cleanItemTransferTargetKindSchema>;
+
+const gmReadGenerationItemTransferSourceKindSchema = z.union([
+  cleanItemTransferSourceKindSchema,
+  cleanItemTransferTargetKindSchema,
+]);
+const gmReadGenerationItemTransferTargetKindSchema = z.union([
+  cleanItemTransferTargetKindSchema,
+  cleanItemTransferSourceKindSchema,
+]);
+
+const ITEM_TRANSFER_OPERATION_SHAPE: Record<CleanItemTransferOperation, {
+  sourceKind: CleanItemTransferSourceKind;
+  targetKind: CleanItemTransferTargetKind;
+  equipSlot: "equipped" | null;
+}> = {
+  give_to_visible_actor: { sourceKind: "player_inventory", targetKind: "visible_actor", equipSlot: null },
+  drop_in_current_scene: { sourceKind: "player_inventory", targetKind: "current_scene", equipSlot: null },
+  pickup_from_current_scene: { sourceKind: "current_scene_item", targetKind: "player_inventory", equipSlot: null },
+  equip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_equipment", equipSlot: "equipped" },
+  unequip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_inventory", equipSlot: null },
+};
 
 const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
   operation: cleanItemTransferOperationSchema,
   itemRef: gmReadGenerationModelSafeRef,
-  sourceKind: cleanItemTransferSourceKindSchema,
-  targetKind: cleanItemTransferTargetKindSchema,
+  sourceKind: gmReadGenerationItemTransferSourceKindSchema,
+  targetKind: gmReadGenerationItemTransferTargetKindSchema,
   targetRef: gmReadGenerationModelSafeRef,
   equipSlot: z.enum(["equipped", "carried"]).nullable(),
   requestedItemText: gmReadGenerationShortText,
@@ -193,10 +217,33 @@ function normalizeGmReadDeviceNoSurfaceAdmission(input: {
   };
 }
 
-function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
-  if (!isRecord(candidate) || candidate.liveSceneQuestion !== null) return candidate;
+function normalizeGmReadItemTransferShapeCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  const itemTransferNeed = actionInterpretation.itemTransferNeed;
+  if (!isRecord(itemTransferNeed) || typeof itemTransferNeed.operation !== "string") return candidate;
+  const expectedShape = ITEM_TRANSFER_OPERATION_SHAPE[itemTransferNeed.operation as CleanItemTransferOperation];
+  if (!expectedShape) return candidate;
+
   return {
     ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      itemTransferNeed: {
+        ...itemTransferNeed,
+        sourceKind: expectedShape.sourceKind,
+        targetKind: expectedShape.targetKind,
+      },
+    },
+  };
+}
+
+function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(candidate);
+  if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
+  return {
+    ...normalizedTransfer,
     liveSceneQuestion: DEFAULT_GM_READ_LIVE_SCENE_QUESTION,
   };
 }
@@ -416,18 +463,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     const itemRef = itemTransferNeed.itemRef.toLowerCase();
     const targetRef = itemTransferNeed.targetRef.toLowerCase();
     const operation = itemTransferNeed.operation;
-    const expected: Record<typeof operation, {
-      sourceKind: typeof itemTransferNeed.sourceKind;
-      targetKind: typeof itemTransferNeed.targetKind;
-      equipSlot: typeof itemTransferNeed.equipSlot;
-    }> = {
-      give_to_visible_actor: { sourceKind: "player_inventory", targetKind: "visible_actor", equipSlot: null },
-      drop_in_current_scene: { sourceKind: "player_inventory", targetKind: "current_scene", equipSlot: null },
-      pickup_from_current_scene: { sourceKind: "current_scene_item", targetKind: "player_inventory", equipSlot: null },
-      equip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_equipment", equipSlot: "equipped" },
-      unequip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_inventory", equipSlot: null },
-    };
-    const expectedShape = expected[operation];
+    const expectedShape = ITEM_TRANSFER_OPERATION_SHAPE[operation];
     if (
       itemTransferNeed.sourceKind !== expectedShape.sourceKind
       || itemTransferNeed.targetKind !== expectedShape.targetKind
@@ -1121,6 +1157,7 @@ export function buildGmReadSystemPrompt(): string {
     "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory. For visible_actor_distance, targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
     "Use item_transfer only for one uncontested Player item custody/location/equip-state transition: give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, equip_inventory_item, or unequip_inventory_item.",
     "itemTransferNeed must cite itemRef from SceneFrame.inventory for give/drop/equip/unequip, or from SceneFrame.targets where kind=item for pickup. give_to_visible_actor targetRef must be a visible actor; drop targetRef must be current scene/location; pickup/equip/unequip targetRef must be Player.",
+    "itemTransferNeed sourceKind/targetKind are fixed by operation: give/drop/equip/unequip sourceKind=player_inventory, pickup sourceKind=current_scene_item; give targetKind=visible_actor, drop targetKind=current_scene, pickup/unequip targetKind=player_inventory, equip targetKind=player_equipment.",
     "itemTransferNeed.equipSlot is the requested target equipment slot only: set it to \"equipped\" only for equip_inventory_item, and set it to null for give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, and unequip_inventory_item. Do not copy the inventory item's current equipState into equipSlot.",
     "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
     "If the player puts on, wears, straps on, slings onto shoulder/back, fastens onto themselves, or otherwise moves a carried inventory item into a worn/equipped state, use item_transfer with operation=equip_inventory_item.",

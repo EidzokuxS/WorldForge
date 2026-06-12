@@ -27,6 +27,26 @@ P105/P106 clean local observation player-facing leak:
   - P106 DB: one accepted `local_observation` receipt, no mutation, clock stayed `worldVersion=0/worldTimeMinutes=0/currentTick=0`, old v2/saga/narrator/oracle/simulation stores stayed 0.
 - Status: local observation leak fixed and live-proven. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
 
+P107/P108 GM Read item_transfer enum-drift checkpoint:
+- P107 fresh zero-turn diagnostic lane `p107-acceptance-a-bb5ae0c9` started clean after the local-observation fix.
+- P107 turn 1 action `I stay in Lowwater Bazaar and look to see whether anyone is visibly nearby, without touching anything.` accepted `local_observation`, returned `No visible non-player actors are present in the current scene.`, and left clock/stores clean.
+- P107 turn 2 action `I unfasten the Courier satchel from my shoulder and carry it in one hand.` was invalid: GM Read generation produced an `itemTransferNeed` with invalid `sourceKind`, native JSON validation failed before clean GM Read normalization, and runtime fell back to a clarification-style scene snapshot. No DB mutation occurred, but the player-facing turn failed to perform the requested equip-state transfer; P107 is diagnostic-invalid from turn 2.
+- Root cause: `gmReadModelGenerationSchema` rejected operation-owned item-transfer source/target enum drift before `validateGmReadCandidate` could canonicalize or repair it. Final `gmReadSchema` remained strict, but the generation schema was too strict for a model near-miss whose canonical values are fully determined by `itemTransferNeed.operation`.
+- Fix:
+  - `gmReadModelGenerationSchema` now allows source/target kind near-misses drawn from the item-transfer source/target enum domains.
+  - `normalizeGmReadCandidateForValidation` canonicalizes `itemTransferNeed.sourceKind` and `targetKind` from the accepted `operation` before strict `gmReadSchema` validation.
+  - `equipSlot` remains strict; the existing carried-equipSlot near-miss still rejects.
+  - GM Read prompt now states the operation-owned sourceKind/targetKind mapping explicitly.
+- Verification:
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` passed: 175 tests.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 77 tests.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 252 tests.
+  - Fresh live proof clone `p108-unequip-after-observation-70459af5`, artifacts `output/clean-runtime-p108-unequip-after-observation-turn1-20260612161436/` and `output/clean-runtime-p108-unequip-after-observation-turn2-20260612161505/`.
+  - P108 turn 1 repeated the empty visible-roster local observation cleanly.
+  - P108 turn 2 accepted one `item_transfer` receipt with operation `unequip_inventory_item`; `Courier satchel` became `equipState=carried`; `worldVersion` advanced `0 -> 1`; `worldTimeMinutes/currentTick` stayed `0`; no turn clock ledger row; old v2/saga/narrator/oracle/simulation stores stayed 0.
+- Status: enum-drift GM Read fallout fixed and live-proven. Final acceptance remains 0%.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.
