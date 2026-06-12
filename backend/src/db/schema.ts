@@ -1302,3 +1302,36 @@ export const cleanGameplayActorConditions = sqliteTable(
       .where(sql`${table.active} = 1`),
   ],
 );
+
+export const cleanGameplayMinorPois = sqliteTable(
+  "clean_gameplay_minor_pois",
+  {
+    poiId: text("poi_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    poiRef: text("poi_ref").notNull(),
+    poiLabel: text("poi_label").notNull(),
+    poiKind: text("poi_kind").notNull(),
+    anchorLocationId: text("anchor_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    anchorSceneLocationId: text("anchor_scene_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    active: integer("active", { mode: "boolean" }).notNull(),
+    appliedReceiptId: text("applied_receipt_id"),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("clean_minor_pois_active_bool", sql`${table.active} IN (0, 1)`),
+    index("idx_clean_minor_pois_campaign_scene_active")
+      .on(table.campaignId, table.anchorSceneLocationId, table.active),
+    uniqueIndex("clean_minor_pois_active_ref_unique")
+      .on(table.campaignId, table.anchorSceneLocationId, table.poiRef)
+      .where(sql`${table.active} = 1`),
+  ],
+);

@@ -441,6 +441,33 @@ function branchIssues(input: {
       "Player item custody/location/equip-state transitions require backend_action_plan_needed so Stage 4 can issue an item transfer receipt before narration.",
     );
   }
+  if (gmRead.actionInterpretation.interactionKind === "minor_poi_create") {
+    const minorPoiCapability = frame.capabilities.some((capability) =>
+      capability.capabilityId === "minor_poi_create" && capability.allowed
+    );
+    const minorPoiSurface = frame.currentScenePlaceHandleSurface ?? null;
+    const placeKind = gmRead.actionInterpretation.minorPoiNeed?.placeKind ?? null;
+    const surfaceAllowsKind = Boolean(
+      minorPoiSurface
+      && placeKind
+      && minorPoiSurface.allowedPlaceKinds.includes(placeKind),
+    );
+    if (judgment.nextStep === "action_plan" && (!minorPoiCapability || !surfaceAllowsKind)) {
+      add(
+        "checkNeed",
+        "Minor POI handle creation can be admitted only when the current SceneFrame exposes minor_poi_create and an allowed current-scene place-handle surface.",
+      );
+    }
+    if (
+      ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
+      && judgment.checkNeed === "no_roll_needed"
+    ) {
+      add(
+        "checkNeed",
+        "Current-scene minor POI handle creation requires backend_action_plan_needed so Stage 4 can issue a minor POI handle receipt before narration.",
+      );
+    }
+  }
   if (
     gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     && gmRead.actionInterpretation.localObservationNeed != null
@@ -575,6 +602,7 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     movementOptions: frame.movementOptions,
     targets: frame.targets,
     inventory: frame.inventory,
+    currentScenePlaceHandleSurface: frame.currentScenePlaceHandleSurface ?? null,
     capabilities: frame.capabilities,
     citableRefs: frame.citableRefs,
     forecast: {
@@ -613,6 +641,8 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "When GM Read actionInterpretation.interactionKind is ordinary_support_actor_needed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the support actor materialization receipt. Do not call Oracle for ordinary support actor availability.",
     "When GM Read actionInterpretation.interactionKind is player_local_condition, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the Player local condition receipt. Do not call Oracle for uncontested posture/readiness.",
     "When GM Read actionInterpretation.interactionKind is item_transfer, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the item transfer receipt. Do not call Oracle for ordinary uncontested give/drop/pickup/equip/unequip.",
+    "When GM Read actionInterpretation.interactionKind is minor_poi_create and the SceneFrame exposes minor_poi_create plus currentScenePlaceHandleSurface for the requested kind, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible current-scene place-handle receipt. Do not call Oracle for ordinary public current-scene handle creation.",
+    "If minor_poi_create is missing from SceneFrame.capabilities, currentScenePlaceHandleSurface is absent, or the requested placeKind is not allowed, block or ask clarification; do not admit action_plan.",
     "When GM Read actionInterpretation.interactionKind is current_scene_observation with localObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the local observation receipt. Do not call Oracle for targeted visible SceneFrame surface observations or bounded no-match over enumerated current-scene surfaces.",
     "When GM Read actionInterpretation.interactionKind is device_status_observation with deviceObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the device surface observation receipt. Do not call Oracle for checking modeled public device surface indicators or bounded no-surface results.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",

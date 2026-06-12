@@ -20,6 +20,7 @@ import {
   cleanStage4ItemTransferEffectSchema,
   cleanStage4LocalObservationEffectSchema,
   cleanStage4LocalConditionSetEffectSchema,
+  cleanStage4MinorPoiCreateEffectSchema,
   cleanStage4SupportActorCreateEffectSchema,
   assertCleanStage4Receipt,
   assertCleanStage4Request,
@@ -38,6 +39,8 @@ type LocalConditionSetEffect = Extract<CleanStage4Request["effect"], { kind: "co
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
 type ItemTransferEffect = Extract<CleanStage4Request["effect"], { kind: "item_transfer" }>;
 type ItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTransfer"]>;
+type MinorPoiCreateEffect = Extract<CleanStage4Request["effect"], { kind: "minor_poi_create" }>;
+type MinorPoiHandleResult = NonNullable<CleanStage4Receipt["publicResult"]["minorPoi"]>;
 type LocalObservationEffect = Extract<CleanStage4Request["effect"], { kind: "local_observation" }>;
 type LocalObservationResult = NonNullable<CleanStage4Receipt["publicResult"]["localObservation"]>;
 type LocalObservationSurfaceKind = LocalObservationEffect["surfaceKinds"][number];
@@ -112,6 +115,14 @@ type ItemRow = {
   is_signature: number;
 };
 
+type CleanMinorPoiRow = {
+  poi_id: string;
+  poi_ref: string;
+  poi_label: string;
+  poi_kind: MinorPoiCreateEffect["placeKind"];
+  active: number;
+};
+
 export interface CleanStage4ReceiptStore {
   insert(receipt: CleanStage4Receipt, createdAt?: number): void;
 }
@@ -149,6 +160,7 @@ export type Stage4FrameRefresh = (request: Stage4FrameRefreshRequest) => Promise
 type MaterializedSpeakerBinding = NonNullable<Step["dependencyBindings"]>[number];
 type PlayerLocalConditionBinding = NonNullable<Step["dependencyBindings"]>[number];
 type ItemTransferBinding = NonNullable<Step["dependencyBindings"]>[number];
+type MinorPoiHandleBinding = NonNullable<Step["dependencyBindings"]>[number];
 
 type Stage4MaterializedSpeakerResolution = {
   bindingId: "materialized_speaker";
@@ -178,10 +190,21 @@ type Stage4ItemTransferResolution = {
   refreshedFrameId: string;
 };
 
+type Stage4MinorPoiHandleResolution = {
+  bindingId: "minor_poi_handle";
+  fromStepId: string;
+  receiptId: string;
+  poiRef: string;
+  poiLabel: string;
+  resultKind: MinorPoiHandleResult["resultKind"];
+  refreshedFrameId: string;
+};
+
 type Stage4DialogueDependencyResolution = {
   materializedSpeaker: Stage4MaterializedSpeakerResolution | null;
   playerLocalCondition: Stage4PlayerLocalConditionResolution | null;
   itemTransfer: Stage4ItemTransferResolution | null;
+  minorPoi: Stage4MinorPoiHandleResolution | null;
 };
 
 export interface Stage4DialogueRequestCandidateRequest {
@@ -379,6 +402,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "dialogue_record") return "dialogue_record";
   if (kind === "support_actor_create") return "support_actor_create";
   if (kind === "item_transfer") return "item_transfer";
+  if (kind === "minor_poi_create") return "minor_poi_create";
   if (kind === "condition_set") return "condition_set";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
@@ -575,6 +599,33 @@ function requestEffectForStep(input: {
         dialogueContent: false,
         privateKnowledge: false,
         absenceOrNoChange: false,
+      },
+    };
+  }
+  if (input.capabilityId === "minor_poi_create") {
+    const plan = input.step.intended.minorPoiPlan;
+    return {
+      kind: "minor_poi_create",
+      authorityKind: "current_scene_visible_place_handle_create",
+      actorRef: "Player",
+      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      placeLabel: plan?.placeLabel ?? input.destinationRef,
+      placeKind: plan?.placeKind ?? "other_place",
+      reusePolicy: "reuse_matching_current_scene_place_handle_or_create",
+      evidenceRefs: input.step.evidenceRefs,
+      forbiddenPayloads: {
+        actorCreation: false,
+        servicesOrInventory: false,
+        routeTruth: false,
+        locationReveal: false,
+        movementDestination: false,
+        businessFact: false,
+        readableText: false,
+        hiddenDiscovery: false,
+        absenceOrNoChange: false,
+        dialogueContent: false,
+        worldFact: false,
+        privateKnowledge: false,
       },
     };
   }
@@ -1323,6 +1374,160 @@ function itemTransferResult(input: {
   };
 }
 
+function modelSafeMinorPoiRef(label: string): string {
+  const normalized = label
+    .trim()
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 80);
+  return normalized.length > 0 ? normalized : "place_handle";
+}
+
+function activeMinorPoiRows(input: {
+  campaignId: string;
+  currentSceneLocationId: string;
+}): CleanMinorPoiRow[] {
+  return getSqliteConnection()
+    .prepare(`
+      SELECT
+        poi_id,
+        poi_ref,
+        poi_label,
+        poi_kind,
+        active
+      FROM clean_gameplay_minor_pois
+      WHERE campaign_id = ?
+        AND anchor_scene_location_id = ?
+        AND active = 1
+      ORDER BY created_at ASC, poi_id ASC
+    `)
+    .all(input.campaignId, input.currentSceneLocationId) as CleanMinorPoiRow[];
+}
+
+function minorPoiHandleConflicts(input: {
+  frame: AuthoritativeSceneFrame;
+  poiRef: string;
+  poiLabel: string;
+}): boolean {
+  const ref = normalizedRef(input.poiRef);
+  const label = normalizedRef(input.poiLabel);
+  const reserved = [
+    input.frame.scene.currentScene.ref,
+    input.frame.scene.currentScene.label,
+    input.frame.scene.currentLocation.ref,
+    input.frame.scene.currentLocation.label,
+    ...input.frame.movementOptions.flatMap((option) => [option.ref, option.label]),
+    ...input.frame.actors.flatMap((actor) => [actor.ref, actor.label]),
+    ...input.frame.inventory.flatMap((item) => [item.ref, item.label]),
+    ...input.frame.targets
+      .filter((target) => target.kind !== "place_handle")
+      .flatMap((target) => [target.ref, target.label]),
+  ].map(normalizedRef);
+  return reserved.includes(ref) || reserved.includes(label);
+}
+
+function minorPoiHandleResult(input: {
+  frame: AuthoritativeSceneFrame;
+  effect: MinorPoiCreateEffect;
+  resultKind: MinorPoiHandleResult["resultKind"];
+  poiRef: string;
+}): MinorPoiHandleResult {
+  return {
+    type: "minor_poi_handle",
+    resultKind: input.resultKind,
+    poiRef: input.poiRef,
+    poiLabel: input.effect.placeLabel,
+    poiKind: input.effect.placeKind,
+    actorLabel: "Player",
+    anchorSceneLabel: input.frame.scene.currentScene.label,
+    anchorLocationLabel: input.frame.scene.currentLocation.label,
+    visibility: "public_visible_current_scene",
+    persistenceScope: "current_scene",
+    targetOnly: true,
+    claimStatus: "visible_current_scene_place_handle_only",
+  };
+}
+
+function minorPoiReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  receiptId?: string;
+  minorPoi: MinorPoiHandleResult;
+  resultWorldVersion?: number;
+  mutationApplied: boolean;
+  authorityTraceId?: string | null;
+  playerId: string;
+  minorPoiId: string;
+  minorPoiOperation: "inserted" | "reused";
+  anchorLocationId: string;
+  anchorSceneLocationId: string;
+  stateDeltaRefs?: string[];
+}): CleanStage4Receipt {
+  return assertCleanStage4Receipt({
+    version: "gameplay-runtime.stage4-receipt.v1",
+    receiptId: input.receiptId ?? `stage4-receipt-${randomUUID()}`,
+    requestId: input.request.requestId,
+    campaignId: input.frame.campaignId,
+    turnId: input.frame.turnId,
+    frameId: input.frame.frameId,
+    checklistId: input.checklist.checklistId,
+    stepId: input.step.stepId,
+    capabilityId: "minor_poi_create",
+    status: "accepted",
+    source: input.request.source,
+    base: input.frame.base,
+    result: {
+      tick: input.frame.base.tick,
+      worldVersion: input.resultWorldVersion ?? input.frame.base.worldVersion,
+      worldTimeMinutes: input.frame.base.worldTimeMinutes,
+      mutationApplied: input.mutationApplied,
+    },
+    authority: {
+      evidenceAuthority: "minor_poi_handle_receipt",
+      mutationAuthority: input.mutationApplied ? "current_scene_minor_poi_handle" : "none",
+      visibleResultAuthority: "may_claim_visible_minor_poi_handle",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: input.mutationApplied,
+    },
+    publicResult: {
+      summary: input.mutationApplied
+        ? `Visible local place handle available: ${input.minorPoi.poiLabel}.`
+        : `Visible local place handle reused: ${input.minorPoi.poiLabel}.`,
+      visibleRefs: uniqueStrings([
+        "Player",
+        input.frame.scene.currentScene.ref,
+        input.minorPoi.poiRef,
+      ]).slice(0, 12),
+      routeStatus: null,
+      routeOptions: null,
+      locationChange: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
+      dialogue: null,
+      minorPoi: input.minorPoi,
+    },
+    privateResult: {
+      playerId: input.playerId,
+      fromLocationId: null,
+      destinationLocationId: null,
+      edgeIds: [],
+      authorityTraceId: input.authorityTraceId ?? null,
+      clockReceiptId: null,
+      stateDeltaRefs: input.stateDeltaRefs ?? [],
+      minorPoiId: input.minorPoiId,
+      minorPoiOperation: input.minorPoiOperation,
+      anchorLocationId: input.anchorLocationId,
+      anchorSceneLocationId: input.anchorSceneLocationId,
+    },
+    failure: null,
+  });
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -1393,6 +1598,9 @@ export function validateDialogueRequestEffectCandidate(input: {
     ...input.step.evidenceRefs,
     ...(input.dependencyResolution?.materializedSpeaker
       ? [input.dependencyResolution.materializedSpeaker.actorRef]
+      : []),
+    ...(input.dependencyResolution?.minorPoi
+      ? [input.dependencyResolution.minorPoi.poiRef]
       : []),
   ].map(normalizedRef));
   const refs = uniqueStrings([
@@ -1474,6 +1682,11 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
       role: actor.role,
       visibleStatus: actor.visibleStatus,
     })),
+    targets: frame.targets.map((target) => ({
+      ref: target.ref,
+      label: target.label,
+      kind: target.kind,
+    })),
     citableRefs: frame.citableRefs,
   };
 }
@@ -1520,6 +1733,12 @@ export function buildStage4DialogueRequestPrompt(input: {
             JSON.stringify(input.dependencyResolution.itemTransfer, null, 2),
             "The item state has already been applied by Stage 4 and the authoritative SceneFrame below is post-dependency.",
           ].join("\n")
+          : input.dependencyResolution?.minorPoi
+            ? [
+              "Resolved minor-POI-handle dependency:",
+              JSON.stringify(input.dependencyResolution.minorPoi, null, 2),
+              "The visible current-scene place handle has already been accepted by Stage 4 and the authoritative SceneFrame below is post-dependency.",
+            ].join("\n")
           : "No post-dependency SceneFrame binding is active for this dialogue step.",
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
@@ -1544,6 +1763,8 @@ function buildStage4DialogueRepairPrompt(input: {
         ? "This dialogue follows an accepted player-local-condition dependency; do not restate or mutate that condition beyond accepted evidence."
         : input.dependencyResolution?.itemTransfer
           ? "This dialogue follows an accepted item-transfer dependency; do not restate or mutate item state beyond accepted evidence."
+          : input.dependencyResolution?.minorPoi
+            ? "This dialogue follows an accepted minor-POI-handle dependency; cite the refreshed place handle only as a visible current-scene target."
           : "This dialogue step has no post-dependency SceneFrame binding.",
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
@@ -4344,6 +4565,321 @@ async function executeItemTransfer(input: {
   });
 }
 
+async function executeMinorPoiCreate(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+}): Promise<CleanStage4Receipt> {
+  const effect = input.request.effect;
+  if (effect.kind !== "minor_poi_create") {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "invalid_backend_request",
+      message: "Stage 4 minor_poi_create request effect did not match capability.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  if (!input.step.intended.minorPoiPlan) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "invalid_backend_request",
+      message: "Stage 4 minor_poi_create requires a typed backend minorPoiPlan.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const parsedEffect = cleanStage4MinorPoiCreateEffectSchema.safeParse(effect);
+  if (!parsedEffect.success) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "invalid_backend_request",
+      message: parsedEffect.error.issues[0]?.message ?? "Stage 4 minor_poi_create request failed schema validation.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const surface = input.frame.currentScenePlaceHandleSurface ?? null;
+  if (
+    !surface
+    || normalizedRef(effect.anchorRef) !== normalizedRef(input.frame.scene.currentScene.ref)
+    || !surface.allowedPlaceKinds.includes(effect.placeKind)
+  ) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "minor_poi_surface_unavailable",
+      message: "Stage 4 minor_poi_create requires the current SceneFrame place-handle surface and an allowed place kind.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  if (!effectRefsAreCitable({
+    frame: input.frame,
+    refs: uniqueStrings([
+      effect.actorRef,
+      effect.anchorRef,
+      ...effect.evidenceRefs,
+    ]),
+  })) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "invalid_backend_request",
+      message: "Stage 4 minor_poi_create cited refs outside SceneFrame.citableRefs or backend-looking refs.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  const poiRef = modelSafeMinorPoiRef(effect.placeLabel);
+  if (minorPoiHandleConflicts({ frame: input.frame, poiRef, poiLabel: effect.placeLabel })) {
+    const receipt = failReceipt({
+      ...input,
+      capabilityId: "minor_poi_create",
+      kind: "target_state_invalid",
+      message: "Stage 4 minor_poi_create place handle conflicts with an existing actor, item, route, location, or current SceneFrame target.",
+    });
+    input.store.insert(receipt);
+    return receipt;
+  }
+
+  return withSqliteWriteLock("clean-stage4-minor-poi-create", () => {
+    const db = getSqliteConnection();
+    const transaction = db.transaction(() => {
+      const player = readPlayer(input.frame);
+      const clock = readClock(input.frame.campaignId);
+      const current = validateFrameAndClock({ frame: input.frame, player, clock });
+      if (!current.ok || !player?.current_location_id || !player.current_scene_location_id) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "minor_poi_create",
+          kind: "stale_frame_or_clock",
+          message: current.ok ? "Stage 4 current scene is unavailable for minor_poi_create." : current.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const currentLocation = locationByLabel(input.frame, input.frame.scene.currentLocation.label);
+      const currentScene = locationByLabel(input.frame, input.frame.scene.currentScene.label);
+      if (
+        !currentLocation
+        || !currentScene
+        || player.current_location_id !== currentLocation.id
+        || player.current_scene_location_id !== currentScene.id
+      ) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "minor_poi_create",
+          kind: "stale_frame_or_clock",
+          message: "Stage 4 current scene no longer matches the SceneFrame.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const rows = activeMinorPoiRows({
+        campaignId: input.frame.campaignId,
+        currentSceneLocationId: currentScene.id,
+      });
+      const existing = rows.filter((row) => normalizedRef(row.poi_ref) === normalizedRef(poiRef));
+      if (existing.length > 1) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "minor_poi_create",
+          kind: "minor_poi_state_conflict",
+          message: "Stage 4 minor_poi_create found ambiguous active place-handle rows.",
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      if (existing.length === 1) {
+        if (
+          normalizedRef(existing[0].poi_label) !== normalizedRef(effect.placeLabel)
+          || existing[0].poi_kind !== effect.placeKind
+        ) {
+          const receipt = failReceipt({
+            ...input,
+            capabilityId: "minor_poi_create",
+            kind: "minor_poi_state_conflict",
+            message: "Stage 4 minor_poi_create found an existing handle ref with a different label or kind.",
+          });
+          input.store.insert(receipt);
+          return receipt;
+        }
+        const minorPoi = minorPoiHandleResult({
+          frame: input.frame,
+          effect,
+          resultKind: "reused",
+          poiRef,
+        });
+        const receipt = minorPoiReceipt({
+          frame: input.frame,
+          checklist: input.checklist,
+          step: input.step,
+          request: input.request,
+          minorPoi,
+          mutationApplied: false,
+          playerId: player.id,
+          minorPoiId: existing[0].poi_id,
+          minorPoiOperation: "reused",
+          anchorLocationId: currentLocation.id,
+          anchorSceneLocationId: currentScene.id,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+
+      const receiptId = `stage4-receipt-${randomUUID()}`;
+      const poiId = `stage4-minor-poi-${randomUUID()}`;
+      const authorityTraceId = `stage4-authority-${randomUUID()}`;
+      const resultWorldVersion = clock.world_version + 1;
+      const now = Date.now();
+      const stateDeltaRefs = [`minor_poi:${poiId}:created`];
+
+      const updateClock = db.prepare(`
+        UPDATE world_clocks
+        SET world_version = ?, updated_at = ?
+        WHERE campaign_id = ? AND world_version = ? AND world_time_minutes = ?
+      `).run(
+        resultWorldVersion,
+        now,
+        input.frame.campaignId,
+        clock.world_version,
+        clock.world_time_minutes,
+      );
+      if (updateClock.changes !== 1) {
+        throw new Error("minor POI clock update failed");
+      }
+      db.prepare(`
+        INSERT INTO clean_gameplay_minor_pois (
+          poi_id,
+          campaign_id,
+          poi_ref,
+          poi_label,
+          poi_kind,
+          anchor_location_id,
+          anchor_scene_location_id,
+          active,
+          applied_receipt_id,
+          base_world_version,
+          result_world_version,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+      `).run(
+        poiId,
+        input.frame.campaignId,
+        poiRef,
+        effect.placeLabel,
+        effect.placeKind,
+        currentLocation.id,
+        currentScene.id,
+        receiptId,
+        clock.world_version,
+        resultWorldVersion,
+        now,
+        now,
+      );
+      db.prepare(`
+        INSERT INTO authority_traces (
+          id,
+          campaign_id,
+          operation,
+          source_entity_type,
+          source_entity_id,
+          base_world_version,
+          result_world_version,
+          world_time_minutes,
+          elapsed_world_time_minutes,
+          tool_result_id,
+          event_ids,
+          state_delta_refs,
+          witnesses,
+          metadata,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        authorityTraceId,
+        input.frame.campaignId,
+        "gameplay-cycle-runtime.minor_poi_create.v1",
+        "minor_poi",
+        poiId,
+        clock.world_version,
+        resultWorldVersion,
+        clock.world_time_minutes,
+        0,
+        receiptId,
+        "[]",
+        JSON.stringify(stateDeltaRefs),
+        JSON.stringify(effect.evidenceRefs),
+        JSON.stringify({
+          checklistId: input.checklist.checklistId,
+          stepId: input.step.stepId,
+          capabilityId: "minor_poi_create",
+          placeKind: effect.placeKind,
+          anchorScope: "current_scene",
+          anchorRef: effect.anchorRef,
+          resultKind: "created",
+        }),
+        now,
+      );
+
+      const minorPoi = minorPoiHandleResult({
+        frame: input.frame,
+        effect,
+        resultKind: "created",
+        poiRef,
+      });
+      const receipt = minorPoiReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        receiptId,
+        minorPoi,
+        resultWorldVersion,
+        mutationApplied: true,
+        authorityTraceId,
+        playerId: player.id,
+        minorPoiId: poiId,
+        minorPoiOperation: "inserted",
+        anchorLocationId: currentLocation.id,
+        anchorSceneLocationId: currentScene.id,
+        stateDeltaRefs,
+      });
+      input.store.insert(receipt);
+      return receipt;
+    });
+
+    try {
+      return transaction();
+    } catch {
+      const receipt = failReceipt({
+        frame: input.frame,
+        checklist: input.checklist,
+        step: input.step,
+        request: input.request,
+        capabilityId: "minor_poi_create",
+        kind: "mutation_apply_failed",
+        message: "Stage 4 minor_poi_create mutation transaction failed before commit.",
+      });
+      input.store.insert(receipt);
+      return receipt;
+    }
+  });
+}
+
 async function executeTimeAdvance(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -4911,6 +5447,17 @@ function itemTransferBinding(step: Step): ItemTransferBinding | null {
   ) ?? null;
 }
 
+function minorPoiHandleBinding(step: Step): MinorPoiHandleBinding | null {
+  return (step.dependencyBindings ?? []).find((binding) =>
+    binding.bindingId === "minor_poi_handle"
+    && binding.requiredCapabilityId === "minor_poi_create"
+    && binding.requiredReceiptAuthority === "minor_poi_handle_receipt"
+    && binding.sourcePath === "publicResult.minorPoi"
+    && binding.resolveIn === "post_dependency_scene_frame"
+    && binding.requiredFramePresence === "targets_and_citableRefs"
+  ) ?? null;
+}
+
 function refreshedActorForMaterializedSpeaker(input: {
   frame: AuthoritativeSceneFrame;
   actorRef: string;
@@ -4965,6 +5512,21 @@ function refreshedItemTransferMatches(input: {
   return false;
 }
 
+function refreshedMinorPoiMatches(input: {
+  frame: AuthoritativeSceneFrame;
+  minorPoi: MinorPoiHandleResult;
+}): boolean {
+  const citable = new Set(input.frame.citableRefs.map(normalizedRef));
+  if (!citable.has(normalizedRef(input.minorPoi.poiRef))) return false;
+  return input.frame.targets.some((target) =>
+    target.kind === "place_handle"
+    && (
+      normalizedRef(target.ref) === normalizedRef(input.minorPoi.poiRef)
+      || normalizedRef(target.label) === normalizedRef(input.minorPoi.poiLabel)
+    )
+  );
+}
+
 async function resolveDialogueDependencies(input: {
   initialFrame: AuthoritativeSceneFrame;
   currentFrame: AuthoritativeSceneFrame;
@@ -4985,7 +5547,8 @@ async function resolveDialogueDependencies(input: {
   const speakerBinding = materializedSpeakerBinding(input.step);
   const conditionBinding = playerLocalConditionBinding(input.step);
   const itemBinding = itemTransferBinding(input.step);
-  if (!speakerBinding && !conditionBinding && !itemBinding) {
+  const minorPoiBinding = minorPoiHandleBinding(input.step);
+  if (!speakerBinding && !conditionBinding && !itemBinding && !minorPoiBinding) {
     return {
       status: "ready",
       frame: input.currentFrame,
@@ -5013,7 +5576,7 @@ async function resolveDialogueDependencies(input: {
     }),
   });
 
-  if (conditionBinding && !speakerBinding && !itemBinding) {
+  if (conditionBinding && !speakerBinding && !itemBinding && !minorPoiBinding) {
     const sourceReceipt = input.receipts.find((receipt) =>
       receipt.stepId === conditionBinding.fromStepId
       && receipt.capabilityId === "condition_set"
@@ -5070,7 +5633,7 @@ async function resolveDialogueDependencies(input: {
       refreshed: true,
       afterReceiptId: sourceReceipt.receiptId,
       resolution: {
-        materializedSpeaker: null,
+          materializedSpeaker: null,
         playerLocalCondition: {
           bindingId: "player_local_condition",
           fromStepId: conditionBinding.fromStepId,
@@ -5081,11 +5644,12 @@ async function resolveDialogueDependencies(input: {
           refreshedFrameId: refreshedFrame.frameId,
         },
         itemTransfer: null,
+        minorPoi: null,
       },
     };
   }
 
-  if (itemBinding && !speakerBinding && !conditionBinding) {
+  if (itemBinding && !speakerBinding && !conditionBinding && !minorPoiBinding) {
     const sourceReceipt = input.receipts.find((receipt) =>
       receipt.stepId === itemBinding.fromStepId
       && receipt.capabilityId === "item_transfer"
@@ -5142,8 +5706,8 @@ async function resolveDialogueDependencies(input: {
       refreshed: true,
       afterReceiptId: sourceReceipt.receiptId,
       resolution: {
-        materializedSpeaker: null,
-        playerLocalCondition: null,
+          materializedSpeaker: null,
+          playerLocalCondition: null,
         itemTransfer: {
           bindingId: "item_transfer_state",
           fromStepId: itemBinding.fromStepId,
@@ -5152,12 +5716,86 @@ async function resolveDialogueDependencies(input: {
           itemLabel: itemTransfer.itemLabel,
           refreshedFrameId: refreshedFrame.frameId,
         },
+        minorPoi: null,
+      },
+    };
+  }
+
+  if (minorPoiBinding && !speakerBinding && !conditionBinding && !itemBinding) {
+    const sourceReceipt = input.receipts.find((receipt) =>
+      receipt.stepId === minorPoiBinding.fromStepId
+      && receipt.capabilityId === "minor_poi_create"
+    );
+    if (
+      !sourceReceipt
+      || sourceReceipt.status !== "accepted"
+      || sourceReceipt.authority.evidenceAuthority !== "minor_poi_handle_receipt"
+      || !sourceReceipt.publicResult.minorPoi
+    ) {
+      return skipDependency("Dependent dialogue was skipped because minor POI handle evidence was not accepted.");
+    }
+    if (!input.refreshFrameAfterReceipt) {
+      return skipDependency("Dependent dialogue was skipped because no post-minor-POI SceneFrame refresh was available.");
+    }
+
+    let refreshedFrame: AuthoritativeSceneFrame;
+    try {
+      refreshedFrame = await input.refreshFrameAfterReceipt({
+        initialFrame: input.initialFrame,
+        currentFrame: input.currentFrame,
+        checklist: input.checklist,
+        step: input.step,
+        receipt: sourceReceipt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return skipDependency(`Dependent dialogue was skipped because post-minor-POI SceneFrame refresh failed: ${message}`);
+    }
+
+    const minorPoi = sourceReceipt.publicResult.minorPoi;
+    if (!refreshedMinorPoiMatches({ frame: refreshedFrame, minorPoi })) {
+      return {
+        status: "skip",
+        receipt: skipReceipt({
+          frame: refreshedFrame,
+          checklist: input.checklist,
+          step: input.step,
+          request: placeholderDialogueRequest({
+            frame: refreshedFrame,
+            checklist: input.checklist,
+            step: input.step,
+          }),
+          capabilityId: "dialogue_record",
+          kind: "dependency_not_accepted",
+          message: "Dependent dialogue was skipped because the refreshed SceneFrame did not expose the accepted minor POI handle.",
+        }),
+      };
+    }
+
+    return {
+      status: "ready",
+      frame: refreshedFrame,
+      refreshed: true,
+      afterReceiptId: sourceReceipt.receiptId,
+      resolution: {
+        materializedSpeaker: null,
+        playerLocalCondition: null,
+        itemTransfer: null,
+        minorPoi: {
+          bindingId: "minor_poi_handle",
+          fromStepId: minorPoiBinding.fromStepId,
+          receiptId: sourceReceipt.receiptId,
+          poiRef: minorPoi.poiRef,
+          poiLabel: minorPoi.poiLabel,
+          resultKind: minorPoi.resultKind,
+          refreshedFrameId: refreshedFrame.frameId,
+        },
       },
     };
   }
 
   const binding = speakerBinding;
-  if (!binding || conditionBinding || itemBinding) return skipDependency("Dependent dialogue has unsupported mixed dependency bindings.");
+  if (!binding || conditionBinding || itemBinding || minorPoiBinding) return skipDependency("Dependent dialogue has unsupported mixed dependency bindings.");
   const sourceReceipt = input.receipts.find((receipt) =>
     receipt.stepId === binding.fromStepId
     && receipt.capabilityId === "support_actor_create"
@@ -5229,6 +5867,7 @@ async function resolveDialogueDependencies(input: {
       },
       playerLocalCondition: null,
       itemTransfer: null,
+      minorPoi: null,
     },
   };
 }
@@ -5289,6 +5928,7 @@ export async function runCleanStage4Execution(input: {
       "support_actor_create",
       "condition_set",
       "item_transfer",
+      "minor_poi_create",
       "time_advance",
       "scene_beat_record",
     ];
@@ -5457,6 +6097,24 @@ export async function runCleanStage4Execution(input: {
       continue;
     }
 
+    if (step.intended.kind === "minor_poi_create") {
+      const request = requestForStep({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        requiredRouteReceiptId: null,
+      });
+      const receipt = await executeMinorPoiCreate({
+        frame: currentFrame,
+        checklist: input.checklist,
+        step,
+        request,
+        store,
+      });
+      receipts.push(receipt);
+      continue;
+    }
+
     const routeDependency = receipts.find((receipt) =>
       step.dependsOnStepIds.includes(receipt.stepId)
       && receipt.capabilityId === "route_check"
@@ -5516,6 +6174,7 @@ export async function runCleanStage4Execution(input: {
       supportActor: receipt.publicResult.supportActor,
       condition: receipt.publicResult.condition,
       itemTransfer: receipt.publicResult.itemTransfer,
+      minorPoi: receipt.publicResult.minorPoi,
       localObservation: receipt.publicResult.localObservation,
       deviceSurfaceObservation: receipt.publicResult.deviceSurfaceObservation,
     }));

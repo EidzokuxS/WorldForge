@@ -3243,3 +3243,78 @@ Session: `gm-v1-consequenc-slice`.
     - Fallout fix: `gmReadModelGenerationSchema` now accepts overlong-but-repairable summary/question/rationale text up to the generation envelope while the strict accepted `gmReadSchema` still rejects it; regression coverage proves the near-miss reaches validation/repair rather than becoming a route-level failure.
   - Status impact:
     - Diagnostic primitive evidence is complete for P71. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P72 clean gameplay runtime Primitive 18 Next Local Place / POI / Fact Boundary:
+  - Status:
+    - [x] Identify the next unresolved blocker after P71 from lessons and clean capability gaps.
+    - [x] Prepare the Oracle/GPT-5.5 Pro review question artifact.
+    - [x] Run a valid Oracle/GPT-5.5 Pro review with one real context bundle.
+    - [x] Record Oracle recommendation, accepted scope, and rejected alternatives.
+    - [x] Run GitNexus impact before editing indexed symbols.
+    - [x] Implement only the Oracle-approved clean primitive boundary.
+    - [x] Add focused schema, GM Read/Judge/Checklist, Stage 4, settlement/narration, refresh/dependency, import-fence, and live proof tests.
+    - [x] Verify with typecheck, focused tests, and one live zero-turn `/api/chat/action` proof.
+  - Candidate problem:
+    - P70 `local_observation` can inspect only already-exposed SceneFrame surfaces and cannot create or reveal POI/storefront/landmark truth.
+    - P71 `device_surface_observation` closes phone/device status checks but does not address local navigation, place handles, storefronts, signs, or micro-locations.
+    - Lessons still forbid movement from substituting an unrelated connected route when the player follows directions toward an unmodeled POI/micro-location.
+    - Oracle-only weak hits and dialogue claims must not narrate walking progress, signs, storefronts, POI discovery/absence, or current-scene changes without accepted local/search/POI/reveal receipts.
+  - Candidate options for review:
+    - `minor_poi_create`: one ordinary visible current-scene target-only place handle, no route edge, no movement option, no hidden discovery, no item/NPC/world-fact creation.
+    - `location_reveal`: source-bounded visible current-scene place handle or sublocation, still not movement/route creation unless a separate accepted capability owns that state.
+    - `scene_local_following` / `scene_beat_record` extension: attempted local-navigation/following beat only, with no durable target or route truth.
+    - `world_fact_record`: future-usable public/known fact from accepted evidence; likely high-risk as a generic truth sink and should not be implemented without a clear Oracle boundary.
+  - Oracle review plan:
+    - Ask for GO/MODIFY/NO-GO on the next primitive after P71.
+    - Ask whether P72 should implement `minor_poi_create`, `location_reveal`, a scene-local following/beat primitive, `world_fact_record`, or a narrower alternative.
+    - Ask for exact allowed actions, authoritative inputs, GM Read/Judge/Checklist fields, Stage 4 schema, DB/source adapter rules, mutation/worldVersion behavior, SceneFrame refresh/dependency rules, settlement/narration limits, failure semantics, forbidden old-runtime imports/stores, focused tests, and one live proof design.
+    - Question artifact: `output/oracle/p72-clean-next-primitive-question.md`.
+  - Oracle/GPT-5.5 Pro review:
+    - Session: `wf-clean-p72-next-primitive`.
+    - Engine/model: Oracle browser, GPT-5.5 Pro, ChatGPT `Pro Extended`.
+    - Bundle: one bundled text attachment, 13 files, usage `inputTokens=124950`, `outputTokens=4775`, `totalTokens=129725`.
+    - Question artifact: `output/oracle/p72-clean-next-primitive-question.md`.
+    - Answer artifact: `output/oracle/p72-clean-next-primitive-answer.md`.
+    - Delivery verification: `C:\Users\robra\.oracle\sessions\wf-clean-p72-next-primitive\meta.json` has `status=completed`, `browser.runtime.promptSubmitted=true`, `browserBundleFiles=true`, `browserBundleFormat="text"`, all 13 intended files in `options.file`, transcript at `C:\Users\robra\.oracle\sessions\wf-clean-p72-next-primitive\artifacts\transcript.md`, model selection `resolvedLabel=Pro Extended`, and usage shows a substantive 4775-token answer.
+    - Verdict: MODIFY -> GO.
+    - Recommended primitive: keep live capability id `minor_poi_create`, but name the authority boundary `current_scene_visible_place_handle_create`.
+  - Oracle-accepted P72 scope:
+    - Create or reuse exactly one ordinary, public, visible, current-scene place handle that becomes a future-usable `SceneFrame.targets` entry.
+    - Prefer adding a new target kind such as `place_handle`; do not overload `location` if movement/route code could treat it as movement authority.
+    - Add a deterministic Stage 0 `currentScenePlaceHandleSurface` before advertising the capability; Judge must not admit P72 if that surface is absent or does not allow the requested ordinary place kind.
+    - Stage 4 request must be backend-authored from the accepted checklist and current frame.
+    - Store handles in a clean runtime table such as `clean_gameplay_minor_pois`, not in `locations` or `location_edges`.
+    - Created handles advance `worldVersion` by 1 only, write one `authority_traces` row with operation `gameplay-cycle-runtime.minor_poi_create.v1`, and persist the clean Stage 4 receipt atomically. Reused handles are accepted no-op with no worldVersion advance and no authority trace.
+    - Accepted creation requires real post-mutation SceneFrame refresh before any later same-turn step cites the new handle; `minor_poi_create` must not be a movement dependency and creates no legal destination.
+    - Settlement maps accepted receipts to `minor_poi_handle` and `visible_target` only, with narration limited to the visible current-scene place handle being available/picked out/usable as a local target.
+  - Rejected/deferred:
+    - `location_reveal` is NO-GO for P72 because it risks hidden/location truth, route creation, current-scene movement, discovery, or broader world-state reveal.
+    - `world_fact_record` is NO-GO because it is a generic truth sink.
+    - A pure `scene_local_following` / `scene_beat_record` extension is useful but not sufficient because it does not create the future-usable local target handle manual play is missing.
+    - P72 must not create actors, services, inventory, business facts, dialogue content, route truth, readable sign text, hidden discovery, absence, no-change, world facts, `locations`, `location_edges`, or movement options.
+  - Verification plan:
+    - Schema tests for request/effect/result/receipt and forbidden payloads.
+    - GM Read/Judge/Checklist tests for visible handle creation, source-bounded speaker-direction target handle, cross-town destination rejection, hidden target rejection, and readable-sign exclusion.
+    - Stage 4 tests for create/reuse/stale/conflict/rollback behavior.
+    - SceneFrame tests proving post-turn targets/citableRefs include `place_handle` while movementOptions and route graph stay unchanged.
+    - Settlement/narration tests for `minor_poi_handle`/`visible_target` evidence and strict limits against travel, arrival, route, sign contents, shop inventory/services, NPC truth, hidden discovery, absence, no-change, and world facts.
+    - Import-fence tests against old gameplay-cycle-v2 schemas/handlers/executors, saga/replay/restore, vector/episodic memory, location graph mutation, world-fact writes, and root tool executor imports.
+    - Live proof: fresh zero-turn clone with action `I pick out a small visible tea stall as a local place target in this scene.`; expect one accepted `minor_poi_create`, one active clean minor POI row, one authority trace, `worldVersion +1` only, no old stores, no `locations`/`location_edges`/movement/world-fact writes, post-turn `SceneFrame.targets/citableRefs` includes the handle, and bounded narration.
+  - Implementation evidence:
+    - Added clean `minor_poi_create` contracts for target kind `place_handle`, `currentScenePlaceHandleSurface`, GM Read `minorPoiNeed`, checklist `minorPoiPlan`, backend-authored Stage 4 effect/result, receipt authority `minor_poi_handle_receipt`, settlement claim kind `minor_poi_handle`, and narration deterministic authority projection.
+    - Added clean table `clean_gameplay_minor_pois`, clone/manifest support, and migration `0023_clean_gameplay_minor_pois.sql`; P72 writes only this clean table plus `authority_traces` and `world_clocks.world_version` on created handles.
+    - SceneFrame now exposes active clean minor POIs as `targets`/`citableRefs` with kind `place_handle` and does not add movement options or route edges.
+    - Stage 4 create/reuse is backend-owned from accepted checklist/current frame. Created handles advance `worldVersion +1` and write `gameplay-cycle-runtime.minor_poi_create.v1`; reused handles accept as no-op without worldVersion/authority trace.
+    - Dependent same-turn dialogue requires a refreshed SceneFrame via `minor_poi_handle` dependency binding before the dialogue step may cite the handle.
+    - Test fallout fixed: generic route/time text fallbacks in deterministic checklist compilation now run only for standalone non-dialogue cases, so accepted `visible_actor_dialogue` compound plans are not intercepted by words such as `watch`.
+  - Executed verification:
+    - GitNexus impact was run before edits for indexed clean runtime symbols; `buildDeterministicGmActionChecklist` final fallout fix reported LOW risk with one direct caller, `runCleanGmActionChecklist`.
+    - `npm --prefix backend run typecheck` passed before and after the final checklist fallout fix.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 227 tests passed.
+    - Requested P69 live item-transfer proof passed on fresh zero-turn clone `p69-item-transfer-045823`, action `I hand the Brass Tube to Guide.`; artifacts are under `output/clean-runtime-p69-item-transfer-live-20260612045823/`.
+    - P69 live DB proof: one accepted `item_transfer` receipt with `item_transfer_receipt`, Brass Tube owner became `Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, one `authority_traces` row with `gameplay-cycle-runtime.item_transfer.v1`, no `turn_clock_ledger`, and no old v2/saga/narrator/oracle/simulation store rows.
+    - P72 live minor-POI proof passed on fresh zero-turn clone `p72-minor-poi-050100`, action `I pick out a small visible tea stall as a local place target in this scene.`; artifacts are under `output/clean-runtime-p72-minor-poi-live-20260612050100/`.
+    - P72 live DB proof: one accepted `minor_poi_create` receipt with `minor_poi_handle_receipt`, one active `clean_gameplay_minor_pois` row `small_tea_stall`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, one `authority_traces` row with `gameplay-cycle-runtime.minor_poi_create.v1`, no `turn_clock_ledger`, no old v2/saga/narrator/oracle/simulation store rows, and unchanged `locations`/`location_edges` counts.
+    - GitNexus `detect_changes(scope=all)` before commit reported CRITICAL risk by breadth: 46 changed symbols, 17 affected processes, centered on `runCleanStage4Execution` receipt/assert paths and `buildAuthoritativeSceneFrame` flows. This is the expected P72 primitive surface and is covered by typecheck, the focused 227-test suite, P69 live transfer proof, and P72 live minor-POI proof above.
+  - Status impact:
+    - Diagnostic primitive evidence is complete for P72 and the requested P69 item-transfer regression proof is clean. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

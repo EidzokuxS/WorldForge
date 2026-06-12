@@ -341,6 +341,68 @@ function itemTransferReceipt(inputFrame = frame(), inputChecklist = checklist(in
   });
 }
 
+function minorPoiReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
+  return cleanStage4ReceiptSchema.parse({
+    ...movementReceipt(inputFrame, inputChecklist),
+    receiptId: "stage4-receipt-minor-poi-1",
+    requestId: "stage4-request-minor-poi-1",
+    capabilityId: "minor_poi_create",
+    result: { ...inputFrame.base, worldVersion: inputFrame.base.worldVersion + 1, mutationApplied: true },
+    authority: {
+      evidenceAuthority: "minor_poi_handle_receipt",
+      mutationAuthority: "current_scene_minor_poi_handle",
+      visibleResultAuthority: "may_claim_visible_minor_poi_handle",
+      maySupportNarrationClaim: true,
+      mayAuthorizeMutation: true,
+    },
+    publicResult: {
+      summary: "Visible local place handle available: Tea Stall.",
+      visibleRefs: ["Player", "Market", "tea_stall"],
+      routeStatus: null,
+      locationChange: null,
+      routeOptions: null,
+      timeAdvance: null,
+      visibleObservation: null,
+      sceneBeat: null,
+      dialogue: null,
+      supportActor: null,
+      condition: null,
+      minorPoi: {
+        type: "minor_poi_handle",
+        resultKind: "created",
+        poiRef: "tea_stall",
+        poiLabel: "Tea Stall",
+        poiKind: "stall",
+        actorLabel: "Player",
+        anchorSceneLabel: "Market",
+        anchorLocationLabel: "Market",
+        visibility: "public_visible_current_scene",
+        persistenceScope: "current_scene",
+        targetOnly: true,
+        claimStatus: "visible_current_scene_place_handle_only",
+      },
+    },
+    privateResult: {
+      playerId: "player-1",
+      fromLocationId: null,
+      destinationLocationId: null,
+      supportActorId: null,
+      supportActorOperation: null,
+      conditionId: null,
+      conditionOperation: null,
+      minorPoiId: "stage4-minor-poi-secret",
+      minorPoiOperation: "inserted",
+      anchorLocationId: "loc-market",
+      anchorSceneLocationId: "loc-market",
+      edgeIds: [],
+      authorityTraceId: "stage4-authority-minor-poi",
+      clockReceiptId: null,
+      stateDeltaRefs: ["minor_poi:stage4-minor-poi-secret:created"],
+    },
+    failure: null,
+  });
+}
+
 function localObservationReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
   return cleanStage4ReceiptSchema.parse({
     ...movementReceipt(inputFrame, inputChecklist),
@@ -509,6 +571,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         supportActor: receipt.publicResult.supportActor,
         condition: receipt.publicResult.condition,
         itemTransfer: receipt.publicResult.itemTransfer,
+        minorPoi: receipt.publicResult.minorPoi,
         localObservation: receipt.publicResult.localObservation,
         deviceSurfaceObservation: receipt.publicResult.deviceSurfaceObservation,
       })),
@@ -755,6 +818,43 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("item-brass-tube");
     expect(JSON.stringify(view)).not.toContain("npc-guide");
     expect(JSON.stringify(view)).not.toContain("stage4-authority-item-transfer");
+  });
+
+  it("settles minor_poi_create receipts as visible current-scene handle evidence only", () => {
+    const inputFrame = frame({
+      playerAction: "I mark the Tea Stall as a place to meet.",
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = minorPoiReceipt(inputFrame, inputChecklist);
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    const handle = packet.acceptedEvidence.find((entry) => entry.authority === "minor_poi_handle_receipt");
+    expect(handle?.claimKinds).toEqual(["minor_poi_handle", "visible_target"]);
+    expect(handle?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Visible current-scene place handle created: Tea Stall.",
+      "Place handle label: Tea Stall.",
+      "Place handle kind: stall.",
+      "Current scene anchor: Market.",
+      "Handle result: created.",
+      "This is a visible current-scene target handle only, not a movement destination.",
+    ]);
+    expect(handle?.limits.doesNotProve).toEqual(expect.arrayContaining([
+      "services or inventory",
+      "readable sign text",
+      "route truth",
+      "legal movement destination",
+      "location reveal",
+      "world fact",
+      "absence or no-change beyond the accepted visible place handle",
+    ]));
+    expect(JSON.stringify(view)).not.toContain("stage4-minor-poi-secret");
+    expect(JSON.stringify(view)).not.toContain("stage4-authority-minor-poi");
   });
 
   it("settles local_observation receipts as bounded current-scene observation evidence only", () => {

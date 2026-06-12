@@ -140,6 +140,22 @@ const ITEM_TRANSFER_DOES_NOT_PROVE = [
   "absence or no-change beyond the accepted item state",
 ];
 
+const MINOR_POI_DOES_NOT_PROVE = [
+  "actor presence",
+  "services or inventory",
+  "business fact",
+  "readable sign text",
+  "hidden discovery",
+  "search result",
+  "route truth",
+  "legal movement destination",
+  "location reveal",
+  "world fact",
+  "dialogue content",
+  "NPC private knowledge",
+  "absence or no-change beyond the accepted visible place handle",
+];
+
 const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
   "hidden discovery",
   "concealed or thorough search result",
@@ -635,6 +651,39 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             "current scene item state anchor",
           ],
           doesNotProve: ITEM_TRANSFER_DOES_NOT_PROVE,
+        },
+      });
+      continue;
+    }
+    if (receipt.authority.evidenceAuthority === "minor_poi_handle_receipt" && receipt.publicResult.minorPoi) {
+      const evidenceId = nextEvidenceId(evidence);
+      const minorPoi = receipt.publicResult.minorPoi;
+      const operationText = minorPoi.resultKind === "reused"
+        ? `Visible current-scene place handle reused: ${minorPoi.poiLabel}.`
+        : `Visible current-scene place handle created: ${minorPoi.poiLabel}.`;
+      evidence.push({
+        evidenceId,
+        sourceKind: "stage4_receipt",
+        sourceRef: receipt.receiptId,
+        authority: "minor_poi_handle_receipt",
+        claimKinds: ["minor_poi_handle", "visible_target"],
+        text: `${operationText} Current scene anchor: ${minorPoi.anchorSceneLabel}.`,
+        visibleRefs: receipt.publicResult.visibleRefs,
+        backendFacts: [
+          fact(evidenceId, 1, operationText),
+          fact(evidenceId, 2, `Place handle label: ${minorPoi.poiLabel}.`),
+          fact(evidenceId, 3, `Place handle kind: ${minorPoi.poiKind}.`),
+          fact(evidenceId, 4, `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
+          fact(evidenceId, 5, `Handle result: ${minorPoi.resultKind}.`),
+          fact(evidenceId, 6, "This is a visible current-scene target handle only, not a movement destination."),
+        ],
+        limits: {
+          proves: [
+            "accepted visible current-scene place handle label",
+            "accepted place handle kind",
+            "current SceneFrame target handle",
+          ],
+          doesNotProve: MINOR_POI_DOES_NOT_PROVE,
         },
       });
       continue;

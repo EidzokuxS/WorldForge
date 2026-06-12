@@ -26,6 +26,7 @@ const LIVE_GAMEPLAY_CAPABILITIES: GameplayRuntimeCapabilityId[] = [
   "support_actor_create",
   "condition_set",
   "item_transfer",
+  "minor_poi_create",
   "time_advance",
   "scene_beat_record",
 ];
@@ -118,7 +119,35 @@ function activeCleanPlayerLocalConditions(campaignId: string): string[] {
   return uniqueRefs(rows.map((row) => firstText(row.label)));
 }
 
-function targetKind(target: SceneFrame["targetCandidates"][number]): "actor" | "item" | "location" | "faction" | "unknown" {
+type CleanMinorPoiTarget = {
+  ref: string;
+  label: string;
+  kind: "place_handle";
+};
+
+function activeCleanMinorPoiTargets(campaignId: string): CleanMinorPoiTarget[] {
+  const rows = getSqliteConnection()
+    .prepare(`
+      SELECT
+        p.poi_ref AS ref,
+        p.poi_label AS label
+      FROM clean_gameplay_minor_pois p
+      INNER JOIN players player
+        ON player.campaign_id = p.campaign_id
+       AND player.current_scene_location_id = p.anchor_scene_location_id
+      WHERE p.campaign_id = ?
+        AND p.active = 1
+      ORDER BY p.created_at ASC, p.poi_id ASC
+    `)
+    .all(campaignId) as Array<{ ref: string; label: string }>;
+  return rows.map((row) => ({
+    ref: firstText(row.ref, row.label),
+    label: firstText(row.label, row.ref),
+    kind: "place_handle",
+  }));
+}
+
+function targetKind(target: SceneFrame["targetCandidates"][number]): "actor" | "item" | "location" | "faction" | "place_handle" | "unknown" {
   if (target.type === "actor" || target.type === "item" || target.type === "location" || target.type === "faction") {
     return target.type;
   }
@@ -222,6 +251,7 @@ export async function buildAuthoritativeSceneFrame(
   const currentLocationLabel = firstText(frame.currentLocationName, "current_location");
   const currentSceneLabel = firstText(frame.currentSceneScopeName, frame.currentLocationName, "current_scene");
   const cleanLocalConditions = activeCleanPlayerLocalConditions(input.campaignId);
+  const minorPoiTargets = activeCleanMinorPoiTargets(input.campaignId);
   const player = playerView(frame, cleanLocalConditions);
   const actors = actorRows(frame);
   const movementOptions = frame.movementCandidates.map((candidate) => ({
@@ -236,7 +266,14 @@ export async function buildAuthoritativeSceneFrame(
       ref: firstText(target.label),
       label: firstText(target.label),
       kind: targetKind(target),
-    }));
+    }))
+    .concat(minorPoiTargets)
+    .filter((target, index, allTargets) =>
+      allTargets.findIndex((candidate) =>
+        normalizedRef(candidate.ref) === normalizedRef(target.ref)
+      ) === index
+    )
+    .slice(0, 64);
   const inventory = (frame.playerInventory ?? []).map((item) => ({
     ref: firstText(item.label),
     label: firstText(item.label),
@@ -329,6 +366,27 @@ export async function buildAuthoritativeSceneFrame(
     targets,
     inventory,
     deviceStatusSurfaces,
+    currentScenePlaceHandleSurface: {
+      surfaceVersion: "scene_frame_current_place_handle_surface.v1",
+      anchorRef: currentSceneLabel,
+      anchorLabel: currentSceneLabel,
+      allowedPlaceKinds: [
+        "stall",
+        "counter",
+        "bench",
+        "landmark",
+        "signage",
+        "cover",
+        "doorway",
+        "alcove",
+        "workstation",
+        "notice_board",
+        "other_place",
+      ],
+      existingPlaceHandleRefs: minorPoiTargets.map((target) => target.ref).slice(0, 32),
+      maxCreatesPerTurn: 1,
+      creationAuthority: "ordinary_public_visible_current_scene_handle_only",
+    },
     capabilities: LIVE_GAMEPLAY_CAPABILITIES.map((capabilityId) => ({
       capabilityId,
       evidenceAuthority: capabilityId === "observe_visible" || capabilityId === "route_options"

@@ -243,6 +243,48 @@ function itemStateView(): CleanNarratorView {
   });
 }
 
+function minorPoiHandleView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I mark the Tea Stall as a place to meet.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "minor_poi_handle_receipt",
+      claimKinds: ["minor_poi_handle", "visible_target"],
+      text: "Visible current-scene place handle created: Tea Stall. Current scene anchor: Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Visible current-scene place handle created: Tea Stall.", exact: true },
+        { factRef: "e1.f2", text: "Place handle label: Tea Stall.", exact: true },
+        { factRef: "e1.f3", text: "Place handle kind: stall.", exact: true },
+        { factRef: "e1.f4", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f5", text: "Handle result: created.", exact: true },
+        { factRef: "e1.f6", text: "This is a visible current-scene target handle only, not a movement destination.", exact: true },
+      ],
+      limits: {
+        proves: [
+          "accepted visible current-scene place handle label",
+          "accepted place handle kind",
+          "current SceneFrame target handle",
+        ],
+        doesNotProve: [
+          "actor presence",
+          "services or inventory",
+          "business fact",
+          "readable sign text",
+          "hidden discovery",
+          "search result",
+          "route truth",
+          "legal movement destination",
+          "location reveal",
+          "world fact",
+          "dialogue content",
+          "NPC private knowledge",
+          "absence or no-change beyond the accepted visible place handle",
+        ],
+      },
+    }],
+  });
+}
+
 function localObservationView(): CleanNarratorView {
   return movementView({
     playerAction: "Do I see a Violet Astrolabe here?",
@@ -670,6 +712,47 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
     expect(result.text).not.toMatch(/\bsays|accepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
+  });
+
+  it("renders minor_poi_handle evidence without route, location, service, sign-text, or no-change claims", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
+    const text = renderCleanNarrationFallback(minorPoiHandleView());
+
+    expect(text).toBe("Visible current-scene place handle created: Tea Stall. Place handle label: Tea Stall. Place handle kind: stall. Current scene anchor: Market. Handle result: created. This is a visible current-scene target handle only, not a movement destination.");
+    expect(text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|nothing changed|no change)\b/iu);
+
+    const unsupported = validateCleanNarrationCandidate({
+      view: minorPoiHandleView(),
+      candidate: {
+        ...movementCandidate("The Tea Stall is open for business and reachable as a new destination."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "The Tea Stall is open for business and reachable as a new destination.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["minor_poi_handle", "route_status"],
+          auditStepIds: [],
+        }],
+        finalText: "The Tea Stall is open for business and reachable as a new destination.",
+      },
+    });
+    expect(unsupported.status).toBe("rejected");
+    if (unsupported.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+  });
+
+  it("uses deterministic authority projection for minor_poi_handle instead of model paraphrase", async () => {
+    const result = await runCleanNarration({
+      narratorView: minorPoiHandleView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("minor_poi_handle should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toContain("Visible current-scene place handle created: Tea Stall.");
+    expect(result.text).not.toMatch(/route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
   });
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {

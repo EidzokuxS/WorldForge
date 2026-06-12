@@ -244,8 +244,10 @@ function checklistForKind(
                   ? "condition_set"
                   : kind === "item_transfer"
                     ? "item_transfer"
-                    : kind === "device_surface_observation"
-                      ? "device_surface_observation"
+                    : kind === "minor_poi_create"
+                      ? "minor_poi_create"
+                      : kind === "device_surface_observation"
+                        ? "device_surface_observation"
               : base.steps[0].intended.requiredCapabilityId;
   return {
     ...base,
@@ -261,7 +263,7 @@ function checklistForKind(
         ...base.steps[0].intended,
         kind,
         requiredCapabilityId: capability,
-        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create" || kind === "condition_set" || kind === "item_transfer"
+        stateOrEvidence: kind === "time_advance" || kind === "movement" || kind === "support_actor_create" || kind === "condition_set" || kind === "item_transfer" || kind === "minor_poi_create"
           ? "state"
           : kind === "dialogue_record"
             ? "terminal_player_visible"
@@ -572,6 +574,111 @@ function itemTransferChecklist(inputFrame = itemTransferFrame()): GmActionCheckl
         visibleRefs: ["Player", "Brass Tube", "Guide", "Market"],
       },
     }],
+  };
+}
+
+function minorPoiFrame(worldVersion = 0): AuthoritativeSceneFrame {
+  return {
+    ...frame(),
+    frameId: `frame-stage4-minor-poi-${worldVersion}`,
+    turnId: `clean-turn-stage4-minor-poi-${worldVersion}`,
+    base: { tick: 0, worldVersion, worldTimeMinutes: 0 },
+    playerAction: "I mark the tea stall as a place to meet.",
+    targets: worldVersion > 0
+      ? [{ ref: "tea_stall", label: "Tea Stall", kind: "place_handle" }]
+      : [],
+    currentScenePlaceHandleSurface: {
+      surfaceVersion: "scene_frame_current_place_handle_surface.v1",
+      anchorRef: "Market",
+      anchorLabel: "Market",
+      allowedPlaceKinds: ["stall", "counter", "bench", "landmark", "signage", "cover", "doorway", "alcove", "workstation", "notice_board", "other_place"],
+      existingPlaceHandleRefs: worldVersion > 0 ? ["tea_stall"] : [],
+      maxCreatesPerTurn: 1,
+      creationAuthority: "ordinary_public_visible_current_scene_handle_only",
+    },
+    capabilities: [
+      ...frame().capabilities,
+      { capabilityId: "minor_poi_create", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: worldVersion > 0
+      ? ["Player", "Market", "North Hall", "tea_stall"]
+      : ["Player", "Market", "North Hall"],
+  };
+}
+
+function minorPoiChecklist(inputFrame = minorPoiFrame()): GmActionChecklist {
+  const base = checklistForKind("minor_poi_create", inputFrame);
+  const step = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Mark Tea Stall as a current-scene place handle.",
+      admittedConsequenceNeed: "Visible place handle creation requires backend receipt authority.",
+    },
+    steps: [{
+      ...step,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        kind: "minor_poi_create",
+        stateOrEvidence: "state",
+        requiredCapabilityId: "minor_poi_create",
+        summary: "Stage 4 must create or reuse Tea Stall as a visible current-scene place handle only.",
+        minorPoiPlan: {
+          actorRef: "Player",
+          placeLabel: "Tea Stall",
+          placeKind: "stall",
+          anchorRef: "Market",
+          reusePolicy: "reuse_matching_current_scene_place_handle_or_create",
+        },
+      },
+      expectedVisibleEffect: {
+        summary: "Accepted minor POI handle receipt only; no route, location, service, sign text, or discovery is authorized.",
+        visibleRefs: ["Player", "Market"],
+      },
+    }],
+  };
+}
+
+function minorPoiThenDialogueChecklist(inputFrame = minorPoiFrame()): GmActionChecklist {
+  const base = minorPoiChecklist(inputFrame);
+  const poiStep = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Point out Tea Stall, then ask Guide to watch it.",
+      admittedConsequenceNeed: "Minor POI handle must refresh SceneFrame before visible dialogue can cite it.",
+    },
+    steps: [
+      poiStep,
+      {
+        ...poiStep,
+        stepId: "step-2",
+        purpose: "Record dependent visible Guide dialogue only after post-minor-POI SceneFrame refresh.",
+        targetRefs: ["Guide", "tea_stall"],
+        evidenceRefs: ["Player", "Guide", "tea_stall", "Market"],
+        intended: {
+          kind: "dialogue_record",
+          stateOrEvidence: "terminal_player_visible",
+          requiredCapabilityId: "dialogue_record",
+          summary: "Stage 4 may record Guide dialogue only after the accepted minor POI handle is reflected in a refreshed SceneFrame.",
+        },
+        dependsOnStepIds: ["step-1"],
+        dependencyBindings: [{
+          bindingId: "minor_poi_handle",
+          fromStepId: "step-1",
+          requiredCapabilityId: "minor_poi_create",
+          requiredReceiptAuthority: "minor_poi_handle_receipt",
+          sourcePath: "publicResult.minorPoi",
+          resolveIn: "post_dependency_scene_frame",
+          requiredFramePresence: "targets_and_citableRefs",
+        }],
+        expectedVisibleEffect: {
+          summary: "If minor POI handle is accepted and refreshed into SceneFrame targets/citableRefs, one visible Guide response may be recorded.",
+          visibleRefs: ["Player", "Guide", "tea_stall"],
+        },
+      },
+    ],
   };
 }
 
@@ -1169,6 +1276,213 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
     expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("creates and reuses a current-scene minor POI handle without creating a route or location", async () => {
+    const inputFrame = minorPoiFrame();
+
+    const created = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: minorPoiChecklist(inputFrame),
+    });
+
+    expect(created.status).toBe("executed");
+    expect(created.publicEvents).toEqual([]);
+    expect(created.execution?.mutationApplied).toBe(true);
+    expect(created.execution?.resultWorldVersion).toBe(1);
+    expect(created.execution?.visibleResults[0]).toMatchObject({
+      authority: "minor_poi_handle_receipt",
+      minorPoi: {
+        type: "minor_poi_handle",
+        resultKind: "created",
+        poiRef: "tea_stall",
+        poiLabel: "Tea Stall",
+        poiKind: "stall",
+        targetOnly: true,
+        claimStatus: "visible_current_scene_place_handle_only",
+      },
+    });
+    expect(created.execution?.receipts[0]).toMatchObject({
+      capabilityId: "minor_poi_create",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      authority: {
+        evidenceAuthority: "minor_poi_handle_receipt",
+        mutationAuthority: "current_scene_minor_poi_handle",
+        visibleResultAuthority: "may_claim_visible_minor_poi_handle",
+      },
+      privateResult: {
+        minorPoiOperation: "inserted",
+        anchorLocationId: "loc-market",
+        anchorSceneLocationId: "loc-market",
+      },
+    });
+
+    const db = getSqliteConnection();
+    const poi = db
+      .prepare("SELECT poi_ref AS poiRef, poi_label AS poiLabel, poi_kind AS poiKind, active FROM clean_gameplay_minor_pois WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { poiRef: string; poiLabel: string; poiKind: string; active: number };
+    expect(poi).toEqual({ poiRef: "tea_stall", poiLabel: "Tea Stall", poiKind: "stall", active: 1 });
+    const clockAfterCreate = db
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
+    expect(clockAfterCreate).toEqual({ worldVersion: 1, worldTimeMinutes: 0, currentTick: 0 });
+    const authority = db
+      .prepare("SELECT operation, source_entity_type AS sourceEntityType, result_world_version AS resultWorldVersion FROM authority_traces WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID) as { operation: string; sourceEntityType: string; resultWorldVersion: number };
+    expect(authority).toEqual({
+      operation: "gameplay-cycle-runtime.minor_poi_create.v1",
+      sourceEntityType: "minor_poi",
+      resultWorldVersion: 1,
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM locations WHERE campaign_id = ?").get(CAMPAIGN_ID))
+      .toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM location_edges WHERE campaign_id = ?").get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+
+    const refreshed = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-stage4-minor-poi-next",
+      idempotencyKey: "next-frame-minor-poi-proof",
+      playerAction: {
+        submitted: "I look at the Tea Stall.",
+        normalized: "I look at the Tea Stall.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-minor-poi-next"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+    expect(refreshed.targets).toContainEqual({
+      ref: "tea_stall",
+      label: "Tea Stall",
+      kind: "place_handle",
+    });
+    expect(refreshed.citableRefs).toContain("tea_stall");
+    expect(refreshed.movementOptions.map((option) => option.ref)).not.toContain("tea_stall");
+
+    const reusedFrame = minorPoiFrame(1);
+    const reused = await runCleanStage4Execution({
+      frame: reusedFrame,
+      checklist: minorPoiChecklist(reusedFrame),
+    });
+    expect(reused.execution?.receipts[0]).toMatchObject({
+      capabilityId: "minor_poi_create",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: false },
+      authority: {
+        mutationAuthority: "none",
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        minorPoi: {
+          resultKind: "reused",
+          poiRef: "tea_stall",
+          poiLabel: "Tea Stall",
+        },
+      },
+      privateResult: {
+        minorPoiOperation: "reused",
+      },
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM clean_gameplay_minor_pois WHERE campaign_id = ?").get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM authority_traces WHERE campaign_id = ? AND operation = 'gameplay-cycle-runtime.minor_poi_create.v1'").get(CAMPAIGN_ID))
+      .toEqual({ count: 1 });
+  });
+
+  it("executes minor_poi_create then dialogue_record only after a refreshed SceneFrame exposes the place handle", async () => {
+    const baseFrame = minorPoiFrame();
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...baseFrame,
+      playerAction: "I point out the Tea Stall and ask Guide to watch it.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+      capabilities: [
+        ...baseFrame.capabilities,
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: minorPoiThenDialogueChecklist(inputFrame),
+      refreshFrameAfterReceipt: async ({ receipt }) => ({
+        ...inputFrame,
+        frameId: "frame-post-minor-poi",
+        base: {
+          tick: receipt.result.tick,
+          worldVersion: receipt.result.worldVersion,
+          worldTimeMinutes: receipt.result.worldTimeMinutes,
+        },
+        targets: [
+          { ref: "Guide", label: "Guide", kind: "actor" },
+          { ref: "tea_stall", label: "Tea Stall", kind: "place_handle" },
+        ],
+        citableRefs: ["Player", "Market", "North Hall", "Guide", "tea_stall"],
+      }),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "I will keep the Tea Stall in sight.",
+          summary: "Guide visibly agrees to watch the handle.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "tea_stall", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["minor_poi_create", "accepted"],
+      ["dialogue_record", "accepted"],
+    ]);
+    const poiReceipt = result.execution?.receipts[0];
+    expect(result.execution?.frameChain?.[1]).toMatchObject({
+      source: "post_dependency_scene_frame",
+      afterReceiptId: poiReceipt?.receiptId,
+      frameId: "frame-post-minor-poi",
+      base: { tick: 0, worldVersion: 1, worldTimeMinutes: 0 },
+    });
+    expect(result.execution?.receipts[1]).toMatchObject({
+      frameId: "frame-post-minor-poi",
+      publicResult: {
+        dialogue: {
+          speakerLabel: "Guide",
+          quotedSpeech: "I will keep the Tea Stall in sight.",
+        },
+      },
+    });
   });
 
   it("applies, replaces, and clears Player current-scene local conditions through clean receipt authority", async () => {

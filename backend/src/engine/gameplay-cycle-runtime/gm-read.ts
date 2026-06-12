@@ -7,6 +7,7 @@ import {
   cleanItemTransferOperationSchema,
   cleanItemTransferSourceKindSchema,
   cleanItemTransferTargetKindSchema,
+  cleanMinorPoiKindSchema,
   gmReadSchema,
   gmReadActionInterpretationSchema,
   type AuthoritativeSceneFrame,
@@ -73,11 +74,20 @@ const gmReadGenerationItemTransferNeedSchema = z.object({
   evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
 }).strict();
 
+const gmReadGenerationMinorPoiNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  placeLabel: gmReadGenerationShortText,
+  placeKind: cleanMinorPoiKindSchema,
+  anchorRef: gmReadGenerationModelSafeRef,
+  evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
+}).strict();
+
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
   liveSceneQuestion: gmReadGenerationRepairableText,
   actionInterpretation: gmReadActionInterpretationSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
+    minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
   }).strict(),
   interpretationRationale: gmReadGenerationRepairableText,
 }).passthrough();
@@ -215,6 +225,14 @@ function refValidationIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
     ...(read.actionInterpretation.localConditionNeed?.targetRef
       ? [read.actionInterpretation.localConditionNeed.targetRef]
       : []),
+    ...(read.actionInterpretation.itemTransferNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.itemTransferNeed
+      ? [read.actionInterpretation.itemTransferNeed.itemRef, read.actionInterpretation.itemTransferNeed.targetRef]
+      : []),
+    ...(read.actionInterpretation.minorPoiNeed?.evidenceRefs ?? []),
+    ...(read.actionInterpretation.minorPoiNeed?.anchorRef
+      ? [read.actionInterpretation.minorPoiNeed.anchorRef]
+      : []),
     ...(read.actionInterpretation.localObservationNeed?.evidenceRefs ?? []),
     ...(read.actionInterpretation.localObservationNeed?.targetRef
       ? [read.actionInterpretation.localObservationNeed.targetRef]
@@ -275,6 +293,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     .map((target) => target.ref.toLowerCase()));
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
+  const minorPoiNeed = read.actionInterpretation.minorPoiNeed ?? null;
   const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
   const deviceObservationNeed = read.actionInterpretation.deviceObservationNeed ?? null;
   const sceneRefs = new Set([
@@ -283,6 +302,8 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   ]);
   const deviceSurfaceRefs = new Set((frame.deviceStatusSurfaces ?? [])
     .map((surface) => surface.deviceRef.toLowerCase()));
+  const minorPoiSurface = frame.currentScenePlaceHandleSurface ?? null;
+  const allowedMinorPoiKinds = new Set(minorPoiSurface?.allowedPlaceKinds ?? []);
 
   if (localConditionNeed) {
     const targetRef = localConditionNeed.targetRef?.toLowerCase() ?? null;
@@ -391,6 +412,29 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     }
   }
 
+  if (minorPoiNeed) {
+    if (!minorPoiSurface) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "minorPoiNeed requires a current SceneFrame place-handle surface.",
+      });
+    } else if (!allowedMinorPoiKinds.has(minorPoiNeed.placeKind)) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed.placeKind",
+        message: "minorPoiNeed.placeKind must be allowed by the current SceneFrame place-handle surface.",
+      });
+    }
+    if (!sceneRefs.has(minorPoiNeed.anchorRef.toLowerCase())) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed.anchorRef",
+        message: "minorPoiNeed.anchorRef must be the current scene/location ref.",
+      });
+    }
+  }
+
   if (localObservationNeed) {
     const localSurfaceRefs = new Set<string>();
     for (const surfaceKind of localObservationNeed.surfaceKinds) {
@@ -469,6 +513,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "current_scene_observation must not include deviceObservationNeed.",
       });
     }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "current_scene_observation must not include minorPoiNeed.",
+      });
+    }
     return issues;
   }
 
@@ -506,6 +557,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localObservationNeed",
         message: "device_status_observation must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "device_status_observation must not include minorPoiNeed.",
       });
     }
     return issues;
@@ -589,6 +647,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "player_local_condition must not include deviceObservationNeed.",
       });
     }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "player_local_condition must not include minorPoiNeed.",
+      });
+    }
     return issues;
   }
 
@@ -628,6 +693,59 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "item_transfer must not include deviceObservationNeed.",
       });
     }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "item_transfer must not include minorPoiNeed.",
+      });
+    }
+    return issues;
+  }
+
+  if (read.actionInterpretation.interactionKind === "minor_poi_create") {
+    if (read.actionInterpretation.minorPoiNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "minor_poi_create requires minorPoiNeed.",
+      });
+    }
+    if (read.actionInterpretation.supportActorNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.supportActorNeed",
+        message: "minor_poi_create must not include supportActorNeed.",
+      });
+    }
+    if (read.actionInterpretation.localConditionNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed",
+        message: "minor_poi_create must not include localConditionNeed.",
+      });
+    }
+    if (read.actionInterpretation.itemTransferNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "minor_poi_create must not include itemTransferNeed.",
+      });
+    }
+    if (read.actionInterpretation.localObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+        message: "minor_poi_create must not include localObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.deviceObservationNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.deviceObservationNeed",
+        message: "minor_poi_create must not include deviceObservationNeed.",
+      });
+    }
     return issues;
   }
 
@@ -665,6 +783,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.deviceObservationNeed",
         message: "ordinary_support_actor_needed must not include deviceObservationNeed.",
+      });
+    }
+    if (read.actionInterpretation.minorPoiNeed != null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.minorPoiNeed",
+        message: "ordinary_support_actor_needed must not include minorPoiNeed.",
       });
     }
     const targetedVisibleActors = loweredTargets.filter((target) => visibleActorRefs.has(target));
@@ -711,6 +836,13 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       code: "interaction_invalid",
       path: "actionInterpretation.deviceObservationNeed",
       message: "deviceObservationNeed is allowed only for device_status_observation.",
+    });
+  }
+  if (read.actionInterpretation.minorPoiNeed != null) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.minorPoiNeed",
+      message: "minorPoiNeed is allowed only for minor_poi_create or visible_actor_dialogue compound actions.",
     });
   }
   return issues;
@@ -815,6 +947,7 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     targets: frame.targets,
     inventory: frame.inventory,
     deviceStatusSurfaces: frame.deviceStatusSurfaces ?? [],
+    currentScenePlaceHandleSurface: frame.currentScenePlaceHandleSurface ?? null,
     capabilities: frame.capabilities,
     citableRefs: frame.citableRefs,
     forecast: {
@@ -847,7 +980,7 @@ export function buildGmReadSystemPrompt(): string {
     "Keep situationSummary, liveSceneQuestion, and interpretationRationale concise enough for the gm-read.v1 field limits.",
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
-    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, unsupported_or_unclear.",
+    "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
@@ -863,6 +996,10 @@ export function buildGmReadSystemPrompt(): string {
     "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
     "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
     "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
+    "Use minor_poi_create only for one ordinary public visible current-scene place handle named or pointed out by the player: a stall, counter, bench, landmark, signage, cover, doorway, alcove, workstation, notice_board, or other_place. It creates/reuses only a SceneFrame target handle, not a location or route.",
+    "minorPoiNeed.placeLabel is the visible handle label the player is establishing. minorPoiNeed.anchorRef must be the current scene/location ref from SceneFrame.citableRefs. placeKind must be allowed by SceneFrame.currentScenePlaceHandleSurface.allowedPlaceKinds.",
+    "minor_poi_create does not authorize actors, services, inventory, business facts, readable sign text, hidden discovery, search result, absence, no-change, world fact, location reveal, movement option, legal destination, route truth, or dialogue content.",
+    "If the player establishes a current-scene place handle and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill minorPoiNeed for the handle part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
     "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details.",
     "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
     "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",
@@ -874,6 +1011,7 @@ export function buildGmReadSystemPrompt(): string {
     "For ordinary_support_actor_needed, supportActorNeed.evidenceRefs must also be copied exactly from SceneFrame.citableRefs, usually Player plus current scene/current location.",
     "For player_local_condition or compound localConditionNeed, localConditionNeed.evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For item_transfer or compound itemTransferNeed, itemTransferNeed.itemRef, targetRef, and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
+    "For minor_poi_create or compound minorPoiNeed, minorPoiNeed.anchorRef and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "For localObservationNeed, evidenceRefs and any targetRef must also be copied exactly from SceneFrame.citableRefs.",
     "For deviceObservationNeed, deviceRef and evidenceRefs must also be copied exactly from SceneFrame.citableRefs.",
     "Do not use UUIDs, database ids, backend refs, or private terms.",

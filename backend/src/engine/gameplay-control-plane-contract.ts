@@ -537,6 +537,7 @@ export const PHASE95_SQLITE_STORE_TABLES = [
   "clean_gameplay_turn_records",
   "clean_gameplay_stage4_receipts",
   "clean_gameplay_actor_conditions",
+  "clean_gameplay_minor_pois",
 ] as const;
 
 export const PHASE95_REQUIRED_STORE_KEYS = [
@@ -787,6 +788,16 @@ const PHASE95_STORE_MANIFEST_BASE = [
   },
   {
     store: "sqlite:clean_gameplay_actor_conditions",
+    authorityLevel: "authoritative",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "reject",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:clean_gameplay_minor_pois",
     authorityLevel: "authoritative",
     clonePolicy: "purge",
     rollbackPolicy: "rewrite",

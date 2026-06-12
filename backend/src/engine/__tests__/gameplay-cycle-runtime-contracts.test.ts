@@ -30,6 +30,7 @@ import {
   cleanStage4ItemTransferEffectSchema,
   cleanStage4LocalObservationEffectSchema,
   cleanStage4DeviceSurfaceObservationEffectSchema,
+  cleanStage4MinorPoiCreateEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   isCleanGameplayRuntimeEnabled,
@@ -711,6 +712,28 @@ function itemTransferActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame>
   });
 }
 
+function minorPoiActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  const base = actionPlanFrame();
+  return actionPlanFrame({
+    playerAction: "I mark the tea stall as a place to meet.",
+    currentScenePlaceHandleSurface: {
+      surfaceVersion: "scene_frame_current_place_handle_surface.v1",
+      anchorRef: "Market",
+      anchorLabel: "Market",
+      allowedPlaceKinds: ["stall", "counter", "bench", "landmark", "signage", "cover", "doorway", "alcove", "workstation", "notice_board", "other_place"],
+      existingPlaceHandleRefs: [],
+      maxCreatesPerTurn: 1,
+      creationAuthority: "ordinary_public_visible_current_scene_handle_only",
+    },
+    capabilities: [
+      ...base.capabilities,
+      { capabilityId: "minor_poi_create", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    ...overrides,
+  });
+}
+
 function actionPlanGmRead(frame = actionPlanFrame()): GmRead {
   return {
     ...validGmRead(frame),
@@ -754,6 +777,30 @@ function itemTransferGmRead(frame = itemTransferActionPlanFrame()): GmRead {
       },
     },
     interpretationRationale: "Giving a carried item to a visible actor needs item-state receipt authority.",
+  };
+}
+
+function minorPoiGmRead(frame = minorPoiActionPlanFrame()): GmRead {
+  return {
+    ...actionPlanGmRead(frame),
+    focalRefs: ["Player", "Market"],
+    evidenceRefs: ["Player", "Market"],
+    liveSceneQuestion: "Which visible current-scene place handle must Stage 4 settle?",
+    actionInterpretation: {
+      summary: "The player establishes Tea Stall as a visible current-scene place handle.",
+      playerIntent: "Mark Tea Stall as a current-scene place handle.",
+      method: "point out",
+      targetRefs: ["Market"],
+      interactionKind: "minor_poi_create",
+      minorPoiNeed: {
+        actorRef: "Player",
+        placeLabel: "Tea Stall",
+        placeKind: "stall",
+        anchorRef: "Market",
+        evidenceRefs: ["Player", "Market"],
+      },
+    },
+    interpretationRationale: "The action creates a visible current-scene target handle, not a route or location.",
   };
 }
 
@@ -2979,6 +3026,132 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("deterministically produces minor_poi_create checklist for a current-scene place handle", async () => {
+    const frame = minorPoiActionPlanFrame();
+    const gmRead = minorPoiGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Minor POI handle creation needs a clean minor_poi_create receipt before narration.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-minor-poi",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      intended: {
+        kind: "minor_poi_create",
+        requiredCapabilityId: "minor_poi_create",
+        stateOrEvidence: "state",
+        minorPoiPlan: {
+          actorRef: "Player",
+          placeLabel: "Tea Stall",
+          placeKind: "stall",
+          anchorRef: "Market",
+          reusePolicy: "reuse_matching_current_scene_place_handle_or_create",
+        },
+      },
+      disposition: {
+        kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("blocks minor_poi_create action-plan admission when the SceneFrame lacks the place-handle surface", () => {
+    const frame = minorPoiActionPlanFrame({
+      currentScenePlaceHandleSurface: undefined,
+    });
+    const gmRead = minorPoiGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "This should not admit without a current place-handle surface.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("rejected");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("rejected");
+  });
+
+  it("deterministically splits minor_poi_create plus visible dialogue with minor_poi_handle refresh binding", async () => {
+    const frame = minorPoiActionPlanFrame({
+      playerAction: "I point out the tea stall and ask Guide to watch it.",
+    });
+    const gmRead: GmRead = {
+      ...minorPoiGmRead(frame),
+      liveSceneQuestion: "Which visible place handle must settle before Guide can visibly answer?",
+      actionInterpretation: {
+        ...minorPoiGmRead(frame).actionInterpretation,
+        summary: "The player points out Tea Stall and asks Guide to watch it.",
+        playerIntent: "Point out Tea Stall, then ask Guide to watch it.",
+        method: "point and ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide", "Market"],
+      evidenceRefs: ["Player", "Guide", "Market"],
+      checkRationale: "The place handle must settle before dependent visible dialogue can be recorded.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Compound minor POI handle and dialogue need backend receipts with refreshed frame binding.",
+        evidenceRefs: ["Player", "Guide", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-minor-poi-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "minor_poi_create",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "minor_poi_handle",
+        fromStepId: "step-1",
+        requiredCapabilityId: "minor_poi_create",
+        requiredReceiptAuthority: "minor_poi_handle_receipt",
+        sourcePath: "publicResult.minorPoi",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "targets_and_citableRefs",
+      }],
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("deterministically produces only support_actor_create for ordinary support actor needs", async () => {
     const frame = actionPlanFrame({
       playerAction: "I look for a local vendor in the market.",
@@ -3705,6 +3878,55 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(cleanStage4DeviceSurfaceObservationEffectSchema.safeParse({
       ...base,
       forbiddenPayloads: { ...base.forbiddenPayloads, absenceOrNoChange: true },
+    }).success).toBe(false);
+  });
+
+  it("requires P72 minor_poi_create effects to stay bounded to current-scene visible place handles", () => {
+    const base = {
+      kind: "minor_poi_create" as const,
+      authorityKind: "current_scene_visible_place_handle_create" as const,
+      actorRef: "Player" as const,
+      anchorRef: "Market",
+      placeLabel: "Tea Stall",
+      placeKind: "stall" as const,
+      reusePolicy: "reuse_matching_current_scene_place_handle_or_create" as const,
+      evidenceRefs: ["Player", "Market"],
+      forbiddenPayloads: {
+        actorCreation: false as const,
+        servicesOrInventory: false as const,
+        routeTruth: false as const,
+        locationReveal: false as const,
+        movementDestination: false as const,
+        businessFact: false as const,
+        readableText: false as const,
+        hiddenDiscovery: false as const,
+        absenceOrNoChange: false as const,
+        dialogueContent: false as const,
+        worldFact: false as const,
+        privateKnowledge: false as const,
+      },
+    };
+
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse(base).success).toBe(true);
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse({
+      ...base,
+      actorRef: "Guide",
+    }).success).toBe(false);
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse({
+      ...base,
+      authorityKind: "location_reveal",
+    }).success).toBe(false);
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse({
+      ...base,
+      placeKind: "district",
+    }).success).toBe(false);
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, routeTruth: true },
+    }).success).toBe(false);
+    expect(cleanStage4MinorPoiCreateEffectSchema.safeParse({
+      ...base,
+      forbiddenPayloads: { ...base.forbiddenPayloads, readableText: true },
     }).success).toBe(false);
   });
 

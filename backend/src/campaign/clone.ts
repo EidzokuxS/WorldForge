@@ -258,6 +258,32 @@ function ensureCleanGameplayActorConditionsCloneTable(db: Database.Database): vo
   `);
 }
 
+function ensureCleanGameplayMinorPoisCloneTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS clean_gameplay_minor_pois (
+      poi_id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      poi_ref TEXT NOT NULL,
+      poi_label TEXT NOT NULL,
+      poi_kind TEXT NOT NULL,
+      anchor_location_id TEXT NOT NULL,
+      anchor_scene_location_id TEXT NOT NULL,
+      active INTEGER NOT NULL,
+      applied_receipt_id TEXT,
+      base_world_version INTEGER NOT NULL,
+      result_world_version INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      CHECK (active IN (0, 1))
+    );
+    CREATE INDEX IF NOT EXISTS idx_clean_minor_pois_campaign_scene_active
+      ON clean_gameplay_minor_pois (campaign_id, anchor_scene_location_id, active);
+    CREATE UNIQUE INDEX IF NOT EXISTS clean_minor_pois_active_ref_unique
+      ON clean_gameplay_minor_pois (campaign_id, anchor_scene_location_id, poi_ref)
+      WHERE active = 1;
+  `);
+}
+
 function applySqliteClonePlan(input: {
   dbPath: string;
   plan: CampaignStoreManifestOperationPlan;
@@ -282,6 +308,7 @@ function applySqliteClonePlan(input: {
     ensureCleanGameplayTurnRecordsCloneTable(db);
     ensureCleanGameplayStage4ReceiptsCloneTable(db);
     ensureCleanGameplayActorConditionsCloneTable(db);
+    ensureCleanGameplayMinorPoisCloneTable(db);
     const applyPlan = db.transaction(() => {
       for (const { step, tableName } of sqliteSteps) {
         if (!tableExists(db, tableName)) {

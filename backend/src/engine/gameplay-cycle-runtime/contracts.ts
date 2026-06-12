@@ -97,7 +97,7 @@ export const movementOptionViewSchema = z.object({
 export const targetCandidateViewSchema = z.object({
   ref: modelSafeRef,
   label: shortText,
-  kind: z.enum(["actor", "item", "location", "faction", "unknown"]),
+  kind: z.enum(["actor", "item", "location", "faction", "place_handle", "unknown"]),
 });
 
 export const inventoryItemViewSchema = z.object({
@@ -144,6 +144,30 @@ export const sceneFrameDeviceStatusSurfaceSchema = z.object({
     }
   });
 });
+
+export const cleanMinorPoiKindSchema = z.enum([
+  "stall",
+  "counter",
+  "bench",
+  "landmark",
+  "signage",
+  "cover",
+  "doorway",
+  "alcove",
+  "workstation",
+  "notice_board",
+  "other_place",
+]);
+
+export const sceneFrameCurrentPlaceHandleSurfaceSchema = z.object({
+  surfaceVersion: z.literal("scene_frame_current_place_handle_surface.v1"),
+  anchorRef: modelSafeRef,
+  anchorLabel: shortText,
+  allowedPlaceKinds: z.array(cleanMinorPoiKindSchema).min(1).max(16),
+  existingPlaceHandleRefs: z.array(modelSafeRef).max(32),
+  maxCreatesPerTurn: z.literal(1),
+  creationAuthority: z.literal("ordinary_public_visible_current_scene_handle_only"),
+}).strict();
 
 export const scopedForecastEnvelopeSchema = z.object({
   version: z.literal("scoped-forecast.v1"),
@@ -199,6 +223,7 @@ export const authoritativeSceneFrameSchema = z.object({
   targets: z.array(targetCandidateViewSchema).max(64),
   inventory: z.array(inventoryItemViewSchema).max(64),
   deviceStatusSurfaces: z.array(sceneFrameDeviceStatusSurfaceSchema).max(32).optional(),
+  currentScenePlaceHandleSurface: sceneFrameCurrentPlaceHandleSurfaceSchema.optional(),
   capabilities: z.array(z.object({
     capabilityId: gameplayRuntimeCapabilityIdSchema,
     evidenceAuthority: z.enum([
@@ -357,6 +382,7 @@ export const gmReadActionInterpretationSchema = z.object({
     "ordinary_support_actor_needed",
     "player_local_condition",
     "item_transfer",
+    "minor_poi_create",
     "unsupported_or_unclear",
   ]).default("unsupported_or_unclear"),
   supportActorNeed: z.object({
@@ -388,6 +414,13 @@ export const gmReadActionInterpretationSchema = z.object({
     targetRef: modelSafeRef,
     equipSlot: z.literal("equipped").nullable(),
     requestedItemText: shortText,
+    evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  }).strict().nullable().optional(),
+  minorPoiNeed: z.object({
+    actorRef: z.literal("Player"),
+    placeLabel: shortText,
+    placeKind: cleanMinorPoiKindSchema,
+    anchorRef: modelSafeRef,
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
   localObservationNeed: z.object({
@@ -707,10 +740,21 @@ export const gmActionChecklistItemTransferBindingSchema = z.object({
   requiredFramePresence: z.literal("item_state_reconciled"),
 }).strict();
 
+export const gmActionChecklistMinorPoiHandleBindingSchema = z.object({
+  bindingId: z.literal("minor_poi_handle"),
+  fromStepId: gmActionChecklistStepIdSchema,
+  requiredCapabilityId: z.literal("minor_poi_create"),
+  requiredReceiptAuthority: z.literal("minor_poi_handle_receipt"),
+  sourcePath: z.literal("publicResult.minorPoi"),
+  resolveIn: z.literal("post_dependency_scene_frame"),
+  requiredFramePresence: z.literal("targets_and_citableRefs"),
+}).strict();
+
 export const gmActionChecklistDependencyBindingSchema = z.discriminatedUnion("bindingId", [
   gmActionChecklistMaterializedSpeakerBindingSchema,
   gmActionChecklistPlayerLocalConditionBindingSchema,
   gmActionChecklistItemTransferBindingSchema,
+  gmActionChecklistMinorPoiHandleBindingSchema,
 ]);
 
 export const gmActionChecklistStepSchema = z.object({
@@ -744,6 +788,13 @@ export const gmActionChecklistStepSchema = z.object({
       targetEquipState: z.enum(["carried", "equipped"]),
       targetEquippedSlot: z.literal("equipped").nullable(),
       anchorRef: modelSafeRef,
+    }).strict().nullable().optional(),
+    minorPoiPlan: z.object({
+      actorRef: z.literal("Player"),
+      placeLabel: shortText,
+      placeKind: cleanMinorPoiKindSchema,
+      anchorRef: modelSafeRef,
+      reusePolicy: z.literal("reuse_matching_current_scene_place_handle_or_create"),
     }).strict().nullable().optional(),
     localObservationPlan: z.object({
       actorRef: z.literal("Player"),
@@ -834,6 +885,7 @@ export const cleanStage4CapabilityIdSchema = z.enum([
   "dialogue_record",
   "support_actor_create",
   "item_transfer",
+  "minor_poi_create",
   "condition_set",
   "time_advance",
   "scene_beat_record",
@@ -1053,6 +1105,46 @@ export const cleanStage4ItemTransferResultSchema = z.object({
   claimStatus: z.literal("visible_item_state_change_only"),
 }).strict();
 
+export const cleanStage4MinorPoiCreateEffectSchema = z.object({
+  kind: z.literal("minor_poi_create"),
+  authorityKind: z.literal("current_scene_visible_place_handle_create"),
+  actorRef: z.literal("Player"),
+  anchorRef: modelSafeRef,
+  placeLabel: shortText,
+  placeKind: cleanMinorPoiKindSchema,
+  reusePolicy: z.literal("reuse_matching_current_scene_place_handle_or_create"),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+  forbiddenPayloads: z.object({
+    actorCreation: z.literal(false),
+    servicesOrInventory: z.literal(false),
+    routeTruth: z.literal(false),
+    locationReveal: z.literal(false),
+    movementDestination: z.literal(false),
+    businessFact: z.literal(false),
+    readableText: z.literal(false),
+    hiddenDiscovery: z.literal(false),
+    absenceOrNoChange: z.literal(false),
+    dialogueContent: z.literal(false),
+    worldFact: z.literal(false),
+    privateKnowledge: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const cleanStage4MinorPoiHandleResultSchema = z.object({
+  type: z.literal("minor_poi_handle"),
+  resultKind: z.enum(["created", "reused"]),
+  poiRef: modelSafeRef,
+  poiLabel: shortText,
+  poiKind: cleanMinorPoiKindSchema,
+  actorLabel: z.literal("Player"),
+  anchorSceneLabel: shortText,
+  anchorLocationLabel: shortText,
+  visibility: z.literal("public_visible_current_scene"),
+  persistenceScope: z.literal("current_scene"),
+  targetOnly: z.literal(true),
+  claimStatus: z.literal("visible_current_scene_place_handle_only"),
+}).strict();
+
 export const cleanStage4LocalObservationEffectSchema = z.object({
   kind: z.literal("local_observation"),
   authorityKind: z.literal("current_scene_observation_surface"),
@@ -1226,6 +1318,7 @@ export const cleanStage4RequestSchema = z.object({
     cleanStage4DialogueRequestEffectSchema,
     cleanStage4SupportActorCreateEffectSchema,
     cleanStage4ItemTransferEffectSchema,
+    cleanStage4MinorPoiCreateEffectSchema,
     cleanStage4LocalConditionSetEffectSchema,
   ]),
 }).strict().superRefine((request, ctx) => {
@@ -1247,6 +1340,12 @@ export const cleanStage4RequestSchema = z.object({
   if (request.effect.kind === "item_transfer") {
     if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
       ctx.addIssue({ code: "custom", path: ["author"], message: "P69 item_transfer requests must be backend-authored from the accepted checklist." });
+    }
+    return;
+  }
+  if (request.effect.kind === "minor_poi_create") {
+    if (request.author !== "backend_from_checklist" || request.modelAuthored !== false) {
+      ctx.addIssue({ code: "custom", path: ["author"], message: "P72 minor_poi_create requests must be backend-authored from the accepted checklist." });
     }
     return;
   }
@@ -1309,6 +1408,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "support_actor_materialization_receipt",
       "player_local_condition_receipt",
       "item_transfer_receipt",
+      "minor_poi_handle_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -1320,6 +1420,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "current_scene_support_actor",
       "player_local_condition_state",
       "item_custody_location_equip_state",
+      "current_scene_minor_poi_handle",
     ]),
     visibleResultAuthority: z.enum([
       "may_describe_visible_snapshot",
@@ -1334,6 +1435,7 @@ export const cleanStage4ReceiptSchema = z.object({
       "may_claim_visible_support_actor_materialized",
       "may_claim_player_local_condition",
       "may_claim_item_state_change",
+      "may_claim_visible_minor_poi_handle",
       "failure_only",
       "none",
     ]),
@@ -1395,6 +1497,7 @@ export const cleanStage4ReceiptSchema = z.object({
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
     itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
+    minorPoi: cleanStage4MinorPoiHandleResultSchema.nullable().optional(),
   }).strict(),
   privateResult: z.object({
     playerId: shortText.nullable(),
@@ -1418,6 +1521,8 @@ export const cleanStage4ReceiptSchema = z.object({
     nextEquipState: z.enum(["carried", "equipped"]).nullable().optional(),
     previousEquippedSlot: shortText.nullable().optional(),
     nextEquippedSlot: shortText.nullable().optional(),
+    minorPoiId: shortText.nullable().optional(),
+    minorPoiOperation: z.enum(["inserted", "reused"]).nullable().optional(),
     edgeIds: z.array(shortText).max(24),
     authorityTraceId: shortText.nullable(),
     clockReceiptId: shortText.nullable(),
@@ -1443,6 +1548,8 @@ export const cleanStage4ReceiptSchema = z.object({
       "target_not_visible",
       "target_state_invalid",
       "equip_slot_conflict",
+      "minor_poi_surface_unavailable",
+      "minor_poi_state_conflict",
       "mutation_apply_failed",
       "receipt_persist_failed",
     ]),
@@ -1612,6 +1719,37 @@ export const cleanStage4ReceiptSchema = z.object({
       }
     }
   }
+  if (receipt.status === "accepted" && receipt.capabilityId === "minor_poi_create") {
+    const minorPoi = receipt.publicResult.minorPoi ?? null;
+    if (minorPoi === null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "minorPoi"], message: "Accepted minor_poi_create requires public minor POI handle result." });
+      return;
+    }
+    if (receipt.authority.evidenceAuthority !== "minor_poi_handle_receipt") {
+      ctx.addIssue({ code: "custom", path: ["authority", "evidenceAuthority"], message: "Accepted minor_poi_create must use minor POI handle evidence authority." });
+    }
+    if (receipt.authority.visibleResultAuthority !== "may_claim_visible_minor_poi_handle") {
+      ctx.addIssue({ code: "custom", path: ["authority", "visibleResultAuthority"], message: "Accepted minor_poi_create must authorize visible minor POI handle narration." });
+    }
+    if (receipt.result.worldTimeMinutes !== receipt.base.worldTimeMinutes || receipt.result.tick !== receipt.base.tick) {
+      ctx.addIssue({ code: "custom", path: ["result"], message: "Accepted minor_poi_create must not advance time or tick." });
+    }
+    if (minorPoi.resultKind === "reused") {
+      if (receipt.result.mutationApplied || receipt.result.worldVersion !== receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Reused minor_poi_create receipt must not mutate or advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "none" || receipt.authority.mayAuthorizeMutation !== false) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Reused minor_poi_create receipt must not authorize mutation." });
+      }
+    } else {
+      if (!receipt.result.mutationApplied || receipt.result.worldVersion <= receipt.base.worldVersion) {
+        ctx.addIssue({ code: "custom", path: ["result"], message: "Created minor_poi_create receipt must apply mutation and advance world version." });
+      }
+      if (receipt.authority.mutationAuthority !== "current_scene_minor_poi_handle" || receipt.authority.mayAuthorizeMutation !== true) {
+        ctx.addIssue({ code: "custom", path: ["authority"], message: "Created minor_poi_create receipt must own current-scene minor POI handle mutation." });
+      }
+    }
+  }
   if (receipt.status === "accepted" && receipt.capabilityId === "local_observation") {
     const localObservation = receipt.publicResult.localObservation ?? null;
     if (localObservation === null) {
@@ -1694,7 +1832,9 @@ export const cleanStage4ReceiptSchema = z.object({
     .replace(/dialogue_response/g, "")
     .replace(/support_actor_materialization/g, "")
     .replace(/player_local_condition/g, "")
-    .replace(/item_transfer/g, "");
+    .replace(/item_transfer/g, "")
+    .replace(/minor_poi_handle/g, "")
+    .replace(/minorPoi/g, "");
   if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(publicJson)) {
     ctx.addIssue({ code: "custom", path: ["publicResult"], message: "Public receipt result must not expose UUID-like backend ids." });
   }
@@ -1743,6 +1883,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
       "support_actor_materialization_receipt",
       "player_local_condition_receipt",
       "item_transfer_receipt",
+      "minor_poi_handle_receipt",
       "terminal_mutation_receipt",
       "failure_receipt",
       "skip_receipt",
@@ -1774,6 +1915,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
     supportActor: cleanStage4SupportActorMaterializationResultSchema.nullable().optional(),
     condition: cleanStage4PlayerLocalConditionResultSchema.nullable().optional(),
     itemTransfer: cleanStage4ItemTransferResultSchema.nullable().optional(),
+    minorPoi: cleanStage4MinorPoiHandleResultSchema.nullable().optional(),
     localObservation: cleanStage4LocalObservationResultSchema.nullable().optional(),
     deviceSurfaceObservation: cleanStage4DeviceSurfaceObservationResultSchema.nullable().optional(),
   }).strict()).max(6),
@@ -1797,6 +1939,7 @@ const cleanSettledClaimKindSchema = z.enum([
   "support_actor_materialization",
   "player_local_condition",
   "item_state",
+  "minor_poi_handle",
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
@@ -1814,6 +1957,7 @@ const cleanSettledEvidenceAuthoritySchema = z.enum([
   "support_actor_materialization_receipt",
   "player_local_condition_receipt",
   "item_transfer_receipt",
+  "minor_poi_handle_receipt",
   "terminal_mutation_receipt",
   "oracle_visible_outcome",
 ]);
@@ -1857,6 +2001,7 @@ export const cleanSettledStepAuditSchema = z.object({
     "support_actor_materialization_receipt",
     "player_local_condition_receipt",
     "item_transfer_receipt",
+    "minor_poi_handle_receipt",
     "terminal_mutation_receipt",
     "failure_receipt",
     "skip_receipt",

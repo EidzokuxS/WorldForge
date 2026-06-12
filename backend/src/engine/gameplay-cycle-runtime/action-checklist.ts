@@ -295,6 +295,9 @@ function refIssues(input: {
           step.intended.itemTransferPlan.anchorRef,
         ]
       : []),
+    ...(step.intended.minorPoiPlan
+      ? [step.intended.minorPoiPlan.anchorRef]
+      : []),
     ...(step.intended.localObservationPlan
       ? [
           ...(step.intended.localObservationPlan.targetRef ? [step.intended.localObservationPlan.targetRef] : []),
@@ -449,6 +452,29 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         code: "step_invalid",
         path: `steps.${index}.intended.itemTransferPlan`,
         message: "itemTransferPlan is allowed only on item_transfer steps.",
+      });
+    }
+    if (step.intended.kind === "minor_poi_create") {
+      if (!step.intended.minorPoiPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.minorPoiPlan`,
+          message: "minor_poi_create steps require a typed minorPoiPlan.",
+        });
+      }
+      const plan = step.intended.minorPoiPlan;
+      if (plan && ![...step.targetRefs, ...step.evidenceRefs].some((ref) => ref.toLowerCase() === plan.anchorRef.toLowerCase())) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.minorPoiPlan.anchorRef`,
+          message: "minorPoiPlan.anchorRef must be included in step target/evidence refs.",
+        });
+      }
+    } else if (step.intended.minorPoiPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.minorPoiPlan`,
+        message: "minorPoiPlan is allowed only on minor_poi_create steps.",
       });
     }
     if (step.intended.kind === "local_observation") {
@@ -609,6 +635,17 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
             message: "item_transfer_state bindings must depend on an earlier item_transfer step.",
           });
         }
+      } else if (binding.bindingId === "minor_poi_handle") {
+        if (
+          dependencyStep?.intended.kind !== "minor_poi_create"
+          || dependencyStep.intended.requiredCapabilityId !== "minor_poi_create"
+        ) {
+          issues.push({
+            code: "dependency_invalid",
+            path: `steps.${index}.dependencyBindings`,
+            message: "minor_poi_handle bindings must depend on an earlier minor_poi_create step.",
+          });
+        }
       }
     }
   });
@@ -718,6 +755,12 @@ function admittedRefSet(input: {
         ...input.gmRead.actionInterpretation.itemTransferNeed.evidenceRefs,
       ]
       : []),
+    ...(input.gmRead.actionInterpretation.minorPoiNeed
+      ? [
+        input.gmRead.actionInterpretation.minorPoiNeed.anchorRef,
+        ...input.gmRead.actionInterpretation.minorPoiNeed.evidenceRefs,
+      ]
+      : []),
     ...(input.gmRead.actionInterpretation.localObservationNeed
       ? [
         ...(input.gmRead.actionInterpretation.localObservationNeed.targetRef
@@ -798,6 +841,7 @@ function stepFor(input: {
   dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
+  minorPoiPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["minorPoiPlan"]>;
   localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
   deviceObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>;
   purpose?: string;
@@ -813,6 +857,7 @@ function stepFor(input: {
       || input.kind === "support_actor_create"
       || input.kind === "condition_set"
       || input.kind === "item_transfer"
+      || input.kind === "minor_poi_create"
       ? "state"
       : input.kind === "dialogue_record"
         ? "terminal_player_visible"
@@ -825,6 +870,9 @@ function stepFor(input: {
   }
   if (input.itemTransferPlan) {
     intended.itemTransferPlan = input.itemTransferPlan;
+  }
+  if (input.minorPoiPlan) {
+    intended.minorPoiPlan = input.minorPoiPlan;
   }
   if (input.localObservationPlan) {
     intended.localObservationPlan = input.localObservationPlan;
@@ -904,6 +952,7 @@ export function buildDeterministicGmActionChecklist(input: {
     : null;
   const localConditionNeed = input.gmRead.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = input.gmRead.actionInterpretation.itemTransferNeed ?? null;
+  const minorPoiNeed = input.gmRead.actionInterpretation.minorPoiNeed ?? null;
   const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     ? input.gmRead.actionInterpretation.localObservationNeed ?? null
     : null;
@@ -914,6 +963,7 @@ export function buildDeterministicGmActionChecklist(input: {
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
   let itemTransferStepId: GmActionChecklistStepId | null = null;
+  let minorPoiStepId: GmActionChecklistStepId | null = null;
   if (allowed.has("condition_set") && sceneRef && localConditionNeed) {
     const targetRefs = uniqueStrings([
       localConditionNeed.targetRef ?? sceneRef,
@@ -990,6 +1040,34 @@ export function buildDeterministicGmActionChecklist(input: {
       expectedVisibleSummary: `If accepted, final item custody/location/equip state for ${itemTransferNeed.itemRef} may be visible only through the item_transfer receipt.`,
     }));
     itemTransferStepId = steps[steps.length - 1]?.stepId ?? null;
+  }
+
+  if (allowed.has("minor_poi_create") && sceneRef && minorPoiNeed) {
+    const minorPoiEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...minorPoiNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "minor_poi_create",
+      actorRef,
+      targetRefs: [sceneRef],
+      evidenceRefs: minorPoiEvidenceRefs,
+      minorPoiPlan: {
+        actorRef: "Player",
+        placeLabel: minorPoiNeed.placeLabel,
+        placeKind: minorPoiNeed.placeKind,
+        anchorRef: sceneRef,
+        reusePolicy: "reuse_matching_current_scene_place_handle_or_create",
+      },
+      purpose: `Plan current-scene visible place handle ${minorPoiNeed.placeLabel}.`,
+      intendedSummary: `Stage 4 must create or reuse one ordinary public visible current-scene place handle (${minorPoiNeed.placeKind}) before narration may cite it. This does not authorize actors, services, inventory, business facts, readable text, route truth, movement, location reveal, hidden discovery, absence, no-change, world facts, or dialogue.`,
+      expectedVisibleSummary: `If accepted, ${minorPoiNeed.placeLabel} may be cited only as a visible current-scene place handle.`,
+    }));
+    minorPoiStepId = steps[steps.length - 1]?.stepId ?? null;
   }
 
   if (allowed.has("local_observation") && sceneRef && localObservationNeed) {
@@ -1078,7 +1156,7 @@ export function buildDeterministicGmActionChecklist(input: {
       evidenceRefs: uniqueStrings([actorRef, movementTarget.ref, ...evidenceRefs]),
       dependsOnStepIds: movementTarget.connected ? [] : steps.map((step) => step.stepId),
     }));
-  } else if (allowed.has("route_options") && sceneRef && wantsRouteOptions(actionText)) {
+  } else if (steps.length === 0 && !dialogueSpeaker && allowed.has("route_options") && sceneRef && wantsRouteOptions(actionText)) {
     steps.push(stepFor({
       index: 1,
       kind: "route_options",
@@ -1086,7 +1164,7 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
-  } else if (allowed.has("time_advance") && sceneRef && wantsExplicitWait(actionText)) {
+  } else if (steps.length === 0 && !dialogueSpeaker && allowed.has("time_advance") && sceneRef && wantsExplicitWait(actionText)) {
     steps.push(stepFor({
       index: 1,
       kind: "time_advance",
@@ -1128,11 +1206,23 @@ export function buildDeterministicGmActionChecklist(input: {
         requiredFramePresence: "item_state_reconciled",
       });
     }
+    if (minorPoiStepId) {
+      dependsOnStepIds.push(minorPoiStepId);
+      dependencyBindings.push({
+        bindingId: "minor_poi_handle",
+        fromStepId: minorPoiStepId,
+        requiredCapabilityId: "minor_poi_create",
+        requiredReceiptAuthority: "minor_poi_handle_receipt",
+        sourcePath: "publicResult.minorPoi",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "targets_and_citableRefs",
+      });
+    }
     if (dependencyBindings.length > 0) {
       dialogueStepInput.dependsOnStepIds = dependsOnStepIds;
       dialogueStepInput.dependencyBindings = dependencyBindings;
       dialogueStepInput.purpose = "Record one visible response only after prior state-bearing steps are settled and the SceneFrame is refreshed.";
-      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after post-dependency authoritative SceneFrame refresh reflects accepted Player local condition or item state requirements.";
+      dialogueStepInput.intendedSummary = "Stage 4 may record dialogue only after post-dependency authoritative SceneFrame refresh reflects accepted Player local condition, item state, or minor place-handle requirements.";
     }
     steps.push(stepFor(dialogueStepInput));
   } else if (allowed.has("support_actor_create") && sceneRef && supportActorNeed) {
