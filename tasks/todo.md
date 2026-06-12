@@ -4679,3 +4679,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P133 raises the same Lowwater clone from 20/60 to 30/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P134 clean gameplay runtime Acceptance-Candidate Lane / P131 Continuation 30 -> 40:
+  - Plan:
+    - [x] Continue existing zero-turn clone `p131-lowwater-acceptance-20260612203318` from its clean turn-30 state.
+    - [x] Preflight current DB state: player at `The Copper Tap`, visible `Old Route Hand Sessik` and `Tap-Keeper Brost`, routes `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`, `Courier satchel` equipped by player, `Sealed lacquer message tube` carried by `Relay-Tech Dorin`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 31-40 one action at a time from inspected post-turn state, covering visible-actor observation, dialogue, route options/checks, movement to `Slip Twelve Berth`, current-scene actor refresh, dialogue there, and return movement to `Lowwater Bazaar`.
+    - [x] Persist `turn-031/` through `turn-040/` artifacts plus root `db-verification-turn-031.json` through `db-verification-turn-040.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] Turn 31 visible-actor observation at `The Copper Tap` passed: accepted `local_observation`, surfaced `Old Route Hand Sessik` and `Tap-Keeper Brost`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 32 dialogue with `Old Route Hand Sessik` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 33 route-options check from `The Copper Tap` passed: accepted `route_options`, surfaced `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 34 route-check to `Slip Twelve Berth` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 35 movement to `Slip Twelve Berth` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `The Copper Tap -> Slip Twelve Berth`, clock `13/13/13 -> 14/14/14`, visible NPC DB surface contains `Litha Corsen` and `Sigil Boss Torvin Kask`, old stores zero.
+    - [x] Turn 36 visible-actor observation at `Slip Twelve Berth` passed: accepted `local_observation`, surfaced `Litha Corsen` and `Sigil Boss Torvin Kask`, no mutation/clock/ledger/trace, old stores zero. Corrected only the verifier's stale authority-string expectation.
+    - [x] Turn 37 dialogue with `Litha Corsen` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 38 route-options check from `Slip Twelve Berth` passed: accepted `route_options`, surfaced `Lowwater Bazaar`, `Silt Warrens`, and `The Copper Tap`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 39 route-check to `Lowwater Bazaar` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero. Corrected only the verifier's over-strict expectation that narration use the word `connected` instead of `reachable`.
+    - [x] Turn 40 movement to `Lowwater Bazaar` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Slip Twelve Berth -> Lowwater Bazaar`, clock `14/14/14 -> 15/15/15`, current-scene NPC surface empty, old stores zero.
+  - Verification executed:
+    - [x] P131/P132/P133/P134 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-040.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 40: 40 clean turn records, 39 Stage4 receipts plus one clean `direct_scene` turn, 15 authority traces, 12 clock ledger rows, world clock `15/15/15`, player at `Lowwater Bazaar`, current-scene NPC surface empty, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P134 raises the same Lowwater clone from 30/60 to 40/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
