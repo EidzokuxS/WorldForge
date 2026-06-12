@@ -8,6 +8,31 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P152 clean Stage4 failed/skipped receipt boundary:
+- Baseline: branch `codex/rebuild-gm-turn-cycle` after commit `4fe9ede9` (`Enforce Oracle settlement no-fallback invariant`).
+- Trigger:
+  - Fresh clone `p152-stage4-failed-skipped-vendor-20260613` from `p69-item-transfer-045651` inserted a hidden broad-location `Local Vendor` row, then action `I ask a local vendor what changed today.` reached Stage4 and produced an invalid diagnostic outcome: the support-actor request failure message exceeded the Stage4 receipt schema's 500-character public/failure message limit. The route restored before clean turn commit; this clone is diagnostic-invalid.
+  - Fresh clone `p152-stage4-failed-skipped-vendor-r2-20260613` hit a separate Judge validation failure before Stage4; it is diagnostic-invalid.
+- Root cause:
+  - `executeSupportActorCreate` passed the raw support-actor request generation diagnostic into `failReceipt`. Long provider/Zod diagnostics could violate `cleanStage4ReceiptSchema` and turn an intended typed failure receipt into a route-level restore.
+  - The support-actor placeholder request reason used fallback wording even though the object is only a failure-audit shell for a rejected request.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now normalizes and caps support-actor failure diagnostics before `failReceipt`, keeping both `publicResult.summary` and `failure.message` inside the typed receipt limits.
+  - The failure-audit shell wording no longer describes itself as a fallback.
+  - No gameplay-process fallback, guard pile, semantic regex, old v2 handler, or old tool schema path was added.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` now covers overlong support-actor generation diagnostics and proves the executor returns a typed failed `support_actor_create` receipt with `failure_receipt` / `failure_only`, no mutation, and schema-bounded public/failure messages.
+- Live repair proof:
+  - Fresh clone `p152-stage4-failed-skipped-vendor-r3-20260613` from `p69-item-transfer-045651`, with chat history 0 and one hidden broad-location `Local Vendor` row not present in the citable pre-frame.
+  - Action: `I call over a local vendor and ask, "What changed today?"`
+  - Artifact: `output/clean-runtime-p152-stage4-failed-skipped-vendor-r3-20260613/`.
+  - Result path: `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> settled-turn-packet -> narrative -> finalizing_turn -> done`, `done.runtime=gameplay-cycle-runtime`.
+  - Settled packet kind: `stage4_failed_or_skipped`; no accepted Stage4 receipts; `support_actor_create` failed with `evidenceAuthority=failure_receipt`, `maySupportNarrationClaim=false`; dependent `dialogue_record` skipped with `evidenceAuthority=skip_receipt`, `maySupportNarrationClaim=false`.
+  - Narrator view step audit marked both failed/skipped steps with `mayUseAsWorldTruth=false`; player-facing text stayed a bounded current-scene snapshot and did not mention `Local Vendor` or fabricate dialogue.
+  - DB verification: `clean_gameplay_turn_records=1`, `clean_gameplay_stage4_receipts=2`, `authority_traces=0`, `turn_clock_ledger=0`, `gameplay_cycle_v2_packets=0`, `settled_turn_packets=0`, `turn_sagas=0`, `turn_saga_events=0`, `narrator_attempts=0`, `oracle_decisions=0`, `simulation_proposals=0`, `simulation_jobs=0`; clock stayed `worldVersion=0/worldTimeMinutes=0/currentTick=0`.
+- Status impact:
+  - P152 proves the Stage4 failed/skipped audit branch through the live clean runtime. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P127 post-SceneFrame-wording repair Shibuya/HQ burn-in:
 - Baseline: branch clean/synced after commit `9f6e7fa9` (`Remove SceneFrame wording from clean settlement evidence`).
 - Fresh clean-start clone `p126-scene-evidence-leak-proof-192145` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`; turns 1-2 were the P126 live repair proof and remained clean.

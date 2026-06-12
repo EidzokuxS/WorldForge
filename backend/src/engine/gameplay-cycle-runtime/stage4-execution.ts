@@ -2340,7 +2340,7 @@ function placeholderSupportActorRequest(input: {
         mayBecomePersistentHere: false,
       },
       reusePolicy: "reuse_matching_temporary_current_scene_or_create",
-      reason: "Fallback placeholder for failed support actor request generation.",
+      reason: "Failure audit request shell for rejected support actor request generation.",
       evidenceRefs: uniqueStrings(["Player", input.frame.scene.currentScene.ref, ...input.step.evidenceRefs]).slice(0, 12),
       forbiddenPayloads: {
         dialogueContent: false,
@@ -2353,6 +2353,16 @@ function placeholderSupportActorRequest(input: {
       },
     },
   });
+}
+
+function supportActorFailureMessage(message: string): string {
+  const prefix = "Stage 4 support actor request was not accepted: ";
+  const normalized = message.replace(/\s+/g, " ").trim() || "invalid support actor request";
+  const maxMessageLength = 500 - prefix.length;
+  const diagnostic = normalized.length <= maxMessageLength
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maxMessageLength - 3))}...`;
+  return `${prefix}${diagnostic}`;
 }
 
 async function buildSupportActorRequest(input: {
@@ -3340,6 +3350,9 @@ async function executeSupportActorCreate(input: {
     generateSupportActorRequest: input.generateSupportActorRequest,
   });
   if (builtRequest.status === "failed") {
+    const message = supportActorFailureMessage(
+      builtRequest.issues[0]?.message ?? "invalid support actor request",
+    );
     const receipt = failReceipt({
       frame: input.frame,
       checklist: input.checklist,
@@ -3347,7 +3360,7 @@ async function executeSupportActorCreate(input: {
       request: builtRequest.request,
       capabilityId: "support_actor_create",
       kind: "invalid_backend_request",
-      message: `Stage 4 support actor request was not accepted: ${builtRequest.issues[0]?.message ?? "invalid support actor request"}`,
+      message,
     });
     input.store.insert(receipt);
     return receipt;

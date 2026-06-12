@@ -3307,6 +3307,45 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(counts).toEqual({ npcCount: 1, traceCount: 0, worldVersion: 0 });
   });
 
+  it("keeps overlong support actor generation diagnostics inside failed receipt limits", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask a local vendor what changed today.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => {
+        throw new Error(`provider schema diagnostic ${"x".repeat(1200)}`);
+      },
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.mutationApplied).toBe(false);
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "failed",
+      authority: {
+        evidenceAuthority: "failure_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "failure_only",
+      },
+      failure: {
+        kind: "invalid_backend_request",
+        hiddenMutationApplied: false,
+      },
+    });
+    expect(receipt?.publicResult.summary.length).toBeLessThanOrEqual(500);
+    expect(receipt?.failure?.message.length).toBeLessThanOrEqual(500);
+  });
+
   it("fails broad-location hidden support actor collision without exposing the hidden row", async () => {
     insertNpc({
       id: "npc-hidden-broad-vendor",
