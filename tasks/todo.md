@@ -3354,3 +3354,34 @@ Session: `gm-v1-consequenc-slice`.
     - Added regression coverage for sibling-scene background actors being excluded from clean SceneFrame actors/citable refs, and for support-actor planning outranking wait-like wording in a support request.
   - Status impact:
     - P73 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P74 clean gameplay runtime Adaptive Burn-in / Route-Movement Boundary Discovery:
+  - Status:
+    - [x] Start from a clean tree after committed/pushed P73.
+    - [x] Create a fresh zero-turn clean-start clone and inspect actual current SceneFrame/movement candidates before turn 1.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`, not watch mode.
+    - [x] Send one manually chosen `/api/chat/action` at a time from the observed state.
+    - [x] Target route feasibility / legal movement only after the fresh frame exposed concrete movement candidates.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record retry diagnostic evidence after the route/movement boundary fix.
+  - Purpose:
+    - Continue from P73 with a fresh diagnostic lane aimed at the next broad acceptance family: route availability and movement authority.
+    - Preserve the lessons that `check_route` evidence is not movement, movement requires movement authority, and Oracle/POI/dialogue cannot claim travel or arrival by themselves.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Diagnostic evidence:
+    - Fresh clone `p74-route-084310` exposed `Lowwater Bazaar` with connected movement options including `Silt Warrens`.
+    - Real turn 1 action `I check whether the visible route to Silt Warrens is open and legal from Lowwater Bazaar, without moving.` was invalid before the fix: runtime accepted `local_observation` plus `movement`, moved the Player to `Silt Warrens`, advanced `worldVersion/worldTimeMinutes/currentTick 0 -> 1`, and narrated arrival. Artifacts are under `output/clean-runtime-p74-route-burnin-20260612084310/`.
+    - Root cause: deterministic checklist compilation treated any GM Read `targetRefs` entry that matched a movement option as movement, regardless of `interactionKind`. A route-feasibility inquiry could therefore compile movement even when the player explicitly asked not to move.
+    - Fix: `buildDeterministicGmActionChecklist` now compiles visible-route `route_inquiry` to `route_check` only, while physical `movement` requires `interactionKind=movement_intent`. GM Read prompt now states that open/legal/reachable route checks, including `without moving`, are `route_inquiry`, and that current-scene/location changes require explicit movement wording.
+  - Retry clean diagnostic slice:
+    - Fresh retry clone `p74-route-r2-084900` precheck was zero-turn clean: chat 0, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0, `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, scene `Lowwater Bazaar`, movement option `Silt Warrens` visible.
+    - Retry turn 1 repeated the route-feasibility action and accepted exactly one `route_check` receipt with `route_check_receipt`, `routeStatus=connected`, no `movement`, no `authority_traces`, no `turn_clock_ledger`, no old stores, no Player location change, and `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`.
+    - Retry turn 2 action `I take the visible route to Silt Warrens now.` accepted exactly one `movement` receipt with `terminal_mutation_receipt`, wrote `gameplay-cycle-runtime.player.move.v1`, wrote one travel clock ledger row, moved Player to `Silt Warrens`, advanced `worldVersion/worldTimeMinutes/currentTick 0 -> 1`, and kept old stores at 0.
+    - Retry artifacts are under `output/clean-runtime-p74-route-burnin-r2-20260612084900/`.
+  - Executed verification:
+    - GitNexus impact was run before edits on `buildDeterministicGmActionChecklist` and `buildGmReadSystemPrompt`; both reported LOW risk with one direct clean-runtime caller.
+    - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` passed with 168 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 230 tests passed.
+  - Status impact:
+    - P74 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

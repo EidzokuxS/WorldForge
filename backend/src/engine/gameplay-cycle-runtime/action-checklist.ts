@@ -1138,7 +1138,26 @@ export function buildDeterministicGmActionChecklist(input: {
     }));
   }
 
-  if (movementTarget && allowed.has("movement")) {
+  if (
+    movementTarget
+    && input.gmRead.actionInterpretation.interactionKind === "route_inquiry"
+    && allowed.has("route_check")
+  ) {
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "route_check",
+      actorRef,
+      targetRefs: [movementTarget.ref],
+      evidenceRefs: uniqueStrings([actorRef, movementTarget.ref, ...evidenceRefs]),
+      purpose: `Plan route status check for ${movementTarget.label}.`,
+      intendedSummary: "Stage 4 must settle route status before narration may claim whether this visible route is connected. This does not authorize movement, arrival, elapsed travel time, hidden routes, or absence of other routes.",
+      expectedVisibleSummary: `If accepted, route check may describe only the route status for ${movementTarget.label}.`,
+    }));
+  } else if (
+    movementTarget
+    && input.gmRead.actionInterpretation.interactionKind === "movement_intent"
+    && allowed.has("movement")
+  ) {
     if (!movementTarget.connected && allowed.has("route_check")) {
       steps.push(stepFor({
         index: steps.length + 1,

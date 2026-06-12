@@ -2547,6 +2547,57 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("deterministically checks a visible route without compiling movement when the player asks not to move", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I check whether the visible route to North Hall is open and legal, without moving.",
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      liveSceneQuestion: "Can route status be checked without moving the Player?",
+      evidenceRefs: ["Player", "Market", "North Hall"],
+      actionInterpretation: {
+        summary: "The player asks whether the visible route to North Hall is open and legal without moving.",
+        playerIntent: "Check route status to North Hall without moving.",
+        method: "check route",
+        targetRefs: ["North Hall"],
+        interactionKind: "route_inquiry",
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["North Hall"],
+      evidenceRefs: ["Player", "Market", "North Hall"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Route status needs a route_check receipt before narration may answer.",
+        evidenceRefs: ["Player", "North Hall"],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-route-inquiry-no-move",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual(["route_check"]);
+    expect(result.checklist.steps.map((step) => step.intended.kind)).not.toContain("movement");
+    expect(result.checklist.steps[0]).toMatchObject({
+      intended: {
+        kind: "route_check",
+        requiredCapabilityId: "route_check",
+        stateOrEvidence: "evidence",
+      },
+      targetRefs: ["North Hall"],
+      dependsOnStepIds: [],
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("deterministically produces time_advance checklist when no admitted movement target exists", async () => {
     const frame = actionPlanFrame({
       movementOptions: [],

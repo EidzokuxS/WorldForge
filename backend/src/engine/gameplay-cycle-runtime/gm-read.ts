@@ -981,6 +981,8 @@ export function buildGmReadSystemPrompt(): string {
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
+    "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, or where it leads, including wording like without moving / do not go yet.",
+    "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, or otherwise change current scene/location.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
