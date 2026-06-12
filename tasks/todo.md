@@ -3654,3 +3654,28 @@ Session: `gm-v1-consequenc-slice`.
     - Focused suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 239 tests passed.
   - Status impact:
     - P83 is diagnostic primitive proof for P69 equip/unequip composition. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P84 clean gameplay runtime Cross-Source Burn-in / Broad Look + Device Surface:
+  - Status:
+    - [x] Started from a clean tree after committed/pushed P83.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Created a fresh clean-start clone from zero-turn source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+    - [x] Ran a real `/api/chat/action` broad-look turn on the current Shibuya scene.
+    - [x] Ran a real `/api/chat/action` phone/device surface check on the equipped `Burner phone`.
+    - [x] Verified no old gameplay-cycle-v2/saga/narrator/oracle/simulation stores were used.
+  - Purpose:
+    - Exercise the clean runtime on a different zero-turn source with an equipped phone/device surface and a broad direct-scene scan, while keeping the proof narrow and diagnostic.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Live proof:
+    - Fresh clone: `p84-cross-source-3e755a54`.
+    - Artifacts: `output/clean-runtime-p84-cross-source-burnin-20260612082442/`.
+    - Turn 1 action: `I look around Shibuya District to see clearly visible people, objects, local targets, and exits, without moving or touching anything.`
+    - Turn 1 result: clean `direct_scene` broad snapshot, no Stage 4 receipts, no authority trace, no `turn_clock_ledger`, old stores 0, clock stayed `0/0/0`.
+    - Turn 1 player-facing narration stayed bounded to the current scene/place, Player inventory (`Burner phone`, `Delivery manifest`, `Worn courier bag`), visible location targets, and route options.
+    - Turn 2 action: `I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators, without moving.`
+    - Turn 2 result: one accepted `device_surface_observation` receipt with `no_requested_surface`, `mutationApplied=false`, no authority trace, no `turn_clock_ledger`, old stores 0, clock stayed `0/0/0`.
+    - Final DB proof: two clean turn records, one Stage 4 receipt, four chat history rows, zero authority traces, zero clock ledger rows, and zero old runtime rows.
+    - Final frame proof: Player remained in `Shibuya District`; inventory still contains equipped `Burner phone`, `Delivery manifest`, and `Worn courier bag`; the phone surface exists but exposes no modeled requested facets.
+    - Player-facing phone narration stayed bounded to the receipt: no modeled/exposed device surface for requested facets at the current frame/worldVersion. It did not invent no-message, no-call, no-signal, no-change, or instruction claims.
+  - Status impact:
+    - P84 is cross-source diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
