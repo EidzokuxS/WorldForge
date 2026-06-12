@@ -117,6 +117,29 @@ P111/P112 Stage4 dialogue item-custody grounding checkpoint:
   - DB proof after turn 2: `Brass Tube.owner_id=p69-fixture-guide`, holder `visible_actor/Guide`, `equip_state=carried`, `equipped_slot=null`.
 - Status: Stage4 dialogue item-custody grounding fallout fixed and live-proven. P111 is diagnostic-invalid from turn 22. P112 is a two-turn repair proof only. Final acceptance remains 0%.
 
+P113/P114 Stage6 route_check label preservation checkpoint:
+- Started fresh diagnostic lane `p113-barricade-dialogue-proof-171618` after P112.
+- P113 reached seven clean turns through direct scene snapshot, movement to `Resonance Tower`, movement to `Ground-Floor Barricade`, item_transfer of `Courier satchel` to `Watch-Captain Ilara Rost`, holder-grounded dialogue, movement back to `Resonance Tower`, and broad visible-surface snapshot.
+- P113 confirmed the prior P111 item-custody dialogue fix in the original rich-scene context: the repeated question `I ask Watch-Captain Ilara Rost, "Do you have the Courier satchel now?"` produced quote `I do. It's right here with me.` with no unsupported seizure/provenance/logging claims.
+- P113 turn 8 action `I check whether the route from Resonance Tower to Transmission Basement is open, without moving.` is diagnostic-invalid: the accepted `route_check` receipt and backend facts preserved `Transmission Basement`, but model Stage 6 narration corrupted the player-facing label to `Transmission Basin`.
+- Root cause:
+  - `route_status` had a deterministic fallback renderer, but `needsDeterministicAuthorityProjection` did not select it.
+  - Route-check turns with SceneFrame snapshot context could call the model, allowing label paraphrase/corruption and extra snapshot prose despite exact route_check receipt facts.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/narration.ts` now treats `route_status` as deterministic authority projection, preserving the exact accepted backend fact and avoiding model paraphrase.
+  - No raw-action regex, fallback semantics, or old v2 path was added; this selects the existing route_check receipt projection for an already receipt-owned claim kind.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` verifies `route_status` with SceneFrame snapshot context does not call the model, preserves `Transmission Basement`, rejects `Transmission Basin`, and avoids inventory/visible-path/no-change clutter.
+- Verification:
+  - GitNexus impact before editing `needsDeterministicAuthorityProjection`: LOW; direct caller `runCleanNarration`.
+  - `npm --prefix backend run typecheck` passed.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 255 tests.
+- Live repair proof:
+  - Fresh clone `p114-route-label-proof-172600` from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+  - Turn 1 artifact `output/clean-runtime-p114-route-label-proof-turn1-20260612172600/`: movement from `Lowwater Bazaar` to `Resonance Tower`, accepted `movement`, worldVersion/time/tick advanced by 1, old stores zero.
+  - Turn 2 artifact `output/clean-runtime-p114-route-label-proof-turn2-20260612172642/`: route_check to `Transmission Basement`, accepted `route_check`, narration `The settled route check confirms: Transmission Basement is reachable from the current scene.`, no mutation, no traces/ledger, clock stayed `worldVersion=1/worldTimeMinutes=1/currentTick=1`, old v2/saga/narrator/oracle/simulation stores zero.
+- Status: route_check label-preservation fallout fixed and live-proven. P113 is diagnostic-invalid from turn 8. P114 is a two-turn repair proof only. Final acceptance remains 0%.
+
 ## Current Session Focus 2026-06-06
 
 User reminder accepted: acceptance still counts only as several different zero-turn campaigns/clones with about 60 clean turns each and zero failed, replayed, restored, or invalid player-facing turns. P42-P47 below are diagnostic layer proofs only.

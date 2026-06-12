@@ -117,6 +117,30 @@ function routeView(): CleanNarratorView {
   });
 }
 
+function routeWithSceneFrameSnapshotView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I check whether the route from Resonance Tower to Transmission Basement is open, without moving.",
+    acceptedEvidence: [
+      ...sceneFrameSnapshotView().acceptedEvidence,
+      {
+        ref: "e5",
+        authority: "route_check_receipt",
+        claimKinds: ["route_status"],
+        text: "Transmission Basement is reachable from the current scene.",
+        backendFacts: [{
+          factRef: "e5.f1",
+          text: "Transmission Basement is reachable from the current scene.",
+          exact: true,
+        }],
+        limits: {
+          proves: ["route status only"],
+          doesNotProve: ["movement", "arrival", "current-scene change", "clock advance", "no-change"],
+        },
+      },
+    ],
+  });
+}
+
 function timeView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -778,6 +802,22 @@ describe("clean Stage 6 narration contracts", () => {
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
     expect(renderCleanNarrationFallback(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
+  });
+
+  it("uses deterministic authority projection for route_status with snapshot context", async () => {
+    const result = await runCleanNarration({
+      narratorView: routeWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("route_status should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("The settled route check confirms: Transmission Basement is reachable from the current scene.");
+    expect(result.text).toContain("Transmission Basement");
+    expect(result.text).not.toContain("Transmission Basin");
+    expect(result.text).not.toMatch(/\b(visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
   });
 
   it("falls back from P64 elapsed-time evidence without no-change claims", () => {
