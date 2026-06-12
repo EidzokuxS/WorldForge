@@ -4652,3 +4652,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P132 raises the same Lowwater clone from 10/60 to 20/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P133 clean gameplay runtime Acceptance-Candidate Lane / P131 Continuation 20 -> 30:
+  - Plan:
+    - [x] Continue existing zero-turn clone `p131-lowwater-acceptance-20260612203318` from its clean turn-20 state.
+    - [x] Preflight current DB state: player at `Ground-Floor Barricade`, visible `Watch-Captain Ilara Rost`, route `Resonance Tower`, `Courier satchel` equipped by player, `Sealed lacquer message tube` carried by `Relay-Tech Dorin`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 21-30 one action at a time from inspected post-turn state, covering route options/checks, movement, exact time advance, player inventory equip-state transfer, and route-list refresh.
+    - [x] Persist `turn-021/` through `turn-030/` artifacts plus root `db-verification-turn-021.json` through `db-verification-turn-030.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] Turn 21 route-options check from `Ground-Floor Barricade` passed: accepted `route_options`, surfaced `Resonance Tower`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 22 route-check to `Resonance Tower` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 23 movement back to `Resonance Tower` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Ground-Floor Barricade -> Resonance Tower`, clock `7/7/7 -> 8/8/8`, old stores zero.
+    - [x] Turn 24 exact 3-minute wait passed: accepted `time_advance`, trace `gameplay-cycle-runtime.clock.advance.v1`, ledger `wait`, clock `8/8/8 -> 9/11/11`, scene unchanged, old stores zero.
+    - [x] Turn 25 route-check to `Lowwater Bazaar` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 26 movement to `Lowwater Bazaar` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Resonance Tower -> Lowwater Bazaar`, clock `9/11/11 -> 10/12/12`, old stores zero.
+    - [x] Turn 27 unequip `Courier satchel` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, item stayed owned by `Mira Voss`, equip state `carried`, worldVersion `10 -> 11`, no time/tick/ledger advance, old stores zero.
+    - [x] Turn 28 re-equip `Courier satchel` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, equip state `equipped`, worldVersion `11 -> 12`, no time/tick/ledger advance, old stores zero.
+    - [x] Turn 29 route-list refresh from `Lowwater Bazaar` passed through `direct_scene`: no Stage4 receipt expected, scene-frame `movement_option` evidence and player-facing narrative included all eight route labels, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 30 movement to `The Copper Tap` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Lowwater Bazaar -> The Copper Tap`, clock `12/12/12 -> 13/13/13`, visible NPC DB surface contains `Old Route Hand Sessik` and `Tap-Keeper Brost`, old stores zero.
+  - Verification executed:
+    - [x] P131/P132/P133 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-030.json` all `pass=true`, `runtime=gameplay-cycle-runtime`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 30: 30 clean turn records, 29 Stage4 receipts plus one clean `direct_scene` turn, 13 authority traces, 10 clock ledger rows, world clock `13/13/13`, player at `The Copper Tap`, `Courier satchel` equipped by `Mira Voss`, `Sealed lacquer message tube` carried by `Relay-Tech Dorin`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P133 raises the same Lowwater clone from 20/60 to 30/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
