@@ -4118,3 +4118,45 @@ Session: `gm-v1-consequenc-slice`.
     - Result: one accepted `item_transfer` receipt with `operation=unequip_inventory_item` and `resultKind=unequipped`; authority trace `gameplay-cycle-runtime.item_transfer.v1`; `Courier satchel.equip_state=carried`, `equipped_slot=null`; worldVersion `0 -> 1`; `world_time_minutes/current_tick` stayed `0/0`; old v2/saga/narrator/oracle/simulation stores stayed zero.
   - Status impact:
     - P101 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P102/P104 clean gameplay runtime Fallout Repair / Equipped Item Re-equip Classification + Generic Slot Conflict:
+  - Status:
+    - [x] Started fresh post-P101 zero-turn lane `p102-acceptance-a-e059fc31`.
+    - [x] Turn 1 direct scene snapshot and turn 2 `unequip_inventory_item` stayed clean.
+    - [x] Found a real re-equip failure on P102 turn 3: `I sling the Courier satchel back onto my shoulder.` produced a failed `item_transfer` receipt because generic slot `equipped` was treated as occupied by the still-equipped message tube, then player-facing narration degraded into a broad scene snapshot.
+    - [x] During repair proof, found the layered GM Read side too: the same re-equip wording could classify as `player_local_condition/gripping_held_item`.
+    - [x] Fixed GM Read prompt ownership for putting on/wearing/strapping/slinging an inventory item into equipped state.
+    - [x] Fixed Stage 4 equip conflict semantics so only real exclusive slots conflict; generic `equipped` is a compatibility bucket and can contain multiple equipped items.
+    - [x] Added focused regressions and re-ran typecheck plus focused clean-runtime tests.
+    - [x] Ran fresh P104 live proof through `unequip -> equip`.
+  - Diagnostic lanes:
+    - Fresh clone: `p102-acceptance-a-e059fc31`.
+    - Turn 3 artifact: `output/clean-runtime-p102-acceptance-a-turn3-20260612153816/`.
+    - Turn 3 invalid result: failed `item_transfer` receipt with `failure.kind=equip_slot_conflict`; no mutation; satchel stayed carried; narration emitted a broad scene snapshot rather than the failed equip outcome.
+    - Fresh clone: `p103-equip-proof-57c28eaf`.
+    - Turn 2 artifact: `output/clean-runtime-p103-equip-turn2-20260612154350/`.
+    - Turn 2 invalid result: accepted `condition_set` with `conditionKey=gripping_held_item`; satchel stayed carried.
+    - Status impact: P102 and P103 are diagnostic-invalid and add 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now classifies putting on, wearing, strapping on, slinging onto shoulder/back, or fastening a carried inventory item onto the player as `item_transfer` with `operation=equip_inventory_item`.
+    - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now skips equip slot conflict checks for the generic compatibility slot `equipped`; conflict checks remain available for future non-generic exclusive slots.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` now accepts sling/shoulder wording as `equip_inventory_item`.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` now proves an item can be equipped while another player-owned item already uses generic `equipped`, and that unequipping the first item leaves the other equipped.
+  - Executed verification:
+    - GitNexus impact before editing `executeItemTransfer`: LOW; direct caller `runCleanStage4Execution`.
+    - GitNexus impact before editing `buildGmReadSystemPrompt`: LOW; direct caller `runCleanGmRead`.
+    - `npm --prefix backend run typecheck` passed.
+    - Narrow contracts test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 174 tests passed.
+    - Narrow Stage4 test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` -> 33 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 251 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p104-equip-proof-8769f5c0` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Artifacts:
+      - `output/clean-runtime-p104-equip-turn1-20260612154532/`
+      - `output/clean-runtime-p104-equip-turn2-20260612154558/`
+    - Turn 1: accepted `item_transfer` with `operation=unequip_inventory_item`, satchel became carried, worldVersion `0 -> 1`, no time/tick advance, old stores zero.
+    - Turn 2: accepted `item_transfer` with `operation=equip_inventory_item`, satchel became equipped while `Sealed lacquer message tube` remained equipped; worldVersion `1 -> 2`, no time/tick advance, old stores zero.
+    - DB proof: `Courier satchel` and `Sealed lacquer message tube` both ended with `equip_state=equipped`, `equipped_slot=equipped`; both authority traces use `gameplay-cycle-runtime.item_transfer.v1`.
+  - Status impact:
+    - P104 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

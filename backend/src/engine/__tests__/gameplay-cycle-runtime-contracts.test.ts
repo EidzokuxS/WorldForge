@@ -1369,6 +1369,60 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.status).toBe("rejected");
   });
 
+  it("classifies slinging a carried item onto the shoulder as equip item_transfer", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I sling the Brass Tube back onto my shoulder.",
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player is changing a carried inventory item's equip state.",
+      liveSceneQuestion: "Which bounded item equip-state transition must Stage 4 settle?",
+      focalRefs: ["Player", "Brass Tube"],
+      evidenceRefs: ["Player", "Brass Tube", "Market"],
+      actionInterpretation: {
+        summary: "The player equips Brass Tube onto their shoulder.",
+        playerIntent: "Equip Brass Tube.",
+        method: "sling onto shoulder",
+        targetRefs: ["Brass Tube", "Player"],
+        interactionKind: "item_transfer",
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "equip_inventory_item",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          targetKind: "player_equipment",
+          targetRef: "Player",
+          equipSlot: "equipped",
+          requestedItemText: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+        },
+      },
+      interpretationRationale: "Moving a carried item onto the body changes equip state; this belongs to item_transfer authority.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "item_transfer",
+      itemTransferNeed: {
+        operation: "equip_inventory_item",
+        itemRef: "Brass Tube",
+        targetRef: "Player",
+        equipSlot: "equipped",
+      },
+    });
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
   it("classifies removing an equipped item from its worn slot as unequip item_transfer even when the player will carry it", () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I unfasten the Brass Tube from my shoulder and carry it in one hand.",

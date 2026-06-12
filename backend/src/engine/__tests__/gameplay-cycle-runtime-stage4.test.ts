@@ -1469,6 +1469,14 @@ describe("clean Stage 4 executor DB contracts", () => {
       equipState: "carried",
       equippedSlot: null,
     });
+    insertItem({
+      id: "item-signal-seal",
+      name: "Signal Seal",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "equipped",
+      equippedSlot: "equipped",
+    });
     const buildFrame = (worldVersion: number, equipState: "carried" | "equipped"): AuthoritativeSceneFrame => ({
       ...itemTransferFrame(worldVersion),
       frameId: `frame-stage4-equip-${worldVersion}`,
@@ -1582,11 +1590,19 @@ describe("clean Stage 4 executor DB contracts", () => {
     const equippedProjection = getSqliteConnection()
       .prepare("SELECT character_record AS characterRecord, equipped_items AS equippedItems FROM players WHERE id = ?")
       .get("player-1") as { characterRecord: string; equippedItems: string };
-    expect(JSON.parse(equippedProjection.equippedItems)).toEqual(["Brass Tube"]);
-    expect(JSON.parse(equippedProjection.characterRecord).loadout).toMatchObject({
-      inventorySeed: ["Brass Tube"],
-      equippedItemRefs: ["Brass Tube"],
-    });
+    const equippedItems = JSON.parse(equippedProjection.equippedItems) as string[];
+    expect(equippedItems).toHaveLength(2);
+    expect(equippedItems).toEqual(expect.arrayContaining(["Brass Tube", "Signal Seal"]));
+    expect(JSON.parse(equippedProjection.characterRecord).loadout.inventorySeed)
+      .toEqual(expect.arrayContaining(["Brass Tube", "Signal Seal"]));
+    expect(JSON.parse(equippedProjection.characterRecord).loadout.equippedItemRefs)
+      .toEqual(expect.arrayContaining(["Brass Tube", "Signal Seal"]));
+    expect(getSqliteConnection()
+      .prepare("SELECT equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-signal-seal")).toEqual({
+        equipState: "equipped",
+        equippedSlot: "equipped",
+      });
 
     const unequipFrame = buildFrame(1, "equipped");
     const unequipResult = await runCleanStage4Execution({
@@ -1634,11 +1650,17 @@ describe("clean Stage 4 executor DB contracts", () => {
     const carriedProjection = getSqliteConnection()
       .prepare("SELECT character_record AS characterRecord, equipped_items AS equippedItems FROM players WHERE id = ?")
       .get("player-1") as { characterRecord: string; equippedItems: string };
-    expect(JSON.parse(carriedProjection.equippedItems)).toEqual([]);
-    expect(JSON.parse(carriedProjection.characterRecord).loadout).toMatchObject({
-      inventorySeed: ["Brass Tube"],
-      equippedItemRefs: [],
-    });
+    expect(JSON.parse(carriedProjection.equippedItems)).toEqual(["Signal Seal"]);
+    expect(JSON.parse(carriedProjection.characterRecord).loadout.inventorySeed)
+      .toEqual(expect.arrayContaining(["Brass Tube", "Signal Seal"]));
+    expect(JSON.parse(carriedProjection.characterRecord).loadout.equippedItemRefs)
+      .toEqual(["Signal Seal"]);
+    expect(getSqliteConnection()
+      .prepare("SELECT equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-signal-seal")).toEqual({
+        equipState: "equipped",
+        equippedSlot: "equipped",
+      });
     expect(getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID)).toEqual({ worldVersion: 2, worldTimeMinutes: 0, currentTick: 0 });

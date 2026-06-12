@@ -1237,6 +1237,10 @@ function itemTransferStateMatches(input: {
     && input.row.equipped_slot === input.nextEquippedSlot;
 }
 
+function isExclusiveEquipmentSlot(slot: string | null): boolean {
+  return slot != null && slot !== "equipped";
+}
+
 function effectRefsAreCitable(input: {
   frame: AuthoritativeSceneFrame;
   refs: readonly string[];
@@ -4385,7 +4389,7 @@ async function executeItemTransfer(input: {
         return receipt;
       }
 
-      if (effect.operation === "equip_inventory_item") {
+      if (effect.operation === "equip_inventory_item" && isExclusiveEquipmentSlot(target.nextEquippedSlot)) {
         const slotConflict = itemRows.some((row) =>
           row.id !== item.row.id
           && row.owner_id === player.id
