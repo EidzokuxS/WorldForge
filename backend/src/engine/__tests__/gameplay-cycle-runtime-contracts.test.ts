@@ -33,12 +33,14 @@ import {
   cleanStage4MinorPoiCreateEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
+  type CleanGameplayRuntimeEvent,
   isCleanGameplayRuntimeEnabled,
   processCleanGameplayTurnFromInput,
 } from "../gameplay-cycle-runtime/runtime.js";
 import {
   buildGmReadPrompt,
   buildGmReadSystemPrompt,
+  CleanGmReadGenerationError,
   gmReadModelGenerationSchema,
   runCleanGmRead,
   validateGmReadCandidate,
@@ -2077,6 +2079,46 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.repairAttempted).toBe(true);
   });
 
+  it("surfaces GM Read generation transport errors before fallback clarification", async () => {
+    const frame = minimalFrame();
+
+    await expect(runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("provider unavailable");
+      },
+    })).rejects.toThrow(CleanGmReadGenerationError);
+    await expect(runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("provider unavailable");
+      },
+    })).rejects.toThrow("Clean GM Read generation failed before validation");
+  });
+
+  it("surfaces GM Read repair generation transport errors before fallback clarification", async () => {
+    const frame = minimalFrame();
+    const calls: string[] = [];
+
+    await expect(runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async (request) => {
+        calls.push(request.repairOf ? "repair" : "initial");
+        if (request.repairOf) {
+          throw new Error("repair provider unavailable");
+        }
+        return {
+          ...validGmRead(frame),
+          payload: { toolId: "movement" },
+        };
+      },
+    })).rejects.toThrow("Clean GM Read repair generation failed");
+    expect(calls).toEqual(["initial", "repair"]);
+  });
+
   it("falls back to a no-mutation clarification read when generation and repair stay invalid", async () => {
     const frame = minimalFrame();
     const result = await runCleanGmRead({
@@ -2697,6 +2739,39 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
 
     expect(order).toEqual(["scene-frame", "gm-read", "settled-turn-packet"]);
     expect(order).not.toContain("judge-called");
+  });
+
+  it("stops before settled packet, narration, and commit when GM Read generation throws", async () => {
+    const frame = minimalFrame();
+    const events: CleanGameplayRuntimeEvent[] = [];
+    const commits: Parameters<typeof fakeCommitTurn>[0][] = [];
+
+    await expect((async () => {
+      for await (const event of processCleanGameplayTurnFromInput({
+        turn: validTurnInput(),
+        judgeProvider: provider,
+        buildFrame: async () => frame,
+        gmReadCandidateGenerator: async () => {
+          throw new Error("provider unavailable");
+        },
+        judgeUncertaintyCandidateGenerator: async () => validJudgeUncertainty(frame),
+        runNarration: fakeRunNarration,
+        commitTurn: async (input) => {
+          commits.push(input);
+          return fakeCommitTurn(input);
+        },
+      })) {
+        events.push(event);
+      }
+    })()).rejects.toThrow(CleanGmReadGenerationError);
+
+    expect(events.map((event) => event.type)).toEqual(["scene-settling", "scene-settling"]);
+    expect(events.map((event) =>
+      typeof event.data === "object" && event.data ? (event.data as { stage?: unknown }).stage : null
+    )).toEqual(["scene-frame", "gm-read"]);
+    expect(events.some((event) => event.type === "narrative")).toBe(false);
+    expect(events.some((event) => event.type === "done")).toBe(false);
+    expect(commits).toEqual([]);
   });
 });
 

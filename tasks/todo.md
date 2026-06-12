@@ -8,6 +8,31 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P115/P116 clean runtime GM Read transport-failure boundary:
+- Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean/synced and `npm --prefix backend run typecheck` passed before continuing.
+- P115 fresh diagnostic lane `p115-acceptance-a-173029` reached seven clean turns across broad look, route_check, movement, visible-actor dialogue, item_transfer, holder-grounded dialogue, and player-local condition.
+- P115 turn 8 action `I wait quietly in The Copper Tap for 3 minutes, staying where I am and touching nothing else.` is diagnostic-invalid: GM Read provider transport failed after retries, but the runtime emitted `narrative`, `finalizing_turn`, `done`, committed a clean turn record, and player-facing text degraded into a scene snapshot. Clock and old stores stayed clean, but the requested elapsed-time action was hidden behind a false success.
+- Root cause:
+  - `runCleanGmRead` converted generation exceptions into `fallback_clarification`.
+  - `processCleanGameplayTurnFromInput` then skipped Judge/Stage4, built a settled packet with only scene-frame snapshot evidence, ran Stage6 deterministic fallback, committed chat/record, and let `/api/chat/action` report success.
+- Fix:
+  - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now throws `CleanGmReadGenerationError` for initial GM Read generation and repair-generation transport exceptions.
+  - Validation failures that actually produce invalid candidates still use the existing no-mutation clarification repair/fallback path; provider exceptions cross the route rollback boundary before settled packet/narration/commit.
+  - This is a technical-failure boundary fix, not a wait-action semantic fallback, raw-action regex, or old v2 path.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` proves initial and repair GM Read generation exceptions reject with `CleanGmReadGenerationError`.
+  - Runtime contract test proves a GM Read generation exception emits only `scene-frame` and `gm-read` progress, then stops before `settled-turn-packet`, `narrative`, `done`, and `commitTurn`.
+- Verification:
+  - GitNexus impact/context before editing clean GM Read/runtime-related symbols reported LOW risk; direct affected symbol for fallback builder was `runCleanGmRead`.
+  - `npm --prefix backend run typecheck` passed.
+  - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 258 tests passed.
+- Live proof:
+  - Fresh clone `p116-gmread-failure-boundary-proof-174909` from source fixture `p69-item-transfer-045651`.
+  - Artifact: `output/clean-runtime-p116-gmread-failure-boundary-proof-20260612174909/`.
+  - Action `I hand the Brass Tube to Guide.` accepted exactly one `item_transfer` receipt; `Brass Tube.owner_id=p69-fixture-guide`; `worldVersion 0 -> 1`; `worldTimeMinutes/currentTick` stayed `0/0`; no `turn_clock_ledger`; one authority trace `gameplay-cycle-runtime.item_transfer.v1`; old v2/saga/narrator/oracle/simulation stores stayed zero.
+- Status impact:
+  - P115 is diagnostic-invalid from turn 8. P116 is a one-turn repair/proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P105/P106 clean local observation player-facing leak:
 - Baseline on `codex/rebuild-gm-turn-cycle`: `git status --short --branch` clean and `npm --prefix backend run typecheck` passed before continuing live burn-in.
 - P105 fresh zero-turn diagnostic lane `p105-acceptance-a-d69ea071` reached 12 mechanically clean turns across direct scene, equip/unequip item_transfer, movement, give-to-visible-actor item_transfer, dialogue, route_check, and movement.

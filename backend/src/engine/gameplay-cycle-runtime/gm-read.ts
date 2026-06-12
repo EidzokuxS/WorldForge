@@ -147,6 +147,13 @@ export interface GmReadFallback {
 
 export type GmReadRunResult = GmReadAccepted | GmReadFallback;
 
+export class CleanGmReadGenerationError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "CleanGmReadGenerationError";
+  }
+}
+
 export interface GmReadCandidateRequest {
   system: string;
   prompt: string;
@@ -1274,19 +1281,10 @@ export async function runCleanGmRead(input: {
     firstCandidate = await generateCandidate({ system, prompt });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      status: "fallback_clarification",
-      read: buildFallbackClarificationGmRead({
-        frame: input.frame,
-        reason: `GM Read generation failed before validation: ${message.slice(0, 300)}`,
-      }),
-      issues: [{
-        code: "schema_invalid",
-        path: "<generation>",
-        message,
-      }],
-      repairAttempted: false,
-    };
+    throw new CleanGmReadGenerationError(
+      `Clean GM Read generation failed before validation: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 
   const firstValidation = validateGmReadCandidate({
@@ -1338,21 +1336,9 @@ export async function runCleanGmRead(input: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      status: "fallback_clarification",
-      read: buildFallbackClarificationGmRead({
-        frame: input.frame,
-        reason: `GM Read repair generation failed: ${message.slice(0, 300)}`,
-      }),
-      issues: [
-        ...firstValidation.issues,
-        {
-          code: "schema_invalid",
-          path: "<repair>",
-          message,
-        },
-      ],
-      repairAttempted: true,
-    };
+    throw new CleanGmReadGenerationError(
+      `Clean GM Read repair generation failed: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 }
