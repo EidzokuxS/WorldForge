@@ -4846,3 +4846,31 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P139 raises the second clean-runtime acceptance-candidate lane from 20/60 to 30/60. Final acceptance remains incomplete until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P140 clean gameplay runtime Acceptance-Candidate Lane B / P137 Continuation 30 -> 40:
+  - Plan:
+    - [x] Continue existing second zero-turn clone `p137-lowwater-acceptance-b-20260612215626` from its clean turn-30 state.
+    - [x] Preflight current DB state: player at `Silt Warrens`, no exact-scene NPCs, visible routes `Lowwater Bazaar`, `Resonance Tower`, `Slip Twelve Berth`, `The Copper Tap`, and `Transmission Basement`, `Transmission Basement` has visible actors `Relay-Tech Dorin` and `Venn the Borrowed`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 31-40 one action at a time from inspected post-turn state, covering route options/checks from `Silt Warrens`, movement to `Transmission Basement`, current-scene actor refresh, visible dialogue, route options/checks to `Resonance Tower`, movement there, no-actor observation, and route surface refresh.
+    - [x] Persist `turn-031/` through `turn-040/` artifacts plus root `db-verification-turn-031.json` through `db-verification-turn-040.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p137-lowwater-acceptance-b-20260612215626/`.
+    - [x] Preflight artifact: `p140-preflight-current-state.json`; state matched turn-30 baseline with player at `Silt Warrens`, clock `9/6/6`, 30 clean turn records, 30 Stage4 receipts, routes including `Transmission Basement`, and old stores zero.
+    - [x] Turn 31 route-options check from `Silt Warrens` passed: accepted `route_options`, surfaced `Lowwater Bazaar`, `Resonance Tower`, `Slip Twelve Berth`, `The Copper Tap`, and `Transmission Basement`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 32 route-check to `Transmission Basement` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 33 movement to `Transmission Basement` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Silt Warrens -> Transmission Basement`, clock `9/6/6 -> 10/7/7`, visible NPC DB surface contains `Relay-Tech Dorin` and `Venn the Borrowed`, old stores zero.
+    - [x] Turn 34 visible-actor observation at `Transmission Basement` passed: accepted `local_observation`, surfaced `Relay-Tech Dorin` and `Venn the Borrowed`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 35 dialogue with `Relay-Tech Dorin` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 36 route-options check from `Transmission Basement` passed: accepted `route_options`, surfaced `Resonance Tower` and `Silt Warrens`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 37 route-check to `Resonance Tower` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 38 movement to `Resonance Tower` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Transmission Basement -> Resonance Tower`, clock `10/7/7 -> 11/8/8`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 39 visible-actor observation at `Resonance Tower` passed: accepted `local_observation` bounded no-match, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 40 route-options check from `Resonance Tower` passed: accepted `route_options`, surfaced `Ground-Floor Barricade`, `Lowwater Bazaar`, `Silt Warrens`, and `Transmission Basement`, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P137/P138/P139/P140 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-040.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 40: 40 clean turn records, 40 Stage4 receipts, 11 authority traces, 8 clock ledger rows, world clock `11/8/8`, player at `Resonance Tower`, current-scene NPC surface empty, `Sealed lacquer message tube` still carried by `Litha Corsen`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P140 raises the second clean-runtime acceptance-candidate lane from 30/60 to 40/60. Final acceptance remains incomplete until multiple different zero-turn clones reach about 60 clean manual turns each.
