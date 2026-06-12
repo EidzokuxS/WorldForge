@@ -3599,3 +3599,28 @@ Session: `gm-v1-consequenc-slice`.
     - Post-load proof: `post-load-inventory-authority-check.json` confirms `loadCampaign` leaves exactly one `Brass Tube`, owner `Guide`, and Player-owned `Brass Tube` count 0.
   - Status impact:
     - P81 is diagnostic fallout repair and primitive proof only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P82 clean gameplay runtime Regression Proof / Drop Reload Pickup:
+  - Status:
+    - [x] Started from a clean tree after committed/pushed P81.
+    - [x] Ran baseline `git status --short --branch` and `npm --prefix backend run typecheck`; typecheck passed.
+    - [x] Created a fresh clean-start clone from zero-turn source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - [x] Forced the proof fixture to the P81 root condition: Player owns only equipped `Courier satchel`, and legacy compatibility projection still lists that satchel before the live turn.
+    - [x] Ran real `/api/chat/action` drop, stopped backend, restarted backend, called `/api/campaigns/:id/load`, verified inventory authority did not recreate a Player-owned duplicate, then ran real `/api/chat/action` pickup.
+    - [x] Verified no old gameplay-cycle-v2/saga/narrator/oracle/simulation stores were used.
+  - Purpose:
+    - Prove the actual P81 fallout path rather than only a handoff control: after a clean `drop_in_current_scene` removes the last Player-owned item, `loadCampaign -> ensureCampaignInventoryAuthority` must respect the refreshed compatibility projection and leave the dropped item as a single current-scene item target for later pickup.
+    - Keep this as diagnostic regression evidence only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Live proof:
+    - Fresh clone: `p82-drop-reload-pickup-f40afbd7`.
+    - Artifacts: `output/clean-runtime-p82-drop-reload-pickup-20260612080344/`.
+    - Turn 1 action: `I set the Courier satchel down on the floor beside me, without opening it or moving.`
+    - Turn 1 result: exactly one accepted `item_transfer` receipt, operation `drop_in_current_scene`, result `dropped_in_scene`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, old stores 0.
+    - Post-drop DB proof: exactly one `Courier satchel` row, owner `null`, `location_id` set to current `Lowwater Bazaar`, `equip_state=carried`, `equipped_slot=null`, and Player owns no items.
+    - Reload proof: `post-load-inventory-authority-check.json` shows `playerLoadout.inventorySeed=[]`, `equippedItemRefs=[]`, `signatureItems=[]`, `players.equipped_items=[]`, exactly one `Courier satchel` row, owner `null`, location still current scene, and no Player-owned duplicate.
+    - Turn 2 action: `I pick up the Courier satchel from the floor beside me, without opening it or moving.`
+    - Turn 2 result: exactly one accepted `item_transfer` receipt, operation `pickup_from_current_scene`, result `picked_up`, one new authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion 1 -> 2`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, old stores 0.
+    - Final DB proof: exactly one `Courier satchel` row, owner Player, `location_id=null`, `equip_state=carried`, `equipped_slot=null`; final counts are two clean turn records, two Stage4 receipts, two authority traces, zero clock ledger rows, and zero old runtime rows.
+    - Player-facing narration stayed bounded to accepted item state: drop said only `dropped_in_scene`; pickup said only `picked_up`; neither added contents, item use, dialogue, reaction, consent, or no-change claims.
+  - Status impact:
+    - P82 is diagnostic regression proof for the P81 compatibility-projection repair. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
