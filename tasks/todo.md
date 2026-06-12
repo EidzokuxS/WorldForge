@@ -4706,3 +4706,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P134 raises the same Lowwater clone from 30/60 to 40/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P135 clean gameplay runtime Acceptance-Candidate Lane / P131 Continuation 40 -> 50:
+  - Plan:
+    - [x] Continue existing zero-turn clone `p131-lowwater-acceptance-20260612203318` from its clean turn-40 state.
+    - [x] Preflight current DB state: player at `Lowwater Bazaar`, no exact-scene NPCs, eight visible routes, `Anchor Chain Pylon` has visible actors `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 41-50 one action at a time from inspected post-turn state, covering broad route list/direct-scene evidence, route check, movement to `Anchor Chain Pylon`, current-scene actor refresh, visible dialogue, route options/checks, movement to `Upper Dam Ruins`, and no-actor observation there.
+    - [x] Persist `turn-041/` through `turn-050/` artifacts plus root `db-verification-turn-041.json` through `db-verification-turn-050.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] Turn 41 route-options check from `Lowwater Bazaar` passed: accepted `route_options`, surfaced all eight route labels including `Anchor Chain Pylon` and `Upper Dam Ruins`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 42 route-check to `Anchor Chain Pylon` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 43 movement to `Anchor Chain Pylon` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Lowwater Bazaar -> Anchor Chain Pylon`, clock `15/15/15 -> 16/16/16`, visible NPC DB surface contains `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`, old stores zero.
+    - [x] Turn 44 visible-actor observation at `Anchor Chain Pylon` passed: accepted `local_observation`, surfaced `Dam-Speaker Yara`, `Pike`, and `Undercurrent Courier Nisse`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 45 dialogue with `Dam-Speaker Yara` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 46 route-options check from `Anchor Chain Pylon` passed: accepted `route_options`, surfaced `Lowwater Bazaar` and `Upper Dam Ruins`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 47 route-check to `Upper Dam Ruins` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 48 movement to `Upper Dam Ruins` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Anchor Chain Pylon -> Upper Dam Ruins`, clock `16/16/16 -> 17/17/17`, current-scene NPC surface empty, old stores zero.
+    - [x] Turn 49 visible-actor observation at `Upper Dam Ruins` passed: accepted `local_observation` bounded no-match, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 50 route-options check from `Upper Dam Ruins` passed: accepted `route_options`, surfaced `Anchor Chain Pylon` and `Lowwater Bazaar`, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P131/P132/P133/P134/P135 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-050.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 50: 50 clean turn records, 49 Stage4 receipts plus one clean `direct_scene` turn, 17 authority traces, 14 clock ledger rows, world clock `17/17/17`, player at `Upper Dam Ruins`, current-scene NPC surface empty, visible routes `Anchor Chain Pylon` and `Lowwater Bazaar`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P135 raises the same Lowwater clone from 40/60 to 50/60 clean turns. It is still one acceptance lane, so final acceptance remains 0% until multiple different zero-turn clones reach about 60 clean manual turns each.
