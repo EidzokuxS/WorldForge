@@ -11,7 +11,8 @@ import {
 import {
   buildCleanNarrationSystemPrompt,
   buildCleanNarratorPromptInput,
-  renderCleanNarrationFallback,
+  CleanNarrationGenerationError,
+  renderCleanAuthorityProjection,
   runCleanNarration,
   validateCleanNarrationCandidate,
 } from "../gameplay-cycle-runtime/narration.js";
@@ -188,6 +189,40 @@ function routeOptionsView(): CleanNarratorView {
       limits: {
         proves: ["route options exposed by current SceneFrame"],
         doesNotProve: ["hidden routes", "absence of other routes", "movement", "discovery", "no-change"],
+      },
+    }],
+  });
+}
+
+function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
+  return movementView({
+    playerAction: "I hand it to them.",
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "clarification_request",
+      claimKinds: ["clarification_request"],
+      text: "Clarification needed: Which visible person should receive the item?",
+      backendFacts: [{
+        factRef: "e1.f1",
+        text: "Clarification request: Which visible person should receive the item?",
+        exact: true,
+      }],
+      limits: {
+        proves: ["player clarification is required before resolving this action", "clarification question text"],
+        doesNotProve: ["movement", "item state", "dialogue response", "world fact", "absence", "no-change"],
+      },
+    }, {
+      ref: "e2",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_target"],
+      text: "Visible current-frame targets include Guide, Courier.",
+      backendFacts: [
+        { factRef: "e2.f1", text: "Visible target: Guide (actor).", exact: true },
+        { factRef: "e2.f2", text: "Visible target: Courier (actor).", exact: true },
+      ],
+      limits: {
+        proves: ["visible current-scene target labels"],
+        doesNotProve: ["hidden targets", "discovery", "movement", "item state"],
       },
     }],
   });
@@ -801,7 +836,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
-    expect(renderCleanNarrationFallback(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
+    expect(renderCleanAuthorityProjection(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
   });
 
   it("uses deterministic authority projection for route_status with snapshot context", async () => {
@@ -820,8 +855,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
   });
 
-  it("falls back from P64 elapsed-time evidence without no-change claims", () => {
-    const text = renderCleanNarrationFallback(timeView());
+  it("projects P64 elapsed-time evidence without no-change claims", () => {
+    const text = renderCleanAuthorityProjection(timeView());
 
     expect(text).toBe("World clock advances by 5 minute(s).");
     expect(text).not.toMatch(/nothing changed|nothing happened|no visible changes|everything stayed/iu);
@@ -842,10 +877,43 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("renders route-options evidence without converting options into movement", () => {
-    const text = renderCleanNarrationFallback(routeOptionsView());
+    const text = renderCleanAuthorityProjection(routeOptionsView());
 
     expect(text).toBe("Route option: North Hall (connected, 1 minute(s)).");
     expect(text).not.toMatch(/\b(move|arrive|travel to|you go)\b/iu);
+  });
+
+  it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
+    const result = await runCleanNarration({
+      narratorView: clarificationWithSceneFrameSnapshotView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("clarification_request should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Please clarify: Which visible person should receive the item?");
+    expect(result.text).not.toMatch(/\bVisible target|Guide|Courier|Brass Tube|moves?|nothing changed|no change\b/u);
+
+    const unsupported = validateCleanNarrationCandidate({
+      view: clarificationWithSceneFrameSnapshotView(),
+      candidate: {
+        ...movementCandidate("Guide receives the item."),
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "Guide receives the item.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["clarification_request", "item_state"],
+          auditStepIds: [],
+        }],
+        finalText: "Guide receives the item.",
+      },
+    });
+    expect(unsupported.status).toBe("rejected");
+    if (unsupported.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("uses deterministic authority projection for direct scene targets and exits", async () => {
@@ -863,7 +931,7 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
-    const text = renderCleanNarrationFallback(dialogueView());
+    const text = renderCleanAuthorityProjection(dialogueView());
 
     expect(text).toBe('Guide says: "The north stairs flooded before dawn."');
     const promotedTruth = validateCleanNarrationCandidate({
@@ -901,21 +969,18 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("model");
     expect(result.text).toBe('Guide says: "The north stairs flooded before dawn."');
 
-    const fallback = await runCleanNarration({
+    await expect(runCleanNarration({
       narratorView: dialogueWithSceneFrameSnapshotView(),
       provider,
       generateCandidate: async () => {
-        throw new Error("force fallback");
+        throw new Error("model offline");
       },
-    });
-
-    expect(fallback.source).toBe("fallback_generation_error");
-    expect(fallback.text).toBe('Guide says: "The north stairs flooded before dawn."');
+    })).rejects.toThrow(CleanNarrationGenerationError);
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
-    const text = renderCleanNarrationFallback(supportActorView());
+    const text = renderCleanAuthorityProjection(supportActorView());
 
     expect(text).toBe("Visible support actor: Local Vendor. Support role: vendor. Anchor scene: Market. Materialization result: created.");
     expect(text).not.toMatch(/\bsays|offers|knows|service|future\b/iu);
@@ -942,7 +1007,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders Player local condition evidence without inventing HP, cover, combat, movement, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
-    const text = renderCleanNarrationFallback(playerLocalConditionView());
+    const text = renderCleanAuthorityProjection(playerLocalConditionView());
 
     expect(text).toBe("Player is kneeling. Condition key: kneeling. Current scene anchor: Market. Condition result: applied.");
     expect(text).not.toMatch(/\bhp|damage|cover|combat|moves?|nothing changed|no change\b/iu);
@@ -985,7 +1050,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For item_state");
-    const text = renderCleanNarrationFallback(itemStateView());
+    const text = renderCleanAuthorityProjection(itemStateView());
 
     expect(text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
     expect(text).not.toMatch(/\bsays|discovers?|uses?|activates?|consents?|reacts?|nothing changed|no change\b/iu);
@@ -1050,7 +1115,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders minor_poi_handle evidence without route, location, service, sign-text, or no-change claims", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
-    const text = renderCleanNarrationFallback(minorPoiHandleView());
+    const text = renderCleanAuthorityProjection(minorPoiHandleView());
 
     expect(text).toBe("Visible current-scene place handle created: Tea Stall. Place handle label: Tea Stall. Place handle kind: stall. Current scene anchor: Market. Handle result: created. This is a visible current-scene target handle only, not a movement destination.");
     expect(text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|nothing changed|no change)\b/iu);
@@ -1091,7 +1156,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
-    const text = renderCleanNarrationFallback(localObservationView());
+    const text = renderCleanAuthorityProjection(localObservationView());
 
     expect(text).toBe("Current visible actors and visible targets show no match for \"Violet Astrolabe\".");
     expect(text).not.toMatch(/\b(SceneFrame|worldVersion|surface entry)\b/u);
@@ -1172,7 +1237,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
-    const text = renderCleanNarrationFallback(deviceSurfaceObservationView());
+    const text = renderCleanAuthorityProjection(deviceSurfaceObservationView());
 
     expect(text).toBe("Current visible device surface for Burner phone exposes no requested message indicator. Device: Burner phone. Requested surface facets: message indicator. Current visible device surface exposes no requested message indicator for Burner phone.");
     expect(text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
@@ -1237,7 +1302,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.status).toBe("rejected");
-    expect(renderCleanNarrationFallback(view)).toContain("not confirmed");
+    expect(renderCleanAuthorityProjection(view)).toContain("not confirmed");
   });
 
   it("rejects private, backend, old-runtime, and oracle adapter leaks", () => {
@@ -1254,39 +1319,37 @@ describe("clean Stage 6 narration contracts", () => {
     ]));
   });
 
-  it("falls back on generation failure without no-change narration", async () => {
-    const result = await runCleanNarration({
+  it("rejects generation failure before player-facing narration", async () => {
+    await expect(runCleanNarration({
       narratorView: movementView(),
       provider,
       generateCandidate: async () => {
         throw new Error("model offline");
       },
-    });
+    })).rejects.toThrow(CleanNarrationGenerationError);
 
-    expect(result.source).toBe("fallback_generation_error");
-    expect(result.text).toBe("You move to North Hall.");
-    expect(result.text).not.toMatch(/nothing changed|nothing happened|no visible changes|you remain/iu);
-  });
-
-  it("uses Russian ordinary prose while preserving English accepted labels", async () => {
-    const result = await runCleanNarration({
-      narratorView: movementView({
-        playerAction: "Я иду в The Copper Tap.",
-        acceptedEvidence: [{
-          ...movementView().acceptedEvidence[0]!,
-          text: "Player location changed to The Copper Tap.",
-          backendFacts: [
-            { factRef: "e1.f1", text: "Player location changed to The Copper Tap.", exact: true },
-          ],
-        }],
-      }),
+    await expect(runCleanNarration({
+      narratorView: movementView(),
       provider,
       generateCandidate: async () => {
-        throw new Error("force fallback");
+        throw new Error("model offline");
       },
-    });
+    })).rejects.toThrow("Clean Narration generation failed before validation");
+  });
 
-    expect(result.text).toBe("Вы перемещаетесь в The Copper Tap.");
+  it("uses Russian ordinary prose in deterministic authority projection while preserving English accepted labels", () => {
+    const text = renderCleanAuthorityProjection(movementView({
+      playerAction: "Я иду в The Copper Tap.",
+      acceptedEvidence: [{
+        ...movementView().acceptedEvidence[0]!,
+        text: "Player location changed to The Copper Tap.",
+        backendFacts: [
+          { factRef: "e1.f1", text: "Player location changed to The Copper Tap.", exact: true },
+        ],
+      }],
+    }));
+
+    expect(text).toBe("Вы перемещаетесь в The Copper Tap.");
   });
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {

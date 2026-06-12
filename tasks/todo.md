@@ -5114,3 +5114,33 @@ Session: `gm-v1-consequenc-slice`.
   - Next scoped work:
     - [ ] Build a small edge-case live proof lane on fresh zero-turn clone(s) for clarification, Oracle, and rejected/revised or failed/skipped Stage4 behavior, with DB checks mirroring the 3x60 verifier.
     - [ ] After that lane, rerun typecheck, focused tests, GitNexus detect, commit/push, and `npx gitnexus analyze --embeddings`.
+
+- P150 clean gameplay runtime clarification edge proof:
+  - Plan:
+    - [x] Reproduce the first missing edge-case live path on fresh zero-turn clones using ambiguous transfer wording.
+    - [x] Inspect clean turn records to separate internal `clarification` settlement from player-facing narration behavior.
+    - [x] Fix the narrow Stage 5/6 projection gap so clarification turns carry explicit accepted evidence and deterministic player-facing text.
+    - [x] Re-run typecheck, focused runtime tests, and a fresh live `/api/chat/action` proof.
+  - Findings:
+    - [x] `clean-runtime-p150-clarification-edge-20260612` with `I go there.` settled internally as `clarification`, produced one clean turn record, no Stage4 receipt, no mutation/clock advance, and old stores zero, but narrated a scene snapshot instead of an explicit clarification prompt.
+    - [x] `clean-runtime-p150-clarification-edge-r2-20260612` with `I hand it to them.` showed the same contract gap: `settlementKind=clarification` and `judge_uncertainty` evidence existed internally, while player-facing text projected `scene_frame_snapshot` target/route context.
+  - Changes:
+    - [x] Added `clarification_request` as a clean settled claim/authority sourced from GM Read or Judge.
+    - [x] Settlement now emits first-class accepted evidence with the exact clarification question and limits that forbid movement, item state, dialogue, world facts, absence, and no-change.
+    - [x] After user correction that gameplay-process fallbacks are forbidden, removed the generic default clarification text: missing GM Read/Judge clarification text now fails the settlement invariant instead of inventing a question.
+    - [x] Narration now deterministically projects `clarification_request` before scene snapshot context and asks only the accepted question.
+    - [x] Focused tests cover settlement evidence shape, missing-question invariant failure, narrator view projection, deterministic Stage 6 behavior, and rejection of invented `item_state` from clarification evidence.
+    - [x] Removed existing clean-runtime gameplay fallback result branches: GM Read/Judge invalid generation no longer synthesize clarification, Action Checklist invalid compile no longer emits no-mutation fallback, Oracle adapter failure no longer becomes conservative miss, and Narration generation/validation failure no longer emits fallback text.
+  - Live proof:
+    - [x] Artifact root: `output/clean-runtime-p150-clarification-edge-r5-20260612/`; clone/campaign id `p150-clarification-edge-r5-20260612`.
+    - [x] Action: `I hand it to them.`; SSE `done.runtime=gameplay-cycle-runtime`; player-facing narrative `Please clarify: Who is 'them,' and which item is being handed over?`.
+    - [x] DB record: `settlementKind=clarification`; first accepted evidence authority `clarification_request`; accepted evidence text `Clarification needed: Who is 'them,' and which item is being handed over?`; `stage4ExecutionVersion=null`.
+    - [x] Counts: one clean turn record, zero clean Stage4 receipts, zero authority traces, zero turn clock ledger rows, zero old v2/saga/narrator/oracle/simulation stores.
+    - [x] Clock/state: `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, `mutationApplied=false`.
+  - Verification executed:
+    - [x] Clean runtime grep check found no `fallback_clarification`, `fallback_no_mutation`, `settled_with_fallback`, `conservative_miss`, or Stage 6 fallback result-source markers in `backend/src/engine/gameplay-cycle-runtime` and the focused clean-runtime tests.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`266 passed`).
+  - Remaining edge live proofs:
+    - [ ] Explicit Oracle branch through live `/api/chat/action`.
+    - [ ] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action`.

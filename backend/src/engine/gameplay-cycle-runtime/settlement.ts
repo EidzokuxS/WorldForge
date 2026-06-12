@@ -262,6 +262,21 @@ const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
   "future device state",
 ];
 
+const CLARIFICATION_REQUEST_DOES_NOT_PROVE = [
+  "movement",
+  "arrival",
+  "clock advance",
+  "item state",
+  "dialogue response",
+  "NPC consent or reaction",
+  "relationship change",
+  "world fact",
+  "discovery",
+  "condition or HP change",
+  "absence",
+  "no-change",
+];
+
 const SCENE_DOES_NOT_PROVE = [
   "absence",
   "no-change",
@@ -445,6 +460,54 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       },
     });
   }
+}
+
+function clarificationQuestion(input: {
+  gmRead: GmRead | null;
+  judgment: JudgeUncertainty | null;
+}): string | null {
+  const question = input.gmRead?.path === "clarification"
+    ? input.gmRead.liveSceneQuestion.trim()
+    : input.judgment?.nextStep === "ask_clarification"
+      ? (input.judgment.noRollReason?.explanation.trim() || input.judgment.checkRationale.trim())
+      : input.gmRead?.uncertainty.question?.trim();
+  if (!question) return null;
+  return question.endsWith("?") ? question : `${question}?`;
+}
+
+function clarificationEvidence(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead | null;
+  judgment: JudgeUncertainty | null;
+  evidence: CleanSettledEvidence[];
+}): void {
+  const evidenceId = nextEvidenceId(input.evidence);
+  const question = clarificationQuestion({
+    gmRead: input.gmRead,
+    judgment: input.judgment,
+  });
+  if (!question) {
+    throw new Error("Clarification settlement requires a GM Read or Judge clarification question.");
+  }
+  input.evidence.push({
+    evidenceId,
+    sourceKind: input.gmRead ? "gm_read" : "judge_uncertainty",
+    sourceRef: input.gmRead?.frameId ?? input.judgment?.judgmentId ?? input.frame.frameId,
+    authority: "clarification_request",
+    claimKinds: ["clarification_request"],
+    text: `Clarification needed: ${question}`,
+    visibleRefs: uniqueStrings([
+      input.frame.player.ref,
+      ...(input.gmRead?.evidenceRefs ?? input.judgment?.evidenceRefs ?? []),
+    ]).slice(0, 16),
+    backendFacts: [
+      fact(evidenceId, 1, `Clarification request: ${question}`),
+    ],
+    limits: {
+      proves: ["player clarification is required before resolving this action", "clarification question text"],
+      doesNotProve: CLARIFICATION_REQUEST_DOES_NOT_PROVE,
+    },
+  });
 }
 
 function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: CleanSettledEvidence[]): void {
@@ -931,11 +994,20 @@ function resultClock(input: {
 
 export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): CleanSettledTurnPacket {
   const acceptedEvidence: CleanSettledEvidence[] = [];
+  const kind = settlementKind(input);
   const hasTerminalMovement = Boolean(input.stage4Execution?.receipts.some((receipt) =>
     receipt.status === "accepted"
     && receipt.authority.evidenceAuthority === "terminal_mutation_receipt"
     && receipt.publicResult.locationChange !== null
   ));
+  if (kind === "clarification") {
+    clarificationEvidence({
+      frame: input.frame,
+      gmRead: input.gmRead,
+      judgment: input.judgment,
+      evidence: acceptedEvidence,
+    });
+  }
   if (!hasTerminalMovement) {
     sceneEvidence(input.frame, acceptedEvidence);
   }
@@ -967,7 +1039,7 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
     },
     base: input.frame.base,
     result: resultClock({ frame: input.frame, stage4Execution: input.stage4Execution }),
-    settlementKind: settlementKind(input),
+    settlementKind: kind,
     acceptedEvidence,
     stepAudit: stepAudit({
       checklist: input.actionChecklist,

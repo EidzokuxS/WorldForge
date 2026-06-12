@@ -612,20 +612,7 @@ export const oracleAdapterOkResultSchema = z.object({
   reasoning: shortText,
 }).strict();
 
-export const oracleAdapterFallbackResultSchema = z.object({
-  status: z.literal("fallback"),
-  fallbackPolicy: z.literal("conservative_miss"),
-  outcome: z.literal("miss"),
-  reason: z.object({
-    kind: z.enum(["adapter_generation_failed", "invalid_adapter_output"]),
-    message: z.string().trim().min(1).max(500),
-  }).strict(),
-}).strict();
-
-export const oracleAdapterSettlementResultSchema = z.discriminatedUnion("status", [
-  oracleAdapterOkResultSchema,
-  oracleAdapterFallbackResultSchema,
-]);
+export const oracleAdapterSettlementResultSchema = oracleAdapterOkResultSchema;
 
 export const oracleSettlementAuthorityForbiddenClaimKindSchema = z.enum([
   "movement",
@@ -680,11 +667,7 @@ export const oracleSettlementSchema = z.object({
     claimScope: z.literal("visible_uncertainty_outcome_only"),
     forbiddenClaimKinds: z.array(oracleSettlementAuthorityForbiddenClaimKindSchema).min(1).max(16),
   }).strict(),
-  failure: z.object({
-    kind: z.enum(["adapter_generation_failed", "invalid_adapter_output"]),
-    fallbackPolicy: z.literal("conservative_miss"),
-    hiddenMutationApplied: z.literal(false),
-  }).strict().nullable(),
+  failure: z.null(),
 }).strict();
 
 export const gmActionChecklistStepIdSchema = z.enum([
@@ -1983,9 +1966,11 @@ const cleanSettledClaimKindSchema = z.enum([
   "player_location_change",
   "elapsed_time",
   "oracle_outcome",
+  "clarification_request",
 ]);
 
 const cleanSettledEvidenceAuthoritySchema = z.enum([
+  "clarification_request",
   "scene_frame_snapshot",
   "scene_observation_receipt",
   "local_observation_receipt",
@@ -2015,7 +2000,7 @@ const cleanSettledBackendFactSchema = z.object({
 
 export const cleanSettledEvidenceSchema = z.object({
   evidenceId: shortText,
-  sourceKind: z.enum(["scene_frame", "stage4_receipt", "oracle_settlement"]),
+  sourceKind: z.enum(["scene_frame", "gm_read", "judge_uncertainty", "stage4_receipt", "oracle_settlement"]),
   sourceRef: shortText,
   authority: cleanSettledEvidenceAuthoritySchema,
   claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
@@ -2236,9 +2221,6 @@ export const cleanNarrationResultSchema = z.object({
   source: z.enum([
     "model",
     "deterministic_authority_projection",
-    "fallback_generation_error",
-    "fallback_validation_error",
-    "fallback_empty_evidence",
   ]),
 }).strict();
 

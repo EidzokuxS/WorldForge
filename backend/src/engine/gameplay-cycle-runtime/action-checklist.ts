@@ -92,17 +92,17 @@ export interface GmActionChecklistAccepted {
   repairAttempted: boolean;
 }
 
-export interface GmActionChecklistFallback {
-  status: "fallback_no_mutation";
-  checklist: null;
-  issues: GmActionChecklistValidationIssue[];
-  repairAttempted: boolean;
-  fallbackReason: string;
-}
+export type GmActionChecklistRunResult = GmActionChecklistAccepted;
 
-export type GmActionChecklistRunResult =
-  | GmActionChecklistAccepted
-  | GmActionChecklistFallback;
+export class CleanGmActionChecklistValidationError extends Error {
+  readonly issues: GmActionChecklistValidationIssue[];
+
+  constructor(message: string, issues: GmActionChecklistValidationIssue[]) {
+    super(message);
+    this.name = "CleanGmActionChecklistValidationError";
+    this.issues = issues;
+  }
+}
 
 function normalizedKey(key: string): string {
   return key.replace(/[\s_-]/g, "").toLowerCase();
@@ -1379,13 +1379,10 @@ export async function runCleanGmActionChecklist(input: {
 }): Promise<GmActionChecklistRunResult> {
   const branchIssues = eligibleBranchIssues(input);
   if (branchIssues.length > 0) {
-    return {
-      status: "fallback_no_mutation",
-      checklist: null,
-      issues: branchIssues,
-      repairAttempted: false,
-      fallbackReason: "GM Action Checklist was requested outside the accepted action-plan branch.",
-    };
+    throw new CleanGmActionChecklistValidationError(
+      "Clean GM Action Checklist requested outside the accepted action-plan branch.",
+      branchIssues,
+    );
   }
 
   const candidate = buildDeterministicGmActionChecklist(input);
@@ -1407,11 +1404,8 @@ export async function runCleanGmActionChecklist(input: {
     };
   }
 
-  return {
-    status: "fallback_no_mutation",
-    checklist: null,
-    issues: validation.issues,
-    repairAttempted: false,
-    fallbackReason: "Deterministic GM Action Checklist could not be compiled from accepted clean-runtime evidence.",
-  };
+  throw new CleanGmActionChecklistValidationError(
+    "Clean GM Action Checklist deterministic compile failed validation.",
+    validation.issues,
+  );
 }

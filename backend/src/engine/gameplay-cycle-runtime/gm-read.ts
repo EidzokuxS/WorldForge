@@ -138,19 +138,22 @@ export interface GmReadAccepted {
   repairAttempted: boolean;
 }
 
-export interface GmReadFallback {
-  status: "fallback_clarification";
-  read: GmRead;
-  issues: GmReadValidationIssue[];
-  repairAttempted: boolean;
-}
-
-export type GmReadRunResult = GmReadAccepted | GmReadFallback;
+export type GmReadRunResult = GmReadAccepted;
 
 export class CleanGmReadGenerationError extends Error {
   constructor(message: string, cause: unknown) {
     super(message, { cause });
     this.name = "CleanGmReadGenerationError";
+  }
+}
+
+export class CleanGmReadValidationError extends Error {
+  readonly issues: GmReadValidationIssue[];
+
+  constructor(message: string, issues: GmReadValidationIssue[]) {
+    super(message);
+    this.name = "CleanGmReadValidationError";
+    this.issues = issues;
   }
 }
 
@@ -1193,38 +1196,6 @@ export function validateGmReadCandidate(input: {
   return { status: "accepted", read: parsedRead, issues: [] };
 }
 
-export function buildFallbackClarificationGmRead(input: {
-  frame: AuthoritativeSceneFrame;
-  reason: string;
-}): GmRead {
-  const sceneRef = input.frame.scene.currentScene.ref;
-  return assertGmRead({
-    version: "gm-read.v1",
-    frameId: input.frame.frameId,
-    turnId: input.frame.turnId,
-    path: "clarification",
-    situationSummary: "The current player action needs clarification before the GM can interpret it safely.",
-    liveSceneQuestion: "What exactly is the player trying to do in the current scene?",
-    focalRefs: ["Player"],
-    evidenceRefs: uniqueStrings(["Player", sceneRef]),
-    actionInterpretation: {
-      summary: "The action is not safe to interpret as a concrete world change yet.",
-      playerIntent: input.frame.playerAction,
-      method: null,
-      targetRefs: [],
-      interactionKind: "unsupported_or_unclear",
-      supportActorNeed: null,
-      localConditionNeed: null,
-    },
-    uncertainty: {
-      present: false,
-      question: null,
-      basis: null,
-    },
-    interpretationRationale: input.reason,
-  });
-}
-
 function promptFrame(frame: AuthoritativeSceneFrame): unknown {
   return {
     version: frame.version,
@@ -1489,16 +1460,12 @@ export async function runCleanGmRead(input: {
         repairAttempted: true,
       };
     }
-    return {
-      status: "fallback_clarification",
-      read: buildFallbackClarificationGmRead({
-        frame: input.frame,
-        reason: "GM Read repair did not satisfy the clean interpretation contract.",
-      }),
-      issues: [...firstValidation.issues, ...repairValidation.issues],
-      repairAttempted: true,
-    };
+    throw new CleanGmReadValidationError(
+      "Clean GM Read validation failed after repair.",
+      [...firstValidation.issues, ...repairValidation.issues],
+    );
   } catch (error) {
+    if (error instanceof CleanGmReadValidationError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new CleanGmReadGenerationError(
       `Clean GM Read repair generation failed: ${message.slice(0, 300)}`,

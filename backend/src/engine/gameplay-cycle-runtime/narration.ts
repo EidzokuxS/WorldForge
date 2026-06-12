@@ -41,6 +41,23 @@ export type CleanNarrationRunResult = CleanNarrationResult & {
   validationIssues: CleanNarrationValidationIssue[];
 };
 
+export class CleanNarrationGenerationError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "CleanNarrationGenerationError";
+  }
+}
+
+export class CleanNarrationValidationError extends Error {
+  readonly issues: CleanNarrationValidationIssue[];
+
+  constructor(message: string, issues: CleanNarrationValidationIssue[]) {
+    super(message);
+    this.name = "CleanNarrationValidationError";
+    this.issues = issues;
+  }
+}
+
 const UUID_LIKE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const BACKEND_REF = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player):[^\s",.]+/i;
 const BACKEND_DASH_ID = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player|stage4-receipt)-[a-z0-9][a-z0-9-]*\b/i;
@@ -151,6 +168,7 @@ export function buildCleanNarrationSystemPrompt(): string {
     "For minor_poi_handle, narrate only the accepted visible current-scene place handle label/kind as a target handle; never add actors, services, inventory, business facts, readable text, route truth, movement destination, location reveal, hidden discovery, world facts, dialogue, absence, or no-change claims.",
     "For local_observation, narrate only the accepted current visible observation result. For bounded_visibility_negative, say only that current visible entries showed no matching visible result; never mention SceneFrame/worldVersion and never claim broad absence, hidden absence, discovery failure, no-change, route truth, device status, item effects, or world facts.",
     "For device_surface_observation, narrate only the accepted modeled public device surface facet(s), or the bounded current visible device-surface no-result. Never claim hidden/private message contents, true no-message/no-call/no-signal, instructions, message/call generation, network truth, device use, hacking, route/location truth, world facts, dialogue, or no-change.",
+    "For clarification_request, ask only the accepted clarification question; never add movement, item state, dialogue response, world facts, absence, or no-change claims.",
     "Use promptInput.language for response language. Preserve accepted labels exactly as written.",
   ].join("\n");
 }
@@ -299,7 +317,7 @@ export function validateCleanNarrationCandidate(input: {
   return { status: "accepted", candidate, issues: [] };
 }
 
-function fallbackLanguage(view: CleanNarratorView): "ru" | "en" {
+function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
   return /[\u0400-\u04ff]/u.test(view.playerAction) ? "ru" : "en";
 }
 
@@ -311,6 +329,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   );
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("item_state")
+    || evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
     || evidence.claimKinds.includes("player_local_condition")
@@ -331,8 +350,21 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   );
 }
 
-export function renderCleanNarrationFallback(view: CleanNarratorView): string {
-  const language = fallbackLanguage(view);
+export function renderCleanAuthorityProjection(view: CleanNarratorView): string {
+  const language = projectionLanguage(view);
+  const clarification = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("clarification_request")
+  );
+  if (clarification) {
+    const question = (clarification.backendFacts[0]?.text ?? clarification.text)
+      .replace(/^Clarification request:\s*/u, "")
+      .replace(/^Clarification needed:\s*/u, "")
+      .trim();
+    return language === "ru"
+      ? `Уточните: ${question}`
+      : `Please clarify: ${question}`;
+  }
+
   const movement = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("player_location_change")
   );
@@ -522,7 +554,7 @@ export async function runCleanNarration(input: {
         version: "gameplay-runtime.clean-narration-result.v1",
         packetId: input.narratorView.packetId,
         turnId: input.narratorView.turnId,
-        text: renderCleanNarrationFallback(input.narratorView),
+        text: renderCleanAuthorityProjection(input.narratorView),
         source: "deterministic_authority_projection",
       }),
       validationIssues: [],
@@ -539,22 +571,11 @@ export async function runCleanNarration(input: {
   try {
     candidate = await generateCandidate({ system, prompt, promptInput });
   } catch (error) {
-    return {
-      ...assertCleanNarrationResult({
-        version: "gameplay-runtime.clean-narration-result.v1",
-        packetId: input.narratorView.packetId,
-        turnId: input.narratorView.turnId,
-        text: renderCleanNarrationFallback(input.narratorView),
-        source: input.narratorView.acceptedEvidence.length > 0
-          ? "fallback_generation_error"
-          : "fallback_empty_evidence",
-      }),
-      validationIssues: [{
-        code: "schema_invalid",
-        path: "<generation>",
-        message: error instanceof Error ? error.message : String(error),
-      }],
-    };
+    const message = error instanceof Error ? error.message : String(error);
+    throw new CleanNarrationGenerationError(
+      `Clean Narration generation failed before validation: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 
   const validation = validateCleanNarrationCandidate({
@@ -574,16 +595,8 @@ export async function runCleanNarration(input: {
     };
   }
 
-  return {
-    ...assertCleanNarrationResult({
-      version: "gameplay-runtime.clean-narration-result.v1",
-      packetId: input.narratorView.packetId,
-      turnId: input.narratorView.turnId,
-      text: renderCleanNarrationFallback(input.narratorView),
-      source: input.narratorView.acceptedEvidence.length > 0
-        ? "fallback_validation_error"
-        : "fallback_empty_evidence",
-    }),
-    validationIssues: validation.issues,
-  };
+  throw new CleanNarrationValidationError(
+    "Clean Narration validation failed.",
+    validation.issues,
+  );
 }

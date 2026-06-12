@@ -112,14 +112,24 @@ export interface JudgeUncertaintyAccepted {
   repairAttempted: boolean;
 }
 
-export interface JudgeUncertaintyFallback {
-  status: "fallback_clarification";
-  judgment: JudgeUncertainty;
-  issues: JudgeUncertaintyValidationIssue[];
-  repairAttempted: boolean;
+export type JudgeUncertaintyRunResult = JudgeUncertaintyAccepted;
+
+export class CleanJudgeUncertaintyGenerationError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "CleanJudgeUncertaintyGenerationError";
+  }
 }
 
-export type JudgeUncertaintyRunResult = JudgeUncertaintyAccepted | JudgeUncertaintyFallback;
+export class CleanJudgeUncertaintyValidationError extends Error {
+  readonly issues: JudgeUncertaintyValidationIssue[];
+
+  constructor(message: string, issues: JudgeUncertaintyValidationIssue[]) {
+    super(message);
+    this.name = "CleanJudgeUncertaintyValidationError";
+    this.issues = issues;
+  }
+}
 
 export interface JudgeUncertaintyCandidateRequest {
   system: string;
@@ -603,41 +613,6 @@ export function validateJudgeUncertaintyCandidate(input: {
   return { status: "accepted", judgment: parsedJudgment, issues: [] };
 }
 
-export function buildFallbackJudgeUncertainty(input: {
-  frame: AuthoritativeSceneFrame;
-  gmRead: GmRead;
-  reason: string;
-}): JudgeUncertainty {
-  const sceneRef = input.frame.scene.currentScene.ref;
-  return assertJudgeUncertainty({
-    version: "judge-uncertainty.v1",
-    judgmentId: `judge-${input.frame.turnId}`,
-    campaignId: input.frame.campaignId,
-    turnId: input.frame.turnId,
-    frameId: input.frame.frameId,
-    source: {
-      sceneFrameVersion: "scene-frame.v1",
-      gmReadVersion: "gm-read.v1",
-      gmReadPath: input.gmRead.path,
-    },
-    physicalPossibility: "underspecified",
-    checkNeed: "clarification_needed",
-    nextStep: "ask_clarification",
-    actorRefs: ["Player"],
-    targetRefs: [],
-    evidenceRefs: uniqueStrings(["Player", sceneRef]),
-    possibilityRationale: "The clean Judge/Uncertainty result could not be validated.",
-    checkRationale: "No roll or mutation is admitted without a valid Judge/Uncertainty packet.",
-    difficulty: null,
-    oracleAdmission: null,
-    noRollReason: {
-      code: "insufficient_specificity",
-      explanation: input.reason,
-      evidenceRefs: uniqueStrings(["Player", sceneRef]),
-    },
-  });
-}
-
 function promptFrame(frame: AuthoritativeSceneFrame): unknown {
   return {
     version: frame.version,
@@ -783,20 +758,10 @@ export async function runCleanJudgeUncertainty(input: {
     firstCandidate = await generateCandidate({ system, prompt });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      status: "fallback_clarification",
-      judgment: buildFallbackJudgeUncertainty({
-        frame: input.frame,
-        gmRead: input.gmRead,
-        reason: `Judge/Uncertainty generation failed before validation: ${message.slice(0, 300)}`,
-      }),
-      issues: [{
-        code: "schema_invalid",
-        path: "<generation>",
-        message,
-      }],
-      repairAttempted: false,
-    };
+    throw new CleanJudgeUncertaintyGenerationError(
+      `Clean Judge/Uncertainty generation failed before validation: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 
   const firstCandidateForValidation = normalizeNullableBranchFields(firstCandidate);
@@ -842,34 +807,16 @@ export async function runCleanJudgeUncertainty(input: {
         repairAttempted: true,
       };
     }
-    return {
-      status: "fallback_clarification",
-      judgment: buildFallbackJudgeUncertainty({
-        frame: input.frame,
-        gmRead: input.gmRead,
-        reason: "Judge/Uncertainty repair did not satisfy the clean admission contract.",
-      }),
-      issues: [...firstValidation.issues, ...repairValidation.issues],
-      repairAttempted: true,
-    };
+    throw new CleanJudgeUncertaintyValidationError(
+      "Clean Judge/Uncertainty validation failed after repair.",
+      [...firstValidation.issues, ...repairValidation.issues],
+    );
   } catch (error) {
+    if (error instanceof CleanJudgeUncertaintyValidationError) throw error;
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      status: "fallback_clarification",
-      judgment: buildFallbackJudgeUncertainty({
-        frame: input.frame,
-        gmRead: input.gmRead,
-        reason: `Judge/Uncertainty repair generation failed: ${message.slice(0, 300)}`,
-      }),
-      issues: [
-        ...firstValidation.issues,
-        {
-          code: "schema_invalid",
-          path: "<repair>",
-          message,
-        },
-      ],
-      repairAttempted: true,
-    };
+    throw new CleanJudgeUncertaintyGenerationError(
+      `Clean Judge/Uncertainty repair generation failed: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 }

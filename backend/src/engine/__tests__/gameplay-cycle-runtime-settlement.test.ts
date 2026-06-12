@@ -11,6 +11,7 @@ import {
   type GameplayRuntimeTurnInput,
   type GmActionChecklist,
   type GmRead,
+  type JudgeUncertainty,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   buildCleanNarratorView,
@@ -176,6 +177,55 @@ function directGmRead(inputFrame = frame()): GmRead {
       basis: null,
     },
     interpretationRationale: "The action only asks for current visible context.",
+  };
+}
+
+function clarificationGmRead(inputFrame = frame()): GmRead {
+  return {
+    ...directGmRead(inputFrame),
+    path: "clarification",
+    situationSummary: "The player action needs a concrete target before it can settle.",
+    liveSceneQuestion: "Which visible person should receive the item?",
+    focalRefs: ["Player"],
+    evidenceRefs: ["Player", "Guide", "Courier"],
+    actionInterpretation: {
+      summary: "The player wants to hand an item to an underspecified visible person.",
+      playerIntent: "Hand the item to someone.",
+      method: "hand",
+      targetRefs: ["Guide", "Courier"],
+      interactionKind: "unsupported_or_unclear",
+    },
+    interpretationRationale: "The pronoun does not select one current visible target.",
+  };
+}
+
+function clarificationJudgment(inputFrame = frame(), read = clarificationGmRead(inputFrame)): JudgeUncertainty {
+  return {
+    version: "judge-uncertainty.v1",
+    judgmentId: "judge-1",
+    campaignId: inputFrame.campaignId,
+    turnId: inputFrame.turnId,
+    frameId: inputFrame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      gmReadPath: read.path,
+    },
+    physicalPossibility: "underspecified",
+    checkNeed: "clarification_needed",
+    nextStep: "ask_clarification",
+    actorRefs: ["Player"],
+    targetRefs: ["Guide", "Courier"],
+    evidenceRefs: ["Player", "Guide", "Courier"],
+    possibilityRationale: "The action can be possible after target clarification.",
+    checkRationale: "The current target is underspecified.",
+    difficulty: null,
+    oracleAdmission: null,
+    noRollReason: {
+      code: "insufficient_specificity",
+      explanation: "Which visible person should receive the item?",
+      evidenceRefs: ["Player", "Guide", "Courier"],
+    },
   };
 }
 
@@ -608,6 +658,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
 function buildPacket(input: {
   frame?: AuthoritativeSceneFrame;
   gmRead?: GmRead | null;
+  judgment?: JudgeUncertainty | null;
   checklist?: GmActionChecklist | null;
   execution?: CleanStage4ExecutionResult | null;
 } = {}) {
@@ -618,7 +669,7 @@ function buildPacket(input: {
     publicPacketId: buildCleanPublicTurnIds(inputTurn).publicPacketId,
     frame: inputFrame,
     gmRead: input.gmRead ?? null,
-    judgment: null,
+    judgment: input.judgment ?? null,
     oracleSettlement: null,
     actionChecklist: input.checklist ?? null,
     stage4Execution: input.execution ?? null,
@@ -687,6 +738,77 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(routeEvidence?.backendFacts.map((entry) => entry.text)).toContain("Route option: North Hall (connected, 1 minute(s)).");
     expect(routeEvidence?.limits.doesNotProve).toContain("arrival");
     expect(JSON.stringify(view)).not.toContain("SceneFrame");
+  });
+
+  it("settles clarification as an explicit player-facing request before scene snapshot context", () => {
+    const inputFrame = frame({
+      playerAction: "I hand it to them.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }, {
+        ref: "Courier",
+        label: "Courier",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [
+        { ref: "Guide", label: "Guide", kind: "actor" },
+        { ref: "Courier", label: "Courier", kind: "actor" },
+      ],
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Guide", "Courier", "Brass Tube"],
+    });
+    const read = clarificationGmRead(inputFrame);
+    const packet = buildPacket({
+      frame: inputFrame,
+      gmRead: read,
+      judgment: clarificationJudgment(inputFrame, read),
+    });
+    const view = buildCleanNarratorView(packet);
+    const clarification = packet.acceptedEvidence.find((entry) =>
+      entry.claimKinds.includes("clarification_request")
+    );
+
+    expect(packet.settlementKind).toBe("clarification");
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    expect(packet.acceptedEvidence[0]?.authority).toBe("clarification_request");
+    expect(clarification).toMatchObject({
+      authority: "clarification_request",
+      sourceKind: "gm_read",
+      claimKinds: ["clarification_request"],
+      text: "Clarification needed: Which visible person should receive the item?",
+    });
+    expect(clarification?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Clarification request: Which visible person should receive the item?",
+    ]);
+    expect(clarification?.limits.proves).toContain("clarification question text");
+    expect(clarification?.limits.doesNotProve).toContain("item state");
+    expect(packet.acceptedEvidence.some((entry) => entry.authority === "scene_frame_snapshot")).toBe(true);
+    expect(view.acceptedEvidence[0]?.authority).toBe("clarification_request");
+  });
+
+  it("fails clarification settlement when no accepted clarification question exists", () => {
+    const inputFrame = frame({ playerAction: "I do that." });
+    const read = {
+      ...directGmRead(inputFrame),
+      path: "direct" as const,
+      liveSceneQuestion: "What does the player observe from here?",
+    };
+    const judge = {
+      ...clarificationJudgment(inputFrame, read),
+      noRollReason: null,
+      checkRationale: "",
+    };
+
+    expect(() => buildPacket({
+      frame: inputFrame,
+      gmRead: read,
+      judgment: judge,
+    })).toThrow("Clarification settlement requires a GM Read or Judge clarification question.");
   });
 
   it("settles route_check into route status only", () => {

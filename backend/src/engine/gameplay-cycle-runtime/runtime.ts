@@ -241,7 +241,6 @@ function cleanEvidenceRefs(input: {
   }
   if (
     input.oracleSettlement?.status === "settled"
-    || input.oracleSettlement?.status === "settled_with_fallback"
   ) {
     refs.push({
       kind: "oracle_settlement",
@@ -334,7 +333,7 @@ export async function* processCleanGameplayTurnFromInput(
         settlementId: `oracle-settlement-${randomUUID()}`,
         adapter: options.oracleAdapter,
       });
-      if (oracleSettlement.status === "settled" || oracleSettlement.status === "settled_with_fallback") {
+      if (oracleSettlement.status === "settled") {
         yield oracleSettlement.publicEvent;
         yield {
           type: "scene-settling",
@@ -409,7 +408,7 @@ export async function* processCleanGameplayTurnFromInput(
     frame,
     gmRead: gmRead.read,
     judgment: judgeUncertainty?.judgment ?? null,
-    oracleSettlement: oracleSettlement?.status === "settled" || oracleSettlement?.status === "settled_with_fallback"
+    oracleSettlement: oracleSettlement?.status === "settled"
       ? oracleSettlement.settlement
       : null,
     actionChecklist: actionChecklist?.status === "accepted" ? actionChecklist.checklist : null,

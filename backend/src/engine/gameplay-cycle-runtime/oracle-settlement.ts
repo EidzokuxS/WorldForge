@@ -64,17 +64,6 @@ export interface OracleSettlementSettled {
   };
 }
 
-export interface OracleSettlementSettledWithFallback {
-  status: "settled_with_fallback";
-  settlement: OracleSettlement;
-  publicEvent: {
-    type: "oracle_result";
-    data: {
-      outcome: "miss";
-    };
-  };
-}
-
 export interface OracleSettlementNotApplicable {
   status: "not_applicable";
   issues: OracleSettlementValidationIssue[];
@@ -82,10 +71,16 @@ export interface OracleSettlementNotApplicable {
 
 export type OracleSettlementRunResult =
   | OracleSettlementSettled
-  | OracleSettlementSettledWithFallback
   | OracleSettlementNotApplicable;
 
 export type OracleAdapter = (payload: OraclePayload, provider: ProviderConfig) => Promise<OracleResult>;
+
+export class CleanOracleSettlementAdapterError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "CleanOracleSettlementAdapterError";
+  }
+}
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])];
@@ -315,18 +310,11 @@ export function validateOracleSettlement(input: {
       message: "Visible selected meaning must equal accepted selected meaning.",
     });
   }
-  if (settlement.adapter.result.status === "fallback" && settlement.failure?.kind !== settlement.adapter.result.reason.kind) {
-    issues.push({
-      code: "selected_meaning_mismatch",
-      path: "failure.kind",
-      message: "Fallback settlement failure kind must match adapter fallback reason.",
-    });
-  }
-  if (settlement.adapter.result.status === "ok" && settlement.failure !== null) {
+  if (settlement.failure !== null) {
     issues.push({
       code: "selected_meaning_mismatch",
       path: "failure",
-      message: "Normal adapter settlement must not include failure.",
+      message: "Oracle settlement failure is reserved for route-level errors and must not be embedded in gameplay settlement.",
     });
   }
 
@@ -385,29 +373,8 @@ function buildSettlement(input: {
       claimScope: "visible_uncertainty_outcome_only",
       forbiddenClaimKinds: FORBIDDEN_CLAIM_KINDS,
     },
-    failure: input.adapterResult.status === "fallback"
-      ? {
-          kind: input.adapterResult.reason.kind,
-          fallbackPolicy: "conservative_miss",
-          hiddenMutationApplied: false,
-        }
-      : null,
+    failure: null,
   });
-}
-
-function fallbackResult(input: {
-  kind: "adapter_generation_failed" | "invalid_adapter_output";
-  message: string;
-}): OracleAdapterSettlementResult {
-  return {
-    status: "fallback",
-    fallbackPolicy: "conservative_miss",
-    outcome: "miss",
-    reason: {
-      kind: input.kind,
-      message: input.message.slice(0, 500) || input.kind,
-    },
-  };
 }
 
 export async function runCleanOracleSettlement(input: {
@@ -436,17 +403,20 @@ export async function runCleanOracleSettlement(input: {
       outcome: raw.outcome,
       reasoning: raw.reasoning,
     });
-    adapterResult = parsed.success
-      ? parsed.data
-      : fallbackResult({
-          kind: "invalid_adapter_output",
-          message: parsed.error.issues.map((issue) => issue.message).join("; "),
-        });
+    if (!parsed.success) {
+      throw new CleanOracleSettlementAdapterError(
+        `Clean Oracle adapter returned invalid output: ${parsed.error.issues.map((issue) => issue.message).join("; ").slice(0, 300)}`,
+        parsed.error,
+      );
+    }
+    adapterResult = parsed.data;
   } catch (error) {
-    adapterResult = fallbackResult({
-      kind: "adapter_generation_failed",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    if (error instanceof CleanOracleSettlementAdapterError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new CleanOracleSettlementAdapterError(
+      `Clean Oracle adapter failed before settlement: ${message.slice(0, 300)}`,
+      error,
+    );
   }
 
   const settlement = buildSettlement({
@@ -465,19 +435,6 @@ export async function runCleanOracleSettlement(input: {
   });
   if (validation.status === "rejected") {
     return { status: "not_applicable", issues: validation.issues };
-  }
-
-  if (adapterResult.status === "fallback") {
-    return {
-      status: "settled_with_fallback",
-      settlement: validation.settlement,
-      publicEvent: {
-        type: "oracle_result",
-        data: {
-          outcome: "miss",
-        },
-      },
-    };
   }
 
   return {

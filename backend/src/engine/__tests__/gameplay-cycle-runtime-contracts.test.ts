@@ -41,22 +41,26 @@ import {
   buildGmReadPrompt,
   buildGmReadSystemPrompt,
   CleanGmReadGenerationError,
+  CleanGmReadValidationError,
   gmReadModelGenerationSchema,
   runCleanGmRead,
   validateGmReadCandidate,
 } from "../gameplay-cycle-runtime/gm-read.js";
 import {
   buildJudgeUncertaintySystemPrompt,
+  CleanJudgeUncertaintyValidationError,
   judgeUncertaintyGenerationSchema,
   runCleanJudgeUncertainty,
   validateJudgeUncertaintyCandidate,
 } from "../gameplay-cycle-runtime/judge-uncertainty.js";
 import {
   buildOraclePayloadV1,
+  CleanOracleSettlementAdapterError,
   runCleanOracleSettlement,
   validateOracleSettlement,
 } from "../gameplay-cycle-runtime/oracle-settlement.js";
 import {
+  CleanGmActionChecklistValidationError,
   runCleanGmActionChecklist,
   validateGmActionChecklistCandidate,
 } from "../gameplay-cycle-runtime/action-checklist.js";
@@ -2261,20 +2265,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(calls).toEqual(["initial", "repair"]);
   });
 
-  it("falls back to a no-mutation clarification read when generation and repair stay invalid", async () => {
+  it("rejects GM Read validation exhaustion before settled gameplay semantics", async () => {
     const frame = minimalFrame();
-    const result = await runCleanGmRead({
+    await expect(runCleanGmRead({
       frame,
       provider,
       generateCandidate: async () => ({
         ...validGmRead(frame),
         toolInput: { effect: "smuggled" },
       }),
-    });
+    })).rejects.toThrow(CleanGmReadValidationError);
 
-    expect(result.status).toBe("fallback_clarification");
-    expect(result.read.path).toBe("clarification");
-    expect(result.read.frameId).toBe(frame.frameId);
+    await expect(runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => ({
+        ...validGmRead(frame),
+        toolInput: { effect: "smuggled" },
+      }),
+    })).rejects.toThrow("Clean GM Read validation failed after repair.");
   });
 
   it("runs GM Read after SceneFrame and before Judge/Uncertainty events", async () => {
@@ -2922,10 +2931,10 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(result.repairAttempted).toBe(true);
   });
 
-  it("falls back to a no-mutation clarification when generation and repair stay invalid", async () => {
+  it("rejects Judge/Uncertainty validation exhaustion before settled gameplay semantics", async () => {
     const frame = minimalFrame();
     const gmRead = validGmRead(frame);
-    const result = await runCleanJudgeUncertainty({
+    await expect(runCleanJudgeUncertainty({
       frame,
       gmRead,
       provider,
@@ -2933,40 +2942,52 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         ...validJudgeUncertainty(frame, gmRead),
         oracleResult: { tier: "strong_hit" },
       }),
-    });
+    })).rejects.toThrow(CleanJudgeUncertaintyValidationError);
 
-    expect(result.status).toBe("fallback_clarification");
-    expect(result.judgment.nextStep).toBe("ask_clarification");
-    expect(result.judgment.oracleAdmission).toBeNull();
+    await expect(runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async () => ({
+        ...validJudgeUncertainty(frame, gmRead),
+        oracleResult: { tier: "strong_hit" },
+      }),
+    })).rejects.toThrow("Clean Judge/Uncertainty validation failed after repair.");
   });
 
-  it("skips Judge/Uncertainty when GM Read falls back before admission", async () => {
+  it("stops before Judge/Uncertainty when GM Read validation is exhausted", async () => {
     const order: string[] = [];
     const frame = minimalFrame();
+    const events: CleanGameplayRuntimeEvent[] = [];
 
-    for await (const event of processCleanGameplayTurnFromInput({
-      turn: validTurnInput(),
-      judgeProvider: provider,
-      buildFrame: async () => frame,
-      gmReadCandidateGenerator: async () => ({
-        ...validGmRead(frame),
-        toolInput: { effect: "invalid" },
-      }),
-      judgeUncertaintyCandidateGenerator: async () => {
-        order.push("judge-called");
-        return validJudgeUncertainty(frame);
-      },
-      runNarration: fakeRunNarration,
-      commitTurn: fakeCommitTurn,
-    })) {
-      if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
-        const stage = (event.data as { stage?: unknown }).stage;
-        if (typeof stage === "string") order.push(stage);
+    await expect((async () => {
+      for await (const event of processCleanGameplayTurnFromInput({
+        turn: validTurnInput(),
+        judgeProvider: provider,
+        buildFrame: async () => frame,
+        gmReadCandidateGenerator: async () => ({
+          ...validGmRead(frame),
+          toolInput: { effect: "invalid" },
+        }),
+        judgeUncertaintyCandidateGenerator: async () => {
+          order.push("judge-called");
+          return validJudgeUncertainty(frame);
+        },
+        runNarration: fakeRunNarration,
+        commitTurn: fakeCommitTurn,
+      })) {
+        events.push(event);
+        if (event.type === "scene-settling" && typeof event.data === "object" && event.data) {
+          const stage = (event.data as { stage?: unknown }).stage;
+          if (typeof stage === "string") order.push(stage);
+        }
       }
-    }
+    })()).rejects.toThrow(CleanGmReadValidationError);
 
-    expect(order).toEqual(["scene-frame", "gm-read", "settled-turn-packet"]);
+    expect(order).toEqual(["scene-frame", "gm-read"]);
     expect(order).not.toContain("judge-called");
+    expect(events.some((event) => event.type === "narrative")).toBe(false);
+    expect(events.some((event) => event.type === "done")).toBe(false);
   });
 
   it("stops before settled packet, narration, and commit when GM Read generation throws", async () => {
@@ -4282,7 +4303,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
-  it("falls back without repair when deterministic compile lacks a backend capability", async () => {
+  it("rejects deterministic checklist compile when backend capability is missing", async () => {
     const frame = actionPlanFrame({
       playerAction: "I move toward North Hall.",
       capabilities: [
@@ -4291,16 +4312,19 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
     const gmRead = actionPlanGmRead(frame);
     const judgment = actionPlanJudge(frame, gmRead);
-    const result = await runCleanGmActionChecklist({
+    await expect(runCleanGmActionChecklist({
       frame,
       gmRead,
       judgment,
       checklistId: "gm-action-checklist-generated",
-    });
+    })).rejects.toThrow(CleanGmActionChecklistValidationError);
 
-    expect(result.status).toBe("fallback_no_mutation");
-    expect(result.checklist).toBeNull();
-    expect(result.repairAttempted).toBe(false);
+    await expect(runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-generated",
+    })).rejects.toThrow("Clean GM Action Checklist deterministic compile failed validation.");
   });
 
   it("is stable for identical inputs except backend-owned checklist id", async () => {
@@ -5296,14 +5320,14 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
     expect(adapterCalls).toBe(0);
   });
 
-  it("falls back to conservative miss after adapter generation failure without fake chance or roll", async () => {
+  it("rejects Oracle adapter generation failure before settlement", async () => {
     const frame = minimalFrame();
     const gmRead = {
       ...validGmRead(frame),
       path: "uncertain" as const,
     };
     const judgment = validOracleJudgeUncertainty(frame, gmRead);
-    const result = await runCleanOracleSettlement({
+    await expect(runCleanOracleSettlement({
       frame,
       gmRead,
       judgment,
@@ -5312,26 +5336,28 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       adapter: async () => {
         throw new Error("adapter offline");
       },
-    });
+    })).rejects.toThrow(CleanOracleSettlementAdapterError);
 
-    expect(result.status).toBe("settled_with_fallback");
-    if (result.status !== "settled_with_fallback") throw new Error("expected fallback");
-    expect(result.settlement.adapter.result.status).toBe("fallback");
-    expect(result.settlement.visibleOutcome.outcome).toBe("miss");
-    expect(result.settlement.selectedMeaning.text).toBe(judgment.oracleAdmission?.outcomeMeanings.miss);
-    expect(JSON.stringify(result.settlement.adapter.result)).not.toContain("chance");
-    expect(JSON.stringify(result.settlement.adapter.result)).not.toContain("roll");
-    expect(result.settlement.failure?.hiddenMutationApplied).toBe(false);
+    await expect(runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-fallback",
+      adapter: async () => {
+        throw new Error("adapter offline");
+      },
+    })).rejects.toThrow("Clean Oracle adapter failed before settlement");
   });
 
-  it("falls back to conservative miss after invalid adapter output", async () => {
+  it("rejects invalid Oracle adapter output before settlement", async () => {
     const frame = minimalFrame();
     const gmRead = {
       ...validGmRead(frame),
       path: "uncertain" as const,
     };
     const judgment = validOracleJudgeUncertainty(frame, gmRead);
-    const result = await runCleanOracleSettlement({
+    await expect(runCleanOracleSettlement({
       frame,
       gmRead,
       judgment,
@@ -5343,12 +5369,21 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
         outcome: "weak_hit",
         reasoning: "invalid",
       }),
-    });
+    })).rejects.toThrow(CleanOracleSettlementAdapterError);
 
-    expect(result.status).toBe("settled_with_fallback");
-    if (result.status !== "settled_with_fallback") throw new Error("expected fallback");
-    expect(result.settlement.failure?.kind).toBe("invalid_adapter_output");
-    expect(result.settlement.visibleOutcome.outcome).toBe("miss");
+    await expect(runCleanOracleSettlement({
+      frame,
+      gmRead,
+      judgment,
+      provider,
+      settlementId: "oracle-invalid-output",
+      adapter: async () => ({
+        chance: 0,
+        roll: 101,
+        outcome: "weak_hit",
+        reasoning: "invalid",
+      }),
+    })).rejects.toThrow("Clean Oracle adapter returned invalid output");
   });
 
   it("rejects settlement selected meaning mismatches and forbidden materialization claims", async () => {
