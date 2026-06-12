@@ -4972,3 +4972,30 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
   - Status impact:
     - P144 raises the third clean-runtime acceptance-candidate lane from 10/60 to 20/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
+
+- P145 clean gameplay runtime Acceptance-Candidate Lane C / P143 Continuation 20 -> 30:
+  - Plan:
+    - [x] Continue existing third zero-turn clone `p143-lowwater-acceptance-c-20260612230321` from its clean turn-20 state.
+    - [x] Preflight current DB state: player at `The Copper Tap`, visible actors `Old Route Hand Sessik` and `Tap-Keeper Brost`, visible routes `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`, `Sealed lacquer message tube` equipped by `Mira Voss`, old stores zero.
+    - [x] Reuse stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 21-30 one action at a time from inspected post-turn state, covering route options/checks, movement to `Slip Twelve Berth`, visible actor refresh, dialogue, hand-transfer of `Sealed lacquer message tube` to visible `Litha Corsen`, route surface, route check/movement to `Silt Warrens`, and bounded no-actor observation.
+    - [x] Persist `turn-021/` through `turn-030/` artifacts plus root `db-verification-turn-021.json` through `db-verification-turn-030.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p143-lowwater-acceptance-c-20260612230321/`; preflight artifact `p145-preflight-current-state.json`.
+    - [x] Turn 21 route-options check from `The Copper Tap` passed: surfaced `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 22 route-check to `Slip Twelve Berth` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 23 movement to `Slip Twelve Berth` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `6/4/4 -> 7/5/5`, visible NPC DB surface contains `Litha Corsen` and `Sigil Boss Torvin Kask`, old stores zero.
+    - [x] Turn 24 visible-actor observation at `Slip Twelve Berth` passed: surfaced `Litha Corsen` and `Sigil Boss Torvin Kask`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 25 dialogue with `Sigil Boss Torvin Kask` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 26 hand-transfer of `Sealed lacquer message tube` to `Litha Corsen` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, item owner became `Litha Corsen`, equip state `carried`, worldVersion `7 -> 8`, no time/tick/ledger advance, old stores zero.
+    - [x] Turn 27 route-options check from `Slip Twelve Berth` passed: surfaced `Lowwater Bazaar`, `Silt Warrens`, and `The Copper Tap`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 28 route-check to `Silt Warrens` passed: `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 29 movement to `Silt Warrens` passed: trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, clock `8/5/5 -> 9/6/6`, visible routes include `Lowwater Bazaar`, `Resonance Tower`, `Slip Twelve Berth`, `The Copper Tap`, and `Transmission Basement`, old stores zero.
+    - [x] Turn 30 visible-actor observation at `Silt Warrens` passed: bounded no-match, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P143/P144/P145 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-030.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 30: 30 clean turn records, 30 Stage4 receipts, 9 authority traces, 6 clock ledger rows, world clock `9/6/6`, player at `Silt Warrens`, current-scene NPC surface empty, `Sealed lacquer message tube` carried by `Litha Corsen`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Status impact:
+    - P145 raises the third clean-runtime acceptance-candidate lane from 20/60 to 30/60. Final acceptance remains incomplete until Lane C reaches about 60 clean manual turns.
