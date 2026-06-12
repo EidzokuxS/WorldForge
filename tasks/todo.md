@@ -5082,3 +5082,35 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
   - Status impact:
     - P148 completes the third clean-runtime 60-turn acceptance-candidate lane. The 3x60 clean-runtime smoke criterion now has Lane A, Lane B, and Lane C evidence, pending separate full-goal acceptance audit.
+
+- P149 clean gameplay runtime Full-goal acceptance audit:
+  - Plan:
+    - [x] Re-read the canonical GM turn architecture target and compare it to the clean runtime route, stage modules, focused tests, and 3x60 live evidence.
+    - [x] Separate executed evidence, inspected code/test evidence, and remaining assumptions before making any completion claim.
+    - [x] Explain the P87/P149 "fallback" wording by runtime role instead of treating every fallback as the same behavior.
+  - Executed / inspected evidence:
+    - [x] Route boundary: `/api/chat/action` in `backend/src/routes/chat.ts` selects `processCleanGameplayTurn` only when `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN` is enabled, validates the clean `done` boundary as `runtime=gameplay-cycle-runtime`, and keeps the old `processTurn` lane behind the non-clean branch.
+    - [x] Runtime spine: `backend/src/engine/gameplay-cycle-runtime/runtime.ts` executes SceneFrame -> GM Read -> Judge/Uncertainty -> optional Oracle -> optional Action Checklist -> optional Stage4 -> Settled Packet -> Narration -> frozen commit.
+    - [x] Import fence: focused contracts assert the clean runtime import graph stays fenced from `gameplay-cycle-v2`, old saga/narrator stores, and old tool-loop owners.
+    - [x] Stage 0/1: focused contracts cover turn input, SceneFrame refs/capabilities, scoped forecast advisory status, GM Read no executable/admission/mutation/receipt/narration ownership, hand/give/grip/equip/unequip/compound item-transfer classifications, backend ref rejection, private guard rejection, and generation/repair behavior.
+    - [x] Stage 2/Oracle: focused contracts cover Oracle admission invariants, selected outcome meaning equality, no chance/roll leakage to player events, conservative-miss settlement after adapter failure or invalid output, and runtime event order for the Oracle branch.
+    - [x] Stage 3: focused contracts cover action-plan admission, deterministic checklist generation for backend-owned consequences, route-check-before-disconnected-movement planning, item-transfer checklist plans, and compound item-transfer plus dialogue dependencies.
+    - [x] Stage 4: focused contracts cover movement, route check/options, time advance, scene beat, dialogue, support actor materialization, player local condition, item transfer, local observation, device surface observation, minor POI handle, failed/skipped receipt invariants, and item-transfer-state SceneFrame refresh before dependent dialogue.
+    - [x] Stage 5/6: focused settlement/narration contracts cover accepted evidence authorities, item_transfer_receipt -> item_state, evidence limits, failed/skipped audit-only semantics, deterministic item_state projection, deterministic item_state plus dialogue composition, private/backend/old-runtime leak rejection, and fallback text bounded to accepted evidence.
+    - [x] P69 live proof is represented both by the dedicated handoff proof and by later acceptance lanes: accepted `item_transfer`, clean authority trace `gameplay-cycle-runtime.item_transfer.v1`, owner/equip-state changes, `worldVersion +1`, no time/tick/ledger advance, and old v2/saga/narrator/oracle/simulation stores at zero.
+    - [x] 3x60 live smoke evidence exists: Lane A `p131-lowwater-acceptance-20260612203318`, Lane B `p137-lowwater-acceptance-b-20260612215626`, and Lane C `p143-lowwater-acceptance-c-20260612230321` each reached 60 clean turn records with passing verification artifacts, multi-token narration, clean runtime done boundaries, and old stores zero.
+  - Fallback role audit:
+    - [x] GM Read/Judge `fallback_clarification` is a no-mutation player clarification after validation plus repair fail; transport generation exceptions surface as route failures before this path.
+    - [x] Action Checklist `fallback_no_mutation` is a no-mutation checklist admission result when checklist generation/validation cannot produce an executable clean checklist.
+    - [x] Oracle `conservative_miss` fallback applies only after a valid Oracle admission and adapter failure/invalid adapter output; it selects the predeclared miss meaning, emits no fake chance/roll, and mutates no world state.
+    - [x] Narration `deterministic_authority_projection` / `fallback_generation_error` / `fallback_validation_error` is final grounded text rendered from `CleanNarratorView`; it avoids old narrator attempts, pending narration, replay, and new semantics.
+  - Completion decision:
+    - [x] P69 item_transfer clean-runtime scope is complete by focused tests, live proof, DB verification, GitNexus detect-before-commit, push, and post-commit `npx gitnexus analyze --embeddings`.
+    - [x] The 3x60 clean-runtime smoke criterion is complete as stability evidence for the implemented primitive set.
+    - [ ] Full canonical playability acceptance remains pending for rare edge-case live turns: explicit clarification turn, explicit Oracle turn, and rejected/revised or failed/skipped Stage4 step through live `/api/chat/action` with clean runtime. These paths have focused contract/runtime tests, but P149 did not find separate live player-facing zero-turn evidence for them inside the 3x60 lanes.
+  - Verification executed:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`).
+  - Next scoped work:
+    - [ ] Build a small edge-case live proof lane on fresh zero-turn clone(s) for clarification, Oracle, and rejected/revised or failed/skipped Stage4 behavior, with DB checks mirroring the 3x60 verifier.
+    - [ ] After that lane, rerun typecheck, focused tests, GitNexus detect, commit/push, and `npx gitnexus analyze --embeddings`.
