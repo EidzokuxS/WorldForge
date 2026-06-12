@@ -4790,3 +4790,31 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
   - Status impact:
     - P137 starts the second clean-runtime 60-turn acceptance-candidate lane and is clean through 10/60. Final acceptance remains incomplete until multiple different zero-turn clones reach about 60 clean manual turns each.
+
+- P138 clean gameplay runtime Acceptance-Candidate Lane B / P137 Continuation 10 -> 20:
+  - Plan:
+    - [x] Continue existing second zero-turn clone `p137-lowwater-acceptance-b-20260612215626` from its clean turn-10 state.
+    - [x] Preflight current DB state: player at `Auditor Spire`, no exact-scene NPCs, visible routes `Charter Gallery` and `Lowwater Bazaar`, `The Copper Tap` reachable through `Lowwater Bazaar` with visible actors `Old Route Hand Sessik` and `Tap-Keeper Brost`, player owns equipped `Courier satchel` and `Sealed lacquer message tube`, old stores zero.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 11-20 one action at a time from inspected post-turn state, covering route check/movement back to `Lowwater Bazaar`, route surface, movement to `The Copper Tap`, current-scene actor refresh, visible dialogue, `Sealed lacquer message tube` unequip/equip item transfers, and route check to `Slip Twelve Berth`.
+    - [x] Persist `turn-011/` through `turn-020/` artifacts plus root `db-verification-turn-011.json` through `db-verification-turn-020.json`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p137-lowwater-acceptance-b-20260612215626/`.
+    - [x] Preflight artifact: `p138-preflight-current-state.json`; state matched turn-10 baseline with player at `Auditor Spire`, clock `2/2/2`, 10 clean turn records, 10 Stage4 receipts, old stores zero, and both player inventory items equipped by `Mira Voss`.
+    - [x] Turn 11 route-check to `Lowwater Bazaar` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 12 movement to `Lowwater Bazaar` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Auditor Spire -> Lowwater Bazaar`, clock `2/2/2 -> 3/3/3`, old stores zero.
+    - [x] Turn 13 route-options check from `Lowwater Bazaar` passed: accepted `route_options`, surfaced all eight route labels including `The Copper Tap` and `Slip Twelve Berth`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 14 route-check to `The Copper Tap` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 15 movement to `The Copper Tap` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Lowwater Bazaar -> The Copper Tap`, clock `3/3/3 -> 4/4/4`, visible NPC DB surface contains `Old Route Hand Sessik` and `Tap-Keeper Brost`, old stores zero.
+    - [x] Turn 16 visible-actor observation at `The Copper Tap` passed: accepted `local_observation`, surfaced `Old Route Hand Sessik` and `Tap-Keeper Brost`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 17 dialogue with `Tap-Keeper Brost` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 18 unequip `Sealed lacquer message tube` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, item stayed owned by `Mira Voss`, equip state `carried`, worldVersion `4 -> 5`, no time/tick/ledger advance, old stores zero.
+    - [x] Turn 19 re-equip `Sealed lacquer message tube` passed: accepted `item_transfer`, trace `gameplay-cycle-runtime.item_transfer.v1`, equip state `equipped`, worldVersion `5 -> 6`, no time/tick/ledger advance, old stores zero.
+    - [x] Turn 20 route-check to `Slip Twelve Berth` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] P137/P138 artifact sanity: `db-verification-turn-001.json` through `db-verification-turn-020.json` all `pass=true`, multi-token narrative, and old stores zero.
+    - [x] Final DB state after turn 20: 20 clean turn records, 20 Stage4 receipts, 6 authority traces, 4 clock ledger rows, world clock `6/4/4`, player at `The Copper Tap`, current-scene NPC surface contains `Old Route Hand Sessik` and `Tap-Keeper Brost`, `Sealed lacquer message tube` equipped by `Mira Voss`, old stores zero.
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+  - Status impact:
+    - P138 raises the second clean-runtime acceptance-candidate lane from 10/60 to 20/60. Final acceptance remains incomplete until multiple different zero-turn clones reach about 60 clean manual turns each.
