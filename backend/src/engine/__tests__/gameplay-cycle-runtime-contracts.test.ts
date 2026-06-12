@@ -1369,6 +1369,60 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.status).toBe("rejected");
   });
 
+  it("classifies removing an equipped item from its worn slot as unequip item_transfer even when the player will carry it", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I unfasten the Brass Tube from my shoulder and carry it in one hand.",
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "equipped",
+        tags: [],
+      }],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player is changing an equipped inventory item's equip state.",
+      liveSceneQuestion: "Which bounded item equip-state transition must Stage 4 settle?",
+      focalRefs: ["Player", "Brass Tube"],
+      evidenceRefs: ["Player", "Brass Tube", "Market"],
+      actionInterpretation: {
+        summary: "The player removes Brass Tube from an equipped shoulder position and carries it.",
+        playerIntent: "Unequip Brass Tube and carry it.",
+        method: "unfasten and carry",
+        targetRefs: ["Brass Tube", "Player"],
+        interactionKind: "item_transfer",
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "unequip_inventory_item",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          targetKind: "player_inventory",
+          targetRef: "Player",
+          equipSlot: null,
+          requestedItemText: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+        },
+      },
+      interpretationRationale: "Removing an equipped item from its worn slot changes item equip state; the later hand-carry wording is the target item state, not a grip-only condition.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "item_transfer",
+      itemTransferNeed: {
+        operation: "unequip_inventory_item",
+        itemRef: "Brass Tube",
+        targetRef: "Player",
+        equipSlot: null,
+      },
+    });
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
   it("keeps overlong GM Read rationale as a model-generation near-miss for repair only", () => {
     const frame = deviceSurfaceFrame();
     const nearMiss = {

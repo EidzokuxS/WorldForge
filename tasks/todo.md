@@ -4083,3 +4083,38 @@ Session: `gm-v1-consequenc-slice`.
     - Post-proof SceneFrame includes `Local Attendant` in actors, targets, and citable refs.
   - Status impact:
     - P99 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P100/P101 clean gameplay runtime Fallout Repair / Equipped Item Unequip Classification:
+  - Status:
+    - [x] Started a fresh post-P99 zero-turn lane `p100-acceptance-a-2abce760`.
+    - [x] Reached twelve clean turns across direct scene snapshot, movement, item transfer, holder-grounded dialogue, local condition, route check, support actor creation, support actor dialogue, time passage, minor POI creation, and place-handle dialogue.
+    - [x] Found a real GM Read classification miss on P100 turn 13: explicit equip-state removal was settled as `player_local_condition` instead of `item_transfer`.
+    - [x] Fixed the GM Read prompt contract so removing/unfastening/taking off an equipped inventory item is classified as `item_transfer` `unequip_inventory_item` even when the player will hold/carry/grip it afterward.
+    - [x] Added a regression test preserving the distinction between explicit unequip and plain grip.
+    - [x] Re-ran typecheck plus focused clean-runtime tests.
+    - [x] Ran a fresh P101 live repair proof on a zero-turn clone.
+  - Diagnostic lane:
+    - Fresh clone: `p100-acceptance-a-2abce760`.
+    - Turns 1-12 stayed clean; artifacts include `output/clean-runtime-p100-acceptance-a-turn1-20260612152046/` through `output/clean-runtime-p100-acceptance-a-turn12-20260612152903/`.
+    - Turn 13 artifact: `output/clean-runtime-p100-acceptance-a-turn13-20260612152945/`.
+    - Turn 13 action: `I unfasten the Courier satchel from my shoulder and carry it in one hand.`
+    - Turn 13 invalid result: accepted `condition_set` with `conditionKey=gripping_held_item`; `Courier satchel` stayed `equipState=equipped` in the post-turn SceneFrame.
+    - Root cause: GM Read prompt clearly said plain gripping/holding an already-inventory item is `player_local_condition`, but did not explicitly state that removing an equipped item from a worn slot owns an equip-state transition even if the final state is hand-carried.
+    - Status impact: P100 is diagnostic-invalid from turn 13 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` now tells GM Read to use `item_transfer` with `operation=unequip_inventory_item` when the player unfastens, takes off, removes, unslings, or otherwise moves an equipped inventory item out of its worn/equipped slot, even if the action also says the player will hold, carry, or grip it afterward.
+    - The fix stays at the GM Read ownership contract; no raw-action regex guard or fallback semantic patch was added.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` now accepts an explicit equipped-item removal as `item_transfer`/`unequip_inventory_item` and keeps the existing plain `I grip the Brass Tube` case as `player_local_condition`.
+  - Executed verification:
+    - GitNexus impact before editing `buildGmReadSystemPrompt`: LOW; direct caller `runCleanGmRead`.
+    - `npm --prefix backend run typecheck` passed.
+    - Narrow contracts test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 173 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 250 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p101-unequip-proof-e209834b` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Artifact: `output/clean-runtime-p101-unequip-turn1-20260612153239/`.
+    - Action: `I unfasten the Courier satchel from my shoulder and carry it in one hand.`
+    - Result: one accepted `item_transfer` receipt with `operation=unequip_inventory_item` and `resultKind=unequipped`; authority trace `gameplay-cycle-runtime.item_transfer.v1`; `Courier satchel.equip_state=carried`, `equipped_slot=null`; worldVersion `0 -> 1`; `world_time_minutes/current_tick` stayed `0/0`; old v2/saga/narrator/oracle/simulation stores stayed zero.
+  - Status impact:
+    - P101 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
