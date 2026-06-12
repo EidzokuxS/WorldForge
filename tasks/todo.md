@@ -4595,3 +4595,32 @@ Session: `gm-v1-consequenc-slice`.
     - Turn 1 repeated the same action and passed `db-verification.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `local_observation` receipt, no mutation, no clock/scene change, old stores zero, and player-facing text contains all 8 route labels.
   - Status impact:
     - P130 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P131 clean gameplay runtime Acceptance-Candidate Lane / Lowwater Post-Route-List Repair:
+  - Plan:
+    - [x] Create a fresh zero-turn Lowwater clone from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - [x] Preflight `chat_history=0`, clean turn records 0, old v2/saga/narrator/oracle/simulation stores 0, player scene, clock, route surface, and player inventory.
+    - [x] Run stable clean backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Turn 1 manual action from actual state: move from `Lowwater Bazaar` to visible route option `The Copper Tap`.
+    - [x] Verify one accepted `movement` receipt, authority trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, worldVersion/time/tick +1, scene changes to `The Copper Tap`, old stores stay zero, runtime is `gameplay-cycle-runtime`, and player-facing text is grounded/multi-token/no internal leak.
+  - Current status:
+    - [x] Artifact root: `output/clean-runtime-p131-lowwater-acceptance-20260612203318/`.
+    - [x] Fresh clone: `p131-lowwater-acceptance-20260612203318`, source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - [x] Preflight passed: clean-start true, `chat_history=0`, clock `0/0/0`, player at `Lowwater Bazaar`, route surface includes `The Copper Tap` and `Upper Dam Ruins`, items `Courier satchel` and `Sealed lacquer message tube` equipped, old stores zero.
+  - Review / evidence:
+    - [x] Turn 1 `I walk to The Copper Tap.` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Lowwater Bazaar -> The Copper Tap`, clock `0/0/0 -> 1/1/1`, old stores zero.
+    - [x] Turn 2 visible-actor observation at `The Copper Tap` passed: accepted `local_observation`, no mutation/clock/ledger/trace, surfaced `Old Route Hand Sessik` and `Tap-Keeper Brost`, old stores zero.
+    - [x] Turn 3 dialogue with `Tap-Keeper Brost` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+    - [x] Turn 4 exact 2-minute wait passed: accepted `time_advance`, trace `gameplay-cycle-runtime.clock.advance.v1`, ledger `wait`, clock `1/1/1 -> 2/3/3`, scene unchanged, old stores zero. Corrected only the one-off verifier's expected trace-operation label.
+    - [x] Turn 5 route check to `Silt Warrens` passed: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 6 movement to `Silt Warrens` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `The Copper Tap -> Silt Warrens`, clock `2/3/3 -> 3/4/4`, old stores zero.
+    - [x] Turn 7 available-routes check from `Silt Warrens` passed: accepted `route_options`, all five current route labels surfaced in receipt and narrative, no mutation/clock/ledger/trace, old stores zero. Corrected only the verifier's local assumption about `publicResult.routeOptions.options[]`.
+    - [x] Turn 8 movement to `Transmission Basement` passed: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, ledger `travel`, scene `Silt Warrens -> Transmission Basement`, clock `3/4/4 -> 4/5/5`, visible NPC DB surface contains `Relay-Tech Dorin` and `Venn the Borrowed`, old stores zero.
+    - [x] Turn 9 visible-actor observation at `Transmission Basement` passed: accepted `local_observation`, no mutation/clock/ledger/trace, narrative names `Relay-Tech Dorin` and `Venn the Borrowed`, old stores zero.
+    - [x] Turn 10 dialogue with `Venn the Borrowed` passed: accepted `dialogue_record`, terminal dialogue receipt, no mutation/clock/ledger/trace, multi-token grounded response, old stores zero.
+  - Status impact:
+    - P131 is a 10-turn clean-runtime burn-in lane after the P130 route-list repair. It improves evidence coverage but does not change final acceptance: still 0% until several different zero-turn clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+  - Verification executed:
+    - [x] `npm --prefix backend run typecheck`
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`263 passed`)
+    - [x] P131 artifact sanity: `db-verification.json` plus `db-verification-turn-002.json` through `db-verification-turn-010.json` all `pass=true`, `runtime=gameplay-cycle-runtime`, multi-token narrative, and old stores zero.
