@@ -8,6 +8,29 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P153 manual-chosen Lowwater burn-in:
+- Baseline: branch clean/synced after commit `1733d7d6` (`Clamp Stage4 failure diagnostics`).
+- Source preflight:
+  - Source `p69-item-transfer-045651` had chat history 0, clock `0/0/0`, no clean turn records, no Stage4 receipts, no authority traces, no turn clock ledger rows, old v2/saga/narrator/oracle/simulation stores all 0.
+  - Pre-frame: scene `Lowwater Bazaar`, visible actor `Guide`, inventory `Courier satchel`, `Sealed lacquer message tube`, `Brass Tube`, and route options including `Anchor Chain Pylon`.
+- Manual-chosen transport turns:
+  - Turn 1 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn1-20260613/`: broad current-scene look; direct scene snapshot, no Stage4 receipt, no mutation/clock advance, old stores 0.
+  - Turn 2 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn2-20260613/`: asked `Guide` for route advice; one accepted `dialogue_record`, no mutation/clock advance, old stores 0.
+  - Turn 3 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn3-20260613/`: moved to `Anchor Chain Pylon`; one accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock/worldVersion advanced `0/0/0 -> 1/1/1`, old stores 0.
+  - Turn 4 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn4-20260613/`: visible-actor observation at `Anchor Chain Pylon`; one accepted `local_observation` positive list for `Undercurrent Courier Nisse`, `Dam-Speaker Yara`, and `Pike`, no mutation/clock advance, old stores 0.
+  - Turn 5 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn5-20260613/`: handed `Brass Tube` to `Dam-Speaker Yara`; one accepted `item_transfer`, `Brass Tube` left player inventory and remained visible as actor-held item, worldVersion advanced `1 -> 2` only, no time/tick advance, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores 0.
+  - Turn 6 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn6-20260613/`: asked `Dam-Speaker Yara` whether she had the `Brass Tube`; one accepted `dialogue_record`, reply confirmed current holder state, no mutation/clock advance, old stores 0.
+  - Turn 7 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn7-20260613/`: route check to `Upper Dam Ruins` without moving; one accepted `route_check`, no mutation/clock advance, old stores 0.
+  - Turn 8 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn8-20260613/`: moved to `Upper Dam Ruins`; one accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock/worldVersion advanced `2/1/1 -> 3/2/2`, old stores 0.
+  - Turn 9 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn9-20260613/`: visible-actor observation at `Upper Dam Ruins`; one accepted `local_observation` bounded no-match, no mutation/clock advance, old stores 0.
+  - Turn 10 artifact `output/clean-runtime-p153-lowwater-acceptance-a-turn10-20260613/`: waited exactly 2 minutes at `Upper Dam Ruins`; one accepted `time_advance`, authority trace for clock advance, one wait ledger row, clock/worldVersion advanced `3/2/2 -> 4/4/4`, old stores 0.
+- Artifact sweep:
+  - Checked all 10 P153 turn artifacts for `done.runtime=gameplay-cycle-runtime`, `narrative` + `done`, multi-token player-facing text, no old-store writes, no restore/replay ledger rows, and no public internal tokens (`stage4-receipt`, `settled_turn_packet`, `narrator_attempt`, `turn_saga`, `gameplay_cycle_v2`, `privateResult`, `reasoning`, `SceneFrame`, `worldVersion`, `surface entry`); result: 10 checked, 0 bad.
+  - Current lane state after turn 10: scene `Upper Dam Ruins`, clock `worldVersion=4/worldTimeMinutes=4/currentTick=4`, `clean_gameplay_turn_records=10`, `clean_gameplay_stage4_receipts=9`, `authority_traces=4`, `turn_clock_ledger=3`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Evidence classification:
+  - These actions were chosen by Codex one at a time after inspecting the actual post-turn state, then sent through the existing `/api/chat/action` transport harness. This counts as manual-chosen burn-in evidence.
+  - Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual-chosen turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P152 clean Stage4 failed/skipped receipt boundary:
 - Baseline: branch `codex/rebuild-gm-turn-cycle` after commit `4fe9ede9` (`Enforce Oracle settlement no-fallback invariant`).
 - Trigger:
