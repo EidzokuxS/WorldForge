@@ -5142,5 +5142,35 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`266 passed`).
   - Remaining edge live proofs:
-    - [ ] Explicit Oracle branch through live `/api/chat/action`.
+    - [x] Explicit Oracle branch through live `/api/chat/action`.
+    - [ ] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action`.
+
+- P151 clean gameplay runtime Oracle edge proof and no-fallback invariant:
+  - Plan:
+    - [x] Find a fresh zero-turn clean-start clone whose authoritative pre-frame exposes a visible actor for Oracle targeting.
+    - [x] Reproduce an explicit Oracle branch through live `/api/chat/action`.
+    - [x] Fix any no-fallback fallout found during the live proof instead of accepting a downgraded player-facing turn.
+    - [x] Re-run typecheck, focused clean-runtime tests, and live DB/event verification.
+  - Findings:
+    - [x] `output/clean-runtime-p151-oracle-edge-20260613/` was diagnostic only: source/clone frame had no visible actor, so the action correctly settled as clarification with no Stage4, mutation, or old stores.
+    - [x] `output/clean-runtime-p151-oracle-guide-edge-20260613/` was diagnostic only: the action was a targeted current-scene observation and correctly settled through an accepted `local_observation` Stage4 receipt.
+    - [x] `output/clean-runtime-p151-oracle-slip-dest-guide-20260613/` exposed a no-fallback violation: Judge admitted `oracle_roll`, runtime emitted `oracle-roll`, Oracle settlement did not settle, and the process still produced a `minimal_safe` scene-snapshot turn. That fallback path is now forbidden.
+  - Changes:
+    - [x] Added `CleanGameplayRuntimeInvariantError`.
+    - [x] `processCleanGameplayTurnFromInput` now throws before settled packet, narration, chat append, or clean turn record commit when an admitted `oracle_roll` returns non-settled Oracle settlement.
+    - [x] Added a contract test proving rejected Oracle settlement stops after `oracle-roll`, emits no `oracle_result`, no narration/done, and commits nothing.
+  - Live proof:
+    - [x] Canonical artifact root: `output/clean-runtime-p151-oracle-gesture-guide-20260613/`; clone/campaign id `p151-oracle-gesture-guide-20260613`.
+    - [x] Source clone path: fresh clean-start clone from `p69-item-transfer-045651`; pre-frame exposes actor `Guide`, inventory `Courier satchel`, `Sealed lacquer message tube`, `Brass Tube`, and clock `0/0/0`.
+    - [x] Action: `I make a small harmless gesture where Guide might see it, solely to learn whether Guide notices the gesture right now. I do not move, speak, touch items, or change anything else.`
+    - [x] SSE events: `scene-frame -> gm-read -> judge-uncertainty -> oracle-roll -> oracle_result -> oracle-settlement -> settled-turn-packet -> narrative -> finalizing_turn -> done`.
+    - [x] Oracle event payload: `{ outcome: "miss" }`; no public `chance`, numeric `roll`, or `reasoning` payload keys.
+    - [x] Player-facing narrative: `Guide does not notice the gesture at all.`
+    - [x] DB record: `settlementKind=oracle_visible_outcome`; source has `oracleSettlementVersion=oracle-settlement.v1`, `checklistVersion=null`, `stage4ExecutionVersion=null`; accepted Oracle evidence authority `oracle_visible_outcome`, claim kind `oracle_outcome`, limits forbid movement, arrival, route state, discovery, location reveal, item state, NPC private knowledge, actor creation, world facts, absence/no-change, and condition/HP.
+    - [x] Counts/state: one clean turn record, zero Stage4 receipts, zero authority traces, zero turn clock ledger rows, zero old v2/saga/narrator/oracle/simulation stores; `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, `mutationApplied=false`.
+  - Verification executed:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`267 passed`).
+  - Remaining edge live proofs:
     - [ ] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action`.

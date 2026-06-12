@@ -33,6 +33,7 @@ import {
   cleanStage4MinorPoiCreateEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
+  CleanGameplayRuntimeInvariantError,
   type CleanGameplayRuntimeEvent,
   isCleanGameplayRuntimeEnabled,
   processCleanGameplayTurnFromInput,
@@ -2225,7 +2226,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.repairAttempted).toBe(true);
   });
 
-  it("surfaces GM Read generation transport errors before fallback clarification", async () => {
+  it("surfaces GM Read generation transport errors before settled clarification", async () => {
     const frame = minimalFrame();
 
     await expect(runCleanGmRead({
@@ -2244,7 +2245,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     })).rejects.toThrow("Clean GM Read generation failed before validation");
   });
 
-  it("surfaces GM Read repair generation transport errors before fallback clarification", async () => {
+  it("surfaces GM Read repair generation transport errors before settled clarification", async () => {
     const frame = minimalFrame();
     const calls: string[] = [];
 
@@ -2392,7 +2393,7 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     const longRationale = [
       "The player is asking for a backend-owned item custody transition involving a visible actor and a visible item.",
       "The runtime must not narrate this from scene-frame evidence alone because the item owner and holder state require an item_transfer receipt before player-facing narration may claim completion.",
-      "This text is intentionally verbose enough to exceed the final shortText contract so generation can pass it to validation and repair instead of falling directly into fallback clarification.",
+      "This text is intentionally verbose enough to exceed the final shortText contract so generation can pass it to validation and repair before settled clarification.",
       "The repaired candidate should preserve the action_plan branch and shorten the prose.",
     ].join(" ");
     const candidate: JudgeUncertainty = {
@@ -5332,7 +5333,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       gmRead,
       judgment,
       provider,
-      settlementId: "oracle-fallback",
+      settlementId: "oracle-adapter-error",
       adapter: async () => {
         throw new Error("adapter offline");
       },
@@ -5343,7 +5344,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       gmRead,
       judgment,
       provider,
-      settlementId: "oracle-fallback",
+      settlementId: "oracle-adapter-error",
       adapter: async () => {
         throw new Error("adapter offline");
       },
@@ -5529,5 +5530,65 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
     ]);
     const oracleEvent = events.find((event) => event.type === "oracle_result");
     expect(oracleEvent?.data).toEqual({ outcome: "strong_hit" });
+  });
+
+  it("stops before settled packet when admitted Oracle settlement is rejected", async () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const admitted = validOracleJudgeUncertainty(frame, gmRead);
+    const judgment: JudgeUncertainty = {
+      ...admitted,
+      oracleAdmission: {
+        ...admitted.oracleAdmission!,
+        outcomeMeanings: {
+          strong_hit: "The player arrives at Guide's hidden room.",
+          weak_hit: "Guide visibly notices something.",
+          miss: "Guide visibly reacts immediately.",
+        },
+      },
+    };
+    const events: CleanGameplayRuntimeEvent[] = [];
+    const commits: Parameters<typeof fakeCommitTurn>[0][] = [];
+
+    await expect((async () => {
+      for await (const event of processCleanGameplayTurnFromInput({
+        turn: validTurnInput(),
+        judgeProvider: provider,
+        buildFrame: async () => frame,
+        gmReadCandidateGenerator: async () => gmRead,
+        judgeUncertaintyCandidateGenerator: async () => judgment,
+        oracleAdapter: async () => ({
+          chance: 65,
+          roll: 10,
+          outcome: "strong_hit",
+          reasoning: "Adapter resolved the admitted visible uncertainty.",
+        }),
+        runNarration: fakeRunNarration,
+        commitTurn: async (input) => {
+          commits.push(input);
+          return fakeCommitTurn(input);
+        },
+      })) {
+        events.push(event);
+      }
+    })()).rejects.toThrow(CleanGameplayRuntimeInvariantError);
+
+    expect(events.map((event) =>
+      event.type === "scene-settling" && typeof event.data === "object" && event.data
+        ? (event.data as { stage?: unknown }).stage
+        : event.type
+    )).toEqual([
+      "scene-frame",
+      "gm-read",
+      "judge-uncertainty",
+      "oracle-roll",
+    ]);
+    expect(events.some((event) => event.type === "oracle_result")).toBe(false);
+    expect(events.some((event) => event.type === "narrative")).toBe(false);
+    expect(events.some((event) => event.type === "done")).toBe(false);
+    expect(commits).toEqual([]);
   });
 });

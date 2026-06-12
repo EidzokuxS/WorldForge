@@ -70,6 +70,13 @@ export type CleanGameplayRuntimeEvent = {
   data: unknown;
 };
 
+export class CleanGameplayRuntimeInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CleanGameplayRuntimeInvariantError";
+  }
+}
+
 export interface CleanGameplayRuntimeOptions {
   campaignId: string;
   submittedPlayerAction: string;
@@ -333,16 +340,23 @@ export async function* processCleanGameplayTurnFromInput(
         settlementId: `oracle-settlement-${randomUUID()}`,
         adapter: options.oracleAdapter,
       });
-      if (oracleSettlement.status === "settled") {
-        yield oracleSettlement.publicEvent;
-        yield {
-          type: "scene-settling",
-          data: {
-            stage: "oracle-settlement",
-            phase: "gameplay-cycle-runtime",
-          },
-        };
+      if (oracleSettlement.status !== "settled") {
+        const issueSummary = oracleSettlement.issues
+          .map((issue) => `${issue.path}:${issue.message}`)
+          .join("; ")
+          .slice(0, 500);
+        throw new CleanGameplayRuntimeInvariantError(
+          `Clean Oracle settlement did not settle after Judge admitted oracle_roll: ${issueSummary}`,
+        );
       }
+      yield oracleSettlement.publicEvent;
+      yield {
+        type: "scene-settling",
+        data: {
+          stage: "oracle-settlement",
+          phase: "gameplay-cycle-runtime",
+        },
+      };
     } else if (
       judgeUncertainty.status === "accepted"
       && judgeUncertainty.judgment.nextStep === "action_plan"
