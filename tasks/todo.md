@@ -4039,3 +4039,47 @@ Session: `gm-v1-consequenc-slice`.
     - Result: player-facing narration `World clock advances by 3 minute(s).`; one accepted `time_advance` receipt; `publicResult.timeAdvance.elapsedMinutes=3`; authority trace `gameplay-cycle-runtime.clock.advance.v1`; one `turn_clock_ledger` row with `delta_minutes=3` and `reason_kind=wait`; clock `0/0/0 -> 1/3/3`; old v2/saga/narrator/oracle/simulation stores stayed zero.
   - Status impact:
     - P97 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P98/P99 clean gameplay runtime Fallout Repair / Support Actor SceneFrame Refresh:
+  - Status:
+    - [x] Continued fresh Lowwater diagnostic lane `p98-lowwater-6339a502`.
+    - [x] Reached thirteen clean turns across broad look, movement, item transfer, holder-grounded dialogue, local condition, local observation, route check, time passage, and minor POI creation.
+    - [x] Found a real Stage 4 refresh dependency failure on P98 turn 14: `support_actor_create` materialized `Local Attendant`, but the next SceneFrame did not expose that actor.
+    - [x] Fixed support actor persistence to store `current_location_id` in the broad parent location expected by SceneFrame roster assembly while retaining `current_scene_location_id` as the current scene.
+    - [x] Added a regression test that creates a support actor in a child scene and immediately rebuilds the SceneFrame to prove actors, targets, and citable refs expose it.
+    - [x] Re-ran focused clean-runtime tests and typecheck.
+    - [x] Ran a fresh P99 live proof on a zero-turn clone.
+  - Diagnostic lane:
+    - Fresh clone: `p98-lowwater-6339a502`.
+    - Turns 1-13 stayed clean; artifacts include `output/clean-runtime-p98-lowwater-turn1-20260612145718/` through `output/clean-runtime-p98-lowwater-turn13-20260612150412/`.
+    - Turn 14 artifact: `output/clean-runtime-p98-lowwater-turn14-20260612150440/`.
+    - Turn 14 action: `I wave over a nearby server in The Copper Tap, without saying anything yet.`
+    - Turn 14 DB state was clean at the receipt level: one accepted `support_actor_create`, authority trace `gameplay-cycle-runtime.support_actor.materialize.v1`, worldVersion +1, no clock/tick advance, and old v2/saga/narrator/oracle/simulation stores stayed zero.
+    - Turn 14 invalid result: post-turn SceneFrame omitted `Local Attendant` from actors, targets, and citable refs even though the player-facing narration and receipt claimed the actor was visible.
+    - Root cause: `executeSupportActorCreate` stored temporary current-scene support actors with `current_location_id` equal to the child scene id; `buildRoster` reads visible NPCs from the parent broad location plus the current scene id.
+    - Status impact: P98 is diagnostic-invalid from turn 14 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now lets `locationByLabel` preserve the matched location's `parent_location_id` via a local DB read.
+    - `executeSupportActorCreate` now computes `supportActorLocationId = currentScene.parent_location_id ?? currentLocation.id` and uses it for reusable-actor matching plus the inserted NPC `current_location_id`.
+    - The support actor still records `current_scene_location_id` as the current scene id, so sibling scenes remain separated.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` covers support actor creation inside a child scene and verifies the refreshed SceneFrame includes the new actor in `actors`, `targets`, and `citableRefs`.
+  - Executed verification:
+    - GitNexus impact before editing `executeSupportActorCreate`: LOW; direct caller `runCleanStage4Execution`.
+    - GitNexus impact before editing `isReusableSupportActor`: LOW; direct caller `executeSupportActorCreate`.
+    - GitNexus impact before editing `buildRoster`: HIGH, so the fix avoided editing shared SceneFrame roster code.
+    - GitNexus impact before editing `locationByLabel`: CRITICAL because movement, route check, item transfer, minor POI, local condition, support actor, and frame/clock validation call it; the edit preserved match/null behavior and only added parent metadata.
+    - `npm --prefix backend run typecheck` passed.
+    - Narrow Stage4 test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` -> 33 tests passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 249 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p99-support-actor-fresh` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Artifacts:
+      - `output/clean-runtime-p99-support-actor-turn1-20260612151500/`
+      - `output/clean-runtime-p99-support-actor-turn2-20260612151600/`
+    - Turn 1: movement from `Lowwater Bazaar` to `The Copper Tap`; accepted `movement`, trace/ledger clock advance, old stores zero.
+    - Turn 2: `support_actor_create` accepted for `Local Attendant`; companion `dialogue_record` was receipt-only with no mutation; worldVersion `1 -> 2`, worldTime/currentTick stayed `1/1`, and old stores stayed zero.
+    - DB proof: `Local Attendant.current_location_id = 32686bb1-f9fd-40ef-8337-93f2caeec1f0` (`Silt Warrens`, the parent broad location) and `current_scene_location_id = 08fdcc31-89ef-4a99-a921-21682413f832` (`The Copper Tap`).
+    - Post-proof SceneFrame includes `Local Attendant` in actors, targets, and citable refs.
+  - Status impact:
+    - P99 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.

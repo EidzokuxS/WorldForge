@@ -2732,6 +2732,137 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(refreshed.citableRefs).toContain("Local Vendor");
   });
 
+  it("stores support actors under the scene parent broad location so refreshed SceneFrame exposes them", async () => {
+    const now = Date.now();
+    exec(
+      "INSERT INTO locations (id, campaign_id, name, description, kind, persistence, parent_location_id, tags, is_starting, connected_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "loc-lowwater",
+      CAMPAIGN_ID,
+      "Lowwater",
+      "A broad river district.",
+      "macro",
+      "persistent",
+      null,
+      "[]",
+      0,
+      "[]",
+    );
+    exec(
+      "INSERT INTO locations (id, campaign_id, name, description, kind, persistence, parent_location_id, tags, is_starting, connected_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "loc-copper-tap",
+      CAMPAIGN_ID,
+      "The Copper Tap",
+      "A tavern scene inside Lowwater.",
+      "micro",
+      "persistent",
+      "loc-lowwater",
+      "[]",
+      0,
+      "[]",
+    );
+    exec(
+      "UPDATE players SET current_location_id = ?, current_scene_location_id = ? WHERE id = ?",
+      "loc-copper-tap",
+      "loc-copper-tap",
+      "player-1",
+    );
+    exec(
+      "UPDATE world_clocks SET updated_at = ? WHERE campaign_id = ?",
+      now,
+      CAMPAIGN_ID,
+    );
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      frameId: "frame-stage4-copper",
+      turnId: "clean-turn-stage4-copper",
+      playerAction: "I wave over a nearby server in The Copper Tap.",
+      scene: {
+        currentLocation: { ref: "The Copper Tap", label: "The Copper Tap", description: null },
+        currentScene: { ref: "The Copper Tap", label: "The Copper Tap", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "The Copper Tap"],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("support_actor_create", inputFrame),
+      generateSupportActorRequest: async () => ({
+        ...supportActorEffect("guide"),
+        anchorRef: "The Copper Tap",
+        publicPresentation: {
+          publicSummary: "An ordinary local guide is available in The Copper Tap.",
+          visibleCue: "The local guide is close enough to be visible in The Copper Tap.",
+          voiceHint: null,
+        },
+        reason: "The player requested an ordinary local guide in The Copper Tap.",
+        evidenceRefs: ["Player", "The Copper Tap"],
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    const receipt = result.execution?.receipts[0];
+    expect(receipt).toMatchObject({
+      capabilityId: "support_actor_create",
+      status: "accepted",
+      publicResult: {
+        supportActor: {
+          actorLabel: "Local Guide",
+          roleKind: "guide",
+          anchorSceneLabel: "The Copper Tap",
+        },
+      },
+    });
+
+    const npc = getSqliteConnection()
+      .prepare("SELECT name, current_location_id AS currentLocationId, current_scene_location_id AS currentSceneLocationId FROM npcs WHERE campaign_id = ? AND name = ?")
+      .get(CAMPAIGN_ID, "Local Guide") as { name: string; currentLocationId: string; currentSceneLocationId: string };
+    expect(npc).toEqual({
+      name: "Local Guide",
+      currentLocationId: "loc-lowwater",
+      currentSceneLocationId: "loc-copper-tap",
+    });
+
+    const refreshed = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-stage4-copper-next",
+      idempotencyKey: "next-frame-copper-proof",
+      playerAction: {
+        submitted: "I look at the local attendant.",
+        normalized: "I look at the local attendant.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-copper-next"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+    expect(refreshed.actors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Local Guide" }),
+    ]));
+    expect(refreshed.targets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Local Guide", kind: "actor" }),
+    ]));
+    expect(refreshed.citableRefs).toContain("Local Guide");
+  });
+
   it("reuses the exact matching temporary current-scene support actor without mutation", async () => {
     insertNpc({
       id: "npc-existing-vendor",

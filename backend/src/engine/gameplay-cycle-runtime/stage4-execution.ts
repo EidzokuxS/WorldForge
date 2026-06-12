@@ -82,6 +82,7 @@ type ClockRow = {
 type LocationRow = {
   id: string;
   name: string;
+  parent_location_id: string | null;
 };
 
 type NpcSupportRow = {
@@ -309,7 +310,18 @@ function locationByLabel(frame: AuthoritativeSceneFrame, label: string): Locatio
     location.name.trim().toLowerCase() === normalized
   );
   if (matches.length !== 1) return null;
-  return { id: matches[0].id, name: matches[0].name };
+  const parentRow = getSqliteConnection()
+    .prepare(`
+      SELECT parent_location_id AS parentLocationId
+      FROM locations
+      WHERE campaign_id = ? AND id = ?
+    `)
+    .get(frame.campaignId, matches[0].id) as { parentLocationId: string | null } | undefined;
+  return {
+    id: matches[0].id,
+    name: matches[0].name,
+    parent_location_id: parentRow?.parentLocationId ?? null,
+  };
 }
 
 function readPlayer(frame: AuthoritativeSceneFrame): PlayerRow | null {
@@ -3322,6 +3334,7 @@ async function executeSupportActorCreate(input: {
       const labels = supportActorLabels(effect.roleKind);
       const actorLabel = labels.actorLabel;
       const roleLabel = labels.roleLabel;
+      const supportActorLocationId = currentScene.parent_location_id ?? currentLocation.id;
       const normalizedActorLabel = actorLabel.trim().toLowerCase();
       const visibleLabelCollision = [
         input.frame.player.label,
@@ -3358,14 +3371,14 @@ async function executeSupportActorCreate(input: {
       const reusableRows = candidateRows.filter((row) => isReusableSupportActor({
         row,
         roleKind: effect.roleKind,
-        currentLocationId: currentLocation.id,
+        currentLocationId: supportActorLocationId,
         currentSceneLocationId: currentScene.id,
       }));
       if (sameNameRows.length > 0) {
         const exactNameReusableRows = sameNameRows.filter((row) => isReusableSupportActor({
           row,
           roleKind: effect.roleKind,
-          currentLocationId: currentLocation.id,
+          currentLocationId: supportActorLocationId,
           currentSceneLocationId: currentScene.id,
         }));
         if (sameNameRows.length === 1 && exactNameReusableRows.length === 1) {
@@ -3516,7 +3529,7 @@ async function executeSupportActorCreate(input: {
           factionName: null,
           homeLocationId: null,
           homeLocationName: null,
-          currentLocationId: currentLocation.id,
+          currentLocationId: supportActorLocationId,
           currentLocationName: input.frame.scene.currentLocation.label,
           relationshipRefs: [],
           socialStatus: [roleLabel],
@@ -3609,7 +3622,7 @@ async function executeSupportActorCreate(input: {
         JSON.stringify(tags),
         JSON.stringify(tags),
         "temporary",
-        currentLocation.id,
+        supportActorLocationId,
         currentScene.id,
         JSON.stringify({ short_term: [], long_term: [] }),
         "[]",
