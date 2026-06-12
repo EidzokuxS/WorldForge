@@ -2648,6 +2648,14 @@ function localObservationSurfaceGroupLabel(kinds: readonly LocalObservationSurfa
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function localObservationLabelList(entries: readonly LocalObservationSurfaceEntry[]): string {
+  return uniqueStrings(entries.map((entry) => entry.label)).join(", ");
+}
+
+function localObservationEntryList(entries: readonly LocalObservationSurfaceEntry[]): string {
+  return entries.map(localObservationSurfaceEntryLabel).join(", ");
+}
+
 function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
   return kinds.length === 1 && kinds[0] === "visible_actor";
 }
@@ -2685,7 +2693,7 @@ function localObservationSummary(input: {
       ? "No visible non-player actors are present in the current scene."
       : `Current ${surfaceGroup} show no match for "${input.effect.queryText}".`;
   }
-  const labels = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).slice(0, 6).join(", ");
+  const labels = localObservationLabelList(input.matchedEntries);
   if (input.resultKind === "positive_list") {
     return labels.length > 0
       ? `Current ${surfaceGroup} include: ${labels}.`
@@ -2693,10 +2701,7 @@ function localObservationSummary(input: {
         ? "No visible non-player actors are present in the current scene."
         : `Current ${surfaceGroup} include no entries.`;
   }
-  const matchedSurfaceLabels = input.matchedEntries
-    .map(localObservationSurfaceEntryLabel)
-    .slice(0, 6)
-    .join(", ");
+  const matchedSurfaceLabels = localObservationEntryList(input.matchedEntries);
   if (input.resultKind === "ambiguous_match") {
     return `Multiple current visible matches are available: ${matchedSurfaceLabels}.`;
   }

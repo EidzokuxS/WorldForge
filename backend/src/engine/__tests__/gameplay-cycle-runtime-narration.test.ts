@@ -1134,6 +1134,7 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("deterministically projects local_observation movement options without hidden placeholders", async () => {
+    const routeSummary = "Current route options include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
     const result = await runCleanNarration({
       narratorView: movementView({
         playerAction: "I look around for visible routes.",
@@ -1141,10 +1142,10 @@ describe("clean Stage 6 narration contracts", () => {
           ref: "e1",
           authority: "local_observation_receipt",
           claimKinds: ["local_observation"],
-          text: "Current route options and visible targets include: North Hall.",
+          text: routeSummary,
           backendFacts: [
-            { factRef: "e1.f1", text: "Current route options and visible targets include: North Hall.", exact: true },
-            { factRef: "e1.f2", text: "Checked current route options and visible targets.", exact: true },
+            { factRef: "e1.f1", text: routeSummary, exact: true },
+            { factRef: "e1.f2", text: "Checked current route options.", exact: true },
             { factRef: "e1.f3", text: "Observed route option North Hall.", exact: true },
           ],
           limits: {
@@ -1160,7 +1161,9 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Current route options and visible targets include: North Hall. Observed route option North Hall.");
+    expect(result.text).toBe(`${routeSummary} Observed route option North Hall.`);
+    expect(result.text).toContain("The Copper Tap");
+    expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
     expect(result.text).not.toContain("movement_option");
     expect(result.text).not.toContain("visible_target");

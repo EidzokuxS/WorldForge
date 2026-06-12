@@ -315,6 +315,10 @@ function boundedBackendFacts(facts: Array<ReturnType<typeof fact>>): Array<Retur
   return facts.slice(0, 8);
 }
 
+function evidenceLabelList(labels: readonly string[]): string {
+  return uniqueStrings(labels).join(", ");
+}
+
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
   const evidenceId = nextEvidenceId(evidence);
   evidence.push({
@@ -419,15 +423,16 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
 
   if (frame.movementOptions.length > 0) {
     const routeEvidenceId = nextEvidenceId(evidence);
+    const routeOptions = frame.movementOptions.slice(0, 8);
     evidence.push({
       evidenceId: routeEvidenceId,
       sourceKind: "scene_frame",
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["movement_option"],
-      text: `Visible route options include ${frame.movementOptions.slice(0, 6).map((option) => option.label).join(", ")}.`,
-      visibleRefs: frame.movementOptions.slice(0, 6).map((option) => option.ref),
-      backendFacts: boundedBackendFacts(frame.movementOptions.slice(0, 8).map((option, index) =>
+      text: `Visible route options include ${evidenceLabelList(routeOptions.map((option) => option.label))}.`,
+      visibleRefs: routeOptions.map((option) => option.ref),
+      backendFacts: boundedBackendFacts(routeOptions.map((option, index) =>
         fact(
           routeEvidenceId,
           index + 1,

@@ -4558,3 +4558,40 @@ Session: `gm-v1-consequenc-slice`.
     - DB verification artifact: `output/clean-runtime-p129-movement-repair-proof-clean-20260612200033/db-verification.json` with `pass=true`.
   - Status impact:
     - P129 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P130 clean gameplay runtime Acceptance-Candidate Lane / Post-P129 Manual Burn-In:
+  - Plan:
+    - [x] Select or create a fresh zero-turn clone with `chat_history=0`, no clean turn records, no old v2/saga/narrator/oracle/simulation store rows, and inspect the actual pre-frame before turn 1.
+    - [x] Run a stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; fail fast if `/api/chat/action` does not report `done.runtime=gameplay-cycle-runtime`.
+    - [x] Execute one manual action at a time from the observed post-turn state, choosing the next action only after inspecting the current response and DB state.
+    - [x] For each turn, persist an artifact with SSE response, DB verification, receipt/trace/ledger counts, old-store counts, and player-facing leak checks.
+    - [x] If any turn fails, restores, replays, leaks internals, contradicts DB truth, or uses old stores, mark the lane diagnostic-invalid, root-cause the contract miss, add regression coverage, run focused tests, and prove the repair on a fresh zero-turn clone.
+  - Diagnostic lane:
+    - Fresh clone: `p130-lowwater-acceptance-20260612201335` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Preflight artifact: `output/clean-runtime-p130-lowwater-acceptance-20260612201335/preflight-db.json`; clean-start pass true, `Lowwater Bazaar`, world clock `0/0/0`, old stores zero.
+    - Turn 1 artifact: `output/clean-runtime-p130-lowwater-acceptance-20260612201335/turn-001/`.
+    - Turn 1 action: `I look around Lowwater Bazaar and note visible routes and immediately present details, without moving.`
+    - Mechanical result stayed clean: `done.runtime=gameplay-cycle-runtime`, one accepted `local_observation` receipt, no mutation, no clock/scene change, old stores zero.
+    - Invalid player-facing result: the receipt matched 8 route options, but the player-facing narrative listed only the first 6 and omitted `The Copper Tap` and `Upper Dam Ruins` with no overflow cue. The lane is diagnostic-invalid from turn 1 and adds 0% final acceptance.
+  - Fix:
+    - `backend/src/engine/gameplay-cycle-runtime/stage4-execution.ts` now builds `local_observation` summary text from all already-bounded `matchedEntries` instead of silently slicing the display list to 6.
+    - `backend/src/engine/gameplay-cycle-runtime/settlement.ts` now keeps scene route-option evidence text/visible refs aligned with the bounded route facts it exposes to narration.
+    - This is a truthful bounded evidence formatting fix, not a raw-action guard, semantic regex, or fallback semantics patch.
+  - Regression coverage:
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` now proves 8 route options remain present in `local_observation` summary and matched entries.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` now proves the first summary fact preserves all bounded route labels, including labels beyond the per-entry fact cap, while keeping player-safe display labels.
+    - `backend/src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` now proves deterministic local-observation narration includes labels such as `The Copper Tap` and `Upper Dam Ruins` from the summary fact.
+  - Executed verification:
+    - GitNexus impact before editing `localObservationSummary`: LOW; direct caller `localObservationResult`, then `executeLocalObservation`, then `runCleanStage4Execution`.
+    - GitNexus impact before editing `stage4Evidence`: LOW; direct caller `buildCleanSettledTurnPacket`.
+    - GitNexus impact before editing `sceneEvidence`: LOW; direct caller `buildCleanSettledTurnPacket`.
+    - Focused Stage4/Settlement/Narration suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 79 tests passed.
+    - `npm --prefix backend run typecheck` passed.
+    - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 263 tests passed.
+  - Live repair proof:
+    - Fresh clone: `p130-lowwater-route-list-proof-20260612202332` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`.
+    - Artifact: `output/clean-runtime-p130-lowwater-route-list-proof-20260612202332/`.
+    - Preflight: clean-start pass true, `Lowwater Bazaar`, world clock `0/0/0`, 8 outgoing routes including `The Copper Tap` and `Upper Dam Ruins`, old stores zero.
+    - Turn 1 repeated the same action and passed `db-verification.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `local_observation` receipt, no mutation, no clock/scene change, old stores zero, and player-facing text contains all 8 route labels.
+  - Status impact:
+    - P130 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

@@ -2498,21 +2498,31 @@ describe("clean Stage 4 executor DB contracts", () => {
       "Current visible match: visible actor Guide.",
     );
 
+    const routeLabels = [
+      "North Hall",
+      "East Gate",
+      "South Dock",
+      "West Yard",
+      "Bell Tower",
+      "Lantern Row",
+      "The Copper Tap",
+      "Upper Dam Ruins",
+    ];
     const listSurfaceFrame: AuthoritativeSceneFrame = {
       ...inputFrame,
       frameId: "frame-stage4-local-observation-list-surface",
       turnId: "clean-turn-stage4-local-observation-list-surface",
       playerAction: "I look around for visible routes and current local targets.",
       actors: [],
-      targets: [{ ref: "North Hall", label: "North Hall", kind: "location" }],
-      movementOptions: [{ ref: "North Hall", label: "North Hall", connected: true, travelCost: 3 }],
-      citableRefs: ["Player", "Market", "North Hall"],
+      targets: [],
+      movementOptions: routeLabels.map((label) => ({ ref: label, label, connected: true, travelCost: 3 })),
+      citableRefs: ["Player", "Market", ...routeLabels],
     };
     const listSurfaceChecklist = checklistForKind("local_observation", listSurfaceFrame);
     listSurfaceChecklist.steps[0] = {
       ...listSurfaceChecklist.steps[0]!,
       targetRefs: ["Market"],
-      evidenceRefs: ["Player", "Market", "North Hall"],
+      evidenceRefs: ["Player", "Market", ...routeLabels],
       intended: {
         ...listSurfaceChecklist.steps[0]!.intended,
         localObservationPlan: {
@@ -2520,7 +2530,7 @@ describe("clean Stage 4 executor DB contracts", () => {
           mode: "list_surface",
           queryText: "visible routes and current local targets",
           targetRef: null,
-          surfaceKinds: ["movement_option", "visible_target"],
+          surfaceKinds: ["movement_option"],
           allowBoundedNegative: false,
           anchorRef: "Market",
         },
@@ -2534,17 +2544,17 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current route options and visible targets include: North Hall.",
+        summary: "Current route options include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.",
         localObservation: {
           resultKind: "positive_list",
-          matchedEntries: [
-            expect.objectContaining({ surfaceKind: "visible_target", label: "North Hall" }),
-            expect.objectContaining({ surfaceKind: "movement_option", label: "North Hall" }),
-          ],
-          searchedSurfaceKinds: ["movement_option", "visible_target"],
+          searchedSurfaceKinds: ["movement_option"],
         },
       },
     });
+    expect(
+      listSurface.execution?.receipts[0]?.publicResult.localObservation?.matchedEntries
+        .map((entry) => `${entry.surfaceKind}:${entry.label}`),
+    ).toEqual(routeLabels.map((label) => `movement_option:${label}`));
 
     const placeHandleFrame: AuthoritativeSceneFrame = {
       ...inputFrame,

@@ -967,19 +967,30 @@ describe("clean Stage 5 settlement contracts", () => {
   });
 
   it("settles local_observation movement-option facts with player-safe display labels", () => {
+    const routeLabels = [
+      "North Hall",
+      "East Gate",
+      "South Dock",
+      "West Yard",
+      "Bell Tower",
+      "Lantern Row",
+      "The Copper Tap",
+      "Upper Dam Ruins",
+    ];
+    const routeSummary = `Current route options include: ${routeLabels.join(", ")}.`;
     const inputFrame = frame({
       playerAction: "I look around for visible routes and local targets.",
-      targets: [{ ref: "North Hall", label: "North Hall", kind: "location" }],
-      movementOptions: [{ ref: "North Hall", label: "North Hall", connected: true, travelCost: 1 }],
-      citableRefs: ["Player", "Market", "North Hall"],
+      targets: [],
+      movementOptions: routeLabels.map((label) => ({ ref: label, label, connected: true, travelCost: 1 })),
+      citableRefs: ["Player", "Market", ...routeLabels],
     });
     const inputChecklist = checklist(inputFrame);
     const receipt = cleanStage4ReceiptSchema.parse({
       ...localObservationReceipt(inputFrame, inputChecklist),
       publicResult: {
         ...localObservationReceipt(inputFrame, inputChecklist).publicResult,
-        summary: "Current route options and visible targets include: North Hall.",
-        visibleRefs: ["Player", "Market", "North Hall"],
+        summary: routeSummary,
+        visibleRefs: ["Player", "Market", ...routeLabels],
         localObservation: {
           type: "local_observation",
           surfaceVersion: "scene_frame_current_observation_surface.v1",
@@ -987,15 +998,16 @@ describe("clean Stage 5 settlement contracts", () => {
           mode: "list_surface",
           queryText: "visible routes and local targets",
           targetLabel: null,
-          matchedEntries: [
-            { surfaceKind: "visible_target", label: "North Hall", detail: "location target" },
-            { surfaceKind: "movement_option", label: "North Hall", detail: "movement option label only" },
-          ],
-          searchedSurfaceKinds: ["movement_option", "visible_target"],
+          matchedEntries: routeLabels.map((label) => ({
+            surfaceKind: "movement_option",
+            label,
+            detail: "movement option label only",
+          })),
+          searchedSurfaceKinds: ["movement_option"],
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
           boundedNegative: false,
-          summary: "Current route options and visible targets include: North Hall.",
+          summary: routeSummary,
           claimStatus: "bounded_current_scene_observation_only",
         },
       },
@@ -1008,11 +1020,17 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Current route options and visible targets include: North Hall.",
-      "Checked current route options and visible targets.",
-      "Observed visible target North Hall.",
+      routeSummary,
+      "Checked current route options.",
       "Observed route option North Hall.",
+      "Observed route option East Gate.",
+      "Observed route option South Dock.",
+      "Observed route option West Yard.",
+      "Observed route option Bell Tower.",
+      "Observed route option Lantern Row.",
     ]);
+    expect(observation?.backendFacts[0]?.text).toContain("The Copper Tap");
+    expect(observation?.backendFacts[0]?.text).toContain("Upper Dam Ruins");
     expect(JSON.stringify(observation)).not.toContain("[hidden]");
     expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
