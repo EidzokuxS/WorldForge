@@ -3318,3 +3318,39 @@ Session: `gm-v1-consequenc-slice`.
     - GitNexus `detect_changes(scope=all)` before commit reported CRITICAL risk by breadth: 46 changed symbols, 17 affected processes, centered on `runCleanStage4Execution` receipt/assert paths and `buildAuthoritativeSceneFrame` flows. This is the expected P72 primitive surface and is covered by typecheck, the focused 227-test suite, P69 live transfer proof, and P72 live minor-POI proof above.
   - Status impact:
     - Diagnostic primitive evidence is complete for P72 and the requested P69 item-transfer regression proof is clean. This adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P73 clean gameplay runtime Post-P72 Adaptive Burn-in / Next Primitive Discovery:
+  - Status:
+    - [x] Start from a clean tree after committed P72.
+    - [x] Create fresh zero-turn clones and inspect the actual current SceneFrame before turn 1.
+    - [x] Run stable clean backend, not watch mode.
+    - [x] Send one manually chosen `/api/chat/action` at a time, inspect the frozen post-turn state, then choose the next action from that observed state.
+    - [x] Stop at the first failed/restored/replayed/invalid player-facing turn and classify the next primitive/gap from evidence.
+    - [x] Record the clean diagnostic slice after fixing the discovered blockers.
+  - Purpose:
+    - Use P72-complete runtime behavior to discover the next real acceptance blocker instead of guessing the next primitive from old-loop failures.
+    - Keep this as diagnostic burn-in only; it adds 0% final acceptance until multiple different zero-turn campaigns/clones reach about 60 clean manual turns each.
+  - Initial candidate action families:
+    - Current-scene look/visible-roster observation.
+    - Support actor dialogue with current-scene guidance.
+    - Minor place-handle creation plus dependent dialogue.
+    - Route check and legal movement.
+    - Device/local observation if the actual SceneFrame exposes relevant held/visible surfaces.
+  - Diagnostic evidence:
+    - First burn-in clone `p73-burnin-050649` exposed an invalid player-facing turn: clean SceneFrame `actors`/`citableRefs` included broad-location background actors from sibling scenes (`Sigil Boss Torvin Kask`, `Litha Corsen`) even though no NPCs were present in the current scene.
+    - Root cause: clean `actorRows` projected `frame.roster.background` into authoritative current-scene actors/citable refs. Fix: current clean SceneFrame actors now include only active/support roster entries.
+    - Retry clone `p73-burnin-r2-051244` passed turn 1 look and turn 2 `minor_poi_create`, then exposed an invalid support-dialogue turn: `I call over a local market guide ...` compiled to `time_advance` because wait-like wording (`watch` / `keep an eye on`) took priority over structured `ordinary_support_actor_needed`.
+    - Root cause: deterministic checklist time fallback was keyed by raw text alone after other steps stayed empty. Fix: `time_advance` now requires GM Read `interactionKind=time_passage`, and GM Read prompt now routes call-over/hail/find/ask ordinary local roles with speech/request wording to `ordinary_support_actor_needed` plus `dialogue_requested_but_not_yet_recorded`.
+    - Clone `p73-burnin-r3-052539` was invalid harness evidence because the backend was started without `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`; old runtime stores/traces appeared and that lane was discarded.
+    - Final clean diagnostic proof used clone `p73-burnin-r4-053049` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=1`; artifacts are under `output/clean-runtime-p73-burnin-r4-20260612t053049/`.
+  - Final clean diagnostic slice:
+    - Turn 1 look action stayed clean: no sibling-scene actor leak, no receipts, `worldVersion=0`, `worldTimeMinutes=0`, `currentTick=0`, and no old v2/saga/narrator/oracle/simulation store rows.
+    - Turn 2 minor POI action accepted exactly one `minor_poi_create` receipt, created `clean_gameplay_minor_pois.slug=small_tea_stall`, wrote `gameplay-cycle-runtime.minor_poi_create.v1`, advanced `worldVersion 0 -> 1` only, and kept time/tick/old stores unchanged.
+    - Turn 3 support-dialogue action accepted `support_actor_create` plus dependent `dialogue_record`, materialized `Local Guide`, kept `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, no old stores, and advanced `worldVersion 1 -> 2` only for the support actor materialization.
+  - Executed verification:
+    - GitNexus impact was run before edits on `actorRows`, `buildDeterministicGmActionChecklist`, and `buildGmReadSystemPrompt`; each reported LOW risk with the expected direct clean-runtime caller.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused clean runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 4 files, 229 tests passed.
+    - Added regression coverage for sibling-scene background actors being excluded from clean SceneFrame actors/citable refs, and for support-actor planning outranking wait-like wording in a support request.
+  - Status impact:
+    - P73 is diagnostic burn-in/fallout repair only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

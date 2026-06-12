@@ -1164,7 +1164,14 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
-  } else if (steps.length === 0 && !dialogueSpeaker && allowed.has("time_advance") && sceneRef && wantsExplicitWait(actionText)) {
+  } else if (
+    steps.length === 0
+    && !dialogueSpeaker
+    && allowed.has("time_advance")
+    && sceneRef
+    && input.gmRead.actionInterpretation.interactionKind === "time_passage"
+    && wantsExplicitWait(actionText)
+  ) {
     steps.push(stepFor({
       index: 1,
       kind: "time_advance",

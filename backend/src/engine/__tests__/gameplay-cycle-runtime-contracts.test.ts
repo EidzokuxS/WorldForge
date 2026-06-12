@@ -3295,6 +3295,82 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("prioritizes ordinary support actor planning over wait-like wording in a support request", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I call over a local market guide and say, \"Please watch the small tea stall while I sort my courier tube.\"",
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+        { capabilityId: "support_actor_create", evidenceAuthority: "terminal_receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+        { capabilityId: "time_advance", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      targets: [{ ref: "small_tea_stall", label: "small tea stall", kind: "place_handle" }],
+      citableRefs: ["Player", "Market", "North Hall", "small_tea_stall"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "small_tea_stall"],
+      evidenceRefs: ["Player", "Market", "small_tea_stall"],
+      liveSceneQuestion: "Can one ordinary local guide be materialized, then respond after refresh?",
+      actionInterpretation: {
+        summary: "The player calls over an ordinary local guide and asks them to watch a visible current-scene place handle.",
+        playerIntent: "Call over a local market guide and ask them to watch the small tea stall.",
+        method: "call over and ask",
+        targetRefs: ["Market", "small_tea_stall"],
+        interactionKind: "ordinary_support_actor_needed",
+        supportActorNeed: {
+          roleKind: "guide",
+          requestedRoleText: "local market guide",
+          currentScenePlausibility: "ordinary_local_role",
+          intendedUse: "dialogue_requested_but_not_yet_recorded",
+          evidenceRefs: ["Player", "Market", "small_tea_stall"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market", "small_tea_stall"],
+      evidenceRefs: ["Player", "Market", "small_tea_stall"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Support actor materialization and dependent dialogue require backend receipts.",
+        evidenceRefs: ["Player", "Market", "small_tea_stall"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-support-watch-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "support_actor_create",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps.map((step) => step.intended.kind)).not.toContain("time_advance");
+    expect(result.checklist.steps[1]).toMatchObject({
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "materialized_speaker",
+        fromStepId: "step-1",
+        requiredCapabilityId: "support_actor_create",
+        requiredReceiptAuthority: "support_actor_materialization_receipt",
+        sourcePath: "publicResult.supportActor.actorRef",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "actors_and_citableRefs",
+      }],
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("deterministically splits Player local condition before visible dialogue with post-condition SceneFrame refresh binding", async () => {
     const frame = actionPlanFrame({
       playerAction: "I kneel and ask Guide what they see.",

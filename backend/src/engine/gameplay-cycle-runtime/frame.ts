@@ -66,7 +66,6 @@ function actorRows(frame: SceneFrame): AuthoritativeSceneFrame["actors"] {
   const rows = [
     ...frame.roster.active.map((actor) => ({ actor, role: "active" as const })),
     ...frame.roster.support.map((actor) => ({ actor, role: "support" as const })),
-    ...frame.roster.background.map((actor) => ({ actor, role: "background" as const })),
   ];
   return rows
     .filter(({ actor }) => actor.type !== "player")

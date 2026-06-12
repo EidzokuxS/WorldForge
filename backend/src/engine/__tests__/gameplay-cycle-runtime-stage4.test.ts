@@ -854,6 +854,74 @@ describe("clean Stage 4 executor DB contracts", () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
+  it("keeps broad-location background actors out of clean SceneFrame actors and citable refs", async () => {
+    const now = Date.now();
+    exec(
+      `INSERT INTO npcs (
+        id,
+        campaign_id,
+        name,
+        persona,
+        tags,
+        tier,
+        current_location_id,
+        goals,
+        beliefs,
+        unprocessed_importance,
+        inactive_ticks,
+        created_at,
+        character_record,
+        derived_tags,
+        current_scene_location_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      "npc-sibling-scene",
+      CAMPAIGN_ID,
+      "Sibling Scene Broker",
+      "Present somewhere in the broad market, but not in the player's current scene.",
+      "[]",
+      "persistent",
+      "loc-market",
+      "{\"short_term\":[],\"long_term\":[]}",
+      "[]",
+      0,
+      0,
+      now,
+      "{}",
+      "[]",
+      "loc-north-hall",
+    );
+
+    const sceneFrame = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-background-actor",
+      playerAction: {
+        submitted: "I look around.",
+        normalized: "I look around.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 0,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: tempRoot,
+          capturedAt: now,
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+      idempotencyKey: "background-actor-clean-frame",
+    });
+
+    expect(sceneFrame.actors.map((actor) => actor.ref)).not.toContain("Sibling Scene Broker");
+    expect(sceneFrame.citableRefs).not.toContain("Sibling Scene Broker");
+  });
+
   it("applies accepted movement and persists clean receipt authority transactionally", async () => {
     const inputFrame = frame();
     const result = await runCleanStage4Execution({
