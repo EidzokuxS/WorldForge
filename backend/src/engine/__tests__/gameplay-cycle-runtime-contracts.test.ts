@@ -37,6 +37,7 @@ import {
   processCleanGameplayTurnFromInput,
 } from "../gameplay-cycle-runtime/runtime.js";
 import {
+  buildGmReadPrompt,
   buildGmReadSystemPrompt,
   gmReadModelGenerationSchema,
   runCleanGmRead,
@@ -1643,6 +1644,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("procedural does not authorize");
     expect(prompt).toContain("uncertain does not authorize");
     expect(prompt).toContain("Do not copy the inventory item's current equipState into equipSlot.");
+  });
+
+  it("exposes a current-frame cue for visible actor inventory handoffs", () => {
+    const prompt = buildGmReadPrompt(minimalFrame({
+      playerAction: "I hand the Brass Tube to Guide.",
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    }));
+
+    expect(prompt).toContain("Current-frame item_transfer cue");
+    expect(prompt).toContain("choose interactionKind=item_transfer");
+    expect(prompt).toContain("\"itemRef\": \"Brass Tube\"");
+    expect(prompt).toContain("\"targetRef\": \"Guide\"");
+    expect(prompt).toContain("\"equipSlot\": null");
   });
 
   it("repairs once locally, then accepts only a validated GM Read", async () => {

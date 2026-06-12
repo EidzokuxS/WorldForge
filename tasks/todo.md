@@ -3568,3 +3568,34 @@ Session: `gm-v1-consequenc-slice`.
     - Player-facing narration proof: `Courier satchel item state changed: dropped_in_scene. Item label: Courier satchel. Operation: drop_in_current_scene. Source: Mira Voss. Target: Transmission Basement. Final equip state: carried. Current scene anchor: Transmission Basement. Item transfer result: dropped_in_scene.`
   - Status impact:
     - P80 is diagnostic burn-in/composition evidence only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.
+
+- P81 clean gameplay runtime Fallout Repair / Item Transfer Compatibility Projection:
+  - Status:
+    - [x] Reproduced live fallout after P80 on continued clone `p79-transfer-dialogue-r3-85038c`.
+    - [x] Classified the failed P81 pickup attempt as diagnostic-invalid, not acceptance evidence.
+    - [x] Fixed the root cause without binding to old gameplay-cycle-v2 tools or handlers.
+    - [x] Added focused regression coverage for legacy inventory authority reload after clean item transfer.
+    - [x] Re-ran typecheck, focused clean-runtime suite, and a fresh zero-turn live `/api/chat/action` proof.
+  - Diagnostic failure:
+    - Attempted action on continued P80 clone: `I pick up the Courier satchel from the floor beside me, without opening it or moving.`
+    - Artifact: `output/clean-runtime-p81-pickup-item-20260612073745/`.
+    - Local precheck frame saw the dropped `Courier satchel` as a current-scene item target, but live `/api/chat/action` settled as `blocked_no_mutation/direct_scene` with no `gm-action-checklist` or Stage 4 receipt.
+    - Root cause was not stale SQLite snapshot state. `loadCampaign` ran `ensureCampaignInventoryAuthority`; because P80 removed the last player-owned item, the legacy compatibility projection still said the Player owned/equipped `Courier satchel`, so inventory authority recreated a second Player-owned satchel row on reload.
+  - Fix:
+    - Added `refreshInventoryCompatibilityProjectionForActor(campaignId, actorId)` in `backend/src/inventory/legacy-migration.ts`.
+    - Clean Stage 4 `item_transfer` now refreshes compatibility projections for the previous owner and next owner after an accepted item mutation.
+    - GM Read prompt now includes a current-frame cue/example for inventory-to-visible-actor handoffs so live models keep simple `hand/give/pass/offer inventory item to visible actor` turns on the `item_transfer` branch.
+  - Verification:
+    - GitNexus impact before edits:
+      - `executeItemTransfer`: LOW, direct caller `runCleanStage4Execution`.
+      - `ensureCampaignInventoryAuthority`: LOW, direct caller `loadCampaign`.
+      - `rewritePlayerCompatibilityProjection` / `rewriteNpcCompatibilityProjection`: LOW, through `ensureCampaignInventoryAuthority`.
+      - `buildGmReadPrompt` / `runCleanGmRead`: LOW.
+    - `npm --prefix backend run typecheck` passed.
+    - Focused suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 238 tests passed.
+    - Fresh zero-turn clone `p69-item-transfer-59105f9a` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`, action `I hand the Brass Tube to Guide.`
+    - Live result artifact: `output/clean-runtime-p69-item-transfer-live-20260612075111/`.
+    - DB proof: one accepted `item_transfer` receipt, `Brass Tube` owner became `Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes=0`, `currentTick=0`, no `turn_clock_ledger`, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, and old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Post-load proof: `post-load-inventory-authority-check.json` confirms `loadCampaign` leaves exactly one `Brass Tube`, owner `Guide`, and Player-owned `Brass Tube` count 0.
+  - Status impact:
+    - P81 is diagnostic fallout repair and primitive proof only. It adds 0% final acceptance until multiple different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed/replayed/restored/invalid player-facing turns.

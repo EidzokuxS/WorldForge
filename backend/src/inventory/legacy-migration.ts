@@ -279,6 +279,35 @@ function rewriteNpcCompatibilityProjection(campaignId: string, row: NpcRow): voi
     .run();
 }
 
+export function refreshInventoryCompatibilityProjectionForActor(
+  campaignId: string,
+  actorId: string | null,
+): void {
+  if (!actorId) {
+    return;
+  }
+
+  const db = getDb();
+  const playerRow = db
+    .select()
+    .from(players)
+    .where(and(eq(players.campaignId, campaignId), eq(players.id, actorId)))
+    .get();
+  if (playerRow) {
+    rewritePlayerCompatibilityProjection(campaignId, playerRow);
+    return;
+  }
+
+  const npcRow = db
+    .select()
+    .from(npcs)
+    .where(and(eq(npcs.campaignId, campaignId), eq(npcs.id, actorId)))
+    .get();
+  if (npcRow) {
+    rewriteNpcCompatibilityProjection(campaignId, npcRow);
+  }
+}
+
 export function ensureCampaignInventoryAuthority(campaignId: string): void {
   const db = getDb();
   const playerRows = db.select().from(players).where(eq(players.campaignId, campaignId)).all();

@@ -1024,9 +1024,38 @@ export function buildGmReadSystemPrompt(): string {
 }
 
 export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
+  const firstInventoryItem = frame.inventory[0]?.ref ?? null;
+  const firstVisibleActor = frame.actors[0]?.ref ?? null;
+  const itemTransferCue = firstInventoryItem && firstVisibleActor
+    ? [
+      "Current-frame item_transfer cue:",
+      "When the player hands, gives, passes, offers, or transfers a SceneFrame.inventory item to a SceneFrame.actors visible non-player actor, choose interactionKind=item_transfer unless the same action asks for spoken response content.",
+      "Use path=procedural, targetRefs=[itemRef,targetRef], and fill itemTransferNeed with operation=give_to_visible_actor, sourceKind=player_inventory, targetKind=visible_actor, equipSlot=null.",
+      "For this frame, a valid handoff example shape is:",
+      JSON.stringify({
+        path: "procedural",
+        actionInterpretation: {
+          interactionKind: "item_transfer",
+          targetRefs: [firstInventoryItem, firstVisibleActor],
+          itemTransferNeed: {
+            actorRef: "Player",
+            operation: "give_to_visible_actor",
+            itemRef: firstInventoryItem,
+            sourceKind: "player_inventory",
+            targetKind: "visible_actor",
+            targetRef: firstVisibleActor,
+            equipSlot: null,
+            requestedItemText: firstInventoryItem,
+            evidenceRefs: ["Player", firstInventoryItem, firstVisibleActor, frame.scene.currentScene.ref],
+          },
+        },
+      }, null, 2),
+    ].join("\n")
+    : "Current-frame item_transfer cue: no inventory-to-visible-actor handoff example is available in this SceneFrame.";
   return [
     "Interpret the player action against this authoritative SceneFrame.",
     "Return gm-read.v1 JSON. Do not add extra fields.",
+    itemTransferCue,
     JSON.stringify(promptFrame(frame), null, 2),
   ].join("\n\n");
 }

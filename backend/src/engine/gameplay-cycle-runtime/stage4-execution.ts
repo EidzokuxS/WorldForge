@@ -9,6 +9,7 @@ import {
   projectPlayerRecord,
   type PlayerRecordProjection,
 } from "../../character/record-adapters.js";
+import { refreshInventoryCompatibilityProjectionForActor } from "../../inventory/legacy-migration.js";
 import {
   loadLocationGraph,
   resolveTravelPath,
@@ -4453,6 +4454,8 @@ async function executeItemTransfer(input: {
       if (updateItem.changes !== 1) {
         throw new Error("item row optimistic update failed");
       }
+      refreshInventoryCompatibilityProjectionForActor(input.frame.campaignId, item.row.owner_id);
+      refreshInventoryCompatibilityProjectionForActor(input.frame.campaignId, target.nextOwnerId);
       const updateClock = db.prepare(`
         UPDATE world_clocks
         SET world_version = ?, updated_at = ?

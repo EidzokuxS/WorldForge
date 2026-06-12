@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, connectDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
+import { ensureCampaignInventoryAuthority } from "../../inventory/legacy-migration.js";
 import { buildAuthoritativeSceneFrame } from "../gameplay-cycle-runtime/frame.js";
 import { runCleanStage4Execution } from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
@@ -1270,6 +1271,131 @@ describe("clean Stage 4 executor DB contracts", () => {
       ownerId: "npc-guide",
       locationId: null,
       equipState: "carried",
+    });
+  });
+
+  it("keeps dropped item transfers from being recreated by legacy inventory authority on reload", async () => {
+    exec(
+      "UPDATE players SET character_record = ?, equipped_items = ? WHERE id = ?",
+      JSON.stringify({
+        loadout: {
+          inventorySeed: ["Courier satchel"],
+          equippedItemRefs: ["Courier satchel"],
+          signatureItems: ["Courier satchel"],
+        },
+      }),
+      JSON.stringify(["Courier satchel"]),
+      "player-1",
+    );
+    insertItem({
+      id: "item-courier-satchel",
+      name: "Courier satchel",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "equipped",
+      equippedSlot: "equipped",
+      tags: ["starting-loadout", "equipped"],
+    });
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...itemTransferFrame(),
+      frameId: "frame-stage4-drop-satchel",
+      turnId: "clean-turn-stage4-drop-satchel",
+      playerAction: "I set the Courier satchel down beside me.",
+      actors: [],
+      targets: [],
+      inventory: [{
+        ref: "Courier satchel",
+        label: "Courier satchel",
+        equipState: "equipped",
+        tags: ["starting-loadout", "equipped"],
+      }],
+      citableRefs: ["Player", "Market", "Courier satchel"],
+    };
+    const base = checklistForKind("item_transfer", inputFrame);
+    const step = base.steps[0]!;
+    const dropChecklist: GmActionChecklist = {
+      ...base,
+      turnIntent: {
+        playerIntent: "Set Courier satchel down in the current scene.",
+        admittedConsequenceNeed: "Item location/equip state requires backend receipt authority.",
+      },
+      steps: [{
+        ...step,
+        targetRefs: ["Courier satchel", "Market"],
+        evidenceRefs: ["Player", "Courier satchel", "Market"],
+        intended: {
+          kind: "item_transfer",
+          stateOrEvidence: "state",
+          requiredCapabilityId: "item_transfer",
+          summary: "Stage 4 must move Courier satchel from Player inventory to the current scene.",
+          itemTransferPlan: {
+            actorRef: "Player",
+            operation: "drop_in_current_scene",
+            itemRef: "Courier satchel",
+            sourceKind: "player_inventory",
+            targetKind: "current_scene",
+            targetRef: "Market",
+            targetEquipState: "carried",
+            targetEquippedSlot: null,
+            anchorRef: "Market",
+          },
+        },
+        expectedVisibleEffect: {
+          summary: "Accepted item transfer receipt only.",
+          visibleRefs: ["Player", "Courier satchel", "Market"],
+        },
+      }],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: dropChecklist,
+    });
+
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      publicResult: {
+        itemTransfer: {
+          resultKind: "dropped_in_scene",
+          itemLabel: "Courier satchel",
+        },
+      },
+    });
+    ensureCampaignInventoryAuthority(CAMPAIGN_ID);
+
+    const rows = getSqliteConnection()
+      .prepare(`
+        SELECT id, owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot, tags
+        FROM items
+        WHERE campaign_id = ? AND name = ?
+        ORDER BY id
+      `)
+      .all(CAMPAIGN_ID, "Courier satchel") as Array<{
+        id: string;
+        ownerId: string | null;
+        locationId: string | null;
+        equipState: string;
+        equippedSlot: string | null;
+        tags: string;
+      }>;
+    expect(rows).toEqual([{
+      id: "item-courier-satchel",
+      ownerId: null,
+      locationId: "loc-market",
+      equipState: "carried",
+      equippedSlot: null,
+      tags: JSON.stringify(["starting-loadout", "equipped"]),
+    }]);
+
+    const playerProjection = getSqliteConnection()
+      .prepare("SELECT character_record AS characterRecord, equipped_items AS equippedItems FROM players WHERE id = ?")
+      .get("player-1") as { characterRecord: string; equippedItems: string };
+    expect(JSON.parse(playerProjection.equippedItems)).toEqual([]);
+    expect(JSON.parse(playerProjection.characterRecord).loadout).toMatchObject({
+      inventorySeed: [],
+      equippedItemRefs: [],
+      signatureItems: [],
     });
   });
 
