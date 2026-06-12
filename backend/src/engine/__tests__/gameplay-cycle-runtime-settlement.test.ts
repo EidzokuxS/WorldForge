@@ -652,12 +652,19 @@ describe("clean Stage 5 settlement contracts", () => {
   it("settles direct scene snapshots with visible targets and movement options for broad look actions", () => {
     const inputFrame = frame({
       playerAction: "I look around for visible objects, exits, and local targets.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
       targets: [
+        { ref: "Guide", label: "Guide", kind: "actor" },
         { ref: "Notice Board", label: "Notice Board", kind: "place_handle" },
         { ref: "North Hall", label: "North Hall", kind: "location" },
       ],
       inventory: [{ ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] }],
-      citableRefs: ["Player", "Market", "North Hall", "Notice Board", "Courier satchel"],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Notice Board", "Courier satchel"],
     });
     const packet = buildPacket({
       frame: inputFrame,
@@ -671,11 +678,15 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
     expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
     const targetEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_target"));
+    const actorEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_actor"));
+    expect(actorEvidence?.text).toBe("Guide is visible in the current scene.");
+    expect(actorEvidence?.limits.proves).toEqual(["actor visible in the current scene"]);
     expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toContain("Visible target: Notice Board (place_handle).");
     expect(targetEvidence?.limits.doesNotProve).toContain("movement");
     const routeEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("movement_option"));
     expect(routeEvidence?.backendFacts.map((entry) => entry.text)).toContain("Route option: North Hall (connected, 1 minute(s)).");
     expect(routeEvidence?.limits.doesNotProve).toContain("arrival");
+    expect(JSON.stringify(view)).not.toContain("SceneFrame");
   });
 
   it("settles route_check into route status only", () => {

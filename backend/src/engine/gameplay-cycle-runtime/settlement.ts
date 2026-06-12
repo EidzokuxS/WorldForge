@@ -351,7 +351,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       visibleRefs: [visible.source],
       backendFacts: [fact(visibleEvidenceId, 1, visible.summary)],
       limits: {
-        proves: ["visible fact in the SceneFrame snapshot"],
+        proves: ["current visible scene fact"],
         doesNotProve: SCENE_DOES_NOT_PROVE,
       },
     });
@@ -365,11 +365,11 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
-      text: `${actor.label} is visible in the current SceneFrame.`,
+      text: `${actor.label} is visible in the current scene.`,
       visibleRefs: [actor.ref],
       backendFacts: [fact(actorEvidenceId, 1, `Visible actor: ${actor.label}.`)],
       limits: {
-        proves: ["actor visible in the SceneFrame snapshot"],
+        proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "absence of other actors", "future actor action"],
       },
     });
@@ -387,7 +387,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       visibleRefs: [item.ref],
       backendFacts: [fact(itemEvidenceId, 1, `Inventory item: ${item.label}.`)],
       limits: {
-        proves: ["inventory item label in the SceneFrame snapshot"],
+        proves: ["inventory item label in the current inventory view"],
         doesNotProve: ["item state change", "item transfer", "absence of other items"],
       },
     });
@@ -411,7 +411,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
         fact(targetEvidenceId, index + 1, `Visible target: ${target.label} (${target.kind}).`)
       )),
       limits: {
-        proves: ["visible target labels in the SceneFrame snapshot"],
+        proves: ["visible current-scene target labels"],
         doesNotProve: ["hidden targets", "discovery", "route legality", "movement", "services", "inventory contents", "absence of other targets"],
       },
     });
@@ -435,7 +435,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
         )
       )),
       limits: {
-        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        proves: ["route option labels visible from the current scene"],
         doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "elapsed travel time", "absence of other routes"],
       },
     });
@@ -514,7 +514,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: boundedBackendFacts(backendFacts),
         limits: {
-          proves: ["current visible SceneFrame snapshot entries"],
+          proves: ["current visible scene entries"],
           doesNotProve: SCENE_DOES_NOT_PROVE,
         },
       });
@@ -612,7 +612,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           )
         )),
         limits: {
-          proves: ["route options exposed by current SceneFrame"],
+          proves: ["route options visible from the current scene"],
           doesNotProve: ROUTE_OPTIONS_DOES_NOT_PROVE,
         },
       });
@@ -798,7 +798,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           proves: [
             "accepted visible current-scene place handle label",
             "accepted place handle kind",
-            "current SceneFrame target handle",
+            "current visible target handle",
           ],
           doesNotProve: MINOR_POI_DOES_NOT_PROVE,
         },

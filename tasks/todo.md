@@ -8,6 +8,34 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P126 clean settlement evidence SceneFrame wording leak:
+- Baseline: branch clean/synced after commit `495fb77f`.
+- Continued P125 burn-in clone `p124-rooftop-actors-proof-T15521` after turn 15. Pre-turn state: `Shibuya Back-Alley Meeting Point`, visible actor `Nishimura Koji`, clock `worldVersion=9/worldTimeMinutes=8/currentTick=8`, clean turn records 15, old v2/saga/narrator/oracle/simulation stores 0.
+- Turn 16 artifact `output/clean-runtime-p126-shibuya-turn16-20260612191806/`.
+  - Action: `I ask Nishimura Koji, "What are you watching for here?" and I do nothing else.`
+  - Invalid result: dialogue receipt was mechanically clean, but player-facing narration leaked the runtime term `SceneFrame`: `Nishimura Koji is visible in the current SceneFrame.`
+  - Root cause: `sceneEvidence()` in `backend/src/engine/gameplay-cycle-runtime/settlement.ts` wrote player-facing accepted evidence text and `limits.proves` with internal `SceneFrame` wording. Stage 6 copied that accepted evidence into the final prose.
+  - Status impact: P125/P126 Shibuya lane is diagnostic-invalid from turn 16 and adds 0% final acceptance.
+- Fix:
+  - `settlement.ts` now emits player-safe evidence wording such as `visible in the current scene`, `current visible scene entries`, and `route options visible from the current scene`; raw `SceneFrame` wording is removed from settlement evidence exposed to the narrator view.
+  - No raw-action guard, semantic fallback, or old runtime patch was added.
+- Regression coverage:
+  - `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` now includes a direct-scene visible actor and asserts actor evidence text is `Guide is visible in the current scene.`, proves text is player-safe, and the narrator view JSON contains no `SceneFrame`.
+- Executed verification:
+  - GitNexus impact before editing `sceneEvidence`: LOW; direct caller `buildCleanSettledTurnPacket`.
+  - GitNexus impact before editing `buildCleanSettledTurnPacket`: LOW.
+  - `rg` found no `SceneFrame` string literals remaining in `backend/src/engine/gameplay-cycle-runtime/settlement.ts`.
+  - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 45 tests passed.
+  - `npm --prefix backend run typecheck` passed.
+  - Full focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 260 tests passed.
+- Live repair proof:
+  - Fresh clean-start clone `p126-scene-evidence-leak-proof-192145` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`.
+  - Turn 1 artifact `output/clean-runtime-p126-scene-evidence-leak-turn1-20260612192145/`: moved to `Shibuya Back-Alley Meeting Point`; accepted `movement`, clock/worldVersion advanced by 1, old stores 0, post-frame exposed `Nishimura Koji`.
+  - Turn 2 artifact `output/clean-runtime-p126-scene-evidence-leak-turn2-20260612192329/`: repeated the dialogue action; accepted `dialogue_record`, no mutation/clock advance, old stores 0.
+  - Turn 2 player-facing text: `You are at the Shibuya Back-Alley Meeting Point. Nishimura Koji says: "The wrong people showing up. This isn't a social call."`
+  - Verification script checked final narrative and persisted settlement/narrator view for `SceneFrame`; both were clean, `runtime=gameplay-cycle-runtime`, and old stores stayed 0.
+- Status impact: P126 is a fallout repair proof only. Final acceptance remains 0% until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P125 Shibuya acceptance-candidate burn-in after current-scene actor fix:
 - Baseline: branch clean/synced after commit `e3856c5a` (`Fix clean current-scene actor visibility`).
 - Continued fresh zero-turn clone `p124-rooftop-actors-proof-T15521` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`; turns 1-2 came from the P124 repair proof and remained clean.
