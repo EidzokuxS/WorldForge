@@ -8,6 +8,23 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-12
 
+P121 clean Shibuya current-scene actor visibility diagnostic:
+- Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `1e0ee2f8`.
+- Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P120 turn 6. Pre-turn DB inspection: current scene `Shibuya District`, clock `worldVersion=3/worldTimeMinutes=4/currentTick=4`, `clean_gameplay_turn_records=6`, `clean_gameplay_stage4_receipts=4`, `authority_traces=3`, `turn_clock_ledger=3`, and old v2/saga/narrator/oracle/simulation stores all 0.
+- Current-scene actor proof context: no NPC rows had `current_scene_location_id` equal to `Shibuya District`; broad-location sibling NPCs existed under the same parent location only (`Kenjaku` in `Abandoned Warehouse Hideout`, `Nishimura Koji` in `Shibuya Back-Alley Meeting Point`, `Sendo Atsushi` in `Shibuya Rooftop Overlook`).
+- Backend was run with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; proof server artifact `output/clean-runtime-p121-shibuya-visible-actors-server-20260612183020/`; proof server stopped after verification.
+- Turn 7:
+  - Artifact: `output/clean-runtime-p121-shibuya-visible-actors-turn7-20260612153421/`.
+  - Action: `I stay in Shibuya District and look to see whether any people are visibly nearby, without moving.`
+  - Result: `scene-frame -> gm-read -> judge-uncertainty -> gm-action-checklist -> stage4-execution -> settled-turn-packet -> narrative -> finalizing_turn -> done`.
+  - Accepted exactly one `local_observation` receipt with `resultKind=bounded_no_match`, `searchedSurfaceKinds=["visible_actor"]`, `claimStatus=bounded_current_scene_observation_only`, `mutationAuthority=none`, `mutationApplied=false`, and `base/result worldVersion=3`.
+  - No authority trace row, no `turn_clock_ledger` row, and clock stayed `worldVersion=3/worldTimeMinutes=4/currentTick=4`.
+  - Old v2/saga/narrator/oracle/simulation stores stayed 0.
+  - Player-facing text: `No visible non-player actors are present in the current scene.`
+  - Narration did not mention the broad-location sibling NPCs and did not expose raw `worldVersion`, `SceneFrame`, `visible_actor`, current-location ids, or no-change phrasing.
+- Status impact:
+  - P118/P119/P120/P121 Shibuya diagnostic lane is clean through 7 turns across direct scene, device no-result, movement, direct scene refresh, time advance, movement-after-time composition, and current-scene actor bounded observation. This remains 0% final acceptance until several different zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+
 P120 clean Shibuya time-passage diagnostic burn-in:
 - Baseline on `codex/rebuild-gm-turn-cycle`: worktree clean/synced after commit `55965133`.
 - Continued existing clean diagnostic clone `p118-clean-device-surface-no-leak-181129` after P119 turn 4. Pre-turn DB inspection: current scene `Shibuya Pedestrian Underpass`, clock `worldVersion=1/worldTimeMinutes=1/currentTick=1`, `clean_gameplay_turn_records=4`, `clean_gameplay_stage4_receipts=2`, `authority_traces=1`, `turn_clock_ledger=1`, and old v2/saga/narrator/oracle/simulation stores all 0.
