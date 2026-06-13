@@ -119,6 +119,30 @@ P197 scene-texture clause variety:
   - [x] DB proof `output/clean-runtime-p197-texture-variety-qa-20260613-130155/db-proof.json`: two clean turn records, accepted `route_options` and `local_observation` receipts, scene texture fact count 3, both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`.
   - [x] Prose audit passed: `output/clean-runtime-p197-texture-variety-qa-20260613-130155/prose-audit.json`; 2 narratives, zero one-token output, zero receipt/debug/enum/old-formula/surface/list/digest hits, no repeated exact sentence starts.
 
+P198 textured route-options prose shape:
+- Goal:
+  - Replace the stock textured route-options shape `From here, the visible ways lead... Each takes...` with a playable route-choice beat.
+  - Preserve every accepted route label, accepted travel cost, and exact cited `scene_texture` clause.
+  - Keep deterministic route-options projection available for label-only receipt evidence without scene texture.
+- Plan:
+  - [x] Update Stage 6 route-options prompt language toward route-choice prose.
+  - [x] Add validation rejecting the stock textured route-list formula.
+  - [x] Extend prose audit with the same stock route-options detector.
+  - [x] Run focused narration tests, typecheck, live route/local proof, prose audit, GitNexus detect, commit/push/analyze.
+- Changes:
+  - [x] Textured route-options now reject `From here, the visible ways lead... Each takes...` stock wording in Stage 6 validation and prose audit.
+  - [x] Route-options with several `scene_texture` facts now uses the first accepted texture fact when it includes texture; local-observation keeps using a later texture fact or omits texture.
+  - [x] Stage 6 repair feedback names the allowed route/local texture fact refs for a valid replacement candidate.
+- Verification:
+  - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
+  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 313 tests.
+  - [x] Diagnostic live artifact `output/clean-runtime-p198-route-shape-qa-20260613-131428/` exposed adjacent texture repetition: route-options and local-observation both used the same exact dockworkers texture sentence.
+  - [x] Fresh accepted live artifact `output/clean-runtime-p198-route-shape-qa-20260613-131839/`, clone `p198-route-shape-qa-20260613-131839`, source `p69-item-transfer-045651`, clean runtime flags on, GLM 5.2 provider active.
+  - [x] Route-options turn returned route-choice prose with all eight Lowwater Bazaar route labels and no stock route-options formula: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.`
+  - [x] Local-observation turn used a different exact texture clause and reported `Guide` visible: `Guide is in view here. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water.`
+  - [x] DB proof `output/clean-runtime-p198-route-shape-qa-20260613-131839/db-proof.json`: two clean turn records, accepted `route_options` and `local_observation` receipts, both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, authority traces 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.equip_state=carried`, repeated exact sentences 0.
+  - [x] Prose audit passed: `output/clean-runtime-p198-route-shape-qa-20260613-131839/prose-audit.json`; 2 narratives, zero one-token output, zero receipt/debug/enum/old-formula/surface/list/digest/stock-route hits, no repeated exact sentence starts.
+
 P189 clean runtime prose quality pass:
 - Objective:
   - Improve player-facing clean-runtime prose while preserving the primitive-owned truth path: backend receipts own gameplay truth, settled evidence owns claim boundaries, Stage 6 owns readable phrasing.

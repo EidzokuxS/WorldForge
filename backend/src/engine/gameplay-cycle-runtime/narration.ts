@@ -130,6 +130,8 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     pattern: /^(?:Visible (?:here|routes here include|route match)\b|[^.]+ is visible here\.$)/iu,
   },
 ];
+const TEXTURED_ROUTE_OPTIONS_STOCK_SHAPE =
+  /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
@@ -471,6 +473,30 @@ function localObservationUsesFirstSceneTextureFact(
   return false;
 }
 
+function routeOptionsUsesLaterSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "movement_option")) return false;
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length <= 1) return false;
+  const [firstTextureFact, ...laterTextureFacts] = textureFacts;
+  if (!firstTextureFact) return false;
+  const laterFactRefs = new Set(laterTextureFacts.map((fact) => fact.factRef));
+  const firstTextureText = firstTextureFact.text.toLowerCase();
+  for (const sentence of candidate.sentences) {
+    if (!sentence.claimKinds.includes("scene_texture")) continue;
+    const sentenceText = normalizeText(sentence.text)
+      .replace(/\.$/u, "")
+      .toLowerCase();
+    const citesFirstTexture = sentence.backendFactRefs.includes(firstTextureFact.factRef)
+      || firstTextureText.includes(sentenceText);
+    const citesLaterTexture = sentence.backendFactRefs.some((factRef) => laterFactRefs.has(factRef));
+    if (citesLaterTexture && !citesFirstTexture) return true;
+  }
+  return false;
+}
+
 function patternMatches(pattern: RegExp, text: string): string[] {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return [...text.matchAll(new RegExp(pattern.source, flags))]
@@ -633,6 +659,26 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (
+    hasClaimKind(input.view, "movement_option")
+    && hasAcceptedSceneTextureEvidence(input.view)
+    && TEXTURED_ROUTE_OPTIONS_STOCK_SHAPE.test(input.candidate.finalText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Textured route-options prose used stock route-list wording; write a fresh route-choice beat while preserving every accepted label and cost.",
+    });
+  }
+
+  if (routeOptionsUsesLaterSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Route-options scene_texture must use the first accepted texture fact when several scene_texture facts are available, or omit texture for that turn.",
+    });
+  }
+
   const routeOptionLabels = acceptedRouteOptionLabels(input.view);
   if (routeOptionLabels.length > 0) {
     const missingLabels = routeOptionLabels.filter((label) => !text.includes(label));
@@ -756,7 +802,7 @@ export function buildCleanNarrationSystemPrompt(
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
-    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' With scene_texture evidence, one short scene-texture beat may precede or frame the route list; when several texture facts exist, route-options may use the first. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
+    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Build it as a route-choice beat such as '<label> is the one-minute route choice here.' or '<labels> are the available one-minute route choices here.' With scene_texture evidence, one exact scene-texture sentence may precede or frame the route-choice beat; when several texture facts exist, route-options uses the first accepted texture fact. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
@@ -950,6 +996,9 @@ function narrationValidationRepairLines(
   ];
   if (hasClaimKind(view, "local_observation") && textureFacts.length > 1) {
     lines.push(`For local_observation, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} if you include scene_texture; otherwise omit scene_texture.`);
+  }
+  if (hasClaimKind(view, "movement_option") && textureFacts.length > 1 && textureFacts[0]) {
+    lines.push(`For route_options, use ${textureFacts[0].factRef} if you include scene_texture; otherwise omit scene_texture.`);
   }
   lines.push("Put scene_texture in its own accepted_evidence sentence object.");
   return lines;

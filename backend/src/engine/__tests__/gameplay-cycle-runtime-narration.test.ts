@@ -1258,7 +1258,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+          text: "North Hall is the one-minute route choice here.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f1"],
           claimKinds: ["movement_option"],
@@ -1267,9 +1267,55 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the one-minute route choice here.");
     expect(result.text).toContain("North Hall");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|you go|you walk|arrive)\b/iu);
+
+    const stockRouteListShape = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+    expect(stockRouteListShape.status).toBe("rejected");
+    if (stockRouteListShape.status !== "rejected") throw new Error("expected rejected");
+    expect(stockRouteListShape.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("stock route-list wording")
+    )).toBe(true);
+
+    const laterTextureRepeatedByRoute = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "North Hall is the one-minute route choice here.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+    expect(laterTextureRepeatedByRoute.status).toBe("rejected");
+    if (laterTextureRepeatedByRoute.status !== "rejected") throw new Error("expected rejected");
+    expect(laterTextureRepeatedByRoute.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("first accepted texture fact")
+    )).toBe(true);
 
     const paraphrasedTexture = validateCleanNarrationCandidate({
       view,
@@ -1281,7 +1327,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+          text: "North Hall is the one-minute route choice here.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f1"],
           claimKinds: ["movement_option"],
@@ -1345,6 +1391,7 @@ describe("clean Stage 6 narration contracts", () => {
         expect(request.prompt).toContain("unsupported scene texture");
         expect(request.prompt).toContain("Allowed scene_texture sentence texts");
         expect(request.prompt).toContain("e2.f1: Canvas awnings hang over the market lanes.");
+        expect(request.prompt).toContain("For route_options, use e2.f1");
         return acceptedCandidate(view, [
           {
             text: "Canvas awnings hang over the market lanes.",
@@ -1353,7 +1400,7 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+            text: "North Hall is the one-minute route choice here.",
             evidenceRefs: ["e1"],
             backendFactRefs: ["e1.f1"],
             claimKinds: ["movement_option"],
@@ -1364,7 +1411,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(2);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the one-minute route choice here.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
