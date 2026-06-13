@@ -6713,3 +6713,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests, `settlement` -> 21 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because the central `runCleanNarration` prompt-selection path maps through `selectPromptAcceptedEvidence` and `limitPromptEvidenceFacts`; context review found no additional callers beyond `buildCleanNarratorPromptInput` and the covered Stage 6 flow.
     - [x] Pushed commit `f48763a7`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
+
+- P239 Stage 6 movement/item detail fact values:
+  - Plan:
+    - [x] Run GitNexus impact before editing `stage4Evidence`.
+    - [x] Emit typed `value` for movement detail facts (`destination_label`, `elapsed_travel_time`, `current_place_after_movement`) and item detail facts (`item_label`, `source_label`, `target_label`, `final_equip_state`, `current_scene_anchor`, `item_transfer_result`).
+    - [x] Let P238 prompt projection remove these technical labels from narrator prompt input without parsing fact text.
+    - [x] Update focused settlement/narration tests proving packet evidence carries values and prompt input shows player-facing values.
+    - [x] Run focused narration/settlement/contracts/stage4 tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: `stage4Evidence` now emits typed `value` for movement detail facts and item transfer detail facts, while the settled evidence text keeps its audit labels.
+    - Executed: P238 prompt-safe projection now receives ownership/value fields for those facts and renders label-free narrator prompt text without parsing fact text.
+    - Executed: focused checks passed: narration 98, settlement 21, contracts 208, stage4 39, and `npm --prefix backend run typecheck`.
+    - Inspected: GitNexus all-scope and staged `detect_changes` both reported LOW scope for `stage4Evidence`, affected processes 0.
+    - Executed: code commit `d707d2f4` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
