@@ -1823,48 +1823,16 @@ function formatMinutes(value: string | null): string | null {
   return `${value} minute${value === "1" ? "" : "s"}`;
 }
 
-function renderElapsedTimeProjection(view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
+function renderElapsedTimeProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
   const timeBeat = factValue(evidence, "Time beat: ");
   if (timeBeat) return `${timeBeat}.`;
-  const fact = evidence.backendFacts[0]?.text ?? evidence.text;
-  const minutes = fact.match(/^World clock advances by (\d+) minute\(s\)\.$/u)?.[1] ?? null;
-  if (!minutes) return fact;
-  return projectionLanguage(view) === "ru"
-    ? `Проходит ${minutes} мин.`
-    : `${formatMinutes(minutes)!} pass.`;
+  throw new Error("Elapsed-time projection requires accepted Time beat evidence.");
 }
 
-function stableVariant(seed: string, count: number): number {
-  if (count <= 1) return 0;
-  let hash = 0;
-  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash % count;
-}
-
-function renderMovementProjection(view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string | null {
-  const language = projectionLanguage(view);
-  const location = factValue(evidence, "Player location changed to ");
-  if (!location) return null;
-  const travelCost = factValue(evidence, "Travel cost: ")?.match(/^(\d+)\s+minute/u)?.[1] ?? null;
-  const minutes = formatMinutes(travelCost);
-  if (language === "ru") {
-    return minutes
-      ? `Через ${minutes} вы добираетесь до ${location}.`
-      : `Вы добираетесь до ${location}.`;
-  }
-
-  const variants = minutes
-    ? [
-      `After ${minutes}, you reach ${location}.`,
-      `The route brings you to ${location} in ${minutes}.`,
-      `You make it to ${location} after ${minutes}.`,
-    ]
-    : [
-      `You reach ${location}.`,
-      `The route brings you to ${location}.`,
-      `You make it to ${location}.`,
-    ];
-  return variants[stableVariant(`${view.turnId}:${location}`, variants.length)]!;
+function renderMovementProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string | null {
+  const travelBeat = factValue(evidence, "Travel beat: ");
+  if (travelBeat) return `${travelBeat}.`;
+  throw new Error("Movement projection requires accepted Travel beat evidence.");
 }
 
 function parseRouteOptionFact(text: string): { label: string; connected: boolean; travelCost: string | null } | null {
@@ -1923,7 +1891,7 @@ function renderRouteStatusProjection(
   evidence: AcceptedNarrationEvidence,
 ): string {
   const routeBeat = factValue(evidence, "Route beat: ");
-  if (routeBeat) return routeBeat;
+  if (routeBeat) return `${routeBeat}.`;
   throw new Error("Route-status projection requires accepted Route beat evidence.");
 }
 
@@ -2116,10 +2084,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
   const movement = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("player_location_change")
   );
-  const movementFact = movement?.backendFacts.find((entry) =>
-    entry.text.startsWith("Player location changed to ")
-  );
-  if (movementFact) {
+  if (movement) {
     const rendered = renderMovementProjection(view, movement!);
     if (rendered) return rendered;
   }

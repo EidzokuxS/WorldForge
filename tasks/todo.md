@@ -6433,3 +6433,19 @@ Session: `gm-v1-consequenc-slice`.
     - [x] DB proof `p219-fixed-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `route_check` receipt, `mutationApplied=false`, `worldVersion/worldTime/currentTick +0/+0/+0`, no authority trace, no clock ledger, old v2/saga/narrator/oracle/simulation stores all 0.
     - [x] Fixed route-check evidence no longer relies on `Anchor Chain Pylon is reachable from the current scene.` as narrator truth; backend facts are `Route beat`, `Route label`, and `Route status`.
     - [x] Prose audit `prose-audit.json`: 1 narrative, 47 words, zero one-token/debug/enum/movement-arrival/summary-digest hits.
+
+- P220 Stage 6 movement/time projection no-fallback boundary:
+  - Plan:
+    - [x] Run GitNexus impact before editing movement/time/route projection symbols and the shared authority projection selector.
+    - [x] Remove legacy deterministic projection parsing for `Player location changed...`, `Travel cost...`, and `World clock advances...`.
+    - [x] Make authority projection require accepted `Travel beat`, `Time beat`, and `Route beat` story facts; missing facts fail the Stage 6 projection invariant.
+    - [x] Add focused tests proving old changelog evidence fails instead of becoming player-facing prose.
+    - [x] Run focused narration, contracts, Stage 4, settlement, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Results:
+    - [x] GitNexus impacts before edits: `renderElapsedTimeProjection` LOW, `renderMovementProjection` LOW, `renderRouteStatusProjection` LOW, `renderCleanAuthorityProjection` LOW, `stableVariant` LOW.
+    - [x] `renderElapsedTimeProjection` now renders only accepted `Time beat`; old `World clock advances...` evidence throws `Elapsed-time projection requires accepted Time beat evidence.`
+    - [x] `renderMovementProjection` now renders only accepted `Travel beat`; old `Player location changed...` evidence throws `Movement projection requires accepted Travel beat evidence.`
+    - [x] `renderCleanAuthorityProjection` selects movement by `player_location_change` claim ownership instead of old raw fact text, so missing movement story evidence fails immediately.
+    - [x] `renderRouteStatusProjection` now returns the accepted `Route beat` with punctuation and keeps the P219 missing-Route-beat invariant.
+    - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 84 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, `settlement` -> 20 tests, and `npm --prefix backend run typecheck`.
+    - [x] No new live clone was required for P220: normal movement/time live paths were already proven in P217/P218 and this slice removes only legacy projection fallback semantics.

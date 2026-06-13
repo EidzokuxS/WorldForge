@@ -1535,6 +1535,17 @@ describe("clean Stage 6 narration contracts", () => {
     expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
   });
 
+  it("fails elapsed_time projection when accepted Time beat evidence is missing", () => {
+    const view = timeView();
+    view.acceptedEvidence[0] = {
+      ...view.acceptedEvidence[0],
+      text: "World clock advances by 5 minute(s).",
+      backendFacts: [{ factRef: "e1.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+    };
+
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Elapsed-time projection requires accepted Time beat evidence.");
+  });
+
   it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Oracle-outcome surface:");
     const view = oracleOutcomeView();
@@ -3853,9 +3864,10 @@ describe("clean Stage 6 narration contracts", () => {
     })).rejects.toThrow("Clean Narration generation failed before validation");
   });
 
-  it("uses Russian ordinary prose in deterministic authority projection while preserving English accepted labels", () => {
-    const text = renderCleanAuthorityProjection(movementView({
-      language: "ru",
+  it("projects movement only from accepted Travel beat evidence", () => {
+    expect(renderCleanAuthorityProjection(movementView())).toBe("After 1 minute, you reach North Hall.");
+
+    const view = movementView({
       acceptedEvidence: [{
         ...movementView().acceptedEvidence[0]!,
         text: "Player location changed to The Copper Tap.",
@@ -3863,9 +3875,9 @@ describe("clean Stage 6 narration contracts", () => {
           { factRef: "e1.f1", text: "Player location changed to The Copper Tap.", exact: true },
         ],
       }],
-    }));
+    });
 
-    expect(text).toBe("Вы добираетесь до The Copper Tap.");
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Movement projection requires accepted Travel beat evidence.");
   });
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {
