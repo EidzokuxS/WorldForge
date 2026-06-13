@@ -3100,6 +3100,49 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
   });
 
+  it("admits visible route inquiries through the backend route receipt contract before model generation", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I check whether the route to North Hall is open, without moving.",
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      liveSceneQuestion: "Which visible route status must be checked?",
+      evidenceRefs: ["Player", "Market", "North Hall"],
+      actionInterpretation: {
+        summary: "The player asks whether the visible route to North Hall is open without moving.",
+        playerIntent: "Check route status to North Hall without moving.",
+        method: "check route",
+        targetRefs: ["North Hall"],
+        interactionKind: "route_inquiry",
+      },
+      interpretationRationale: "The accepted read identifies a visible route inquiry.",
+    };
+    let modelCalled = false;
+
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async () => {
+        modelCalled = true;
+        throw new Error("route inquiry admission should be deterministic");
+      },
+    });
+
+    expect(modelCalled).toBe(false);
+    expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(false);
+    expect(result.judgment).toMatchObject({
+      nextStep: "action_plan",
+      checkNeed: "backend_action_plan_needed",
+      physicalPossibility: "possible",
+      targetRefs: ["North Hall"],
+    });
+    expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: result.judgment }).status)
+      .toBe("accepted");
+  });
+
   it("accepts a true Oracle admission but does not include a roll or selected outcome", () => {
     const frame = minimalFrame();
     const gmRead = {

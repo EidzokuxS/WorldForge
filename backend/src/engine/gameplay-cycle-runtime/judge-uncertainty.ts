@@ -345,6 +345,83 @@ function hasAllowedCapability(frame: AuthoritativeSceneFrame, capabilityId: stri
   );
 }
 
+function lowerSet(values: readonly string[]): Set<string> {
+  return new Set(values.map((value) => value.toLowerCase()));
+}
+
+function frameCitableRefs(frame: AuthoritativeSceneFrame, refs: readonly string[]): string[] {
+  const citable = lowerSet(frame.citableRefs);
+  return uniqueStrings(refs).filter((ref) => citable.has(ref.toLowerCase()));
+}
+
+function routeInquiryNeedsBackendReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): boolean {
+  const { frame, gmRead } = input;
+  if (gmRead.path !== "procedural" || gmRead.actionInterpretation.interactionKind !== "route_inquiry") {
+    return false;
+  }
+
+  const targetRefs = gmRead.actionInterpretation.targetRefs;
+  const hasMovementTarget = targetRefs.some((targetRef) =>
+    frame.movementOptions.some((option) => option.ref.toLowerCase() === targetRef.toLowerCase())
+  );
+  if (hasMovementTarget) return hasAllowedCapability(frame, "route_check");
+
+  const sceneRefs = lowerSet([frame.scene.currentScene.ref, frame.scene.currentLocation.ref]);
+  const asksForCurrentSceneRoutes =
+    targetRefs.length === 0
+    || targetRefs.some((targetRef) => sceneRefs.has(targetRef.toLowerCase()));
+  return asksForCurrentSceneRoutes && hasAllowedCapability(frame, "route_options");
+}
+
+function deterministicRouteInquiryJudgment(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): JudgeUncertainty | null {
+  const { frame, gmRead } = input;
+  if (!routeInquiryNeedsBackendReceipt(input)) return null;
+
+  const targetRefs = frameCitableRefs(frame, gmRead.actionInterpretation.targetRefs).slice(0, 16);
+  const evidenceRefs = frameCitableRefs(frame, [
+    frame.player.ref,
+    frame.scene.currentScene.ref,
+    frame.scene.currentLocation.ref,
+    ...gmRead.focalRefs,
+    ...gmRead.evidenceRefs,
+    ...targetRefs,
+  ]).slice(0, 16);
+
+  return {
+    version: "judge-uncertainty.v1",
+    judgmentId: `${gmRead.turnId}-route-inquiry-admission`,
+    campaignId: frame.campaignId,
+    turnId: frame.turnId,
+    frameId: frame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      gmReadPath: gmRead.path,
+    },
+    physicalPossibility: "possible",
+    checkNeed: "backend_action_plan_needed",
+    nextStep: "action_plan",
+    actorRefs: frameCitableRefs(frame, [frame.player.ref]).slice(0, 16),
+    targetRefs,
+    evidenceRefs,
+    possibilityRationale: "The accepted route inquiry targets current visible route information.",
+    checkRationale: "Route status and route options are settled by backend receipt authority before narration.",
+    difficulty: null,
+    oracleAdmission: null,
+    noRollReason: {
+      code: "backend_receipt_required",
+      explanation: "Route inquiry needs a route receipt before narration may answer.",
+      evidenceRefs,
+    },
+  };
+}
+
 function branchIssues(input: {
   frame: AuthoritativeSceneFrame;
   gmRead: GmRead;
@@ -760,6 +837,30 @@ export async function runCleanJudgeUncertainty(input: {
   provider: ProviderConfig;
   generateCandidate?: JudgeUncertaintyCandidateGenerator;
 }): Promise<JudgeUncertaintyRunResult> {
+  const deterministicJudgment = deterministicRouteInquiryJudgment({
+    frame: input.frame,
+    gmRead: input.gmRead,
+  });
+  if (deterministicJudgment) {
+    const validation = validateJudgeUncertaintyCandidate({
+      frame: input.frame,
+      gmRead: input.gmRead,
+      candidate: deterministicJudgment,
+    });
+    if (validation.status === "accepted") {
+      return {
+        status: "accepted",
+        judgment: validation.judgment,
+        issues: [],
+        repairAttempted: false,
+      };
+    }
+    throw new CleanJudgeUncertaintyValidationError(
+      "Clean Judge/Uncertainty deterministic route inquiry admission failed validation.",
+      validation.issues,
+    );
+  }
+
   const system = buildJudgeUncertaintySystemPrompt();
   const prompt = buildJudgeUncertaintyPrompt({
     frame: input.frame,

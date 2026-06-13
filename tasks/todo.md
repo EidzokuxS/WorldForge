@@ -5450,5 +5450,19 @@ Session: `gm-v1-consequenc-slice`.
   - Status impact:
     - P172 is clean through 20/60 on a fresh post-P171 zero-turn clone. It is acceptance-candidate evidence only; final acceptance remains 0% until several different fresh post-repair zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
   - Next scoped work:
-    - [ ] Continue P172 from turn 021 to turn 060 by choosing each action from inspected current state.
-    - [ ] Run focused clean-runtime tests after the 60-turn lane segment or sooner if any runtime fallout appears.
+    - [x] Continue P172 from turn 021 to turn 060 by choosing each action from inspected current state.
+    - [x] Run focused clean-runtime tests after the 60-turn lane segment or sooner if any runtime fallout appears.
+  - Continuation evidence:
+    - [x] Turns 021-054 passed one action at a time from inspected state: dialogue, route_options, route_check, movement, and direct/continue scene turns all produced clean-runtime `done`, one new clean turn record, one chat exchange, accepted-only receipts when applicable, multi-token narration, zero old v2/saga/narrator/oracle/simulation stores, and `Brass Tube.owner=Guide`.
+    - [x] Turn 055 original action `I check whether the route from Anchor Chain Pylon to Upper Dam Ruins is open, without moving.` exposed a real Judge/Uncertainty failure before Checklist/Stage4: SSE emitted `error`, no clean turn record/chat/receipt was committed, and the route boundary restored the pre-turn state. Artifact: `output/clean-runtime-p172-post-p171-acceptance-a-20260613/turn-055/`.
+    - [x] Root cause: accepted GM Read correctly produced procedural `route_inquiry`, but Judge admission still depended on model generation for a deterministic route receipt branch; one GLM run failed validation after repair instead of producing `action_plan/backend_receipt_required`.
+    - [x] Fix: `runCleanJudgeUncertainty` now admits procedural `route_inquiry` directly from accepted GM Read + SceneFrame route capabilities into a validated `action_plan/backend_receipt_required` judgment before model generation. This is receipt-contract admission, not gameplay fallback semantics.
+    - [x] Added contract test proving visible route inquiry admission reaches backend route receipt contract without calling the model.
+    - [x] Restarted clean backend on port `31702`; retry artifact `turn-055-retry-after-fix/` passed with accepted `route_check`, no mutation/clock delta, zero old stores, zero restore ledger, and `Brass Tube.owner=Guide`.
+    - [x] Turns 056-060 then passed as diagnostic continuation: movement to `Upper Dam Ruins`, direct scene look, route_check back to `Lowwater Bazaar`, movement back to `Lowwater Bazaar`, and dialogue with visible `Guide` confirming the Brass Tube.
+    - [x] Final diagnostic DB after turn 060: 60 clean turn records, 49 Stage4 receipts, 16 authority traces, 15 travel clock ledger rows, `worldVersion=16`, `worldTimeMinutes=14`, `currentTick=14`, player at `Lowwater Bazaar`, `Brass Tube.owner=Guide`, old stores zero, restore ledger zero.
+    - [x] Verification executed after fix: `npm --prefix backend run typecheck`; `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts`; focused four-file clean-runtime suite (`288 passed`).
+  - Acceptance status:
+    - P172 Lane A is diagnostic only. It reached a clean DB state at 60 records after repair, but the original turn 055 produced a player-facing error, so it contributes 0 clean 60/60 acceptance lanes.
+  - Next scoped work:
+    - [ ] Start a fresh post-fix zero-turn clone for the next 0 -> ~60 manual acceptance lane.
