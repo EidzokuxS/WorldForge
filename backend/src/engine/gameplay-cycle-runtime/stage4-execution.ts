@@ -440,16 +440,19 @@ function requestEffectForStep(input: {
   }
   if (input.capabilityId === "local_observation") {
     const plan = input.step.intended.localObservationPlan;
+    if (!plan) {
+      throw new Error("local_observation Stage4 request requires checklist intended.localObservationPlan.");
+    }
     return {
       kind: "local_observation",
       authorityKind: "current_scene_observation_surface",
       actorRef: "Player",
-      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
-      mode: plan?.mode ?? "target_match",
-      queryText: plan?.queryText ?? input.frame.scene.currentScene.label,
-      targetRef: plan?.targetRef ?? null,
-      surfaceKinds: plan?.surfaceKinds ?? ["current_scene", "current_location", "visible_actor", "visible_target", "inventory_item", "visible_fact"],
-      allowBoundedNegative: plan?.allowBoundedNegative ?? false,
+      anchorRef: plan.anchorRef,
+      mode: plan.mode,
+      queryText: plan.queryText,
+      targetRef: plan.targetRef,
+      surfaceKinds: plan.surfaceKinds,
+      allowBoundedNegative: plan.allowBoundedNegative,
       evidenceRefs: input.step.evidenceRefs,
       forbiddenPayloads: {
         hiddenDiscovery: false,
@@ -469,16 +472,19 @@ function requestEffectForStep(input: {
   }
   if (input.capabilityId === "device_surface_observation") {
     const plan = input.step.intended.deviceObservationPlan;
+    if (!plan) {
+      throw new Error("device_surface_observation Stage4 request requires checklist intended.deviceObservationPlan.");
+    }
     return {
       kind: "device_surface_observation",
       authorityKind: "current_frame_device_status_surface",
       actorRef: "Player",
-      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
-      deviceRef: plan?.deviceRef ?? input.destinationRef,
-      requestedDeviceText: plan?.requestedDeviceText ?? input.destinationRef,
-      requestedFacetText: plan?.requestedFacetText ?? "device surface",
-      facetKinds: plan?.facetKinds ?? ["screen_state"],
-      allowNoSurface: plan?.allowNoSurface ?? false,
+      anchorRef: plan.anchorRef,
+      deviceRef: plan.deviceRef,
+      requestedDeviceText: plan.requestedDeviceText,
+      requestedFacetText: plan.requestedFacetText,
+      facetKinds: plan.facetKinds,
+      allowNoSurface: plan.allowNoSurface,
       evidenceRefs: input.step.evidenceRefs,
       forbiddenPayloads: {
         privateMessageContents: false,
@@ -539,19 +545,22 @@ function requestEffectForStep(input: {
   }
   if (input.capabilityId === "condition_set") {
     const plan = input.step.intended.localConditionPlan;
+    if (!plan) {
+      throw new Error("condition_set Stage4 request requires checklist intended.localConditionPlan.");
+    }
     return {
       kind: "condition_set",
       authorityKind: "current_scene_player_local_condition",
       actorRef: "Player",
       conditionScope: "current_scene",
-      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
-      operation: plan?.operation ?? "apply",
-      conditionKey: plan?.conditionKey ?? "braced",
+      anchorRef: plan.anchorRef,
+      operation: plan.operation,
+      conditionKey: plan.conditionKey,
       target: {
-        targetKind: plan?.targetKind ?? "current_scene",
-        targetRef: plan?.targetRef ?? input.frame.scene.currentScene.ref,
+        targetKind: plan.targetKind,
+        targetRef: plan.targetRef,
       },
-      replacementPolicy: plan?.replacementPolicy ?? "no_replacement",
+      replacementPolicy: plan.replacementPolicy,
       evidenceRefs: input.step.evidenceRefs,
       forbiddenPayloads: {
         hpDelta: false,
@@ -577,15 +586,18 @@ function requestEffectForStep(input: {
   }
   if (input.capabilityId === "item_transfer") {
     const plan = input.step.intended.itemTransferPlan;
-    const operation = plan?.operation ?? "drop_in_current_scene";
-    const sourceKind = plan?.sourceKind ?? "player_inventory";
-    const targetKind = plan?.targetKind ?? "current_scene";
+    if (!plan) {
+      throw new Error("item_transfer Stage4 request requires checklist intended.itemTransferPlan.");
+    }
+    const operation = plan.operation;
+    const sourceKind = plan.sourceKind;
+    const targetKind = plan.targetKind;
     return {
       kind: "item_transfer",
       authorityKind: "player_current_scene_item_state_transition",
       actorRef: "Player",
       operation,
-      itemRef: plan?.itemRef ?? input.destinationRef,
+      itemRef: plan.itemRef,
       source: {
         sourceKind,
         requiredOwner: sourceKind === "player_inventory" ? "Player" : "none",
@@ -594,11 +606,11 @@ function requestEffectForStep(input: {
       },
       target: {
         targetKind,
-        targetRef: plan?.targetRef ?? input.frame.scene.currentScene.ref,
-        targetEquipState: plan?.targetEquipState ?? "carried",
-        targetEquippedSlot: plan?.targetEquippedSlot ?? null,
+        targetRef: plan.targetRef,
+        targetEquipState: plan.targetEquipState,
+        targetEquippedSlot: plan.targetEquippedSlot,
       },
-      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
+      anchorRef: plan.anchorRef,
       evidenceRefs: input.step.evidenceRefs,
       forbiddenPayloads: {
         itemCreation: false,
@@ -622,14 +634,17 @@ function requestEffectForStep(input: {
   }
   if (input.capabilityId === "minor_poi_create") {
     const plan = input.step.intended.minorPoiPlan;
+    if (!plan) {
+      throw new Error("minor_poi_create Stage4 request requires checklist intended.minorPoiPlan.");
+    }
     return {
       kind: "minor_poi_create",
       authorityKind: "current_scene_visible_place_handle_create",
       actorRef: "Player",
-      anchorRef: plan?.anchorRef ?? input.frame.scene.currentScene.ref,
-      placeLabel: plan?.placeLabel ?? input.destinationRef,
-      placeKind: plan?.placeKind ?? "other_place",
-      reusePolicy: "reuse_matching_current_scene_place_handle_or_create",
+      anchorRef: plan.anchorRef,
+      placeLabel: plan.placeLabel,
+      placeKind: plan.placeKind,
+      reusePolicy: plan.reusePolicy,
       evidenceRefs: input.step.evidenceRefs,
       forbiddenPayloads: {
         actorCreation: false,

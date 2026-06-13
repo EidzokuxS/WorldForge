@@ -831,6 +831,26 @@ function deviceSurfaceChecklist(inputFrame = deviceSurfaceFrame(), input: {
   };
 }
 
+type Stage4RequiredPlanKey =
+  | "localObservationPlan"
+  | "deviceObservationPlan"
+  | "localConditionPlan"
+  | "itemTransferPlan"
+  | "minorPoiPlan";
+
+function withoutIntendedPlan(checklistInput: GmActionChecklist, planKey: Stage4RequiredPlanKey): GmActionChecklist {
+  const step = checklistInput.steps[0]!;
+  const intended = { ...step.intended };
+  delete intended[planKey];
+  return {
+    ...checklistInput,
+    steps: [{
+      ...step,
+      intended,
+    }],
+  };
+}
+
 function itemTransferThenDialogueChecklist(inputFrame = itemTransferFrame()): GmActionChecklist {
   const base = itemTransferChecklist(inputFrame);
   const itemStep = base.steps[0]!;
@@ -922,6 +942,76 @@ describe("clean Stage 4 executor DB contracts", () => {
     if (previousCampaignRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;
     else process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
     fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it("requires typed Stage 4 plans before building receipt-owned primitive requests", async () => {
+    const conditionFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      frameId: "frame-stage4-condition-plan-required",
+      turnId: "clean-turn-stage4-condition-plan-required",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const localObservationFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      frameId: "frame-stage4-local-observation-plan-required",
+      turnId: "clean-turn-stage4-local-observation-plan-required",
+      playerAction: "I look at Guide.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "local_observation", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Guide"],
+    };
+
+    const cases = [
+      {
+        frame: localObservationFrame,
+        checklist: withoutIntendedPlan(checklistForKind("local_observation", localObservationFrame), "localObservationPlan"),
+        message: "local_observation Stage4 request requires checklist intended.localObservationPlan.",
+      },
+      {
+        frame: deviceSurfaceFrame(),
+        checklist: withoutIntendedPlan(deviceSurfaceChecklist(deviceSurfaceFrame()), "deviceObservationPlan"),
+        message: "device_surface_observation Stage4 request requires checklist intended.deviceObservationPlan.",
+      },
+      {
+        frame: conditionFrame,
+        checklist: withoutIntendedPlan(conditionChecklist({ frame: conditionFrame }), "localConditionPlan"),
+        message: "condition_set Stage4 request requires checklist intended.localConditionPlan.",
+      },
+      {
+        frame: itemTransferFrame(),
+        checklist: withoutIntendedPlan(itemTransferChecklist(itemTransferFrame()), "itemTransferPlan"),
+        message: "item_transfer Stage4 request requires checklist intended.itemTransferPlan.",
+      },
+      {
+        frame: minorPoiFrame(),
+        checklist: withoutIntendedPlan(minorPoiChecklist(minorPoiFrame()), "minorPoiPlan"),
+        message: "minor_poi_create Stage4 request requires checklist intended.minorPoiPlan.",
+      },
+    ];
+
+    for (const testCase of cases) {
+      await expect(runCleanStage4Execution({
+        frame: testCase.frame,
+        checklist: testCase.checklist,
+      })).rejects.toThrow(testCase.message);
+      const receiptCount = getSqliteConnection()
+        .prepare("SELECT COUNT(*) AS count FROM clean_gameplay_stage4_receipts WHERE campaign_id = ?")
+        .get(CAMPAIGN_ID) as { count: number };
+      expect(receiptCount.count).toBe(0);
+    }
   });
 
   it("keeps broad-location background actors out of clean SceneFrame actors and citable refs", async () => {
