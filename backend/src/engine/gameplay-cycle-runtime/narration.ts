@@ -584,8 +584,6 @@ function leakageIssues(input: {
   return issues;
 }
 
-const ROUTE_AS_MOVEMENT_TEXT = /\b(?:you\s+(?:go|move|walk|head|travel|arrive|reach)\b|arrive[sd]?\s+at\b|brings you to\b|becomes your current place\b|location changed\b|walk(?:ing|'s)?\b)/iu;
-const ROUTE_UNSUPPORTED_TEXTURE_TEXT = /\b(?:stalls?|walkways?|foot traffic|surrounds?\s+you|in every direction)\b/iu;
 const LOCAL_OBSERVATION_DISCOVERY_TEXT = /\b(?:discover(?:s|ed)?|reveal(?:s|ed)?|hidden|concealed|nothing changed|no change|no visible changes)\b/iu;
 const LOCAL_OBSERVATION_ABSENCE_TEXT = /\b(?:absent|does not exist|nowhere|missing|not present|not visible|not here)\b/iu;
 const LOCAL_OBSERVATION_PLAYER_ACTION_TEXT = /\byou\s+(?:stand|sit|crouch|step|move|scan|look|watch|search|listen|hold|grip)\b/iu;
@@ -1090,13 +1088,6 @@ function acceptedDirectSceneRouteOptionLabels(view: CleanNarratorView): string[]
     }));
 }
 
-function hasTerminalRouteEvidence(view: CleanNarratorView): boolean {
-  return view.acceptedEvidence.some((evidence) =>
-    evidence.authority === "route_options_receipt"
-    || (evidence.authority !== "scene_frame_snapshot" && evidence.claimKinds.includes("route_status"))
-  );
-}
-
 function deterministicAuthorityProjectionText(view: CleanNarratorView): string {
   return normalizeText(renderCleanAuthorityProjection(view));
 }
@@ -1164,33 +1155,6 @@ function proseQualityIssues(input: {
         message: "Literary narration copied deterministic authority projection text; transform accepted evidence into a developed story beat.",
       });
     }
-  }
-
-  if (
-    hasTerminalRouteEvidence(input.view)
-    && ROUTE_AS_MOVEMENT_TEXT.test(unquotedText)
-  ) {
-    issues.push({
-      code: "prose_quality",
-      path: "finalText",
-      message: "Route narration must phrase accepted route availability or visible options without claiming movement, arrival, or current-scene change.",
-    });
-  }
-
-  if (
-    hasTerminalRouteEvidence(input.view)
-    && hasUnsupportedTexture(
-      ROUTE_UNSUPPORTED_TEXTURE_TEXT,
-      unquotedText,
-      input.view,
-      input.candidate,
-    )
-  ) {
-    issues.push({
-      code: "prose_quality",
-      path: "finalText",
-      message: "Route narration must use accepted route labels and costs without unsupported scene texture or travel-mode detail.",
-    });
   }
 
   if (hasParaphrasedSceneTexture(input.view, input.candidate)) {

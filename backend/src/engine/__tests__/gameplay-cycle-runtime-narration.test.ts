@@ -2290,10 +2290,21 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(movementDrift.status).toBe("rejected");
-    if (movementDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(movementDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("without claiming movement")
+    expect(movementDrift.status).toBe("accepted");
+
+    const unsupportedMovementClaim = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the visible route choice from here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option", "player_location_change"],
+      }]),
+    });
+    expect(unsupportedMovementClaim.status).toBe("rejected");
+    if (unsupportedMovementClaim.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupportedMovementClaim.issues.some((issue) =>
+      issue.code === "claim_not_supported"
     )).toBe(true);
 
     const missingRouteLabels = validateCleanNarrationCandidate({
@@ -2342,10 +2353,21 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(unsupportedRouteTexture.status).toBe("rejected");
-    if (unsupportedRouteTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(unsupportedRouteTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    expect(unsupportedRouteTexture.status).toBe("accepted");
+
+    const unsupportedSceneTextureClaim = validateCleanNarrationCandidate({
+      view: routeOptionsManyView(),
+      candidate: acceptedCandidate(routeOptionsManyView(), [{
+        text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins remain the visible route choices.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f6"],
+        claimKinds: ["movement_option", "scene_texture"],
+      }]),
+    });
+    expect(unsupportedSceneTextureClaim.status).toBe("rejected");
+    if (unsupportedSceneTextureClaim.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupportedSceneTextureClaim.issues.some((issue) =>
+      issue.code === "claim_not_supported"
     )).toBe(true);
   });
 
@@ -2449,11 +2471,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(uncitedTexture.status).toBe("rejected");
-    if (uncitedTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(uncitedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
-    )).toBe(true);
+    expect(uncitedTexture.status).toBe("accepted");
 
     const wrongCitedTexture = validateCleanNarrationCandidate({
       view,
@@ -2467,11 +2485,11 @@ describe("clean Stage 6 narration contracts", () => {
     expect(wrongCitedTexture.status).toBe("rejected");
     if (wrongCitedTexture.status !== "rejected") throw new Error("expected rejected");
     expect(wrongCitedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+      issue.code === "prose_quality" && issue.message.includes("exact contiguous accepted scene-texture clause")
     )).toBe(true);
   });
 
-  it("repairs unsupported scene_texture inside Stage 6 before player-facing narration", async () => {
+  it("accepts route prose by structured route refs instead of repairing uncited texture wording", async () => {
     const view = routeOptionsWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -2479,40 +2497,19 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [{
-            text: "Market stalls surround you while the visible way leads to North Hall.",
-            evidenceRefs: ["e1"],
-            backendFactRefs: ["e1.f1"],
-            claimKinds: ["movement_option"],
-          }]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("unsupported scene texture");
-        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
-        expect(request.prompt).toContain("e2.f1: Canvas awnings hang over the market lanes.");
-        expect(request.prompt).toContain("For route_options, use e2.f1");
-        expect(request.prompt).toContain("Set scene_texture sentence.text exactly to one listed text");
-        return acceptedCandidate(view, [
-          {
-            text: "Canvas awnings hang over the market lanes.",
-            evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f1"],
-            claimKinds: ["scene_texture"],
-          },
-          {
-            text: "North Hall is the one-minute route choice here.",
-            evidenceRefs: ["e1"],
-            backendFactRefs: ["e1.f1"],
-            claimKinds: ["movement_option"],
-          },
-        ]);
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
+        return acceptedCandidate(view, [{
+          text: "Market stalls surround you while the visible way leads to North Hall.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        }]);
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the one-minute route choice here.");
+    expect(result.text).toBe("Market stalls surround you while the visible way leads to North Hall.");
   });
 
   it("repairs repeated first scene_texture in standalone elapsed-time prose", async () => {
