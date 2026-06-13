@@ -2159,7 +2159,6 @@ export const cleanSettledTurnPacketSchema = z.object({
     "oracle_visible_outcome",
     "stage4_execution",
     "stage4_failed_or_skipped",
-    "minimal_safe",
   ]),
   acceptedEvidence: z.array(cleanSettledEvidenceSchema).max(24),
   stepAudit: z.array(cleanSettledStepAuditSchema).max(6),

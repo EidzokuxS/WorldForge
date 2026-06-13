@@ -1740,18 +1740,13 @@ describe("clean Stage 5 settlement contracts", () => {
       },
     });
 
-    expect(() => buildPacket({ frame: inputFrame })).toThrow(/private guard/u);
+    expect(() => buildPacket({
+      frame: inputFrame,
+      gmRead: directGmRead(inputFrame),
+    })).toThrow(/private guard/u);
   });
 
-  it("does not invent absence or no-change evidence for direct no-receipt packets", () => {
-    const packet = buildPacket();
-    const serialized = JSON.stringify(packet);
-
-    expect(packet.settlementKind).toBe("minimal_safe");
-    expect(serialized).not.toMatch(/none are present|nothing changed|no routes|no one is there/iu);
-    expect(packet.acceptedEvidence.some((entry) =>
-      entry.claimKinds.includes("player_location_change")
-      || entry.claimKinds.includes("route_status")
-    )).toBe(false);
+  it("requires an admitted settlement source before player-facing packet creation", () => {
+    expect(() => buildPacket()).toThrow(/requires an admitted settlement source/u);
   });
 });

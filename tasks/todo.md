@@ -122,6 +122,14 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Fresh zero-turn clone `p168-gmread-explicit-kind-proof-r4-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
   - [x] Live result: SSE terminal `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; receipt authority `item_transfer_receipt` / `item_custody_location_equip_state` / `may_claim_item_state_change`; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; settled evidence includes `item_state`; player-facing narrative is multi-token deterministic item-state projection.
+- P169 Stage 5 admitted-settlement-source boundary:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/settlement.ts`: `settlementKind()` ended with `minimal_safe`, so a packet with no GM Read/Judge/Oracle/Stage4 settlement source could still become player-facing scene evidence.
+  - [x] GitNexus impact before edits for `settlementKind`, `buildCleanSettledTurnPacket`, and `assertCleanSettledTurnPacket` was LOW.
+  - [x] Stage 5 now throws `Clean settlement requires an admitted settlement source before player-facing packet creation.` when no settlement source exists, and `minimal_safe` is removed from the settled packet schema enum.
+  - [x] Tests now guard the invariant directly and update persistence/private-guard fixtures to provide explicit `direct` GM Read sources when they test commit or evidence guards.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 283 passed.
+  - [x] Live proof artifact `output/clean-runtime-p169-no-minimal-safe-settlement-proof-20260613/`.
+  - [x] Fresh zero-turn clone `p169-no-minimal-safe-settlement-proof-20260613` from `p69-item-transfer-045651`; manual-chosen action `I hand the Brass Tube to Guide.` reached clean runtime with one accepted `item_transfer` receipt, `settlementKind=stage4_execution`, `Brass Tube.owner=Guide`, worldVersion `0 -> 1`, world time/current tick `0/0`, no clock ledger, one item-scoped `gameplay-cycle-runtime.item_transfer.v1` authority trace, old stores all 0, and multi-token deterministic item-state narration.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.

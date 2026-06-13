@@ -328,16 +328,17 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
   }
 
   function settlementFor(turn = validTurnInput(), frame = minimalFrame()) {
+    const inputFrame = {
+      ...frame,
+      campaignId: turn.campaignId,
+      turnId: turn.turnId,
+    };
     const ids = buildCleanPublicTurnIds(turn);
     const settledPacket = buildCleanSettledTurnPacket({
       turn,
       publicPacketId: ids.publicPacketId,
-      frame: {
-        ...frame,
-        campaignId: turn.campaignId,
-        turnId: turn.turnId,
-      },
-      gmRead: null,
+      frame: inputFrame,
+      gmRead: validGmRead(inputFrame),
       judgment: null,
       oracleSettlement: null,
       actionChecklist: null,

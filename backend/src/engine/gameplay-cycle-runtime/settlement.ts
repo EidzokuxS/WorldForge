@@ -973,7 +973,7 @@ function settlementKind(input: {
   if (input.judgment?.nextStep === "block_no_mutation") return "blocked_no_mutation";
   if (input.gmRead?.path === "continue") return "continue_scene";
   if (input.gmRead?.path === "direct") return "direct_scene";
-  return "minimal_safe";
+  throw new Error("Clean settlement requires an admitted settlement source before player-facing packet creation.");
 }
 
 function resultClock(input: {
