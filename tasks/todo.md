@@ -5405,7 +5405,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Add focused runtime/Stage4 tests for missing-clock invariant and DB-clock base construction.
     - [x] Run typecheck and focused clean-runtime tests (`287 passed`).
     - [x] Run one fresh live `/api/chat/action` proof for the original Brass Tube handoff path.
-    - [ ] Run GitNexus detect, commit, push, and `npx gitnexus analyze --embeddings`.
+    - [x] Run GitNexus detect, commit/push (`20a450c1`), and `npx gitnexus analyze --embeddings` (exit 0 with recurring `.gitnexus/lbug` lock warnings).
   - Live proof:
     - [x] Artifact root: `output/clean-runtime-p171-authoritative-clock-proof-20260613/`.
     - [x] Fresh zero-turn clone `p171-authoritative-clock-proof-20260613` from `p69-item-transfer-045651`; preflight had chat history 0, authoritative `world_clocks` row `0/0/0`, Player carrying `Brass Tube`, visible exact-scene `Guide`, clean runtime stores 0, and old v2/saga/narrator/oracle/simulation stores 0.
