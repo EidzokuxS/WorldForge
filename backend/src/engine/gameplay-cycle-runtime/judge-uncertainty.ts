@@ -354,15 +354,39 @@ function frameCitableRefs(frame: AuthoritativeSceneFrame, refs: readonly string[
   return uniqueStrings(refs).filter((ref) => citable.has(ref.toLowerCase()));
 }
 
+function visibleActorDialogueNeedsBackendReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): boolean {
+  const { frame, gmRead } = input;
+  if (gmRead.actionInterpretation.interactionKind !== "visible_actor_dialogue") return false;
+  if (!hasAllowedCapability(frame, "dialogue_record")) return false;
+  if (gmRead.actionInterpretation.itemTransferNeed != null && !hasAllowedCapability(frame, "item_transfer")) return false;
+  return gmRead.actionInterpretation.targetRefs.some((targetRef) =>
+    frame.actors.some((actor) =>
+      actor.role !== "player" && actor.ref.toLowerCase() === targetRef.toLowerCase()
+    )
+  );
+}
+
+function movementNeedsBackendReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): boolean {
+  const { frame, gmRead } = input;
+  if (gmRead.actionInterpretation.interactionKind !== "movement_intent") return false;
+  if (!hasAllowedCapability(frame, "movement")) return false;
+  return gmRead.actionInterpretation.targetRefs.some((targetRef) =>
+    frame.movementOptions.some((option) => option.ref.toLowerCase() === targetRef.toLowerCase())
+  );
+}
+
 function routeInquiryNeedsBackendReceipt(input: {
   frame: AuthoritativeSceneFrame;
   gmRead: GmRead;
 }): boolean {
   const { frame, gmRead } = input;
-  if (gmRead.path !== "procedural" || gmRead.actionInterpretation.interactionKind !== "route_inquiry") {
-    return false;
-  }
-
+  if (gmRead.actionInterpretation.interactionKind !== "route_inquiry") return false;
   const targetRefs = gmRead.actionInterpretation.targetRefs;
   const hasMovementTarget = targetRefs.some((targetRef) =>
     frame.movementOptions.some((option) => option.ref.toLowerCase() === targetRef.toLowerCase())
@@ -376,12 +400,95 @@ function routeInquiryNeedsBackendReceipt(input: {
   return asksForCurrentSceneRoutes && hasAllowedCapability(frame, "route_options");
 }
 
-function deterministicRouteInquiryJudgment(input: {
+function typedPrimitiveNeedsBackendReceipt(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): boolean {
+  const { frame, gmRead } = input;
+  switch (gmRead.actionInterpretation.interactionKind) {
+    case "visible_actor_dialogue":
+      return visibleActorDialogueNeedsBackendReceipt(input);
+    case "movement_intent":
+      return movementNeedsBackendReceipt(input);
+    case "route_inquiry":
+      return routeInquiryNeedsBackendReceipt(input);
+    case "ordinary_support_actor_needed":
+      return hasAllowedCapability(frame, "support_actor_create")
+        && gmRead.actionInterpretation.supportActorNeed != null;
+    case "player_local_condition":
+      return hasAllowedCapability(frame, "condition_set")
+        && gmRead.actionInterpretation.localConditionNeed != null;
+    case "item_transfer":
+      return hasAllowedCapability(frame, "item_transfer")
+        && gmRead.actionInterpretation.itemTransferNeed != null;
+    case "minor_poi_create": {
+      const placeKind = gmRead.actionInterpretation.minorPoiNeed?.placeKind ?? null;
+      return hasAllowedCapability(frame, "minor_poi_create")
+        && Boolean(
+          frame.currentScenePlaceHandleSurface
+          && placeKind
+          && frame.currentScenePlaceHandleSurface.allowedPlaceKinds.includes(placeKind),
+        );
+    }
+    case "current_scene_observation":
+      return hasAllowedCapability(frame, "local_observation")
+        && gmRead.actionInterpretation.localObservationNeed != null;
+    case "device_status_observation":
+      return hasAllowedCapability(frame, "device_surface_observation")
+        && gmRead.actionInterpretation.deviceObservationNeed != null;
+    case "time_passage":
+      return hasAllowedCapability(frame, "time_advance")
+        && gmRead.actionInterpretation.timePassageNeed != null;
+    default:
+      return false;
+  }
+}
+
+function typedPrimitiveEvidenceRefs(input: {
+  frame: AuthoritativeSceneFrame;
+  gmRead: GmRead;
+}): string[] {
+  const { gmRead } = input;
+  const localConditionNeed = gmRead.actionInterpretation.localConditionNeed ?? null;
+  const itemTransferNeed = gmRead.actionInterpretation.itemTransferNeed ?? null;
+  const minorPoiNeed = gmRead.actionInterpretation.minorPoiNeed ?? null;
+  const timePassageNeed = gmRead.actionInterpretation.timePassageNeed ?? null;
+  const localObservationNeed = gmRead.actionInterpretation.localObservationNeed ?? null;
+  const deviceObservationNeed = gmRead.actionInterpretation.deviceObservationNeed ?? null;
+  const supportActorNeed = gmRead.actionInterpretation.supportActorNeed ?? null;
+  return [
+    ...(localConditionNeed ? [
+      ...(localConditionNeed.targetRef ? [localConditionNeed.targetRef] : []),
+      ...localConditionNeed.evidenceRefs,
+    ] : []),
+    ...(itemTransferNeed ? [
+      itemTransferNeed.itemRef,
+      itemTransferNeed.targetRef,
+      ...itemTransferNeed.evidenceRefs,
+    ] : []),
+    ...(minorPoiNeed ? [
+      minorPoiNeed.anchorRef,
+      ...minorPoiNeed.evidenceRefs,
+    ] : []),
+    ...(timePassageNeed ? timePassageNeed.evidenceRefs : []),
+    ...(localObservationNeed ? [
+      ...(localObservationNeed.targetRef ? [localObservationNeed.targetRef] : []),
+      ...localObservationNeed.evidenceRefs,
+    ] : []),
+    ...(deviceObservationNeed ? [
+      deviceObservationNeed.deviceRef,
+      ...deviceObservationNeed.evidenceRefs,
+    ] : []),
+    ...(supportActorNeed ? supportActorNeed.evidenceRefs : []),
+  ];
+}
+
+function deterministicBackendReceiptJudgment(input: {
   frame: AuthoritativeSceneFrame;
   gmRead: GmRead;
 }): JudgeUncertainty | null {
   const { frame, gmRead } = input;
-  if (!routeInquiryNeedsBackendReceipt(input)) return null;
+  if (!typedPrimitiveNeedsBackendReceipt(input)) return null;
 
   const targetRefs = frameCitableRefs(frame, gmRead.actionInterpretation.targetRefs).slice(0, 16);
   const evidenceRefs = frameCitableRefs(frame, [
@@ -390,12 +497,13 @@ function deterministicRouteInquiryJudgment(input: {
     frame.scene.currentLocation.ref,
     ...gmRead.focalRefs,
     ...gmRead.evidenceRefs,
+    ...typedPrimitiveEvidenceRefs(input),
     ...targetRefs,
   ]).slice(0, 16);
 
   return {
     version: "judge-uncertainty.v1",
-    judgmentId: `${gmRead.turnId}-route-inquiry-admission`,
+    judgmentId: `${gmRead.turnId}-backend-receipt-admission`,
     campaignId: frame.campaignId,
     turnId: frame.turnId,
     frameId: frame.frameId,
@@ -410,13 +518,13 @@ function deterministicRouteInquiryJudgment(input: {
     actorRefs: frameCitableRefs(frame, [frame.player.ref]).slice(0, 16),
     targetRefs,
     evidenceRefs,
-    possibilityRationale: "The accepted route inquiry targets current visible route information.",
-    checkRationale: "Route status and route options are settled by backend receipt authority before narration.",
+    possibilityRationale: "The accepted GM Read maps the player action to a supported backend-owned primitive.",
+    checkRationale: "The primitive must be settled by backend receipt authority before narration.",
     difficulty: null,
     oracleAdmission: null,
     noRollReason: {
       code: "backend_receipt_required",
-      explanation: "Route inquiry needs a route receipt before narration may answer.",
+      explanation: "The accepted primitive needs a clean backend receipt before narration may answer.",
       evidenceRefs,
     },
   };
@@ -837,7 +945,7 @@ export async function runCleanJudgeUncertainty(input: {
   provider: ProviderConfig;
   generateCandidate?: JudgeUncertaintyCandidateGenerator;
 }): Promise<JudgeUncertaintyRunResult> {
-  const deterministicJudgment = deterministicRouteInquiryJudgment({
+  const deterministicJudgment = deterministicBackendReceiptJudgment({
     frame: input.frame,
     gmRead: input.gmRead,
   });
@@ -856,7 +964,7 @@ export async function runCleanJudgeUncertainty(input: {
       };
     }
     throw new CleanJudgeUncertaintyValidationError(
-      "Clean Judge/Uncertainty deterministic route inquiry admission failed validation.",
+      "Clean Judge/Uncertainty deterministic backend receipt admission failed validation.",
       validation.issues,
     );
   }

@@ -5466,3 +5466,29 @@ Session: `gm-v1-consequenc-slice`.
     - P172 Lane A is diagnostic only. It reached a clean DB state at 60 records after repair, but the original turn 055 produced a player-facing error, so it contributes 0 clean 60/60 acceptance lanes.
   - Next scoped work:
     - [ ] Start a fresh post-fix zero-turn clone for the next 0 -> ~60 manual acceptance lane.
+
+- P173 clean gameplay runtime post-route-inquiry-fix diagnostic lane and typed backend admission repair:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p173-post-route-inquiry-fix-acceptance-a-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative `world_clocks` row `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carried `Brass Tube`, clean runtime stores zero, and old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true`, `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`, port `31703`.
+    - [x] Execute manual turns one action at a time from inspected post-turn state until the first runtime fallout.
+  - Diagnostic evidence:
+    - [x] Turn 001 `I look around Lowwater Bazaar.` passed as `direct_scene`; no receipts/traces/mutation/clock advance; old stores zero.
+    - [x] Turn 002 `I hand the Brass Tube to Guide.` passed with one accepted `item_transfer` receipt, `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, world time/current tick stayed `0/0`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores zero.
+    - [x] Turn 003 original action `I ask Guide, "Are you carrying the Brass Tube now?"` exposed a Judge/Uncertainty validation failure before Checklist/Stage4; no clean turn record/chat/receipt committed, and the route boundary restored the pre-turn state. Artifact: `output/clean-runtime-p173-post-route-inquiry-fix-acceptance-a-20260613/turn-003/`.
+    - [x] Root cause: accepted GM Read correctly produced direct `visible_actor_dialogue` with visible target `Guide`, while Judge admission still depended on model generation to produce deterministic `action_plan/backend_receipt_required`.
+  - Repair:
+    - [x] `runCleanJudgeUncertainty` now builds a validated `action_plan/backend_receipt_required` admission before model generation when accepted GM Read identifies a supported backend-owned typed primitive over current SceneFrame capabilities.
+    - [x] Covered primitives include visible actor dialogue, movement intent, route inquiry, support actor creation, player local condition, item transfer, minor POI creation, current-scene observation, device status observation, and time passage.
+    - [x] Added contract tests proving movement, route inquiry, and visible actor dialogue reach backend receipt admission without calling the model.
+  - Verification executed:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (`201 passed`).
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`289 passed`).
+    - [x] Restarted clean backend on port `31703`; retry artifact `turn-003-retry-after-judge-admission-fix/` passed with one accepted `dialogue_record`, `Brass Tube.owner=Guide`, `worldVersion/worldTime/currentTick` deltas `0/0/0`, old stores zero, and multi-token narration.
+  - Acceptance status:
+    - P173 is diagnostic only. The original turn 003 produced a player-facing error/restore boundary, so it contributes 0 clean 60/60 acceptance lanes.
+  - Next scoped work:
+    - [ ] Commit/push the typed backend admission repair after GitNexus detect.
+    - [ ] Start a fresh post-repair zero-turn clone for the next 0 -> ~60 manual acceptance lane.

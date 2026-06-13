@@ -3076,25 +3076,23 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
   });
 
-  it("repairs procedural no-roll drift into backend action-plan admission", async () => {
+  it("admits movement intent through the backend movement receipt contract before model generation", async () => {
     const frame = actionPlanFrame();
     const gmRead = actionPlanGmRead(frame);
-    const calls: string[] = [];
+    let modelCalled = false;
     const result = await runCleanJudgeUncertainty({
       frame,
       gmRead,
       provider,
-      generateCandidate: async (request) => {
-        calls.push(request.repairOf ? "repair" : "initial");
-        if (!request.repairOf) {
-          return validJudgeUncertainty(frame, gmRead);
-        }
-        return actionPlanJudge(frame, gmRead);
+      generateCandidate: async () => {
+        modelCalled = true;
+        throw new Error("movement admission should be deterministic");
       },
     });
 
-    expect(calls).toEqual(["initial", "repair"]);
+    expect(modelCalled).toBe(false);
     expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(false);
     expect(result.judgment.nextStep).toBe("action_plan");
     expect(result.judgment.checkNeed).toBe("backend_action_plan_needed");
     expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
@@ -3137,6 +3135,51 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
       checkNeed: "backend_action_plan_needed",
       physicalPossibility: "possible",
       targetRefs: ["North Hall"],
+    });
+    expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: result.judgment }).status)
+      .toBe("accepted");
+  });
+
+  it("admits visible actor dialogue through the backend dialogue receipt contract before model generation", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I ask Guide whether they carry the Brass Tube.",
+    });
+    const gmRead: GmRead = {
+      ...validGmRead(frame),
+      path: "direct",
+      liveSceneQuestion: "What does the visible speaker say?",
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      actionInterpretation: {
+        summary: "The player asks visible Guide a question.",
+        playerIntent: "Ask Guide about the Brass Tube.",
+        method: "ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+      interpretationRationale: "The action addresses one already-visible speaker.",
+    };
+    let modelCalled = false;
+
+    const result = await runCleanJudgeUncertainty({
+      frame,
+      gmRead,
+      provider,
+      generateCandidate: async () => {
+        modelCalled = true;
+        throw new Error("visible dialogue admission should be deterministic");
+      },
+    });
+
+    expect(modelCalled).toBe(false);
+    expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(false);
+    expect(result.judgment).toMatchObject({
+      nextStep: "action_plan",
+      checkNeed: "backend_action_plan_needed",
+      physicalPossibility: "possible",
+      targetRefs: ["Guide"],
     });
     expect(result.judgment.noRollReason?.code).toBe("backend_receipt_required");
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: result.judgment }).status)
