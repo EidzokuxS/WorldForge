@@ -69,7 +69,7 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
   };
 }
 
-function movementCandidate(text = "You move to North Hall."): CleanNarrationCandidate {
+function movementCandidate(text = "After one minute, you reach North Hall."): CleanNarrationCandidate {
   return {
     version: "gameplay-runtime.clean-narration-candidate.v1",
     packetId: "cgpacket_test",
@@ -79,8 +79,8 @@ function movementCandidate(text = "You move to North Hall."): CleanNarrationCand
       kind: "accepted_evidence",
       text,
       evidenceRefs: ["e1"],
-      backendFactRefs: ["e1.f1"],
-      claimKinds: ["player_location_change"],
+      backendFactRefs: ["e1.f1", "e1.f2"],
+      claimKinds: ["player_location_change", "elapsed_time"],
       auditStepIds: [],
     }],
     finalText: text,
@@ -963,6 +963,18 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
+  it("keeps elapsed-time literary prompt input to time evidence and scene label anchors", () => {
+    const promptInput = buildCleanNarratorPromptInput(timeWithSceneFrameSnapshotView());
+    const claimKinds = promptInput.acceptedEvidence.flatMap((evidence) => evidence.claimKinds);
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e5", "e1"]);
+    expect(claimKinds).toContain("elapsed_time");
+    expect(claimKinds).toContain("current_scene");
+    expect(claimKinds).not.toContain("visible_actor");
+    expect(claimKinds).not.toContain("visible_target");
+    expect(claimKinds).not.toContain("movement_option");
+  });
+
   it("accepts model narration from accepted movement evidence", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView(),
@@ -972,17 +984,15 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
-  it("uses deterministic authority projection for movement receipts with travel cost", async () => {
+  it("uses model-authored literary narration for movement receipts with travel cost", async () => {
     const result = await runCleanNarration({
       narratorView: movementView(),
       provider,
-      generateCandidate: async () => {
-        throw new Error("player_location_change should not call the model");
-      },
+      generateCandidate: async () => movementCandidate("After one minute, North Hall becomes your current place."),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("After 1 minute, you reach North Hall.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("After one minute, North Hall becomes your current place.");
     expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
   });
 
@@ -1021,17 +1031,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
   });
 
-  it("uses deterministic authority projection for standalone elapsed-time turns with snapshot context", async () => {
+  it("uses model-authored literary narration for standalone elapsed-time turns with snapshot context", async () => {
     const result = await runCleanNarration({
       narratorView: timeWithSceneFrameSnapshotView(),
       provider,
-      generateCandidate: async () => {
-        throw new Error("standalone elapsed_time should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(timeWithSceneFrameSnapshotView(), [{
+        text: "Five minutes pass in Market.",
+        evidenceRefs: ["e5", "e1"],
+        backendFactRefs: ["e5.f1", "e1.f1"],
+        claimKinds: ["elapsed_time", "current_scene"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("5 minutes pass.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Five minutes pass in Market.");
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
@@ -1613,6 +1626,16 @@ describe("clean Stage 6 narration contracts", () => {
     expect(sceneDigest.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("summary-digest")
     )).toBe(true);
+
+    const movementDigest = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate("You arrive at North Hall after one minute."),
+    });
+    expect(movementDigest.status).toBe("rejected");
+    if (movementDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(movementDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
   });
 
   it("rejects Russian narration that falls back to English scaffold wording", () => {
@@ -1712,6 +1735,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");

@@ -113,6 +113,10 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     name: "direct_scene_list",
     pattern: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
   },
+  {
+    name: "old_arrival_formula",
+    pattern: /^You arrive at\b/iu,
+  },
 ];
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -145,11 +149,12 @@ const MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 6;
 const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
   "item_state",
   "dialogue_response",
+  "player_location_change",
+  "elapsed_time",
 ];
 const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
   "current_scene",
   "current_location",
-  "visible_actor",
 ];
 
 function hasClaimKind(view: CleanNarratorView, claimKind: CleanNarrationClaimKind): boolean {
@@ -169,12 +174,23 @@ function hasOnlySceneFrameSnapshotEvidence(view: CleanNarratorView): boolean {
 }
 
 function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
-  if (hasClaimKind(view, "item_state") || hasClaimKind(view, "dialogue_response")) return true;
+  if (
+    hasClaimKind(view, "item_state")
+    || hasClaimKind(view, "dialogue_response")
+    || hasClaimKind(view, "player_location_change")
+    || hasClaimKind(view, "elapsed_time")
+  ) return true;
   return hasOnlySceneFrameSnapshotEvidence(view)
     && view.acceptedEvidence.some((evidence) =>
       evidence.claimKinds.includes("visible_target")
       || evidence.claimKinds.includes("movement_option")
     );
+}
+
+function minimumLiteraryWordCount(view: CleanNarratorView): number {
+  if (hasClaimKind(view, "player_location_change")) return 6;
+  if (hasClaimKind(view, "elapsed_time")) return 4;
+  return 12;
 }
 
 function uniqueFactsByRef(facts: readonly AcceptedNarrationBackendFact[]): AcceptedNarrationBackendFact[] {
@@ -361,11 +377,12 @@ function proseQualityIssues(input: {
         message: "Literary narration must use one to three sentence objects.",
       });
     }
-    if (wordsIn(text).length < 12) {
+    const minimumWords = minimumLiteraryWordCount(input.view);
+    if (wordsIn(text).length < minimumWords) {
       issues.push({
         code: "prose_quality",
         path: "finalText",
-        message: "Literary narration must be more developed than a compact status digest.",
+        message: `Literary narration must be more developed than a compact status digest; expected at least ${minimumWords} words.`,
       });
     }
     for (const marker of SUMMARY_DIGEST_MARKERS) {
@@ -437,8 +454,10 @@ export function buildCleanNarrationSystemPrompt(
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
     "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
+    "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
+    "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, 1-2 for dialogue, and 2-3 for direct scene observation.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, or time passage, 1-2 for dialogue, and 2-3 for direct scene observation.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -915,18 +934,12 @@ function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): stri
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   const onlySceneFrameSnapshotEvidence = hasOnlySceneFrameSnapshotEvidence(view);
-  const hasPlayerLocationChange = hasClaimKind(view, "player_location_change");
   return view.acceptedEvidence.some((evidence) =>
-    evidence.claimKinds.includes("player_location_change")
-    || evidence.claimKinds.includes("clarification_request")
+    evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
     || evidence.claimKinds.includes("player_local_condition")
     || evidence.claimKinds.includes("route_status")
-    || (
-      evidence.claimKinds.includes("elapsed_time")
-      && !hasPlayerLocationChange
-    )
     || evidence.authority === "route_options_receipt"
     || evidence.authority === "scene_observation_receipt"
     || evidence.claimKinds.includes("device_surface_observation")

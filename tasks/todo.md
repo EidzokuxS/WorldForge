@@ -34,16 +34,24 @@ P195 Stage 6 literary adventure narration:
   - [x] `scene_observation_receipt` remains deterministic until its literary contract has explicit evidence coverage; this prevents broad scene invention from an observation receipt.
   - [x] Scene-anchor prompt contract now treats scene labels as exact placement tokens; descriptive scene nouns require accepted observation backendFacts.
   - [x] Item-state grammar now asks for settled-state phrasing: item/custody state carries the sentence, and target labels render as holder/placement phrases.
+  - [x] Movement and standalone elapsed-time claims now use model-authored Stage 6 prose with claim-aware word floors and digest-shape validation.
+  - [x] Receipt-owned elapsed-time prompt input now includes only elapsed-time evidence plus current scene/location anchors; visible actor lists stay in direct-scene observation.
+  - [x] Runtime prose validation rejects the old `You arrive at...` movement formula for literary movement claims.
 - P195 verification:
   - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
-  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 306 tests.
+  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 307 tests.
   - [x] Prose audit passed for `output/clean-runtime-p195-literary-prose-qa-r10-20260613-141047/`: 1 narrative, 19 words, zero one-token output, zero summary/list/digest/echo hits.
   - [x] Fresh zero-turn live proof `p195-literary-prose-qa-r10-20260613-141047`, action `I hand the Brass Tube to Guide.`, returned literary player-facing text: `The Brass Tube passes from Mira Voss to the Guide, who now carries it here in the Lowwater Bazaar.`
   - [x] Live DB proof: one accepted `item_transfer` receipt, `Brass Tube.owner` became `Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, no clock ledger, restore ledger 0, old v2/saga/narrator/oracle/simulation stores 0, authority trace `gameplay-cycle-runtime.item_transfer.v1`.
   - [x] Diagnostic r9 exposed target-action drift (`Guide takes it`) despite correct DB settlement; r10 proof uses settled-state phrasing without target handling action.
+  - [x] Fresh three-turn live proof `p195-literary-prose-qa-r13-20260613-142345`: item transfer, movement to `Anchor Chain Pylon`, then 5-minute time passage all returned clean runtime `done` with accepted receipts/traces and old stores 0.
+  - [x] r13 player-facing movement/time prose: `One minute of travel brings you to Anchor Chain Pylon.` and `Five minutes pass at Anchor Chain Pylon.`
+  - [x] r13 prose audit passed: 3 narratives, zero one-token output, zero route/arrival/status/list/digest/echo hits.
+  - [x] Diagnostic r12 exposed old movement formula (`You arrive at Anchor Chain Pylon after a minute's travel.`); runtime validation now rejects that summary shape.
 - P195 next prose primitives:
   - [x] Tighten item-transfer live prose so scene anchor contributes exact placement only unless observation evidence supplies additional texture.
-  - [ ] Add literary coverage and live proof for route inquiry/options, time passage, local observation, and movement arrival.
+  - [x] Add literary coverage and live proof for movement arrival and standalone time passage.
+  - [ ] Add literary coverage and live proof for route inquiry/options and local observation.
   - [ ] Run longer fresh GLM 5.2 manual-turn lanes after the next primitive group, with prose audit plus DB verification after each lane.
 
 P189 clean runtime prose quality pass:
