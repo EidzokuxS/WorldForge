@@ -6465,3 +6465,19 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Deterministic route-options projection now renders only accepted `Route choices beat`; missing beat throws `Route-options projection requires accepted Route choices beat evidence.`
     - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 85 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because inserted helper code widened indexed touched symbols in `narration.ts`/`settlement.ts`; context review traced affected entry points to `runCleanNarration`, `renderCleanAuthorityProjection`, and `buildCleanSettledTurnPacket`, all covered by the focused checks above.
+
+- P222 Stage 6 scene-frame snapshot route story evidence:
+  - Plan:
+    - [x] Run GitNexus impact before editing snapshot route settlement/projection symbols.
+    - [x] Replace direct `scene_frame_snapshot` movement-option backend facts shaped as `Route option: ...` with typed route-choice story facts derived from `AuthoritativeSceneFrame.movementOptions`.
+    - [x] Update Stage 6 direct-scene projection and direct-scene label validation to read `Route choice labels` / `Route choices beat` without parsing route prose.
+    - [x] Remove `parseRouteOptionFact` once no route path depends on it.
+    - [x] Add focused tests proving direct-scene snapshot routes preserve exact labels/costs and old string-shaped snapshot route facts no longer drive route projection.
+    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Results:
+    - [x] GitNexus impacts before edits: `stage4Evidence` LOW, `routeChoicesBeat` LOW, `renderSceneFrameSnapshotProjection` LOW, `parseRouteOptionFact` LOW, `renderRouteOptionsProjection` LOW, `preferredPromptFacts` LOW, `directSceneFactLabel` LOW, `directSceneVerbatimLabels` LOW, and `proseQualityIssues` LOW.
+    - [x] Direct `scene_frame_snapshot` movement-option evidence now emits `Route choices beat`, `Route origin`, `Route choice labels`, `Open route labels`, `Closed route labels`, and `Route choice travel costs` from typed `AuthoritativeSceneFrame.movementOptions`.
+    - [x] Stage 6 direct-scene projection now renders route choices from accepted `Route choices beat`; missing beat throws `Route-options projection requires accepted Route choices beat evidence.`
+    - [x] `parseRouteOptionFact` was removed from Stage 6; old `Route option: ...` survives only as a receipt leak marker and negative test fixture.
+    - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 86 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` and `renderCleanAuthorityProjection`.

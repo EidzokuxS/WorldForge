@@ -452,10 +452,17 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e4",
       authority: "scene_frame_snapshot",
       claimKinds: ["movement_option"],
-      text: "Visible route options include North Hall.",
-      backendFacts: [{ factRef: "e4.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      text: "From Market, visible route choices are North Hall (1 minute).",
+      backendFacts: [
+        { factRef: "e4.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e4.f2", text: "Route origin: Market.", exact: true },
+        { factRef: "e4.f3", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e4.f4", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e4.f5", text: "Closed route labels: none.", exact: true },
+        { factRef: "e4.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+      ],
       limits: {
-        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        proves: ["route option labels exposed by the current SceneFrame snapshot", "route choice phrasing for the player"],
         doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "absence of other routes"],
       },
     }],
@@ -526,10 +533,17 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e5",
       authority: "scene_frame_snapshot",
       claimKinds: ["movement_option"],
-      text: "Visible route options include North Hall.",
-      backendFacts: [{ factRef: "e5.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      text: "From Market, visible route choices are North Hall (1 minute).",
+      backendFacts: [
+        { factRef: "e5.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e5.f2", text: "Route origin: Market.", exact: true },
+        { factRef: "e5.f3", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e5.f4", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e5.f5", text: "Closed route labels: none.", exact: true },
+        { factRef: "e5.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+      ],
       limits: {
-        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        proves: ["route option labels exposed by the current SceneFrame snapshot", "route choice phrasing for the player"],
         doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "absence of other routes"],
       },
     }],
@@ -1368,6 +1382,10 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("keeps direct scene snapshot evidence available to the literary scene prompt", () => {
     const promptInput = buildCleanNarratorPromptInput(sceneFrameSnapshotView());
+    const routeEvidence = promptInput.acceptedEvidence.find((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && evidence.claimKinds.includes("movement_option")
+    );
 
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
     expect(promptInput.acceptedEvidence.some((evidence) =>
@@ -1376,6 +1394,14 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.some((evidence) =>
       evidence.claimKinds.includes("movement_option")
     )).toBe(true);
+    expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
+      "Route choices beat: From Market, visible route choices are North Hall (1 minute).",
+      "Route origin: Market.",
+      "Route choice labels: North Hall.",
+      "Open route labels: North Hall.",
+      "Closed route labels: none.",
+      "Route choice travel costs: North Hall: 1 minute.",
+    ]);
   });
 
   it("keeps elapsed-time literary prompt input to time evidence and scene label anchors", () => {
@@ -1538,6 +1564,20 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(() => buildCleanNarratorPromptInput(missingLabelsView))
       .toThrow("Route-options prompt input requires accepted Route choice labels evidence.");
+  });
+
+  it("fails scene_frame_snapshot route handling when accepted story evidence is missing", () => {
+    const oldFactView = sceneFrameSnapshotView();
+    oldFactView.acceptedEvidence[3] = {
+      ...oldFactView.acceptedEvidence[3]!,
+      text: "Visible route options include North Hall.",
+      backendFacts: [{ factRef: "e4.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Scene-frame route prompt input requires accepted Route choices beat evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Route-options projection requires accepted Route choices beat evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -2256,7 +2296,7 @@ describe("clean Stage 6 narration contracts", () => {
           {
             text: "North Hall is the one-minute route choice here.",
             evidenceRefs: ["e5"],
-            backendFactRefs: ["e5.f1"],
+            backendFactRefs: ["e5.f1", "e5.f3", "e5.f6"],
             claimKinds: ["movement_option"],
           },
         ]);
@@ -2322,7 +2362,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "North Hall is the one-minute route choice here.",
           evidenceRefs: ["e4"],
-          backendFactRefs: ["e4.f1"],
+          backendFactRefs: ["e4.f1", "e4.f3", "e4.f6"],
           claimKinds: ["movement_option"],
         },
       ]),
@@ -2337,7 +2377,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "At Market, Courier satchel is with you and Notice Board is visible. North Hall is the one-minute route choice here.",
         evidenceRefs: ["e1", "e2", "e3", "e4"],
-        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1", "e4.f3", "e4.f6"],
         claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
       }]),
     });
@@ -2374,7 +2414,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. From Market, visible route choices are North Hall (1 minute).");
     expect(text).not.toContain("Guide, Courier satchel");
     expect(text).not.toContain("Guide, Brass Tube");
     expect(text).not.toContain("Courier satchel is visible");
@@ -2390,7 +2430,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => acceptedCandidate(view, [{
         text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible. North Hall is the one-minute route choice here.",
         evidenceRefs: ["e1", "e2", "e3", "e4", "e5"],
-        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5", "e5.f1"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5", "e5.f1", "e5.f3", "e5.f6"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
       }]),
     });
@@ -3678,7 +3718,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(sceneFrameSnapshotView(), [{
         text: "You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.",
         evidenceRefs: ["e1", "e2", "e3", "e4"],
-        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1", "e4.f3", "e4.f6"],
         claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
       }]),
     });

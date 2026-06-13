@@ -337,7 +337,6 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     ];
     const preferred = evidence.backendFacts.filter((fact) =>
       routeOptionsReceiptPrefixes.some((prefix) => fact.text.startsWith(prefix))
-      || fact.text.startsWith("Route option:")
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
@@ -382,6 +381,7 @@ function maxPromptBackendFactsForEvidence(evidence: AcceptedNarrationEvidence): 
 
 function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
   assertRouteOptionsReceiptStoryEvidence(evidence);
+  assertSceneFrameRouteStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
@@ -724,34 +724,35 @@ function directSceneUsesUnsupportedItemHandling(view: CleanNarratorView, text: s
   );
 }
 
-function directSceneFactLabel(text: string): string | null {
+function directSceneFactLabels(text: string): string[] {
   if (text.startsWith("Current scene is ")) {
-    return trimSentencePeriod(text.replace(/^Current scene is\s*/u, ""));
+    return [trimSentencePeriod(text.replace(/^Current scene is\s*/u, ""))];
   }
   if (text.startsWith("Current place is ")) {
-    return trimSentencePeriod(text.replace(/^Current place is\s*/u, ""));
+    return [trimSentencePeriod(text.replace(/^Current place is\s*/u, ""))];
   }
   if (text.startsWith("Visible actor: ")) {
-    return trimSentencePeriod(text.replace(/^Visible actor:\s*/u, ""));
+    return [trimSentencePeriod(text.replace(/^Visible actor:\s*/u, ""))];
   }
   if (text.startsWith("Inventory item: ")) {
-    return trimSentencePeriod(text.replace(/^Inventory item:\s*/u, ""));
+    return [trimSentencePeriod(text.replace(/^Inventory item:\s*/u, ""))];
   }
   const visibleTarget = parseVisibleTargetFact(text);
-  if (visibleTarget) return visibleTarget.label;
-  const routeOption = parseRouteOptionFact(text);
-  if (routeOption) return routeOption.label;
-  if (text.startsWith("Movement option: ")) {
-    return trimSentencePeriod(text.replace(/^Movement option:\s*/u, ""));
+  if (visibleTarget) return [visibleTarget.label];
+  if (text.startsWith("Route choice labels: ")) {
+    return splitRouteChoiceLabels(text.slice("Route choice labels: ".length));
   }
-  return null;
+  if (text.startsWith("Movement option: ")) {
+    return [trimSentencePeriod(text.replace(/^Movement option:\s*/u, ""))];
+  }
+  return [];
 }
 
 function directSceneVerbatimLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) => isDirectSceneEvidence(evidence))
     .flatMap((evidence) => evidence.backendFacts)
-    .map((fact) => directSceneFactLabel(fact.text) ?? "")
+    .flatMap((fact) => directSceneFactLabels(fact.text))
     .filter((label) => label.length > 0));
 }
 
@@ -760,18 +761,18 @@ function directSceneUsesNonVerbatimCitedLabel(
   candidate: CleanNarrationCandidate,
 ): boolean {
   if (!isDirectSceneNarration(view)) return false;
-  const factLabels = new Map<string, string>();
+  const factLabels = new Map<string, string[]>();
   for (const evidence of view.acceptedEvidence) {
     if (!isDirectSceneEvidence(evidence)) continue;
     for (const fact of evidence.backendFacts) {
-      const label = directSceneFactLabel(fact.text);
-      if (label) factLabels.set(fact.factRef, label);
+      const labels = directSceneFactLabels(fact.text);
+      if (labels.length > 0) factLabels.set(fact.factRef, labels);
     }
   }
   for (const sentence of candidate.sentences) {
     for (const factRef of sentence.backendFactRefs) {
-      const label = factLabels.get(factRef);
-      if (label && !sentence.text.includes(label)) return true;
+      const labels = factLabels.get(factRef) ?? [];
+      if (labels.some((label) => !sentence.text.includes(label))) return true;
     }
   }
   return false;
@@ -1092,6 +1093,21 @@ function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
     }));
 }
 
+function acceptedDirectSceneRouteOptionLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && evidence.claimKinds.includes("movement_option")
+    )
+    .flatMap((evidence) => {
+      const labels = factValue(evidence, "Route choice labels: ");
+      if (labels === null) {
+        throw new Error("Direct-scene route narration requires accepted Route choice labels evidence.");
+      }
+      return splitRouteChoiceLabels(labels);
+    }));
+}
+
 function hasTerminalRouteEvidence(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.some((evidence) =>
     evidence.authority === "route_options_receipt"
@@ -1397,7 +1413,10 @@ function proseQualityIssues(input: {
   }
 
   const routeOptionLabels = candidateCitesClaimKind(input.candidate, "movement_option")
-    ? acceptedRouteOptionLabels(input.view)
+    ? uniqueStrings([
+      ...acceptedRouteOptionLabels(input.view),
+      ...acceptedDirectSceneRouteOptionLabels(input.view),
+    ])
     : [];
   if (routeOptionLabels.length > 0) {
     const missingLabels = routeOptionLabels.filter((label) => !text.includes(label));
@@ -1839,6 +1858,19 @@ function assertRouteOptionsReceiptStoryEvidence(evidence: AcceptedNarrationEvide
   }
 }
 
+function assertSceneFrameRouteStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (
+    evidence.authority !== "scene_frame_snapshot"
+    || !evidence.claimKinds.includes("movement_option")
+  ) return;
+  if (!factValue(evidence, "Route choices beat: ")) {
+    throw new Error("Scene-frame route prompt input requires accepted Route choices beat evidence.");
+  }
+  if (factValue(evidence, "Route choice labels: ") === null) {
+    throw new Error("Scene-frame route prompt input requires accepted Route choice labels evidence.");
+  }
+}
+
 function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string) => boolean): string | null {
   return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
 }
@@ -1849,11 +1881,6 @@ function englishList(values: readonly string[]): string {
   if (labels.length === 1) return labels[0]!;
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
-}
-
-function formatMinutes(value: string | null): string | null {
-  if (!value) return null;
-  return `${value} minute${value === "1" ? "" : "s"}`;
 }
 
 function renderElapsedTimeProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
@@ -1868,16 +1895,6 @@ function renderMovementProjection(_view: CleanNarratorView, evidence: AcceptedNa
   throw new Error("Movement projection requires accepted Travel beat evidence.");
 }
 
-function parseRouteOptionFact(text: string): { label: string; connected: boolean; travelCost: string | null } | null {
-  const match = text.match(/^Route option:\s+(.+?)\s+\((connected|not connected)(?:,\s+(\d+)\s+minute\(s\))?\)\.$/u);
-  if (!match) return null;
-  return {
-    label: match[1]!,
-    connected: match[2] === "connected",
-    travelCost: match[3] ?? null,
-  };
-}
-
 function parseVisibleTargetFact(text: string): { label: string; kind: string | null } | null {
   const match = text.match(/^Visible target:\s+(.+?)(?:\s+\(([^)]+)\))?\.$/u);
   if (!match) return null;
@@ -1890,39 +1907,7 @@ function parseVisibleTargetFact(text: string): { label: string; kind: string | n
 function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): string {
   const routeChoicesBeat = factValue(evidence, "Route choices beat: ");
   if (routeChoicesBeat) return `${routeChoicesBeat}.`;
-  if (evidence.authority === "route_options_receipt") {
-    throw new Error("Route-options projection requires accepted Route choices beat evidence.");
-  }
-
-  const options = evidence.backendFacts
-    .map((entry) => parseRouteOptionFact(entry.text))
-    .filter((option): option is NonNullable<typeof option> => option !== null);
-  if (options.length === 0) return evidence.backendFacts.map((entry) => entry.text).join(" ");
-
-  const connected = options.filter((option) => option.connected);
-  const blocked = options.filter((option) => !option.connected);
-  const sentences: string[] = [];
-  if (connected.length > 0) {
-    const costs = uniqueStrings(connected.map((option) => option.travelCost ?? ""));
-    const routeLabels = englishList(connected.map((option) => option.label));
-    if (connected.length === 1) {
-      const minutes = formatMinutes(connected[0]!.travelCost);
-      sentences.push(minutes
-        ? `From here, the visible way leads to ${routeLabels}. It takes ${minutes}.`
-        : `From here, the visible way leads to ${routeLabels}.`);
-    } else if (costs.length === 1 && costs[0]) {
-      sentences.push(`From here, the visible ways lead to ${routeLabels}. Each takes ${formatMinutes(costs[0]!)!}.`);
-    } else {
-      sentences.push(`From here, the visible ways lead to ${routeLabels}.`);
-    }
-  }
-  if (blocked.length > 0) {
-    const blockedLabels = englishList(blocked.map((option) => option.label));
-    sentences.push(blocked.length === 1
-      ? `Here, the closed visible way points toward ${blockedLabels}.`
-      : `Here, the closed visible ways point toward ${blockedLabels}.`);
-  }
-  return sentences.join(" ");
+  throw new Error("Route-options projection requires accepted Route choices beat evidence.");
 }
 
 function renderRouteStatusProjection(
@@ -1955,14 +1940,16 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     .flatMap((evidence) => evidence.backendFacts)
     .filter((entry) => entry.text.startsWith("Inventory item: "))
     .map((entry) => trimSentencePeriod(entry.text.replace(/^Inventory item:\s*/u, "")));
-  const routeOptions = sceneFacts
-    .flatMap((evidence) => evidence.backendFacts)
-    .map((entry) => parseRouteOptionFact(entry.text))
-    .filter((option): option is NonNullable<typeof option> => option !== null);
+  const routeOptionLabels = sceneFacts
+    .filter((evidence) => evidence.claimKinds.includes("movement_option"))
+    .flatMap((evidence) => {
+      const labels = factValue(evidence, "Route choice labels: ");
+      return labels === null ? [] : splitRouteChoiceLabels(labels);
+    });
   const alreadyNamed = new Set([
     ...actors,
     ...inventory,
-    ...routeOptions.map((option) => option.label),
+    ...routeOptionLabels,
   ].map((label) => label.toLocaleLowerCase("en-US")));
   const targets = sceneFacts
     .flatMap((evidence) => evidence.backendFacts)
@@ -1973,8 +1960,8 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
   const routeEvidence: AcceptedNarrationEvidence = {
     ...sceneFacts[0]!,
     backendFacts: sceneFacts
-      .flatMap((evidence) => evidence.backendFacts)
-      .filter((entry) => entry.text.startsWith("Route option: ")),
+      .filter((evidence) => evidence.claimKinds.includes("movement_option"))
+      .flatMap((evidence) => evidence.backendFacts),
   };
   const sentences: string[] = [];
   if (currentScene && currentPlace && currentScene !== currentPlace) {

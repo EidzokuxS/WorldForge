@@ -416,11 +416,11 @@ function routeChoiceDisplay(option: CleanRouteOptionResult): string {
   return `${option.label} (${routeChoiceStatusPhrase(option)})`;
 }
 
-function routeChoicesBeat(routeOptions: CleanRouteOptionsResult, boundedOptions: readonly CleanRouteOptionResult[]): string {
+function routeChoicesBeat(originLabel: string, boundedOptions: readonly CleanRouteOptionResult[]): string {
   if (boundedOptions.length === 0) {
-    return `No visible route choices are listed from ${routeOptions.fromLabel}.`;
+    return `No visible route choices are listed from ${originLabel}.`;
   }
-  return `From ${routeOptions.fromLabel}, visible route choices are ${evidenceLabelList(boundedOptions.map(routeChoiceDisplay))}.`;
+  return `From ${originLabel}, visible route choices are ${evidenceLabelList(boundedOptions.map(routeChoiceDisplay))}.`;
 }
 
 function compactSceneTexture(value: string | null | undefined): string | null {
@@ -585,23 +585,35 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
   if (frame.movementOptions.length > 0) {
     const routeEvidenceId = nextEvidenceId(evidence);
     const routeOptions = frame.movementOptions.slice(0, 8);
+    const routeBeat = routeChoicesBeat(frame.scene.currentScene.label, routeOptions);
+    const routeLabels = routeOptions.map((option) => option.label);
+    const openRouteLabels = routeOptions
+      .filter((option) => option.connected)
+      .map((option) => option.label);
+    const closedRouteLabels = routeOptions
+      .filter((option) => !option.connected)
+      .map((option) => option.label);
+    const routeCostSummary = routeOptions
+      .map((option) => `${option.label}: ${routeChoiceStatusPhrase(option)}`)
+      .join("; ") || "none";
     evidence.push({
       evidenceId: routeEvidenceId,
       sourceKind: "scene_frame",
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["movement_option"],
-      text: `Visible route options include ${evidenceLabelList(routeOptions.map((option) => option.label))}.`,
+      text: routeBeat,
       visibleRefs: routeOptions.map((option) => option.ref),
-      backendFacts: boundedBackendFacts(routeOptions.map((option, index) =>
-        fact(
-          routeEvidenceId,
-          index + 1,
-          `Route option: ${option.label} (${option.connected ? "connected" : "not connected"}${option.travelCost === null ? "" : `, ${option.travelCost} minute(s)`}).`,
-        )
-      )),
+      backendFacts: boundedBackendFacts([
+        fact(routeEvidenceId, 1, `Route choices beat: ${routeBeat}`),
+        fact(routeEvidenceId, 2, `Route origin: ${frame.scene.currentScene.label}.`),
+        fact(routeEvidenceId, 3, `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 4, `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 5, `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 6, `Route choice travel costs: ${routeCostSummary}.`),
+      ]),
       limits: {
-        proves: ["route option labels visible from the current scene"],
+        proves: ["route option labels visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
         doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "elapsed travel time", "absence of other routes"],
       },
     });
@@ -832,7 +844,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const evidenceId = nextEvidenceId(evidence);
       const routeOptions = receipt.publicResult.routeOptions;
       const boundedOptions = routeOptions.options.slice(0, 8);
-      const routeBeat = routeChoicesBeat(routeOptions, boundedOptions);
+      const routeBeat = routeChoicesBeat(routeOptions.fromLabel, boundedOptions);
       const routeLabels = boundedOptions.map((option) => option.label);
       const openRouteLabels = boundedOptions
         .filter((option) => option.connected)

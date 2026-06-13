@@ -809,7 +809,16 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toContain("Visible target: Notice Board (place_handle).");
     expect(targetEvidence?.limits.doesNotProve).toContain("movement");
     const routeEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("movement_option"));
-    expect(routeEvidence?.backendFacts.map((entry) => entry.text)).toContain("Route option: North Hall (connected, 1 minute(s)).");
+    expect(routeEvidence?.text).toBe("From Market, visible route choices are North Hall (1 minute).");
+    expect(routeEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Route choices beat: From Market, visible route choices are North Hall (1 minute).",
+      "Route origin: Market.",
+      "Route choice labels: North Hall.",
+      "Open route labels: North Hall.",
+      "Closed route labels: none.",
+      "Route choice travel costs: North Hall: 1 minute.",
+    ]);
+    expect(routeEvidence?.limits.proves).toContain("route choice phrasing for the player");
     expect(routeEvidence?.limits.doesNotProve).toContain("arrival");
     expect(JSON.stringify(view)).not.toContain("SceneFrame");
   });
