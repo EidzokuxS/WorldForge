@@ -483,6 +483,19 @@ function isDirectSceneSnapshotNarration(view: CleanNarratorView): boolean {
     );
 }
 
+function isSceneObservationReceiptNarration(view: CleanNarratorView): boolean {
+  return view.acceptedEvidence.some((evidence) => evidence.authority === "scene_observation_receipt");
+}
+
+function isDirectSceneNarration(view: CleanNarratorView): boolean {
+  return isDirectSceneSnapshotNarration(view) || isSceneObservationReceiptNarration(view);
+}
+
+function isDirectSceneEvidence(evidence: AcceptedNarrationEvidence): boolean {
+  return evidence.authority === "scene_frame_snapshot"
+    || evidence.authority === "scene_observation_receipt";
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -490,7 +503,7 @@ function escapeRegExp(value: string): string {
 function directSceneActorLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) =>
-      evidence.authority === "scene_frame_snapshot"
+      isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("visible_actor") || evidence.claimKinds.includes("visible_target"))
     )
     .flatMap((evidence) => evidence.backendFacts)
@@ -507,7 +520,7 @@ function directSceneActorLabels(view: CleanNarratorView): string[] {
 function directSceneObjectLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) =>
-      evidence.authority === "scene_frame_snapshot"
+      isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("inventory_status") || evidence.claimKinds.includes("visible_target"))
     )
     .flatMap((evidence) => evidence.backendFacts)
@@ -526,7 +539,7 @@ function sentenceMentionsLabel(sentence: string, label: string): boolean {
 }
 
 function directSceneUsesUnsupportedActorAction(view: CleanNarratorView, text: string): boolean {
-  if (!isDirectSceneSnapshotNarration(view)) return false;
+  if (!isDirectSceneNarration(view)) return false;
   const actorLabels = directSceneActorLabels(view);
   if (actorLabels.length === 0) return false;
   return text.split(/(?<=[.!?])\s+/u).some((sentence) =>
@@ -536,7 +549,7 @@ function directSceneUsesUnsupportedActorAction(view: CleanNarratorView, text: st
 }
 
 function directSceneUsesUnsupportedItemHandling(view: CleanNarratorView, text: string): boolean {
-  if (!isDirectSceneSnapshotNarration(view)) return false;
+  if (!isDirectSceneNarration(view)) return false;
   const objectLabels = directSceneObjectLabels(view);
   if (objectLabels.length === 0) return false;
   return text.split(/(?<=[.!?])\s+/u).some((sentence) =>
@@ -562,12 +575,15 @@ function directSceneFactLabel(text: string): string | null {
   if (visibleTarget) return visibleTarget.label;
   const routeOption = parseRouteOptionFact(text);
   if (routeOption) return routeOption.label;
+  if (text.startsWith("Movement option: ")) {
+    return trimSentencePeriod(text.replace(/^Movement option:\s*/u, ""));
+  }
   return null;
 }
 
 function directSceneVerbatimLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
-    .filter((evidence) => evidence.authority === "scene_frame_snapshot")
+    .filter((evidence) => isDirectSceneEvidence(evidence))
     .flatMap((evidence) => evidence.backendFacts)
     .map((fact) => directSceneFactLabel(fact.text) ?? "")
     .filter((label) => label.length > 0));
@@ -577,10 +593,10 @@ function directSceneUsesNonVerbatimCitedLabel(
   view: CleanNarratorView,
   candidate: CleanNarrationCandidate,
 ): boolean {
-  if (!isDirectSceneSnapshotNarration(view)) return false;
+  if (!isDirectSceneNarration(view)) return false;
   const factLabels = new Map<string, string>();
   for (const evidence of view.acceptedEvidence) {
-    if (evidence.authority !== "scene_frame_snapshot") continue;
+    if (!isDirectSceneEvidence(evidence)) continue;
     for (const fact of evidence.backendFacts) {
       const label = directSceneFactLabel(fact.text);
       if (label) factLabels.set(fact.factRef, label);
@@ -1049,7 +1065,7 @@ function proseQualityIssues(input: {
   }
 
   if (
-    isDirectSceneSnapshotNarration(input.view)
+    isDirectSceneNarration(input.view)
     && hasAcceptedSceneTextureEvidence(input.view)
     && !candidateCitesClaimKind(input.candidate, "scene_texture")
   ) {
@@ -1061,7 +1077,7 @@ function proseQualityIssues(input: {
   }
 
   if (
-    isDirectSceneSnapshotNarration(input.view)
+    isDirectSceneNarration(input.view)
     && DIRECT_SCENE_PLAYER_ACTION_TEXT.test(unquotedText)
   ) {
     issues.push({
@@ -1341,7 +1357,7 @@ export function buildCleanNarrationSystemPrompt(
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the condition beat; when several texture facts exist, player_local_condition uses a later texture fact than the first. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
     "Minor-POI surface: for minor_poi_handle, phrase only the accepted visible current-scene place handle label, kind, handle result, and exact scene anchor as a local target handle. With scene_texture evidence, put one exact scene_texture sentence beside the handle beat; when several texture facts exist, minor_poi_handle uses a later texture fact than the first. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. With scene_texture evidence, put one exact scene_texture sentence beside the device-surface beat; when several texture facts exist, device_surface_observation uses a later texture fact than the first. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
-    "Direct-scene surface: for scene_frame_snapshot-only direct scene observation, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, discovery, absence, and no-change require their own accepted backendFacts.",
+    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
@@ -1525,7 +1541,7 @@ function narrationValidationRepairLines(
     || issue.message.includes("scene texture")
     || issue.message.includes("texture fact")
     || issue.message.includes("texture clause"));
-  const hasDirectSceneIssue = isDirectSceneSnapshotNarration(view)
+  const hasDirectSceneIssue = isDirectSceneNarration(view)
     && issues.some((issue) => issue.message.includes("Direct-scene"));
   const lines: string[] = [];
   const textureFacts = hasSceneTextureIssue || hasDirectSceneIssue
@@ -1593,7 +1609,7 @@ function narrationValidationRepairLines(
     const labels = directSceneVerbatimLabels(view);
     lines.push(
       "Direct-scene repair contract:",
-      "Use direct-scene snapshot facts as static visible scene state.",
+      "Use direct-scene accepted facts as static visible scene state.",
       "Use presence and visibility shapes: '<actor> is here.', '<actor> is in view here.', '<inventory item> is with you.', '<target> is visible.', '<route label> is the one-minute route choice here.'",
       "Use current-scene placement shapes such as 'At <scene>, ...' for scene labels.",
       "Replace player search, posture, grip, and movement wording with accepted scene placement or visible-state wording.",
@@ -1921,7 +1937,6 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
     || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
     || (evidence.claimKinds.includes("player_local_condition") && !hasSceneTexture)
     || (evidence.claimKinds.includes("support_actor_materialization") && !hasSceneTexture)
-    || evidence.authority === "scene_observation_receipt"
     || (evidence.claimKinds.includes("device_surface_observation") && !hasSceneTexture)
   );
 }

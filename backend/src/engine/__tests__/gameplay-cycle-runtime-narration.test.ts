@@ -898,6 +898,15 @@ function sceneObservationReceiptView(): CleanNarratorView {
   });
 }
 
+function sceneObservationReceiptWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      sceneTextureEvidence("e6"),
+      ...sceneObservationReceiptView().acceptedEvidence,
+    ],
+  });
+}
+
 function deviceSurfaceObservationView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -2971,17 +2980,122 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toContain("SceneFrame");
   });
 
-  it("keeps scene_observation receipts on deterministic projection until the receipt has literary coverage", async () => {
+  it("uses model-authored direct-scene prose for scene_observation receipts with direct-scene guards", async () => {
+    const view = sceneObservationReceiptView();
+    let modelCalls = 0;
     const result = await runCleanNarration({
-      narratorView: sceneObservationReceiptView(),
+      narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("scene_observation_receipt should not call the model");
+        modelCalls += 1;
+        return acceptedCandidate(view, [{
+          text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+          claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+        }]);
       },
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Current scene is Market. Visible actor: Guide. Inventory item: Courier satchel. Movement option: North Hall.");
+    expect(modelCalls).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.");
+    expect(result.text).not.toMatch(/\b(Current scene is|Visible actor:|Inventory item:|Movement option:|backend|receipt|nothing changed|no change)\b/iu);
+
+    const rawReceiptSummary = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Current scene is Market. Visible actor: Guide. Inventory item: Courier satchel. Movement option: North Hall.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+    expect(rawReceiptSummary.status).toBe("rejected");
+    if (rawReceiptSummary.status !== "rejected") throw new Error("expected rejected");
+    expect(rawReceiptSummary.issues.some((issue) => issue.code === "prose_quality")).toBe(true);
+
+    const playerActionDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "You look across Market and spot Guide beside Courier satchel and North Hall.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+    expect(playerActionDrift.status).toBe("rejected");
+    if (playerActionDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(playerActionDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("without adding player posture")
+    )).toBe(true);
+
+    const actorActionDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Guide stands in Market while Courier satchel and North Hall stay visible.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+    expect(actorActionDrift.status).toBe("rejected");
+    if (actorActionDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(actorActionDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("visible-actor labels prove presence only")
+    )).toBe(true);
+
+    const nonVerbatimLabel = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Market keeps the guide visible beside Courier satchel and North Hall.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+    expect(nonVerbatimLabel.status).toBe("rejected");
+    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
+    expect(nonVerbatimLabel.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("cited labels must appear verbatim")
+    )).toBe(true);
+
+    const texturedView = sceneObservationReceiptWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view: texturedView,
+      candidate: acceptedCandidate(texturedView, [{
+        text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("scene_texture")
+    )).toBe(true);
+
+    const texturedResult = await runCleanNarration({
+      narratorView: texturedView,
+      provider,
+      generateCandidate: async () => acceptedCandidate(texturedView, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e6"],
+          backendFactRefs: ["e6.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+          claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+        },
+      ]),
+    });
+    expect(texturedResult.source).toBe("model");
+    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {

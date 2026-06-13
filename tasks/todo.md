@@ -6161,3 +6161,24 @@ Session: `gm-v1-consequenc-slice`.
     - [x] DB proof `output/clean-runtime-p205-route-options-literary-20260613-1917/db-proof.json`: pass true; no movement, current-scene change, hidden-route, route-safety, internal route/backend terms, or old runtime stores.
     - [x] Prose audit `output/clean-runtime-p205-route-options-literary-20260613-1917/prose-audit.json`: 1 narrative, 50 words, zero one-token/debug/enum/stock-route/slop hits.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope, mapping the code change to `proseQualityIssues` with no affected process expansion.
+
+- P206 Stage 6 scene-observation receipt literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow `scene_observation_receipt` to use model-authored direct-scene prose instead of joining raw backend facts.
+    - [x] Share direct-scene guards with receipt-owned observations: preserve exact cited labels, require accepted scene texture when present, and reject player action, actor action, item handling, movement, discovery, absence/no-change, route-safety, and hidden-route claims.
+    - [x] Add tests for accepted model prose plus rejection of raw receipt summary, player-action wording, actor-action drift, non-verbatim labels, and missing texture when texture is accepted.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, live proof if a receipt can be reached reliably, and prose audit.
+    - [x] Run GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts: `isDirectSceneSnapshotNarration` MEDIUM through direct-scene validation/repair and `runCleanNarration`; `needsDeterministicAuthorityProjection`, `proseQualityIssues`, and `buildCleanNarrationSystemPrompt` LOW.
+    - [x] `scene_observation_receipt` no longer forces deterministic projection; it shares the direct-scene literary path and direct-scene guards.
+    - [x] Direct-scene label extraction now covers `scene_observation_receipt` backend facts and `Movement option:` labels so cited receipt labels must appear verbatim in model prose.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 73 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 340 tests.
+    - [x] Live broad-look clone `p206-scene-observation-literary-20260613-1932` settled as `direct_scene` rather than `scene_observation_receipt`, but proved the shared direct-scene literary path on real traffic: no mutation, no receipt, no clock/old-store writes, and prose audit clean.
+    - [x] Live direct-scene prose: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Courier satchel and Sealed lacquer message tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.`
+    - [x] Prose audit `output/clean-runtime-p206-scene-observation-literary-20260613-1932/prose-audit.json`: 1 narrative, 60 words, zero one-token/debug/enum/direct-scene/stock-route/slop hits.
+    - [x] Receipt-targeting attempt `p206-scene-observation-receipt-attempt2-20260613-1935` is diagnostic-invalid: GM Read failed before settlement with malformed `localObservationNeed`; no player-facing `done` was produced.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope, with changed symbols limited to direct-scene validation/prompt helpers and no affected process expansion.
