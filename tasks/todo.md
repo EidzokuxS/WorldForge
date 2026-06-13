@@ -6642,3 +6642,16 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported LOW with no affected execution processes.
     - [x] Pushed commit `66fa33e4`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P234 Stage 6 direct-scene typed labels:
+  - Plan:
+    - [x] Run GitNexus impact before editing scene snapshot settlement values, direct-scene label guards, and prompt evidence assertions.
+    - [x] Emit typed `value` for direct-scene `scene_frame_snapshot`, `scene_observation_receipt`, and `route_options_receipt` label/status facts.
+    - [x] Switch direct-scene label preservation, unsupported actor/item guards, route-label collection, and compact snapshot projection from fact-text prefixes to `role + value`.
+    - [x] Tighten prompt input assertions so direct-scene and route-option story facts require typed value evidence before narrator generation.
+    - [x] Run focused narration/settlement/contracts/stage4 tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] GitNexus impacts before edits were LOW for `sceneEvidence`, `stage4Evidence`, `directSceneFactLabels`, and `directSceneVerbatimLabels`; expected runtime touchpoint is `runCleanNarration`.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected process limited to `RunCleanNarration -> NormalizeText`.
+    - [x] Pushed commit `433d6603`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
