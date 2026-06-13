@@ -282,6 +282,55 @@ function cleanEvidenceRefs(input: {
   return refs;
 }
 
+type CleanStage4AcceptedReceipt = CleanStage4ExecutionResult["receipts"][number];
+
+function lastAcceptedTerminalMovementReceipt(
+  execution: CleanStage4ExecutionResult | null | undefined,
+): CleanStage4AcceptedReceipt | null {
+  if (!execution) return null;
+  return [...execution.receipts].reverse().find((receipt) =>
+    receipt.status === "accepted"
+    && receipt.authority.evidenceAuthority === "terminal_mutation_receipt"
+    && receipt.publicResult.locationChange !== null
+  ) ?? null;
+}
+
+function sceneLabelMatchesMovementReceipt(
+  frame: AuthoritativeSceneFrame,
+  receipt: CleanStage4AcceptedReceipt,
+): boolean {
+  const destination = receipt.publicResult.locationChange?.locationName.trim().toLowerCase();
+  if (!destination) return false;
+  return [
+    frame.scene.currentScene.label,
+    frame.scene.currentLocation.label,
+  ].some((label) => label.trim().toLowerCase() === destination);
+}
+
+async function buildPostResolutionFrameForSettlement(input: {
+  turn: GameplayRuntimeTurnInput;
+  stage4Execution: CleanStage4ExecutionResult | null | undefined;
+  buildFrame: (turn: GameplayRuntimeTurnInput) => Promise<AuthoritativeSceneFrame>;
+}): Promise<AuthoritativeSceneFrame | null> {
+  const movementReceipt = lastAcceptedTerminalMovementReceipt(input.stage4Execution);
+  if (!movementReceipt) return null;
+  const refreshedFrame = await input.buildFrame({
+    ...input.turn,
+    base: {
+      ...input.turn.base,
+      tick: movementReceipt.result.tick,
+      worldVersion: movementReceipt.result.worldVersion,
+      worldTimeMinutes: movementReceipt.result.worldTimeMinutes,
+    },
+  });
+  if (!sceneLabelMatchesMovementReceipt(refreshedFrame, movementReceipt)) {
+    throw new CleanGameplayRuntimeInvariantError(
+      `Post-movement SceneFrame did not reflect accepted destination ${movementReceipt.publicResult.locationChange?.locationName}.`,
+    );
+  }
+  return refreshedFrame;
+}
+
 export async function* processCleanGameplayTurnFromInput(
   options: CleanGameplayRuntimeCoreOptions,
 ): AsyncGenerator<CleanGameplayRuntimeEvent> {
@@ -418,11 +467,17 @@ export async function* processCleanGameplayTurnFromInput(
       phase: "gameplay-cycle-runtime",
     },
   };
+  const postResolutionFrame = await buildPostResolutionFrameForSettlement({
+    turn,
+    stage4Execution: stage4Execution?.execution ?? null,
+    buildFrame: options.buildFrame ?? buildAuthoritativeSceneFrame,
+  });
   const publicIds = buildCleanPublicTurnIds(turn);
   const settledPacket = buildCleanSettledTurnPacket({
     turn,
     publicPacketId: publicIds.publicPacketId,
     frame,
+    postResolutionFrame,
     gmRead: gmRead.read,
     judgment: judgeUncertainty?.judgment ?? null,
     oracleSettlement: oracleSettlement?.status === "settled"

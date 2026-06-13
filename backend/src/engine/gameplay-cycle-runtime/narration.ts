@@ -118,6 +118,18 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     pattern: /^You arrive at\b/iu,
   },
   {
+    name: "bare_movement_travel_brings",
+    pattern: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? of travel brings you to [^.]+\.$/iu,
+  },
+  {
+    name: "bare_movement_current_place",
+    pattern: /^(?:(?:after|in) (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?, [^.]+ becomes (?:your|the) current place|[^.]+ becomes (?:your|the) current place after (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?)\.$/iu,
+  },
+  {
+    name: "bare_elapsed_time",
+    pattern: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? pass(?: at| in)?(?: [^.]+)?\.$/iu,
+  },
+  {
     name: "bare_route_status",
     pattern: /^[^.]+ is reachable from here\.$/iu,
   },
@@ -223,8 +235,8 @@ function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean 
 }
 
 function minimumLiteraryWordCount(view: CleanNarratorView): number {
-  if (hasClaimKind(view, "player_location_change")) return 6;
-  if (hasClaimKind(view, "elapsed_time")) return 4;
+  if (hasClaimKind(view, "player_location_change")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 6;
+  if (hasClaimKind(view, "elapsed_time")) return hasAcceptedSceneTextureEvidence(view) ? 10 : 4;
   if (hasClaimKind(view, "route_status")) return 6;
   if (hasClaimKind(view, "movement_option")) return 8;
   if (hasClaimKind(view, "local_observation")) return 5;
@@ -601,11 +613,35 @@ function localObservationUsesFirstSceneTextureFact(
   return false;
 }
 
+function standaloneElapsedTimeUsesFirstSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "elapsed_time") || hasClaimKind(view, "player_location_change")) return false;
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length <= 1) return false;
+  const [firstTextureFact, ...laterTextureFacts] = textureFacts;
+  if (!firstTextureFact) return false;
+  const laterFactRefs = new Set(laterTextureFacts.map((fact) => fact.factRef));
+  const firstTextureText = firstTextureFact.text.toLowerCase();
+  for (const sentence of candidate.sentences) {
+    if (!sentence.claimKinds.includes("scene_texture")) continue;
+    const sentenceText = normalizeText(sentence.text)
+      .replace(/\.$/u, "")
+      .toLowerCase();
+    const citesLaterTexture = sentence.backendFactRefs.some((factRef) => laterFactRefs.has(factRef));
+    const usesFirstTexture = sentence.backendFactRefs.includes(firstTextureFact.factRef)
+      || firstTextureText.includes(sentenceText);
+    if (usesFirstTexture && !citesLaterTexture) return true;
+  }
+  return false;
+}
+
 function routeOptionsUsesLaterSceneTextureFact(
   view: CleanNarratorView,
   candidate: CleanNarrationCandidate,
 ): boolean {
-  if (!hasClaimKind(view, "movement_option")) return false;
+  if (!candidateCitesClaimKind(candidate, "movement_option")) return false;
   const textureFacts = sceneTextureBackendFactTexts(view);
   if (textureFacts.length <= 1) return false;
   const [firstTextureFact, ...laterTextureFacts] = textureFacts;
@@ -780,6 +816,21 @@ function proseQualityIssues(input: {
   }
 
   if (
+    hasAcceptedSceneTextureEvidence(input.view)
+    && (
+      hasClaimKind(input.view, "player_location_change")
+      || hasClaimKind(input.view, "elapsed_time")
+    )
+    && !candidateCitesClaimKind(input.candidate, "scene_texture")
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Movement and elapsed-time narration with accepted scene_texture must include one exact scene_texture sentence object.",
+    });
+  }
+
+  if (
     isDirectSceneSnapshotNarration(input.view)
     && hasAcceptedSceneTextureEvidence(input.view)
     && !candidateCitesClaimKind(input.candidate, "scene_texture")
@@ -834,6 +885,14 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (standaloneElapsedTimeUsesFirstSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Standalone elapsed-time scene_texture must use a later accepted texture fact when several scene_texture facts are available.",
+    });
+  }
+
   if (
     hasClaimKind(input.view, "movement_option")
     && hasAcceptedSceneTextureEvidence(input.view)
@@ -854,7 +913,9 @@ function proseQualityIssues(input: {
     });
   }
 
-  const routeOptionLabels = acceptedRouteOptionLabels(input.view);
+  const routeOptionLabels = candidateCitesClaimKind(input.candidate, "movement_option")
+    ? acceptedRouteOptionLabels(input.view)
+    : [];
   if (routeOptionLabels.length > 0) {
     const missingLabels = routeOptionLabels.filter((label) => !text.includes(label));
     if (missingLabels.length > 0) {
@@ -974,8 +1035,8 @@ export function buildCleanNarrationSystemPrompt(
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
     "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
-    "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
-    "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
+    "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
+    "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. With scene_texture evidence, put one exact scene_texture sentence first, then one concise elapsed-time beat such as '<time> pass at <scene>.' When several scene_texture backendFacts exist, choose a later texture fact than the first. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
     "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Build it as a route-choice beat such as '<label> is the one-minute route choice here.' or '<labels> are the available one-minute route choices here.' With scene_texture evidence, one exact scene-texture sentence may precede or frame the route-choice beat; when several texture facts exist, route-options uses the first accepted texture fact. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
@@ -1176,6 +1237,9 @@ function narrationValidationRepairLines(
     );
     if (hasClaimKind(view, "local_observation") && textureFacts.length > 1) {
       lines.push(`For local_observation, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} if you include scene_texture; otherwise omit scene_texture.`);
+    }
+    if (hasClaimKind(view, "elapsed_time") && !hasClaimKind(view, "player_location_change") && textureFacts.length > 1) {
+      lines.push(`For standalone elapsed_time, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} for the scene_texture sentence.`);
     }
     if (hasClaimKind(view, "movement_option") && textureFacts.length > 1 && textureFacts[0]) {
       lines.push(`For route_options, use ${textureFacts[0].factRef} if you include scene_texture; otherwise omit scene_texture.`);

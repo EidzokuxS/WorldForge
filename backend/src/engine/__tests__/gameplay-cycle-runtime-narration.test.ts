@@ -203,6 +203,26 @@ function routeOptionsView(): CleanNarratorView {
   });
 }
 
+function timeWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+      {
+        ref: "e5",
+        authority: "terminal_mutation_receipt",
+        claimKinds: ["elapsed_time"],
+        text: "World clock advances by 5 minute(s).",
+        backendFacts: [{ factRef: "e5.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+        limits: {
+          proves: ["elapsed world clock time"],
+          doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
+        },
+      },
+    ],
+  });
+}
+
 function routeOptionsManyView(): CleanNarratorView {
   const labels = [
     "Anchor Chain Pylon",
@@ -279,6 +299,16 @@ function routeOptionsWithSceneTextureView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
       ...routeOptionsView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
+function movementWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...movementView().acceptedEvidence,
       sceneTextureEvidence("e2"),
       currentSceneAnchorEvidence("e3"),
     ],
@@ -1112,14 +1142,28 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("uses model-authored literary narration for movement receipts with travel cost", async () => {
+    const view = movementWithSceneTextureView();
     const result = await runCleanNarration({
-      narratorView: movementView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => movementCandidate("After one minute, North Hall becomes your current place."),
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "After one minute, you reach North Hall.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f2"],
+          claimKinds: ["player_location_change", "elapsed_time"],
+        },
+      ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("After one minute, North Hall becomes your current place.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. After one minute, you reach North Hall.");
     expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
   });
 
@@ -1163,20 +1207,105 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("uses model-authored literary narration for standalone elapsed-time turns with snapshot context", async () => {
+    const view = timeWithSceneTextureView();
     const result = await runCleanNarration({
-      narratorView: timeWithSceneFrameSnapshotView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(timeWithSceneFrameSnapshotView(), [{
-        text: "Five minutes pass in Market.",
-        evidenceRefs: ["e5", "e1"],
-        backendFactRefs: ["e5.f1", "e1.f1"],
-        claimKinds: ["elapsed_time", "current_scene"],
-      }]),
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Five minutes pass in Market.",
+          evidenceRefs: ["e5", "e3"],
+          backendFactRefs: ["e5.f1", "e3.f1"],
+          claimKinds: ["elapsed_time", "current_scene"],
+        },
+      ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Five minutes pass in Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
+  });
+
+  it("rejects standalone elapsed-time prose that repeats the first scene_texture fact when later texture facts exist", () => {
+    const view = timeWithSceneTextureView();
+    const firstTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Five minutes pass in Market.",
+          evidenceRefs: ["e5", "e3"],
+          backendFactRefs: ["e5.f1", "e3.f1"],
+          claimKinds: ["elapsed_time", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(firstTexture.status).toBe("rejected");
+    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Standalone elapsed-time scene_texture")
+    )).toBe(true);
+
+    const laterTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Five minutes pass in Market.",
+          evidenceRefs: ["e5", "e3"],
+          backendFactRefs: ["e5.f1", "e3.f1"],
+          claimKinds: ["elapsed_time", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(laterTexture.status).toBe("accepted");
+  });
+
+  it("allows standalone elapsed-time prose to use later scene_texture when route options are only contextual evidence", () => {
+    const base = timeWithSceneTextureView();
+    const view = movementView({
+      acceptedEvidence: [
+        ...base.acceptedEvidence,
+        routeOptionsView().acceptedEvidence[0]!,
+      ],
+    });
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Five minutes pass in Market.",
+          evidenceRefs: ["e5", "e3"],
+          backendFactRefs: ["e5.f1", "e3.f1"],
+          claimKinds: ["elapsed_time", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.status).toBe("accepted");
   });
 
   it("deterministically projects route-options evidence without converting options into movement", async () => {
@@ -1422,6 +1551,56 @@ describe("clean Stage 6 narration contracts", () => {
     expect(attempts).toBe(2);
     expect(result.source).toBe("model");
     expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the one-minute route choice here.");
+  });
+
+  it("repairs repeated first scene_texture in standalone elapsed-time prose", async () => {
+    const view = timeWithSceneTextureView();
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [
+            {
+              text: "Canvas awnings hang over the market lanes.",
+              evidenceRefs: ["e2"],
+              backendFactRefs: ["e2.f1"],
+              claimKinds: ["scene_texture"],
+            },
+            {
+              text: "Five minutes pass in Market.",
+              evidenceRefs: ["e5", "e3"],
+              backendFactRefs: ["e5.f1", "e3.f1"],
+              claimKinds: ["elapsed_time", "current_scene"],
+            },
+          ]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("Standalone elapsed-time scene_texture");
+        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
+        expect(request.prompt).toContain("For standalone elapsed_time, use e2.f2 for the scene_texture sentence.");
+        return acceptedCandidate(view, [
+          {
+            text: "Rain taps the brass gutters.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f2"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "Five minutes pass in Market.",
+            evidenceRefs: ["e5", "e3"],
+            backendFactRefs: ["e5.f1", "e3.f1"],
+            claimKinds: ["elapsed_time", "current_scene"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
   });
 
   it("repairs direct-scene implied action inside Stage 6 before player-facing narration", async () => {
@@ -2284,6 +2463,39 @@ describe("clean Stage 6 narration contracts", () => {
     expect(movementDigest.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("summary-digest")
     )).toBe(true);
+
+    const movementTravelBrings = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate("One minute of travel brings you to North Hall."),
+    });
+    expect(movementTravelBrings.status).toBe("rejected");
+
+    const movementCurrentPlace = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate("After one minute, North Hall becomes your current place."),
+    });
+    expect(movementCurrentPlace.status).toBe("rejected");
+
+    const movementWithoutTexture = validateCleanNarrationCandidate({
+      view: movementWithSceneTextureView(),
+      candidate: movementCandidate("After one minute, you reach North Hall."),
+    });
+    expect(movementWithoutTexture.status).toBe("rejected");
+    if (movementWithoutTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(movementWithoutTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("scene_texture")
+    )).toBe(true);
+
+    const elapsedDigest = validateCleanNarrationCandidate({
+      view: timeView(),
+      candidate: acceptedCandidate(timeView(), [{
+        text: "Five minutes pass.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["elapsed_time"],
+      }]),
+    });
+    expect(elapsedDigest.status).toBe("rejected");
 
     const routeStatusDigest = validateCleanNarrationCandidate({
       view: routeWithSceneFrameSnapshotView(),

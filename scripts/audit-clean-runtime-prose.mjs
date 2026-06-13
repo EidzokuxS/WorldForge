@@ -37,6 +37,8 @@ const patterns = {
   directSceneDigest: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
   directSceneImpliedAction: /\b(?:waits? in|stands? in|rides? at your side|at hand|set where it can be read|useful things? in reach)\b/iu,
   stockRouteOptions: /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu,
+  stockMovementSummary: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? of travel brings you to [^.]+\.$|^(?:(?:after|in) (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?, [^.]+ becomes (?:your|the) current place|[^.]+ becomes (?:your|the) current place after (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?)\.$/iu,
+  stockElapsedSummary: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? pass(?: at| in)?(?: [^.]+)?\.$/iu,
   optionMenu: /\beither\b[\s\S]{0,80}\bor\b|\b\w+\. Or \w+\b/iu,
   wordAsObject: /\b(?:taste[sd]?|weigh(?:ed|s)?|roll(?:ed|s)?|repeat(?:ed|s)?|testing|working through)\b[\s\S]{0,60}\b(?:name|word|phrase|syllable)s?\b/iu,
   noveltyTag: /\b(?:interesting|intriguing|full of surprises|that's new|we'll see)\b/iu,
@@ -71,11 +73,11 @@ const rows = [];
 for (const root of roots) {
   for (const file of walk(root)) {
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    const text = String(data?.narrative?.text ?? "").trim();
+    const text = String(data?.narrative?.text ?? data?.narrativeText ?? "").trim();
     rows.push({
       root,
       file,
-      action: data.action ?? null,
+      action: data.action ?? data.playerAction ?? null,
       text,
       wordCount: words(text).length,
     });

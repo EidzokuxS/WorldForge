@@ -315,6 +315,7 @@ export interface BuildCleanSettlementInput {
   turn: GameplayRuntimeTurnInput;
   publicPacketId: string;
   frame: AuthoritativeSceneFrame;
+  postResolutionFrame?: AuthoritativeSceneFrame | null;
   gmRead: GmRead | null;
   judgment: JudgeUncertainty | null;
   oracleSettlement: OracleSettlement | null;
@@ -1081,6 +1082,9 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
     && receipt.authority.evidenceAuthority === "terminal_mutation_receipt"
     && receipt.publicResult.locationChange !== null
   ));
+  const sceneFrameForEvidence = hasTerminalMovement
+    ? input.postResolutionFrame ?? null
+    : input.frame;
   if (kind === "clarification") {
     clarificationEvidence({
       frame: input.frame,
@@ -1089,8 +1093,8 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
       evidence: acceptedEvidence,
     });
   }
-  if (!hasTerminalMovement) {
-    sceneEvidence(input.frame, acceptedEvidence);
+  if (sceneFrameForEvidence) {
+    sceneEvidence(sceneFrameForEvidence, acceptedEvidence);
   }
   if (input.stage4Execution) {
     stage4Evidence(input.stage4Execution, acceptedEvidence);

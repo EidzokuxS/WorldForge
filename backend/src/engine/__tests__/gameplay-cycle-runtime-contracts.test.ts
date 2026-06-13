@@ -724,6 +724,23 @@ function actionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): Auth
   });
 }
 
+function postMovementActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  return actionPlanFrame({
+    frameId: "frame-post-movement-1",
+    base: { tick: 1, worldVersion: 1, worldTimeMinutes: 1 },
+    scene: {
+      currentLocation: { ref: "North Hall", label: "North Hall", description: null },
+      currentScene: { ref: "North Hall", label: "North Hall", description: null },
+      visibleFacts: [],
+      recentLocalFacts: [],
+    },
+    movementOptions: [],
+    targets: [],
+    citableRefs: ["Player", "North Hall"],
+    ...overrides,
+  });
+}
+
 function itemTransferActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
   const base = actionPlanFrame();
   return actionPlanFrame({
@@ -5438,7 +5455,16 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     for await (const event of processCleanGameplayTurnFromInput({
       turn: validTurnInput(),
       judgeProvider: provider,
-      buildFrame: async () => frame,
+      buildFrame: async (turnInput) =>
+        turnInput.base.worldVersion > frame.base.worldVersion
+          ? postMovementActionPlanFrame({
+            base: {
+              tick: turnInput.base.tick,
+              worldVersion: turnInput.base.worldVersion,
+              worldTimeMinutes: turnInput.base.worldTimeMinutes ?? frame.base.worldTimeMinutes + 1,
+            },
+          })
+          : frame,
       gmReadCandidateGenerator: async () => gmRead,
       judgeUncertaintyCandidateGenerator: async () => judgment,
       oracleAdapter: async () => {

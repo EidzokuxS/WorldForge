@@ -163,7 +163,31 @@ P199 direct-scene texture and implied-action contract:
   - [x] Player-facing text: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Guide is here, and Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.`
   - [x] DB proof `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/db-proof.json`: one clean direct-scene turn record, no Stage4 receipts, mutationApplied false, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, authority traces 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`, exact scene texture and cited labels preserved.
   - [x] Prose audit `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/prose-audit.json`: one narrative, one-token 0, `youOpening` 0, list-like starts 0, direct-scene digest 0, implied-action 0, stock-route/options/debug/enum/surface hits all 0.
-  - [ ] Run GitNexus detect, commit/push/analyze.
+  - [x] Run GitNexus detect, commit/push/analyze.
+
+P200 post-movement and elapsed-time texture prose:
+- Goal:
+  - Replace movement/time status summaries with truth-bounded adventure beats using accepted post-resolution scene texture when available.
+  - Preserve receipt ownership: movement/time facts come from terminal receipts; scene texture comes from refreshed SceneFrame evidence.
+- Plan:
+  - [x] Add post-resolution SceneFrame evidence for accepted movement before Stage 6 narration.
+  - [x] Require movement/time literary candidates with accepted `scene_texture` to cite one exact texture sentence.
+  - [x] Reject stock movement/time summary formulas in runtime validation and prose audit.
+  - [x] Extend standalone elapsed-time texture selection so repeated same-scene turns use a later accepted texture fact when available.
+  - [x] Scope route-option texture/label validation to candidates that actually cite `movement_option`, so contextual route options do not invalidate elapsed-time prose.
+  - [x] Run focused tests, typecheck, live movement/time proof, and prose audit.
+- Evidence:
+  - [x] Diagnostic refresh proof `output/clean-runtime-p200-move-time-refresh-20260613-171942/` exposed a restored turn: elapsed-time narration used later scene texture while contextual `movement_option` evidence was present; route-options validation incorrectly treated contextual route evidence as narrated route output.
+  - [x] Final fresh zero-turn clone `p200-move-time-final-20260613-172414` from source `p69-item-transfer-045651`, backend `http://localhost:31713`, clean runtime flags on.
+  - [x] Turn 001 action `I go to Anchor Chain Pylon.` accepted one `movement` receipt; player-facing prose used post-resolution Anchor Chain Pylon texture and the accepted one-minute arrival fact.
+  - [x] Turn 002 action `I wait at Anchor Chain Pylon for five minutes.` accepted one `time_advance` receipt; player-facing prose used a different accepted scene texture sentence plus the accepted five-minute passage.
+  - [x] DB proof `output/clean-runtime-p200-move-time-final-20260613-172414/db-proof.json`: 16 assertions pass, 2 clean turn records, authority traces `gameplay-cycle-runtime.player.move.v1` and `gameplay-cycle-runtime.clock.advance.v1`, clock ledger travel 1 then wait 5, final clock `worldVersion=2/worldTimeMinutes=6/currentTick=6`, final scene `Anchor Chain Pylon`, old v2/saga/narrator/oracle/simulation stores all 0.
+  - [x] Prose audit `output/clean-runtime-p200-move-time-final-20260613-172414/prose-audit.json`: 2 narratives, average 42 words, one-token 0, `youOpening` 0, list-like starts 0, repeated starts 0, repeated exact sentences 0, stock movement/time summary 0, all leak/slop counters 0.
+- Verification:
+  - [x] `npm --prefix backend run typecheck`.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 51 passed.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 318 passed.
+  - [x] Run GitNexus detect, commit/push/analyze.
 
 P189 clean runtime prose quality pass:
 - Objective:

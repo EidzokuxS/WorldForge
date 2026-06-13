@@ -98,6 +98,31 @@ function frame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeS
   };
 }
 
+function postMovementFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  return frame({
+    frameId: "frame-post-movement-1",
+    base: { tick: 1, worldVersion: 1, worldTimeMinutes: 1 },
+    scene: {
+      currentLocation: {
+        ref: "North Hall",
+        label: "North Hall",
+        description: "Lantern chains tremble over the north landing.",
+      },
+      currentScene: {
+        ref: "North Hall",
+        label: "North Hall",
+        description: "North Hall narrows beneath a row of iron lamps.",
+      },
+      visibleFacts: [],
+      recentLocalFacts: [],
+    },
+    movementOptions: [],
+    targets: [],
+    citableRefs: ["Player", "North Hall"],
+    ...overrides,
+  });
+}
+
 function checklist(inputFrame = frame()): GmActionChecklist {
   return {
     version: "gm-action-checklist.v1",
@@ -658,6 +683,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
 function buildPacket(input: {
   turn?: GameplayRuntimeTurnInput;
   frame?: AuthoritativeSceneFrame;
+  postResolutionFrame?: AuthoritativeSceneFrame | null;
   gmRead?: GmRead | null;
   judgment?: JudgeUncertainty | null;
   checklist?: GmActionChecklist | null;
@@ -669,6 +695,7 @@ function buildPacket(input: {
     turn: inputTurn,
     publicPacketId: buildCleanPublicTurnIds(inputTurn).publicPacketId,
     frame: inputFrame,
+    postResolutionFrame: input.postResolutionFrame ?? null,
     gmRead: input.gmRead ?? null,
     judgment: input.judgment ?? null,
     oracleSettlement: null,
@@ -678,11 +705,12 @@ function buildPacket(input: {
 }
 
 describe("clean Stage 5 settlement contracts", () => {
-  it("settles accepted movement into terminal mutation evidence only", () => {
+  it("settles accepted movement with post-resolution scene texture evidence", () => {
     const inputFrame = frame();
     const inputChecklist = checklist(inputFrame);
     const packet = buildPacket({
       frame: inputFrame,
+      postResolutionFrame: postMovementFrame(),
       checklist: inputChecklist,
       execution: stage4([movementReceipt(inputFrame, inputChecklist)], inputFrame),
     });
@@ -690,15 +718,21 @@ describe("clean Stage 5 settlement contracts", () => {
 
     expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
     expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
-    expect(packet.acceptedEvidence).toHaveLength(1);
-    expect(packet.acceptedEvidence[0]).toMatchObject({
+    const scene = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("current_scene"));
+    const texture = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("scene_texture"));
+    const movement = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("player_location_change"));
+    expect(scene?.backendFacts.map((entry) => entry.text)).toContain("Current scene is North Hall.");
+    expect(texture?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Scene texture: North Hall narrows beneath a row of iron lamps.",
+    ]);
+    expect(movement).toMatchObject({
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
     });
     expect(JSON.stringify(view)).not.toContain("player-1");
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
     expect(JSON.stringify(view)).not.toContain("privateResult");
-    expect(packet.acceptedEvidence[0]?.limits.doesNotProve).toContain("no-change");
+    expect(movement?.limits.doesNotProve).toContain("no-change");
   });
 
   it("builds narrator view with explicit language metadata instead of raw player action", () => {
