@@ -564,9 +564,9 @@ function dialogueView(): CleanNarratorView {
       claimKinds: ["dialogue_response"],
       text: 'Guide says: "The north stairs flooded before dawn."',
       backendFacts: [
-        { factRef: "e1.f1", text: "Speaker: Guide.", exact: true },
-        { factRef: "e1.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
-        { factRef: "e1.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+        { factRef: "e1.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+        { factRef: "e1.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+        { factRef: "e1.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
       ],
       limits: {
         proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
@@ -587,9 +587,9 @@ function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
         claimKinds: ["dialogue_response"],
         text: 'Guide says: "The north stairs flooded before dawn."',
         backendFacts: [
-          { factRef: "e5.f1", text: "Speaker: Guide.", exact: true },
-          { factRef: "e5.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
-          { factRef: "e5.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+          { factRef: "e5.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+          { factRef: "e5.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e5.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
           proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
@@ -720,8 +720,8 @@ function itemStateView(): CleanNarratorView {
       claimKinds: ["item_state"],
       text: "Brass Tube passes from Player to Guide at Market. Brass Tube is carried by Guide at Market.",
       backendFacts: [
-        { factRef: "e1.f1", role: "custody_change", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
-        { factRef: "e1.f2", role: "settled_custody", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
+        { factRef: "e1.f1", role: "custody_change", value: "Brass Tube passes from Player to Guide at Market.", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
+        { factRef: "e1.f2", role: "settled_custody", value: "Brass Tube is carried by Guide at Market.", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
         { factRef: "e1.f3", role: "item_label", text: "Item label: Brass Tube.", exact: true },
         { factRef: "e1.f4", role: "source_label", text: "Source: Player.", exact: true },
         { factRef: "e1.f5", role: "target_label", text: "Target: Guide.", exact: true },
@@ -770,9 +770,9 @@ function itemStateWithDialogueView(): CleanNarratorView {
         claimKinds: ["dialogue_response"],
         text: 'Guide says: "The north stairs flooded before dawn."',
         backendFacts: [
-          { factRef: "e2.f1", text: "Speaker: Guide.", exact: true },
-          { factRef: "e2.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
-          { factRef: "e2.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+          { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
           proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
@@ -815,9 +815,9 @@ function itemStateWithDialogueAndSceneTextureView(): CleanNarratorView {
         claimKinds: ["dialogue_response"],
         text: 'Guide says: "The north stairs flooded before dawn."',
         backendFacts: [
-          { factRef: "e2.f1", text: "Speaker: Guide.", exact: true },
-          { factRef: "e2.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
-          { factRef: "e2.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+          { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
           proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
@@ -1772,21 +1772,21 @@ describe("clean Stage 6 narration contracts", () => {
     item.acceptedEvidence[0] = {
       ...item.acceptedEvidence[0]!,
       backendFacts: item.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        !fact.text.startsWith("Settled custody: ")
+        fact.role !== "settled_custody"
       ),
     };
     expect(() => renderCleanAuthorityProjection(item))
-      .toThrow("Item-state projection requires accepted Settled custody evidence.");
+      .toThrow("Item-state projection requires accepted Settled custody value evidence.");
 
     const dialogue = dialogueView();
     dialogue.acceptedEvidence[0] = {
       ...dialogue.acceptedEvidence[0]!,
       backendFacts: dialogue.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        !fact.text.includes(" says: ")
+        fact.role !== "dialogue_quote"
       ),
     };
     expect(() => renderCleanAuthorityProjection(dialogue))
-      .toThrow("Dialogue projection requires accepted dialogue quote evidence.");
+      .toThrow("Dialogue projection requires accepted dialogue quote value evidence.");
 
     const supportActor = supportActorView();
     supportActor.acceptedEvidence[0] = {
@@ -2734,6 +2734,36 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promotedTruth.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
+  it("renders dialogue projection from role value instead of quote-shaped fact text", () => {
+    const base = dialogueView();
+    const evidence = base.acceptedEvidence[0]!;
+    const roleValueView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map((fact) =>
+          fact.role === "dialogue_quote"
+            ? { ...fact, text: "Opaque accepted dialogue fact." }
+            : fact
+        ),
+      }],
+    });
+    const missingValueView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map((fact) => {
+          if (fact.role !== "dialogue_quote") return fact;
+          const { value: _value, ...withoutValue } = fact;
+          return withoutValue;
+        }),
+      }],
+    });
+
+    expect(renderCleanAuthorityProjection(roleValueView))
+      .toBe('Guide says: "The north stairs flooded before dawn."');
+    expect(() => renderCleanAuthorityProjection(missingValueView))
+      .toThrow("Dialogue projection requires accepted dialogue quote value evidence.");
+  });
+
   it("uses model-authored literary narration for dialogue without promoting quote truth", async () => {
     const view = dialogueWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
@@ -3076,6 +3106,36 @@ describe("clean Stage 6 narration contracts", () => {
       if (result.status !== "rejected") throw new Error("expected rejected");
       expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
     }
+  });
+
+  it("renders item-state projection from role value instead of settled-custody fact text prefix", () => {
+    const base = itemStateView();
+    const evidence = base.acceptedEvidence[0]!;
+    const roleValueView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map((fact) =>
+          fact.role === "settled_custody"
+            ? { ...fact, text: "Opaque accepted item-state fact." }
+            : fact
+        ),
+      }],
+    });
+    const missingValueView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map((fact) => {
+          if (fact.role !== "settled_custody") return fact;
+          const { value: _value, ...withoutValue } = fact;
+          return withoutValue;
+        }),
+      }],
+    });
+
+    expect(renderCleanAuthorityProjection(roleValueView))
+      .toBe("Brass Tube is carried by Guide at Market.");
+    expect(() => renderCleanAuthorityProjection(missingValueView))
+      .toThrow("Item-state projection requires accepted Settled custody value evidence.");
   });
 
   it("uses model-authored literary narration for item_state instead of compact status prose", async () => {

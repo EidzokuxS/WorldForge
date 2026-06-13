@@ -2282,6 +2282,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
 const cleanSettledBackendFactSchema = z.object({
   factRef: shortText,
   role: cleanSettledBackendFactRoleSchema.optional(),
+  value: shortText.optional(),
   text: shortText,
   exact: z.boolean(),
 }).strict();

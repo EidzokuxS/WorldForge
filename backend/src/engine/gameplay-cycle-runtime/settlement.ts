@@ -445,10 +445,17 @@ function nextEvidenceId(evidence: readonly CleanSettledEvidence[]): string {
 
 type CleanSettledBackendFactRole = NonNullable<CleanSettledEvidence["backendFacts"][number]["role"]>;
 
-function fact(evidenceId: string, index: number, role: CleanSettledBackendFactRole, text: string) {
+function fact(
+  evidenceId: string,
+  index: number,
+  role: CleanSettledBackendFactRole,
+  text: string,
+  value?: string,
+) {
   return {
     factRef: `${evidenceId}.f${index}`,
     role,
+    ...(value ? { value } : {}),
     text,
     exact: true,
   };
@@ -1066,7 +1073,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, "speaker_label", `Speaker: ${dialogue.speakerLabel}.`),
-          fact(evidenceId, 2, "dialogue_quote", quoteFact),
+          fact(evidenceId, 2, "dialogue_quote", quoteFact, quoteFact),
           fact(evidenceId, 3, "dialogue_summary", `Dialogue summary: ${dialogue.summary}`),
         ],
         limits: {
@@ -1160,8 +1167,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${custodyChangeText} ${settledCustodyText}`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "custody_change", `Custody change: ${custodyChangeText}`),
-          fact(evidenceId, 2, "settled_custody", `Settled custody: ${settledCustodyText}`),
+          fact(evidenceId, 1, "custody_change", `Custody change: ${custodyChangeText}`, custodyChangeText),
+          fact(evidenceId, 2, "settled_custody", `Settled custody: ${settledCustodyText}`, settledCustodyText),
           fact(evidenceId, 3, "item_label", `Item label: ${itemTransfer.itemLabel}.`),
           fact(evidenceId, 4, "source_label", `Source: ${itemTransfer.sourceLabel}.`),
           fact(evidenceId, 5, "target_label", `Target: ${itemTransfer.targetLabel}.`),

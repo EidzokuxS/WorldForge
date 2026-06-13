@@ -2033,6 +2033,18 @@ function requireFactText(
   return text;
 }
 
+function requireFactValueByRole(
+  evidence: AcceptedNarrationEvidence,
+  role: AcceptedNarrationBackendFactRole,
+  message: string,
+): string {
+  const fact = evidence.backendFacts.find((entry) => entry.role === role);
+  if (!fact) throw new Error(message);
+  const value = fact.value?.trim();
+  if (!value) throw new Error(message);
+  return normalizeText(value);
+}
+
 function englishList(values: readonly string[]): string {
   const labels = uniqueStrings(values);
   if (labels.length === 0) return "";
@@ -2164,19 +2176,19 @@ function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidenc
 }
 
 function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string {
-  const settledCustody = requireFactValue(
+  const settledCustody = trimSentencePeriod(requireFactValueByRole(
     evidence,
-    "Settled custody: ",
-    "Item-state projection requires accepted Settled custody evidence.",
-  );
+    "settled_custody",
+    "Item-state projection requires accepted Settled custody value evidence.",
+  ));
   return `${settledCustody}.`;
 }
 
 function renderDialogueProjection(evidence: AcceptedNarrationEvidence): string {
-  return requireFactText(
+  return requireFactValueByRole(
     evidence,
-    (text) => text.includes(" says: ") || text.includes("dialogue response"),
-    "Dialogue projection requires accepted dialogue quote evidence.",
+    "dialogue_quote",
+    "Dialogue projection requires accepted dialogue quote value evidence.",
   );
 }
 
