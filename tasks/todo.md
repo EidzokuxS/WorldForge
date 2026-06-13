@@ -5492,3 +5492,25 @@ Session: `gm-v1-consequenc-slice`.
   - Next scoped work:
     - [ ] Commit/push the typed backend admission repair after GitNexus detect.
     - [ ] Start a fresh post-repair zero-turn clone for the next 0 -> ~60 manual acceptance lane.
+
+- P174 clean gameplay runtime post-typed-admission Acceptance-Candidate Lane A / fresh clone 0 -> 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p174-post-typed-admission-acceptance-a-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative `world_clocks` row `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carried `Brass Tube`, clean runtime stores zero, and old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Reuse stable clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns 001-060 one action at a time from inspected post-turn state; actions were chosen manually by Codex after each actual result.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p174-post-typed-admission-acceptance-a-20260613/`; final audit: `final-lane-summary.json`.
+    - [x] All 60 per-turn verifier artifacts passed with `done.runtime=gameplay-cycle-runtime`, one new clean turn record, one chat exchange, accepted-only new receipts when applicable, multi-token narration, zero restore ledger rows, zero old v2/saga/narrator/oracle/simulation stores, and no SSE `error` event.
+    - [x] Final DB: 60 clean turn records, 49 accepted Stage4 receipts, 16 authority traces, 14 turn clock ledger rows, restore ledger 0, old stores all 0.
+    - [x] Receipt mix: item_transfer 1, dialogue_record 15, route_check 14, movement 13, route_options 4, condition_set 1, time_advance 1.
+    - [x] Final clock: `worldVersion=16`, `worldTimeMinutes=18`, `currentTick=18`; clock ledger reasons: travel 13, wait 1.
+    - [x] Final item state: `Brass Tube.owner=Guide`, `equipState=carried`, `equippedSlot=null`.
+    - [x] Root repair proof stayed clean in this fresh lane: turn 003 visible actor item-custody dialogue accepted deterministically through `dialogue_record`; no restore or old stores.
+  - Review notes:
+    - [x] Turn 018 contains one mixed-script token inside Venn's quoted dialogue (`only脚步`). State, receipts, refs, clock, item custody, runtime, and DB proof remained valid. Track as prose-quality evidence; if player-facing prose purity is made a hard acceptance gate, mark P174 diagnostic and rerun after a dialogue language contract repair.
+  - Acceptance status:
+    - P174 is one 60-turn clean-runtime candidate lane by runtime/DB gates. Final gameplay-cycle acceptance remains pending because the bar requires several different fresh post-repair zero-turn campaigns/clones at about 60 turns each.
+  - Next scoped work:
+    - [x] Run the focused clean-runtime suite after P174 (`289 passed`) and `npm --prefix backend run typecheck`.
+    - [ ] Start another fresh post-repair zero-turn clone with different route coverage for the next ~60-turn manual lane.
