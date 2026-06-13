@@ -6788,3 +6788,18 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
     - Executed: code commit `ba4259aa` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P244 Stage 6 narrative page task contract:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt input/schema and prompt wording symbols.
+    - [x] Add a derived `narrativePageTask` to `CleanNarratorPromptInput` from `storyFrame.pagePlan`, with writer moves and allowed backend fact refs per page step.
+    - [x] Keep the task truth-bounded: it may organize prose, but every sentence still cites accepted evidence refs, backend fact refs, and claim kinds.
+    - [x] Update focused narration tests proving movement/route prompt inputs carry the page task and the system prompt names it.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarratorPromptInput` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct caller `runCleanNarration`.
+    - Executed: `CleanNarratorPromptInput` now carries `narrativePageTask` derived from `storyFrame.pagePlan`, with prose moves and allowed backend fact refs for each page step.
+    - Executed: the system prompt now instructs the narrator to follow `narrativePageTask` as writer moves while drawing material only from allowed backend fact refs and cited accepted evidence.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope and affected processes 0.
+    - Executed: code commit `0fa81d7c` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
