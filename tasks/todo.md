@@ -6561,10 +6561,11 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Add explicit backend fact roles at the settlement evidence boundary while preserving the human-readable fact text payload.
     - [x] Replace `preferredPromptFacts` string-prefix/regex fact selection with role-owned selection.
     - [x] Add focused tests proving prompt trimming is driven by roles, not by fact text shape.
-    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
   - Review:
     - [x] GitNexus impacts before edits: `fact` LOW and `preferredPromptFacts` LOW; runtime `contracts.ts` schema const is not indexed as a standalone GitNexus symbol, so schema scope is covered by contract tests/typecheck/detect.
     - [x] Settlement backend facts now carry typed roles such as `travel_beat`, `route_choices_beat`, `custody_change`, `dialogue_quote`, and `scene_placement`; readable fact text remains the model-facing payload.
     - [x] `preferredPromptFacts` now shortlists by backend fact role and throws `Prompt fact selection ... requires typed backend fact roles.` when trimming needs role data.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 93 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported MEDIUM with affected flow limited to `runCleanNarration` prompt evidence limiting.
+    - [x] Pushed commit `9b5b5204`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
