@@ -1263,7 +1263,13 @@ function oracleEvidence(settlement: OracleSettlement, evidence: CleanSettledEvid
     claimKinds: ["oracle_outcome"],
     text: settlement.visibleOutcome.selectedMeaning,
     visibleRefs: settlement.authority.evidenceRefs,
-    backendFacts: [fact(evidenceId, 1, "oracle_selected_meaning", settlement.visibleOutcome.selectedMeaning)],
+    backendFacts: [fact(
+      evidenceId,
+      1,
+      "oracle_selected_meaning",
+      settlement.visibleOutcome.selectedMeaning,
+      settlement.visibleOutcome.selectedMeaning,
+    )],
     limits: {
       proves: ["selected visible uncertainty outcome"],
       doesNotProve: settlement.authority.forbiddenClaimKinds,

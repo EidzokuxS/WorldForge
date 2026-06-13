@@ -1850,12 +1850,6 @@ function trimSentencePeriod(value: string): string {
   return normalizeText(value).replace(/\.$/u, "");
 }
 
-function factValue(evidence: AcceptedNarrationEvidence, prefix: string): string | null {
-  const fact = evidence.backendFacts.find((entry) => entry.text.startsWith(prefix));
-  if (!fact) return null;
-  return trimSentencePeriod(fact.text.slice(prefix.length));
-}
-
 function splitEvidenceLabels(value: string): string[] {
   const compact = trimSentencePeriod(value).trim();
   if (compact.length === 0 || compact === "none") return [];
@@ -1952,26 +1946,6 @@ function assertSceneBeatStoryEvidence(evidence: AcceptedNarrationEvidence): void
   if (!evidence.backendFacts.some((fact) => fact.role === "scene_beat" && fact.value?.trim())) {
     throw new Error("Scene-beat prompt input requires accepted Scene beat value evidence.");
   }
-}
-
-function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string) => boolean): string | null {
-  return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
-}
-
-function requireFactValue(evidence: AcceptedNarrationEvidence, prefix: string, message: string): string {
-  const value = factValue(evidence, prefix);
-  if (value === null || value.length === 0) throw new Error(message);
-  return value;
-}
-
-function requireFactText(
-  evidence: AcceptedNarrationEvidence,
-  predicate: (text: string) => boolean,
-  message: string,
-): string {
-  const text = factText(evidence, predicate);
-  if (text === null || text.length === 0) throw new Error(message);
-  return text;
 }
 
 function requireFactValueByRole(
@@ -2225,10 +2199,10 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("oracle_outcome")
   );
   if (oracle) {
-    return requireFactText(
+    return requireFactValueByRole(
       oracle,
-      (text) => text.length > 0,
-      "Oracle projection requires accepted visible outcome evidence.",
+      "oracle_selected_meaning",
+      "Oracle projection requires accepted selected visible outcome value evidence.",
     );
   }
 

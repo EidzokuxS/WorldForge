@@ -196,7 +196,13 @@ function oracleOutcomeView(): CleanNarratorView {
       claimKinds: ["oracle_outcome"],
       text: "The loose grate holds under your weight.",
       backendFacts: [
-        { factRef: "e1.f1", text: "The loose grate holds under your weight.", exact: true },
+        {
+          factRef: "e1.f1",
+          role: "oracle_selected_meaning",
+          value: "The loose grate holds under your weight.",
+          text: "The loose grate holds under your weight.",
+          exact: true,
+        },
       ],
       limits: {
         proves: ["selected visible uncertainty outcome"],
@@ -1915,6 +1921,11 @@ describe("clean Stage 6 narration contracts", () => {
       "clarification_request",
     ))).toThrow("Clarification projection requires accepted Clarification request value evidence.");
 
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(oracleOutcomeView(), "oracle_selected_meaning")))
+      .toBe("The loose grate holds under your weight.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(oracleOutcomeView(), "oracle_selected_meaning")))
+      .toThrow("Oracle projection requires accepted selected visible outcome value evidence.");
+
     expect(renderCleanAuthorityProjection(withOpaqueFactText(localObservationView(), "local_observation_beat")))
       .toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(localObservationView(), "local_observation_beat")))
@@ -2019,7 +2030,7 @@ describe("clean Stage 6 narration contracts", () => {
       backendFacts: [],
     };
     expect(() => renderCleanAuthorityProjection(oracle))
-      .toThrow("Oracle projection requires accepted visible outcome evidence.");
+      .toThrow("Oracle projection requires accepted selected visible outcome value evidence.");
 
     const sceneBeat = movementView({
       acceptedEvidence: [{
@@ -2064,6 +2075,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence[0]?.claimKinds).toEqual(["oracle_outcome"]);
     expect(promptInput.acceptedEvidence[0]?.backendFacts).toEqual([{
       factRef: "e1.f1",
+      role: "oracle_selected_meaning",
+      value: "The loose grate holds under your weight.",
       text: "The loose grate holds under your weight.",
       exact: true,
     }]);

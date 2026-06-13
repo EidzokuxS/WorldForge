@@ -5,6 +5,7 @@ import {
   cleanSettledTurnPacketSchema,
   cleanStage4ExecutionResultSchema,
   cleanStage4ReceiptSchema,
+  oracleSettlementSchema,
   type AuthoritativeSceneFrame,
   type CleanStage4ExecutionResult,
   type CleanStage4Receipt,
@@ -12,6 +13,7 @@ import {
   type GmActionChecklist,
   type GmRead,
   type JudgeUncertainty,
+  type OracleSettlement,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
   buildCleanNarratorView,
@@ -252,6 +254,94 @@ function clarificationJudgment(inputFrame = frame(), read = clarificationGmRead(
       evidenceRefs: ["Player", "Guide", "Courier"],
     },
   };
+}
+
+function oracleSettlement(inputFrame = frame()): OracleSettlement {
+  const selectedMeaning = "The loose grate holds under your weight.";
+  const weakMeaning = "The loose grate shifts but holds for now.";
+  const missMeaning = "The loose grate gives way under your weight.";
+  return oracleSettlementSchema.parse({
+    version: "oracle-settlement.v1",
+    settlementId: "oracle-settlement-1",
+    campaignId: inputFrame.campaignId,
+    turnId: inputFrame.turnId,
+    frameId: inputFrame.frameId,
+    source: {
+      sceneFrameVersion: "scene-frame.v1",
+      gmReadVersion: "gm-read.v1",
+      judgeVersion: "judge-uncertainty.v1",
+      gmReadPath: "uncertain",
+      judgmentId: "judge-oracle-1",
+      oracleAdmissionId: "oracle-admission-1",
+    },
+    admission: {
+      admissionId: "oracle-admission-1",
+      question: "Does the loose grate hold?",
+      uncertaintyKind: "physical_risk",
+      actorRef: "Player",
+      targetRefs: [inputFrame.scene.currentScene.ref],
+      evidenceRefs: ["Player", inputFrame.scene.currentScene.ref],
+      stakes: "A strong hit means the grate holds; a miss means it gives way.",
+      difficultyTier: "standard",
+      outcomeMeanings: {
+        strong_hit: selectedMeaning,
+        weak_hit: weakMeaning,
+        miss: missMeaning,
+      },
+      settlementScope: "visible_outcome_only",
+      requiresFollowupMutation: false,
+    },
+    adapter: {
+      adapterId: "callOracle",
+      payload: {
+        intent: "Cross the loose grate.",
+        method: "step carefully",
+        actorTags: ["Player"],
+        targetTags: [inputFrame.scene.currentScene.label],
+        environmentTags: ["loose grate"],
+        sceneContext: "The player tests whether the visible loose grate holds.",
+      },
+      result: {
+        status: "ok",
+        chance: 65,
+        roll: 10,
+        outcome: "strong_hit",
+        reasoning: "Adapter resolved the admitted visible uncertainty.",
+      },
+    },
+    selectedMeaning: {
+      outcome: "strong_hit",
+      text: selectedMeaning,
+      source: "admission.outcomeMeanings[result.outcome]",
+    },
+    visibleOutcome: {
+      outcome: "strong_hit",
+      question: "Does the loose grate hold?",
+      stakes: "A strong hit means the grate holds; a miss means it gives way.",
+      selectedMeaning,
+    },
+    authority: {
+      evidenceAuthority: "oracle_settlement",
+      mutationAuthority: "none",
+      evidenceRefs: ["Player", inputFrame.scene.currentScene.ref],
+      mayAuthorizeMutation: false,
+      claimScope: "visible_uncertainty_outcome_only",
+      forbiddenClaimKinds: [
+        "movement",
+        "arrival",
+        "route_state",
+        "discovery",
+        "location_reveal",
+        "item_state",
+        "npc_private_knowledge",
+        "actor_creation",
+        "world_fact",
+        "absence_or_no_change",
+        "condition_or_hp_change",
+      ],
+    },
+    failure: null,
+  });
 }
 
 function movementReceipt(inputFrame = frame(), inputChecklist = checklist(inputFrame)): CleanStage4Receipt {
@@ -687,6 +777,7 @@ function buildPacket(input: {
   postResolutionFrame?: AuthoritativeSceneFrame | null;
   gmRead?: GmRead | null;
   judgment?: JudgeUncertainty | null;
+  oracleSettlement?: OracleSettlement | null;
   checklist?: GmActionChecklist | null;
   execution?: CleanStage4ExecutionResult | null;
 } = {}) {
@@ -699,7 +790,7 @@ function buildPacket(input: {
     postResolutionFrame: input.postResolutionFrame ?? null,
     gmRead: input.gmRead ?? null,
     judgment: input.judgment ?? null,
-    oracleSettlement: null,
+    oracleSettlement: input.oracleSettlement ?? null,
     actionChecklist: input.checklist ?? null,
     stage4Execution: input.execution ?? null,
   });
@@ -948,6 +1039,36 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(clarification?.limits.doesNotProve).toContain("item state");
     expect(packet.acceptedEvidence.some((entry) => entry.authority === "scene_frame_snapshot")).toBe(true);
     expect(view.acceptedEvidence[0]?.authority).toBe("clarification_request");
+  });
+
+  it("settles Oracle visible outcome evidence with typed selected meaning value", () => {
+    const inputFrame = frame();
+    const packet = buildPacket({
+      frame: inputFrame,
+      oracleSettlement: oracleSettlement(inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+    const oracle = packet.acceptedEvidence.find((entry) =>
+      entry.claimKinds.includes("oracle_outcome")
+    );
+
+    expect(packet.settlementKind).toBe("oracle_visible_outcome");
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    if (!oracle) throw new Error("expected Oracle accepted evidence");
+    expect(oracle).toMatchObject({
+      authority: "oracle_visible_outcome",
+      sourceKind: "oracle_settlement",
+      claimKinds: ["oracle_outcome"],
+      text: "The loose grate holds under your weight.",
+    });
+    expect(oracle.backendFacts).toEqual([{
+      factRef: `${oracle.evidenceId}.f1`,
+      role: "oracle_selected_meaning",
+      text: "The loose grate holds under your weight.",
+      value: "The loose grate holds under your weight.",
+      exact: true,
+    }]);
   });
 
   it("fails clarification settlement when no accepted clarification question exists", () => {
