@@ -8,6 +8,44 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-13
 
+P195 Stage 6 literary adventure narration:
+- Objective:
+  - Make default clean-runtime narration read like a playable text RPG adventure rather than a status digest.
+  - Preserve strict truth ownership: accepted evidence and receipts own gameplay facts; Stage 6 owns phrasing, pacing, visible texture, and dialogue presentation only.
+  - Adapt Zetta Micro v1.1.3 / Freaky Frankenstein Micro FF5 mechanisms as WorldForge-owned contracts: cinematic realism, anti-echo, prose bans, realistic visible NPC delivery, anti-omniscient boundaries, and VAD-style visible delivery.
+- Requirements:
+  - [ ] Move normal successful turns for item transfer, dialogue, and direct scene observation from compact deterministic projection into model-authored literary narration with validation.
+  - [ ] Keep deterministic projection as a strict projection boundary for clarification, audit/failure handling, terse mode, and any claim shape whose validator cannot yet prove safe literary enrichment.
+  - [ ] Extend Stage 6 prompt contract so output is 1-3 short adventure-prose paragraphs, uses exact accepted labels/quotes, cites every sentence to evidence refs, and keeps gameplay facts traceable.
+  - [ ] Add validation/audit for dry status-digest prose: flat `X is now with Y`, bare `You are at X`, list-heavy direct-scene dumps, tiny one-sentence outputs when richer evidence exists, and repeated `You` openings.
+  - [ ] Add tests proving literary text for item transfer, dialogue, direct scene observation, route inquiry/options, time passage, and local observation; tests must also reject invented state, unsupported absence/no-change, private facts, receipt prose, stale Zetta/Freaky shapes, and summary-only prose.
+  - [ ] Run fresh GLM 5.2 live QA on zero-turn clones with manually chosen adaptive turns; inspect player-facing prose after each turn and verify DB invariants for stateful turns.
+  - [ ] Update prose audit metrics for summary/list density, repeated openings, receipt/debug leaks, enum leaks, one-token outputs, dialogue over-expansion, and direct-scene list dumps.
+- First vertical slice:
+  - [x] Use model-authored literary narration for accepted `item_state`, accepted `dialogue_response`, and direct `scene_frame_snapshot` observation while preserving deterministic projection for movement, route status/options, elapsed time, local observation, device surface, player condition, minor POI, and clarification until each shape has tests.
+  - [x] Add contract tests where the candidate is literary and evidence-cited, plus negative tests for digest prose and invented facts.
+  - [x] Run typecheck and focused clean-runtime narration tests before any live proof.
+- P195 slice changes:
+  - [x] Stage 6 prompt now frames default successful turns as short playable adventure-prose beats grounded in accepted facts.
+  - [x] Receipt-owned literary prompt input narrows to terminal `item_state` / `dialogue_response` evidence plus scene anchors, with bounded backend fact refs.
+  - [x] Literary validation rejects summary-digest shapes for item transfer, bare dialogue quotes, and direct scene digest lines.
+  - [x] `cleanNarrationSentenceSchema` canonicalizes omitted `auditStepIds` to `[]` for model-generated accepted-evidence sentences, while semantic validation still owns audit_notice shape.
+  - [x] GM Read model-generation normalization canonicalizes omitted `targetRefs` and omitted/terse `uncertainty` before strict validation.
+  - [x] `scene_observation_receipt` remains deterministic until its literary contract has explicit evidence coverage; this prevents broad scene invention from an observation receipt.
+  - [x] Scene-anchor prompt contract now treats scene labels as exact placement tokens; descriptive scene nouns require accepted observation backendFacts.
+  - [x] Item-state grammar now asks for settled-state phrasing: item/custody state carries the sentence, and target labels render as holder/placement phrases.
+- P195 verification:
+  - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
+  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 306 tests.
+  - [x] Prose audit passed for `output/clean-runtime-p195-literary-prose-qa-r10-20260613-141047/`: 1 narrative, 19 words, zero one-token output, zero summary/list/digest/echo hits.
+  - [x] Fresh zero-turn live proof `p195-literary-prose-qa-r10-20260613-141047`, action `I hand the Brass Tube to Guide.`, returned literary player-facing text: `The Brass Tube passes from Mira Voss to the Guide, who now carries it here in the Lowwater Bazaar.`
+  - [x] Live DB proof: one accepted `item_transfer` receipt, `Brass Tube.owner` became `Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, no clock ledger, restore ledger 0, old v2/saga/narrator/oracle/simulation stores 0, authority trace `gameplay-cycle-runtime.item_transfer.v1`.
+  - [x] Diagnostic r9 exposed target-action drift (`Guide takes it`) despite correct DB settlement; r10 proof uses settled-state phrasing without target handling action.
+- P195 next prose primitives:
+  - [x] Tighten item-transfer live prose so scene anchor contributes exact placement only unless observation evidence supplies additional texture.
+  - [ ] Add literary coverage and live proof for route inquiry/options, time passage, local observation, and movement arrival.
+  - [ ] Run longer fresh GLM 5.2 manual-turn lanes after the next primitive group, with prose audit plus DB verification after each lane.
+
 P189 clean runtime prose quality pass:
 - Objective:
   - Improve player-facing clean-runtime prose while preserving the primitive-owned truth path: backend receipts own gameplay truth, settled evidence owns claim boundaries, Stage 6 owns readable phrasing.

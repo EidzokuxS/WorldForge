@@ -28,6 +28,8 @@ const provider: ProviderConfig = {
   model: "test-model",
 };
 
+type NarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
+
 function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarratorView {
   return {
     version: "gameplay-runtime.narrator-view.v1",
@@ -82,6 +84,32 @@ function movementCandidate(text = "You move to North Hall."): CleanNarrationCand
       auditStepIds: [],
     }],
     finalText: text,
+  };
+}
+
+function acceptedCandidate(
+  view: CleanNarratorView,
+  sentences: Array<{
+    text: string;
+    evidenceRefs: string[];
+    backendFactRefs: string[];
+    claimKinds: NarrationClaimKind[];
+  }>,
+): CleanNarrationCandidate {
+  return {
+    version: "gameplay-runtime.clean-narration-candidate.v1",
+    packetId: view.packetId,
+    turnId: view.turnId,
+    language: view.language,
+    sentences: sentences.map((sentence) => ({
+      kind: "accepted_evidence",
+      text: sentence.text,
+      evidenceRefs: sentence.evidenceRefs,
+      backendFactRefs: sentence.backendFactRefs,
+      claimKinds: sentence.claimKinds,
+      auditStepIds: [],
+    })),
+    finalText: sentences.map((sentence) => sentence.text).join(" "),
   };
 }
 
@@ -640,6 +668,30 @@ function positiveLocalObservationView(): CleanNarratorView {
   });
 }
 
+function sceneObservationReceiptView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...sceneFrameSnapshotView().acceptedEvidence,
+      {
+        ref: "e5",
+        authority: "scene_observation_receipt",
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+        text: "Current visible place is Market. Visible actors include Guide. Visible routes include North Hall. Inventory includes Courier satchel.",
+        backendFacts: [
+          { factRef: "e5.f1", text: "Current scene is Market.", exact: true },
+          { factRef: "e5.f2", text: "Visible actor: Guide.", exact: true },
+          { factRef: "e5.f3", text: "Inventory item: Courier satchel.", exact: true },
+          { factRef: "e5.f4", text: "Movement option: North Hall.", exact: true },
+        ],
+        limits: {
+          proves: ["accepted current visible scene observation result"],
+          doesNotProve: ["hidden discovery", "movement", "item state", "dialogue content"],
+        },
+      },
+    ],
+  });
+}
+
 function deviceSurfaceObservationView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -871,6 +923,46 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
   });
 
+  it("narrows literary receipt prompt input to terminal evidence and scene anchors", () => {
+    const promptInput = buildCleanNarratorPromptInput(dialogueWithSceneFrameSnapshotView());
+    const refs = promptInput.acceptedEvidence.map((evidence) => evidence.ref);
+    const claimKinds = promptInput.acceptedEvidence.flatMap((evidence) => evidence.claimKinds);
+
+    expect(refs).toEqual(["e5", "e1"]);
+    expect(claimKinds).toContain("dialogue_response");
+    expect(claimKinds).toContain("current_scene");
+    expect(claimKinds).not.toContain("visible_target");
+    expect(claimKinds).not.toContain("movement_option");
+  });
+
+  it("uses a bounded item-transfer citation shortlist in literary prompt input", () => {
+    const promptInput = buildCleanNarratorPromptInput(itemStateView());
+    const facts = promptInput.acceptedEvidence[0]?.backendFacts ?? [];
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1"]);
+    expect(facts.map((fact) => fact.factRef)).toEqual([
+      "e1.f2",
+      "e1.f4",
+      "e1.f5",
+      "e1.f6",
+      "e1.f7",
+      "e1.f8",
+    ]);
+    expect(facts).toHaveLength(6);
+  });
+
+  it("keeps direct scene snapshot evidence available to the literary scene prompt", () => {
+    const promptInput = buildCleanNarratorPromptInput(sceneFrameSnapshotView());
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(promptInput.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("visible_target")
+    )).toBe(true);
+    expect(promptInput.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("movement_option")
+    )).toBe(true);
+  });
+
   it("accepts model narration from accepted movement evidence", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView(),
@@ -983,31 +1075,58 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic authority projection for direct scene targets and exits", async () => {
+  it("uses model-authored literary narration for direct scene targets and exits", async () => {
+    const view = sceneFrameSnapshotView();
     const result = await runCleanNarration({
-      narratorView: sceneFrameSnapshotView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("scene_frame_snapshot route/target facts should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Market opens around you with the Courier satchel at hand and the Notice Board set where it can be read.",
+          evidenceRefs: ["e1", "e2", "e3"],
+          backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
+          claimKinds: ["current_scene", "inventory_status", "visible_target"],
+        },
+        {
+          text: "North Hall is the visible way out from here, close enough to reach in a minute.",
+          evidenceRefs: ["e4"],
+          backendFactRefs: ["e4.f1"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Market opens around you with the Courier satchel at hand and the Notice Board set where it can be read. North Hall is the visible way out from here, close enough to reach in a minute.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
   });
 
-  it("deduplicates direct scene targets already rendered as actors, inventory, or routes", async () => {
+  it("keeps compact projection available for direct scene target dedupe boundaries", () => {
+    const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
+
+    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(text).not.toContain("Guide, Courier satchel");
+    expect(text).not.toContain("Guide, Brass Tube");
+    expect(text).not.toContain("Courier satchel is visible");
+    expect(text).not.toContain("North Hall is visible");
+    expect(text.match(/\bGuide\b/gu)).toHaveLength(1);
+  });
+
+  it("uses model-authored literary narration for overlapping direct scene targets", async () => {
+    const view = sceneFrameSnapshotWithOverlappingTargetsView();
     const result = await runCleanNarration({
-      narratorView: sceneFrameSnapshotWithOverlappingTargetsView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("scene_frame_snapshot route/target facts should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "Guide waits in Market while the Courier satchel rides at your side; Brass Tube and Notice Board are the useful things in reach, and North Hall is the one-minute way out.",
+        evidenceRefs: ["e1", "e2", "e3", "e4", "e5"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5", "e5.f1"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(result.source).toBe("model");
+    expect(result.text).toContain("Guide waits in Market");
     expect(result.text).not.toContain("Guide, Courier satchel");
     expect(result.text).not.toContain("Guide, Brass Tube");
     expect(result.text).not.toContain("Courier satchel is visible");
@@ -1039,17 +1158,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promotedTruth.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("keeps scene snapshot route and target evidence from overriding dialogue receipts", async () => {
+  it("uses model-authored literary narration for dialogue without promoting quote truth", async () => {
+    const view = dialogueWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
-      narratorView: dialogueWithSceneFrameSnapshotView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("dialogue_response should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: 'In Market, Guide gives the answer: "The north stairs flooded before dawn."',
+        evidenceRefs: ["e1", "e5"],
+        backendFactRefs: ["e1.f1", "e5.f1", "e5.f2"],
+        claimKinds: ["current_scene", "dialogue_response"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Guide says: "The north stairs flooded before dawn."');
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('In Market, Guide gives the answer: "The north stairs flooded before dawn."');
+    expect(result.text).not.toMatch(/\b(route|arrive|travel|durable world fact|true|confirmed by the world)\b/iu);
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {
@@ -1155,33 +1279,48 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("uses deterministic authority projection for item_state instead of model paraphrase", async () => {
+  it("uses model-authored literary narration for item_state instead of compact status prose", async () => {
+    const view = itemStateView();
     const result = await runCleanNarration({
-      narratorView: itemStateView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("item_state should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "The Brass Tube leaves your hand and settles with Guide, carried openly in Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e1.f7"],
+        claimKinds: ["item_state"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Brass Tube is now with Guide.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("The Brass Tube leaves your hand and settles with Guide, carried openly in Market.");
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
-  it("deterministically composes item_state with accepted dialogue_response", async () => {
+  it("uses model-authored literary narration for composed item_state plus dialogue_response", async () => {
+    const view = itemStateWithDialogueView();
     const result = await runCleanNarration({
-      narratorView: itemStateWithDialogueView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("item_state plus dialogue_response should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "The Brass Tube passes from you to Guide and rides in his keeping at Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f7"],
+          claimKinds: ["item_state"],
+        },
+        {
+          text: 'He follows it with a plain answer: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1", "e2.f2"],
+          claimKinds: ["dialogue_response"],
+        },
+      ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Brass Tube is now with Guide. Guide says: "The north stairs flooded before dawn."');
-    expect(result.text).toContain("Brass Tube is now with Guide.");
-    expect(result.text).toContain('Guide says: "The north stairs flooded before dawn."');
+    expect(result.source).toBe("model");
+    expect(result.text).toContain("The Brass Tube passes from you to Guide");
+    expect(result.text).toContain('"The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
@@ -1306,6 +1445,19 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toContain("SceneFrame");
   });
 
+  it("keeps scene_observation receipts on deterministic projection until the receipt has literary coverage", async () => {
+    const result = await runCleanNarration({
+      narratorView: sceneObservationReceiptView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("scene_observation_receipt should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Current scene is Market. Visible actor: Guide. Inventory item: Courier satchel. Movement option: North Hall.");
+  });
+
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
     const text = renderCleanAuthorityProjection(deviceSurfaceObservationView());
@@ -1416,6 +1568,53 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
+  it("rejects summary-digest prose on literary narration claim shapes", () => {
+    const itemDigest = validateCleanNarrationCandidate({
+      view: itemStateView(),
+      candidate: acceptedCandidate(itemStateView(), [{
+        text: "Brass Tube is now with Guide.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f5"],
+        claimKinds: ["item_state"],
+      }]),
+    });
+    expect(itemDigest.status).toBe("rejected");
+    if (itemDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(itemDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const dialogueDigest = validateCleanNarrationCandidate({
+      view: dialogueView(),
+      candidate: acceptedCandidate(dialogueView(), [{
+        text: 'Guide says: "The north stairs flooded before dawn."',
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2"],
+        claimKinds: ["dialogue_response"],
+      }]),
+    });
+    expect(dialogueDigest.status).toBe("rejected");
+    if (dialogueDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(dialogueDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const sceneDigest = validateCleanNarrationCandidate({
+      view: sceneFrameSnapshotView(),
+      candidate: acceptedCandidate(sceneFrameSnapshotView(), [{
+        text: "You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.",
+        evidenceRefs: ["e1", "e2", "e3", "e4"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1"],
+        claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
+      }]),
+    });
+    expect(sceneDigest.status).toBe("rejected");
+    if (sceneDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(sceneDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+  });
+
   it("rejects Russian narration that falls back to English scaffold wording", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView({ language: "ru" }),
@@ -1507,7 +1706,14 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("raw player action is intentionally omitted");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write compact, concrete fiction from accepted facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write playable text-RPG adventure prose from accepted facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Default successful turns use one to three short fiction beats");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Adventure prose floor:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Shape pass:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Echo firewall:");

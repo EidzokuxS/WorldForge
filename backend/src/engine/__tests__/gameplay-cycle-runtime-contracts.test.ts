@@ -1336,6 +1336,26 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     }
   });
 
+  it("canonicalizes omitted model uncertainty to explicit absence before strict GM Read validation", () => {
+    const frame = minimalFrame();
+    const candidate = {
+      ...validGmRead(frame),
+      uncertainty: undefined,
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.uncertainty).toEqual({
+      present: false,
+      question: null,
+      basis: null,
+    });
+  });
+
   it("requires GM Read candidates to choose an explicit primitive interaction kind", () => {
     const candidate = {
       ...validGmRead(),
@@ -1987,6 +2007,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(gmReadSchema.safeParse(nearMiss).success).toBe(false);
     const result = validateGmReadCandidate({ frame, candidate: nearMiss });
     expect(result.status).toBe("rejected");
+  });
+
+  it("canonicalizes omitted GM Read targetRefs to an empty broad-observation list", () => {
+    const frame = minimalFrame();
+    const candidate = {
+      ...validGmRead(frame),
+      actionInterpretation: {
+        ...validGmRead(frame).actionInterpretation,
+        targetRefs: undefined,
+      },
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.targetRefs).toEqual([]);
   });
 
   it("keeps gripping an already-held item in player_local_condition instead of item_transfer", () => {

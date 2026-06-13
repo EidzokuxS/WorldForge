@@ -118,8 +118,9 @@ const gmReadGenerationUncertaintySchema = z.object({
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
   liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
-  uncertainty: gmReadGenerationUncertaintySchema,
+  uncertainty: gmReadGenerationUncertaintySchema.optional(),
   actionInterpretation: gmReadActionInterpretationSchema.extend({
+    targetRefs: z.array(gmReadGenerationModelSafeRef).max(12).optional(),
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
     timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
@@ -312,6 +313,16 @@ function normalizeGmReadItemTransferShapeCandidate(candidate: unknown): unknown 
 function normalizeGmReadUncertaintyCandidate(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const uncertainty = candidate.uncertainty;
+  if (uncertainty === undefined) {
+    return {
+      ...candidate,
+      uncertainty: {
+        present: false,
+        question: null,
+        basis: null,
+      },
+    };
+  }
   if (!isRecord(uncertainty) || uncertainty.present !== false) return candidate;
   return {
     ...candidate,
@@ -323,9 +334,23 @@ function normalizeGmReadUncertaintyCandidate(candidate: unknown): unknown {
   };
 }
 
+function normalizeGmReadTargetRefsCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation) || Array.isArray(actionInterpretation.targetRefs)) return candidate;
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      targetRefs: [],
+    },
+  };
+}
+
 function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
   const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(candidate);
-  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedUncertainty);
+  const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedUncertainty);
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedTargetRefs);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
   return {
     ...normalizedTransfer,

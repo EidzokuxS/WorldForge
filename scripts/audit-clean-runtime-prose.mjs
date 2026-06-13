@@ -32,6 +32,9 @@ const patterns = {
   surfaceSummaryLeak: /\bCurrent visible (?:actors|targets|items|matches?|route options) include\b/iu,
   surfaceKindLeak: /\bvisible (?:actor|target|route option|device surface|support actor)\b/iu,
   dialogueSceneDump: /\bpresent themselves as distinct points of focus\b|\broutes branch toward\b/iu,
+  flatItemTransfer: /^[\p{L}\p{N}' -]+ is now with [\p{L}\p{N}' -]+\.$/iu,
+  bareDialogueQuote: /^[\p{L}\p{N}' -]+ says:\s*"[^"]+[.!?]?"\.?$/iu,
+  directSceneDigest: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
   optionMenu: /\beither\b[\s\S]{0,80}\bor\b|\b\w+\. Or \w+\b/iu,
   wordAsObject: /\b(?:taste[sd]?|weigh(?:ed|s)?|roll(?:ed|s)?|repeat(?:ed|s)?|testing|working through)\b[\s\S]{0,60}\b(?:name|word|phrase|syllable)s?\b/iu,
   noveltyTag: /\b(?:interesting|intriguing|full of surprises|that's new|we'll see)\b/iu,
@@ -82,15 +85,21 @@ const exactSentences = new Map();
 const hits = Object.fromEntries(Object.keys(patterns).map((key) => [key, 0]));
 const examples = Object.fromEntries(Object.keys(patterns).map((key) => [key, []]));
 let oneToken = 0;
+let youOpening = 0;
+let listLikeSentenceStarts = 0;
 
 for (const row of rows) {
   if (row.wordCount <= 1) oneToken += 1;
   const start = words(row.text).slice(0, 4).join(" ").toLowerCase();
   if (start) starts.set(start, (starts.get(start) ?? 0) + 1);
+  if (/^You\b/u.test(row.text)) youOpening += 1;
 
   for (const sentence of row.text.split(/(?<=[.!?])\s+/u)) {
     const normalized = sentence.trim().toLowerCase();
     if (normalized) exactSentences.set(normalized, (exactSentences.get(normalized) ?? 0) + 1);
+    if (/^(?:You are at|You have|Visible routes lead to|A visible route leads to|[\p{L}\p{N}' -]+ is here|[\p{L}\p{N}' -]+ is visible)\b/iu.test(sentence.trim())) {
+      listLikeSentenceStarts += 1;
+    }
   }
 
   for (const [key, pattern] of Object.entries(patterns)) {
@@ -112,6 +121,8 @@ const summary = {
   minWords: rows.length > 0 ? Math.min(...rows.map((row) => row.wordCount)) : 0,
   maxWords: rows.length > 0 ? Math.max(...rows.map((row) => row.wordCount)) : 0,
   oneToken,
+  youOpening,
+  listLikeSentenceStarts,
   hits,
   topStarts: topCounts(starts, 20),
   topExactSentences: topCounts(exactSentences, 20),

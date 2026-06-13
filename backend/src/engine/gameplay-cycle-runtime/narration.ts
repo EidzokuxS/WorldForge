@@ -100,6 +100,20 @@ const PROSE_SHAPE_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     pattern: /\b(?:world (?:narrowed|tilted|fell away)|something (?:dark|ancient|feral)|[\p{L}\p{N}_-]+ was a [\p{L}\p{N}_-]+ thing)\b/iu,
   },
 ];
+const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
+  {
+    name: "bare_item_transfer",
+    pattern: /^[\p{L}\p{N}' -]+ is now with [\p{L}\p{N}' -]+\.$/iu,
+  },
+  {
+    name: "bare_dialogue_quote",
+    pattern: /^[\p{L}\p{N}' -]+ says:\s*"[^"]+[.!?]?"\.?$/iu,
+  },
+  {
+    name: "direct_scene_list",
+    pattern: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
+  },
+];
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
@@ -121,6 +135,105 @@ function wordsIn(value: string): string[] {
 
 function uniqueCyrillicWords(value: string): string[] {
   return uniqueStrings(value.match(CYRILLIC_WORD) ?? []).map((word) => word.toLowerCase());
+}
+
+type CleanNarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
+type AcceptedNarrationEvidence = CleanNarratorView["acceptedEvidence"][number];
+type AcceptedNarrationBackendFact = AcceptedNarrationEvidence["backendFacts"][number];
+
+const MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 6;
+const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
+  "item_state",
+  "dialogue_response",
+];
+const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
+  "current_scene",
+  "current_location",
+  "visible_actor",
+];
+
+function hasClaimKind(view: CleanNarratorView, claimKind: CleanNarrationClaimKind): boolean {
+  return view.acceptedEvidence.some((evidence) => evidence.claimKinds.includes(claimKind));
+}
+
+function evidenceHasAnyClaimKind(
+  evidence: AcceptedNarrationEvidence,
+  claimKinds: readonly CleanNarrationClaimKind[],
+): boolean {
+  return claimKinds.some((claimKind) => evidence.claimKinds.includes(claimKind));
+}
+
+function hasOnlySceneFrameSnapshotEvidence(view: CleanNarratorView): boolean {
+  return view.acceptedEvidence.length > 0
+    && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
+}
+
+function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
+  if (hasClaimKind(view, "item_state") || hasClaimKind(view, "dialogue_response")) return true;
+  return hasOnlySceneFrameSnapshotEvidence(view)
+    && view.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("visible_target")
+      || evidence.claimKinds.includes("movement_option")
+    );
+}
+
+function uniqueFactsByRef(facts: readonly AcceptedNarrationBackendFact[]): AcceptedNarrationBackendFact[] {
+  const seen = new Set<string>();
+  const selected: AcceptedNarrationBackendFact[] = [];
+  for (const fact of facts) {
+    if (seen.has(fact.factRef)) continue;
+    seen.add(fact.factRef);
+    selected.push(fact);
+  }
+  return selected;
+}
+
+function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
+  if (evidence.claimKinds.includes("item_state")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /^(?:Item label|Source|Target|Final equip state|Current scene anchor|Item transfer result):/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
+  if (evidence.claimKinds.includes("dialogue_response")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /^(?:Speaker:|.+ says:|Dialogue summary:)/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
+  return evidence.backendFacts;
+}
+
+function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
+  if (evidence.backendFacts.length <= MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE) return evidence;
+  return {
+    ...evidence,
+    backendFacts: preferredPromptFacts(evidence).slice(0, MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE),
+  };
+}
+
+function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarrationEvidence[] {
+  if (!isLiteraryNarrationCandidateExpected(view) || hasOnlySceneFrameSnapshotEvidence(view)) {
+    return view.acceptedEvidence.map(limitPromptEvidenceFacts);
+  }
+
+  const terminalEvidence = view.acceptedEvidence.filter((evidence) =>
+    evidenceHasAnyClaimKind(evidence, LITERARY_TERMINAL_CLAIMS)
+  );
+  if (terminalEvidence.length === 0) return view.acceptedEvidence.map(limitPromptEvidenceFacts);
+
+  const sceneAnchors = view.acceptedEvidence.filter((evidence) =>
+    evidence.authority === "scene_frame_snapshot"
+    && evidenceHasAnyClaimKind(evidence, LITERARY_SCENE_ANCHOR_CLAIMS)
+  );
+  const byRef = new Set<string>();
+  const selected: AcceptedNarrationEvidence[] = [];
+  for (const evidence of [...terminalEvidence, ...sceneAnchors]) {
+    if (byRef.has(evidence.ref)) continue;
+    byRef.add(evidence.ref);
+    selected.push(limitPromptEvidenceFacts(evidence));
+  }
+  return selected;
 }
 
 function acceptedEvidenceText(view: CleanNarratorView): string {
@@ -189,6 +302,7 @@ function proseQualityIssues(input: {
   const text = normalizeText(input.candidate.finalText);
   const unquotedText = stripQuotedSegments(text);
   const issues: CleanNarrationValidationIssue[] = [];
+  const literaryExpected = isLiteraryNarrationCandidateExpected(input.view);
 
   if (wordsIn(text).length <= 1) {
     issues.push({
@@ -239,6 +353,32 @@ function proseQualityIssues(input: {
     }
   }
 
+  if (literaryExpected) {
+    if (input.candidate.sentences.length > 3) {
+      issues.push({
+        code: "prose_quality",
+        path: "sentences",
+        message: "Literary narration must use one to three sentence objects.",
+      });
+    }
+    if (wordsIn(text).length < 12) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: "Literary narration must be more developed than a compact status digest.",
+      });
+    }
+    for (const marker of SUMMARY_DIGEST_MARKERS) {
+      if (marker.pattern.test(text)) {
+        issues.push({
+          code: "prose_quality",
+          path: "finalText",
+          message: `Literary narration used summary-digest shape: ${marker.name}.`,
+        });
+      }
+    }
+  }
+
   return issues;
 }
 
@@ -251,7 +391,7 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     language: view.language,
     languageSource: view.languageSource,
     preserveLabelsVerbatim: view.preserveLabelsVerbatim,
-    acceptedEvidence: view.acceptedEvidence,
+    acceptedEvidence: selectPromptAcceptedEvidence(view),
     stepAuditForGrounding: view.stepAuditForGrounding,
     guard: view.guard,
   });
@@ -276,21 +416,30 @@ export function buildCleanNarrationSystemPrompt(
   return [
     "You are WorldForge Stage 6 Narration.",
     "Return only JSON matching gameplay-runtime.clean-narration-candidate.v1.",
-    "World-truth source: acceptedEvidence[].backendFacts.",
+    "World-truth source: promptInput.acceptedEvidence[].backendFacts and promptInput.acceptedEvidence[].text.",
     "raw player action is intentionally omitted; write the settled result described by accepted evidence.",
     "Stage authority: narration phrases accepted evidence into player-facing prose.",
-    "Style role: write compact, concrete fiction from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
+    "Style role: write playable text-RPG adventure prose from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
+    "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",
+    "Cinematic realism: render what can be seen, heard, handled, smelled, or felt through accepted evidence; use ordinary concrete words and fluid complete sentences.",
+    "Adventure prose floor: item transfers, dialogue responses, and direct scene observations should read as scene beats, not status lines or inventory lists.",
     ...cleanNarrationStyleLines(styleMode),
     "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
     "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
+    "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different sentence shapes across nearby turns.",
     "Shape pass: replace word-as-object phrasing, novelty tags, crowd-foil contrasts, bottled atmosphere, negation-as-description, either/or verdict menus, and cosmic abstractions with the accepted concrete fact.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth.",
-    "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from acceptedEvidence.",
+    "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
+    "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
+    "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
+    "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, 1-2 for dialogue, and 2-3 for direct scene observation.",
+    "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
     "For route_status, express the cited route_status backend fact.",
@@ -300,7 +449,7 @@ export function buildCleanNarrationSystemPrompt(
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
     "For support_actor_materialization, express the accepted visible temporary support actor or role now present in the current scene.",
     "For player_local_condition, express the accepted Player current-scene posture or readiness condition operation.",
-    "For item_state, express the accepted item custody, location, or equip-state operation.",
+    "For item_state, express the accepted item custody, location, or equip-state operation as a single custody/state beat.",
     "For minor_poi_handle, express the accepted visible current-scene place handle label and kind as a target handle.",
     "For local_observation, express the accepted current visible observation result; for bounded_visibility_negative, express that current visible entries showed no matching visible result.",
     "For device_surface_observation, express the accepted modeled public device surface facets or the bounded current visible device-surface result.",
@@ -454,11 +603,16 @@ export function validateCleanNarrationCandidate(input: {
   return { status: "accepted", candidate, issues: [] };
 }
 
+function summarizeNarrationValidationIssues(issues: readonly CleanNarrationValidationIssue[]): string {
+  return issues
+    .slice(0, 6)
+    .map((issue) => `${issue.code} at ${issue.path}: ${issue.message}`)
+    .join("; ");
+}
+
 function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
   return view.language === "ru" || view.language === "mixed" ? "ru" : "en";
 }
-
-type AcceptedNarrationEvidence = CleanNarratorView["acceptedEvidence"][number];
 
 function trimSentencePeriod(value: string): string {
   return normalizeText(value).replace(/\.$/u, "");
@@ -760,15 +914,10 @@ function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): stri
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
-  const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
-    && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
-  const hasPlayerLocationChange = view.acceptedEvidence.some((evidence) =>
-    evidence.claimKinds.includes("player_location_change")
-  );
+  const onlySceneFrameSnapshotEvidence = hasOnlySceneFrameSnapshotEvidence(view);
+  const hasPlayerLocationChange = hasClaimKind(view, "player_location_change");
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("player_location_change")
-    || evidence.claimKinds.includes("item_state")
-    || evidence.claimKinds.includes("dialogue_response")
     || evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
@@ -779,13 +928,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
       && !hasPlayerLocationChange
     )
     || evidence.authority === "route_options_receipt"
-    || (
-      onlySceneFrameSnapshotEvidence
-      && (
-        evidence.claimKinds.includes("visible_target")
-        || evidence.claimKinds.includes("movement_option")
-      )
-    )
+    || evidence.authority === "scene_observation_receipt"
     || evidence.claimKinds.includes("device_surface_observation")
   );
 }
@@ -1027,7 +1170,7 @@ export async function runCleanNarration(input: {
   }
 
   throw new CleanNarrationValidationError(
-    "Clean Narration validation failed.",
+    `Clean Narration validation failed: ${summarizeNarrationValidationIssues(validation.issues)}`,
     validation.issues,
   );
 }

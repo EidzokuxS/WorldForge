@@ -2407,7 +2407,7 @@ export const cleanNarrationSentenceSchema = z.object({
   evidenceRefs: z.array(shortText).max(6),
   backendFactRefs: z.array(shortText).max(12),
   claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
-  auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6),
+  auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),
 }).strict();
 
 export const cleanNarrationCandidateSchema = z.object({
