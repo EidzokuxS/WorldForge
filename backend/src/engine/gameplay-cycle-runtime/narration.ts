@@ -245,15 +245,16 @@ function localObservationRequiresDeterministicProjection(
 ): boolean {
   if (!evidence.claimKinds.includes("local_observation") || hasSceneTexture) return false;
   if (evidence.claimKinds.includes("bounded_visibility_negative")) return true;
-  if (factValue(evidence, "Searched visible surfaces: ") === "route options") return true;
   const hasPositiveVisibleClaim = evidence.claimKinds.some((claimKind) =>
     claimKind === "visible_actor"
     || claimKind === "visible_fact"
     || claimKind === "visible_target"
   );
-  const hasPositiveVisibleStoryFacts = factValue(evidence, "Local observation beat: ") !== null
-    && factValue(evidence, "Observed entry labels: ") !== null
-    && factValue(evidence, "Observed entry surfaces: ") !== null;
+  const hasBackendFactRole = (role: AcceptedNarrationBackendFactRole): boolean =>
+    evidence.backendFacts.some((fact) => fact.role === role);
+  const hasPositiveVisibleStoryFacts = hasBackendFactRole("local_observation_beat")
+    && hasBackendFactRole("observed_entry_labels")
+    && hasBackendFactRole("observed_entry_surfaces");
   return !(hasPositiveVisibleClaim && hasPositiveVisibleStoryFacts);
 }
 
@@ -1994,22 +1995,22 @@ function assertSceneFrameSnapshotStoryEvidence(evidence: AcceptedNarrationEviden
 
 function assertLocalObservationStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "local_observation_receipt") return;
-  if (!factValue(evidence, "Local observation beat: ")) {
-    throw new Error("Local-observation prompt input requires accepted Local observation beat evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "local_observation_beat" && fact.value?.trim())) {
+    throw new Error("Local-observation prompt input requires accepted Local observation beat value evidence.");
   }
 }
 
 function assertDeviceSurfaceStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "device_surface_observation_receipt") return;
-  if (!factValue(evidence, "Device surface beat: ")) {
-    throw new Error("Device-surface prompt input requires accepted Device surface beat evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "device_surface_beat" && fact.value?.trim())) {
+    throw new Error("Device-surface prompt input requires accepted Device surface beat value evidence.");
   }
 }
 
 function assertSceneBeatStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "scene_beat_receipt") return;
-  if (!factValue(evidence, "Scene beat: ")) {
-    throw new Error("Scene-beat prompt input requires accepted Scene beat evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "scene_beat" && fact.value?.trim())) {
+    throw new Error("Scene-beat prompt input requires accepted Scene beat value evidence.");
   }
 }
 
@@ -2162,28 +2163,28 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
 }
 
 function renderDeviceSurfaceProjection(evidence: AcceptedNarrationEvidence): string {
-  const beat = requireFactValue(
+  const beat = trimSentencePeriod(requireFactValueByRole(
     evidence,
-    "Device surface beat: ",
-    "Device-surface projection requires accepted Device surface beat evidence.",
-  );
+    "device_surface_beat",
+    "Device-surface projection requires accepted Device surface beat value evidence.",
+  ));
   return `${beat}.`;
 }
 
 function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): string {
-  const beat = requireFactValue(
+  const beat = trimSentencePeriod(requireFactValueByRole(
     evidence,
-    "Local observation beat: ",
-    "Local-observation projection requires accepted Local observation beat evidence.",
-  );
+    "local_observation_beat",
+    "Local-observation projection requires accepted Local observation beat value evidence.",
+  ));
   return `${beat}.`;
 }
 
 function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidence): string {
-  return requireFactText(
+  return requireFactValueByRole(
     evidence,
-    (text) => text.startsWith("Player is "),
-    "Player-local-condition projection requires accepted Player condition evidence.",
+    "player_condition_operation",
+    "Player-local-condition projection requires accepted Player condition operation value evidence.",
   );
 }
 
@@ -2205,41 +2206,41 @@ function renderDialogueProjection(evidence: AcceptedNarrationEvidence): string {
 }
 
 function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
-  const label = requireFactValue(
+  const label = requireFactValueByRole(
     evidence,
-    "Place handle label: ",
-    "Minor-POI projection requires accepted Place handle label evidence.",
+    "place_handle_label",
+    "Minor-POI projection requires accepted Place handle label value evidence.",
   );
-  const kind = requireFactValue(
+  const kind = requireFactValueByRole(
     evidence,
-    "Place handle kind: ",
-    "Minor-POI projection requires accepted Place handle kind evidence.",
+    "place_handle_kind",
+    "Minor-POI projection requires accepted Place handle kind value evidence.",
   );
-  const result = requireFactValue(
+  const result = requireFactValueByRole(
     evidence,
-    "Handle result: ",
-    "Minor-POI projection requires accepted Handle result evidence.",
+    "handle_result",
+    "Minor-POI projection requires accepted Handle result value evidence.",
   );
   if (result === "reused") return `${label} remains available here as a visible ${kind} handle.`;
   if (result === "created") return `${label} is now available here as a visible ${kind} handle.`;
-  throw new Error("Minor-POI projection requires accepted Handle result evidence.");
+  throw new Error("Minor-POI projection requires accepted Handle result value evidence.");
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
-  const actor = requireFactValue(
+  const actor = requireFactValueByRole(
     evidence,
-    "Visible support actor: ",
-    "Support-actor projection requires accepted Visible support actor evidence.",
+    "visible_support_actor",
+    "Support-actor projection requires accepted Visible support actor value evidence.",
   );
-  const role = requireFactValue(
+  const role = requireFactValueByRole(
     evidence,
-    "Support role: ",
-    "Support-actor projection requires accepted Support role evidence.",
+    "support_role",
+    "Support-actor projection requires accepted Support role value evidence.",
   );
-  const scene = requireFactValue(
+  const scene = requireFactValueByRole(
     evidence,
-    "Anchor scene: ",
-    "Support-actor projection requires accepted Anchor scene evidence.",
+    "anchor_scene",
+    "Support-actor projection requires accepted Anchor scene value evidence.",
   );
   return `${actor} is present in ${scene} as a ${role}.`;
 }
@@ -2258,10 +2259,10 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("clarification_request")
   );
   if (clarification) {
-    const question = requireFactValue(
+    const question = requireFactValueByRole(
       clarification,
-      "Clarification request: ",
-      "Clarification projection requires accepted Clarification request evidence.",
+      "clarification_request",
+      "Clarification projection requires accepted Clarification request value evidence.",
     );
     return language === "ru"
       ? `Уточните: ${question}`
@@ -2393,11 +2394,11 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("scene_beat")
   );
   if (sceneBeat) {
-    const beat = requireFactValue(
+    const beat = trimSentencePeriod(requireFactValueByRole(
       sceneBeat,
-      "Scene beat: ",
-      "Scene-beat projection requires accepted Scene beat evidence.",
-    );
+      "scene_beat",
+      "Scene-beat projection requires accepted Scene beat value evidence.",
+    ));
     return `${beat}.`;
   }
 

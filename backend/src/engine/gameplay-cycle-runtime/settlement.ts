@@ -781,7 +781,7 @@ function clarificationEvidence(input: {
       ...(input.gmRead?.evidenceRefs ?? input.judgment?.evidenceRefs ?? []),
     ]).slice(0, 16),
     backendFacts: [
-      fact(evidenceId, 1, "clarification_request", `Clarification request: ${question}`),
+      fact(evidenceId, 1, "clarification_request", `Clarification request: ${question}`, question),
     ],
     limits: {
       proves: ["player clarification is required before resolving this action", "clarification question text"],
@@ -916,7 +916,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
-        { role: "local_observation_beat", text: `Local observation beat: ${localBeat}` },
+        { role: "local_observation_beat", text: `Local observation beat: ${localBeat}`, value: localBeat },
         { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.` },
         { role: "observation_query", text: `Observation query: ${observation.queryText}.` },
         ...(observedLabels.length > 0
@@ -937,7 +937,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: localBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: boundedBackendFacts(backendFactTexts.map((entry, index) =>
-          fact(evidenceId, index + 1, entry.role, entry.text)
+          fact(evidenceId, index + 1, entry.role, entry.text, entry.value)
         )),
         limits: {
           proves: boundedNegative
@@ -961,7 +961,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const observedFacetFacts = observation.observedFacets.slice(0, 5)
         .map((facet) => `${trimTrailingSentencePunctuation(facet.displayLabel)}: ${trimTrailingSentencePunctuation(facet.valueText)}`);
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
-        { role: "device_surface_beat", text: `Device surface beat: ${deviceBeat}` },
+        { role: "device_surface_beat", text: `Device surface beat: ${deviceBeat}`, value: deviceBeat },
         { role: "device_label", text: `Device label: ${observation.deviceLabel}.` },
         { role: "requested_surface_facets", text: `Requested surface facets: ${requestedFacetText}.` },
         ...(observedFacetFacts.length > 0
@@ -982,7 +982,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: deviceBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: boundedBackendFacts(backendFactTexts.map((entry, index) =>
-          fact(evidenceId, index + 1, entry.role, entry.text)
+          fact(evidenceId, index + 1, entry.role, entry.text, entry.value)
         )),
         limits: {
           proves: noSurface
@@ -1036,7 +1036,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const beat = receipt.publicResult.sceneBeat;
       const targetLabels = beat.targetLabels.slice(0, 4);
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
-        { role: "scene_beat", text: `Scene beat: ${beat.summary}` },
+        { role: "scene_beat", text: `Scene beat: ${beat.summary}`, value: beat.summary },
         ...(targetLabels.length > 0
           ? [{ role: "scene_beat_target_labels" as const, text: `Scene beat target labels: ${evidenceSemicolonList(targetLabels)}.` }]
           : []),
@@ -1050,7 +1050,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: beat.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: backendFactTexts.map((entry, index) =>
-          fact(evidenceId, index + 1, entry.role, entry.text)
+          fact(evidenceId, index + 1, entry.role, entry.text, entry.value)
         ),
         limits: {
           proves: ["local visible scene beat acknowledgement"],
@@ -1099,9 +1099,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${supportActor.actorLabel} is visible as a ${supportActor.roleLabel} in ${supportActor.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "visible_support_actor", `Visible support actor: ${supportActor.actorLabel}.`),
-          fact(evidenceId, 2, "support_role", `Support role: ${supportActor.roleLabel}.`),
-          fact(evidenceId, 3, "anchor_scene", `Anchor scene: ${supportActor.anchorSceneLabel}.`),
+          fact(evidenceId, 1, "visible_support_actor", `Visible support actor: ${supportActor.actorLabel}.`, supportActor.actorLabel),
+          fact(evidenceId, 2, "support_role", `Support role: ${supportActor.roleLabel}.`, supportActor.roleLabel),
+          fact(evidenceId, 3, "anchor_scene", `Anchor scene: ${supportActor.anchorSceneLabel}.`, supportActor.anchorSceneLabel),
           fact(evidenceId, 4, "materialization_result", `Materialization result: ${supportActor.resultKind}.`),
         ],
         limits: {
@@ -1134,7 +1134,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${operationText} Current scene anchor: ${condition.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "player_condition_operation", operationText),
+          fact(evidenceId, 1, "player_condition_operation", operationText, operationText),
           fact(evidenceId, 2, "condition_key", `Condition key: ${condition.conditionKey}.`),
           fact(evidenceId, 3, "current_scene_anchor", `Current scene anchor: ${condition.anchorSceneLabel}.`),
           fact(evidenceId, 4, "condition_result", `Condition result: ${condition.resultKind}.`),
@@ -1204,11 +1204,11 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${operationText} Current scene anchor: ${minorPoi.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "minor_poi_operation", operationText),
-          fact(evidenceId, 2, "place_handle_label", `Place handle label: ${minorPoi.poiLabel}.`),
-          fact(evidenceId, 3, "place_handle_kind", `Place handle kind: ${minorPoi.poiKind}.`),
+          fact(evidenceId, 1, "minor_poi_operation", operationText, operationText),
+          fact(evidenceId, 2, "place_handle_label", `Place handle label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
+          fact(evidenceId, 3, "place_handle_kind", `Place handle kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
           fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
-          fact(evidenceId, 5, "handle_result", `Handle result: ${minorPoi.resultKind}.`),
+          fact(evidenceId, 5, "handle_result", `Handle result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
           fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene target handle only, not a movement destination."),
         ],
         limits: {

@@ -929,6 +929,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(clarification?.backendFacts.map((entry) => entry.text)).toEqual([
       "Clarification request: Which visible person should receive the item?",
     ]);
+    expect(clarification?.backendFacts[0]?.value).toBe("Which visible person should receive the item?");
     expect(clarification?.limits.proves).toContain("clarification question text");
     expect(clarification?.limits.doesNotProve).toContain("item state");
     expect(packet.acceptedEvidence.some((entry) => entry.authority === "scene_frame_snapshot")).toBe(true);
@@ -1107,6 +1108,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Condition result: applied.",
       "Condition target: Market.",
     ]);
+    expect(condition?.backendFacts[0]?.value).toBe("Player is kneeling.");
     expect(condition?.limits.doesNotProve).toContain("HP change");
     expect(condition?.limits.doesNotProve).toContain("movement");
     expect(condition?.limits.doesNotProve).toContain("dialogue content");
@@ -1193,6 +1195,10 @@ describe("clean Stage 5 settlement contracts", () => {
       "Handle result: created.",
       "This is a visible current-scene target handle only, not a movement destination.",
     ]);
+    expect(handle?.backendFacts[0]?.value).toBe("Visible current-scene place handle created: Tea Stall.");
+    expect(handle?.backendFacts[1]?.value).toBe("Tea Stall");
+    expect(handle?.backendFacts[2]?.value).toBe("stall");
+    expect(handle?.backendFacts[4]?.value).toBe("created");
     expect(handle?.limits.doesNotProve).toEqual(expect.arrayContaining([
       "services or inventory",
       "readable sign text",
@@ -1237,6 +1243,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Anchor scene: Market.",
       "Anchor location: Market.",
     ]);
+    expect(observation?.backendFacts[0]?.value).toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
     expect(observation?.limits.proves).toEqual([
       "bounded no-match against enumerated current visible entries",
     ]);
@@ -1317,6 +1324,7 @@ describe("clean Stage 5 settlement contracts", () => {
     ]);
     expect(observation?.backendFacts[0]?.text).toContain("The Copper Tap");
     expect(observation?.backendFacts[0]?.text).toContain("Upper Dam Ruins");
+    expect(observation?.backendFacts[0]?.value).toBe(routeBeat);
     expect(JSON.stringify(observation)).not.toContain("[hidden]");
     expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
@@ -1354,6 +1362,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Anchor scene: Market.",
       "Anchor location: Market.",
     ]);
+    expect(deviceSurface?.backendFacts[0]?.value).toBe("Burner phone's visible surface shows no requested message indicator.");
     expect(deviceSurface?.limits.proves).toEqual([
       "bounded current visible device surface result for requested facets",
       "requested device label",
@@ -1444,6 +1453,9 @@ describe("clean Stage 5 settlement contracts", () => {
     const support = packet.acceptedEvidence.find((entry) => entry.authority === "support_actor_materialization_receipt");
     expect(support?.claimKinds).toEqual(["visible_actor", "support_actor_materialization"]);
     expect(support?.backendFacts[0]?.text).toBe("Visible support actor: Local Vendor.");
+    expect(support?.backendFacts[0]?.value).toBe("Local Vendor");
+    expect(support?.backendFacts[1]?.value).toBe("vendor");
+    expect(support?.backendFacts[2]?.value).toBe("Market");
     expect(support?.limits.doesNotProve).toContain("dialogue content");
     expect(support?.limits.doesNotProve).toContain("NPC private knowledge");
     expect(support?.limits.doesNotProve).toContain("durable world fact");

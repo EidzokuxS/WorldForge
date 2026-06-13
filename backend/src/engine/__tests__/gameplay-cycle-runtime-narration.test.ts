@@ -392,6 +392,8 @@ function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
       text: "Clarification needed: Which visible person should receive the item?",
       backendFacts: [{
         factRef: "e1.f1",
+        role: "clarification_request",
+        value: "Which visible person should receive the item?",
         text: "Clarification request: Which visible person should receive the item?",
         exact: true,
       }],
@@ -628,10 +630,10 @@ function supportActorView(): CleanNarratorView {
       claimKinds: ["visible_actor", "support_actor_materialization"],
       text: "Local Vendor is visible as a vendor in Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Visible support actor: Local Vendor.", exact: true },
-        { factRef: "e1.f2", text: "Support role: vendor.", exact: true },
-        { factRef: "e1.f3", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f4", text: "Materialization result: created.", exact: true },
+        { factRef: "e1.f1", role: "visible_support_actor", value: "Local Vendor", text: "Visible support actor: Local Vendor.", exact: true },
+        { factRef: "e1.f2", role: "support_role", value: "vendor", text: "Support role: vendor.", exact: true },
+        { factRef: "e1.f3", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f4", role: "materialization_result", text: "Materialization result: created.", exact: true },
       ],
       limits: {
         proves: ["visible temporary support actor label", "ordinary support role", "current-scene materialization or reuse"],
@@ -649,10 +651,10 @@ function playerLocalConditionView(): CleanNarratorView {
       claimKinds: ["player_local_condition"],
       text: "Player is kneeling. Current scene anchor: Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Player is kneeling.", exact: true },
-        { factRef: "e1.f2", text: "Condition key: kneeling.", exact: true },
-        { factRef: "e1.f3", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f4", text: "Condition result: applied.", exact: true },
+        { factRef: "e1.f1", role: "player_condition_operation", value: "Player is kneeling.", text: "Player is kneeling.", exact: true },
+        { factRef: "e1.f2", role: "condition_key", text: "Condition key: kneeling.", exact: true },
+        { factRef: "e1.f3", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f4", role: "condition_result", text: "Condition result: applied.", exact: true },
       ],
       limits: {
         proves: ["Player current-scene local posture/readiness condition operation"],
@@ -672,11 +674,11 @@ function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
         claimKinds: ["player_local_condition"],
         text: "Player is hands visible. Current scene anchor: Market.",
         backendFacts: [
-          { factRef: "e5.f1", text: "Player is hands visible.", exact: true },
-          { factRef: "e5.f2", text: "Condition key: hands_visible.", exact: true },
-          { factRef: "e5.f3", text: "Current scene anchor: Market.", exact: true },
-          { factRef: "e5.f4", text: "Condition result: applied.", exact: true },
-          { factRef: "e5.f5", text: "Condition target: Market.", exact: true },
+          { factRef: "e5.f1", role: "player_condition_operation", value: "Player is hands visible.", text: "Player is hands visible.", exact: true },
+          { factRef: "e5.f2", role: "condition_key", text: "Condition key: hands_visible.", exact: true },
+          { factRef: "e5.f3", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
+          { factRef: "e5.f4", role: "condition_result", text: "Condition result: applied.", exact: true },
+          { factRef: "e5.f5", role: "condition_target", text: "Condition target: Market.", exact: true },
         ],
         limits: {
           proves: ["Player current-scene local posture/readiness condition operation"],
@@ -838,12 +840,12 @@ function minorPoiHandleView(): CleanNarratorView {
       claimKinds: ["minor_poi_handle", "visible_target"],
       text: "Visible current-scene place handle created: Tea Stall. Current scene anchor: Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Visible current-scene place handle created: Tea Stall.", exact: true },
-        { factRef: "e1.f2", text: "Place handle label: Tea Stall.", exact: true },
-        { factRef: "e1.f3", text: "Place handle kind: stall.", exact: true },
-        { factRef: "e1.f4", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f5", text: "Handle result: created.", exact: true },
-        { factRef: "e1.f6", text: "This is a visible current-scene target handle only, not a movement destination.", exact: true },
+        { factRef: "e1.f1", role: "minor_poi_operation", value: "Visible current-scene place handle created: Tea Stall.", text: "Visible current-scene place handle created: Tea Stall.", exact: true },
+        { factRef: "e1.f2", role: "place_handle_label", value: "Tea Stall", text: "Place handle label: Tea Stall.", exact: true },
+        { factRef: "e1.f3", role: "place_handle_kind", value: "stall", text: "Place handle kind: stall.", exact: true },
+        { factRef: "e1.f4", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f5", role: "handle_result", value: "created", text: "Handle result: created.", exact: true },
+        { factRef: "e1.f6", role: "place_handle_scope", text: "This is a visible current-scene target handle only, not a movement destination.", exact: true },
       ],
       limits: {
         proves: [
@@ -889,11 +891,11 @@ function localObservationView(): CleanNarratorView {
       claimKinds: ["local_observation", "bounded_visibility_negative"],
       text: "The visible actors and visible targets show no match for \"Violet Astrolabe\".",
       backendFacts: [
-        { factRef: "e1.f1", text: "Local observation beat: The visible actors and visible targets show no match for \"Violet Astrolabe\".", exact: true },
-        { factRef: "e1.f2", text: "Searched visible surfaces: visible actors and visible targets.", exact: true },
-        { factRef: "e1.f3", text: "Observation query: Violet Astrolabe.", exact: true },
-        { factRef: "e1.f4", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f5", text: "Anchor location: Market.", exact: true },
+        { factRef: "e1.f1", role: "local_observation_beat", value: "The visible actors and visible targets show no match for \"Violet Astrolabe\".", text: "Local observation beat: The visible actors and visible targets show no match for \"Violet Astrolabe\".", exact: true },
+        { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible actors and visible targets.", exact: true },
+        { factRef: "e1.f3", role: "observation_query", text: "Observation query: Violet Astrolabe.", exact: true },
+        { factRef: "e1.f4", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f5", role: "anchor_location", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["bounded no-match against enumerated current visible entries"],
@@ -927,13 +929,13 @@ function positiveLocalObservationView(): CleanNarratorView {
       claimKinds: ["local_observation", "visible_target"],
       text: "central telegraph desk is in view here.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Local observation beat: central telegraph desk is in view here.", exact: true },
-        { factRef: "e1.f2", text: "Searched visible surfaces: visible targets.", exact: true },
-        { factRef: "e1.f3", text: "Observation query: central telegraph desk.", exact: true },
-        { factRef: "e1.f4", text: "Observed entry labels: central telegraph desk.", exact: true },
-        { factRef: "e1.f5", text: "Observed entry surfaces: visible target central telegraph desk.", exact: true },
-        { factRef: "e1.f6", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f7", text: "Anchor location: Market.", exact: true },
+        { factRef: "e1.f1", role: "local_observation_beat", value: "central telegraph desk is in view here.", text: "Local observation beat: central telegraph desk is in view here.", exact: true },
+        { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible targets.", exact: true },
+        { factRef: "e1.f3", role: "observation_query", text: "Observation query: central telegraph desk.", exact: true },
+        { factRef: "e1.f4", role: "observed_entry_labels", text: "Observed entry labels: central telegraph desk.", exact: true },
+        { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible target central telegraph desk.", exact: true },
+        { factRef: "e1.f6", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f7", role: "anchor_location", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["matching current visible entries"],
@@ -1013,12 +1015,12 @@ function deviceSurfaceObservationView(): CleanNarratorView {
       claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       text: "Burner phone's visible surface shows no requested message indicator.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Device surface beat: Burner phone's visible surface shows no requested message indicator.", exact: true },
-        { factRef: "e1.f2", text: "Device label: Burner phone.", exact: true },
-        { factRef: "e1.f3", text: "Requested surface facets: message indicator.", exact: true },
-        { factRef: "e1.f4", text: "Unavailable surface facets: message indicator.", exact: true },
-        { factRef: "e1.f5", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f6", text: "Anchor location: Market.", exact: true },
+        { factRef: "e1.f1", role: "device_surface_beat", value: "Burner phone's visible surface shows no requested message indicator.", text: "Device surface beat: Burner phone's visible surface shows no requested message indicator.", exact: true },
+        { factRef: "e1.f2", role: "device_label", text: "Device label: Burner phone.", exact: true },
+        { factRef: "e1.f3", role: "requested_surface_facets", text: "Requested surface facets: message indicator.", exact: true },
+        { factRef: "e1.f4", role: "unavailable_surface_facets", text: "Unavailable surface facets: message indicator.", exact: true },
+        { factRef: "e1.f5", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f6", role: "anchor_location", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: [
@@ -1699,9 +1701,9 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Local-observation prompt input requires accepted Local observation beat evidence.");
+      .toThrow("Local-observation prompt input requires accepted Local observation beat value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Local-observation projection requires accepted Local observation beat evidence.");
+      .toThrow("Local-observation projection requires accepted Local observation beat value evidence.");
   });
 
   it("fails device_surface_observation receipt handling when accepted story evidence is missing", () => {
@@ -1718,9 +1720,9 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Device-surface prompt input requires accepted Device surface beat evidence.");
+      .toThrow("Device-surface prompt input requires accepted Device surface beat value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Device-surface projection requires accepted Device surface beat evidence.");
+      .toThrow("Device-surface projection requires accepted Device surface beat value evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -1847,6 +1849,101 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
   });
 
+  it("renders small terminal projections from role values instead of beat-shaped fact text", () => {
+    const withOpaqueFactText = (
+      view: CleanNarratorView,
+      role: NonNullable<CleanNarratorView["acceptedEvidence"][number]["backendFacts"][number]["role"]>,
+    ): CleanNarratorView => {
+      view.acceptedEvidence[0] = {
+        ...view.acceptedEvidence[0]!,
+        backendFacts: view.acceptedEvidence[0]!.backendFacts.map((fact) =>
+          fact.role === role ? { ...fact, text: `Opaque ${role} fact.` } : fact
+        ),
+      };
+      return view;
+    };
+    const withoutFactValue = (
+      view: CleanNarratorView,
+      role: NonNullable<CleanNarratorView["acceptedEvidence"][number]["backendFacts"][number]["role"]>,
+    ): CleanNarratorView => {
+      view.acceptedEvidence[0] = {
+        ...view.acceptedEvidence[0]!,
+        backendFacts: view.acceptedEvidence[0]!.backendFacts.map((fact) => {
+          if (fact.role !== role) return fact;
+          const { value: _value, ...withoutValue } = fact;
+          return withoutValue;
+        }),
+      };
+      return view;
+    };
+    const sceneBeatView = (): CleanNarratorView => movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: "The market answers with a visible stir.",
+        backendFacts: [{
+          factRef: "e1.f1",
+          role: "scene_beat",
+          value: "The market answers with a visible stir.",
+          text: "Scene beat: The market answers with a visible stir.",
+          exact: true,
+        }],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: ["movement", "item state", "dialogue content"],
+        },
+      }],
+    });
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(
+      clarificationWithSceneFrameSnapshotView(),
+      "clarification_request",
+    ))).toBe("Please clarify: Which visible person should receive the item?");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(
+      clarificationWithSceneFrameSnapshotView(),
+      "clarification_request",
+    ))).toThrow("Clarification projection requires accepted Clarification request value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(localObservationView(), "local_observation_beat")))
+      .toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(localObservationView(), "local_observation_beat")))
+      .toThrow("Local-observation projection requires accepted Local observation beat value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(
+      deviceSurfaceObservationView(),
+      "device_surface_beat",
+    ))).toBe("Burner phone's visible surface shows no requested message indicator.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(
+      deviceSurfaceObservationView(),
+      "device_surface_beat",
+    ))).toThrow("Device-surface projection requires accepted Device surface beat value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(sceneBeatView(), "scene_beat")))
+      .toBe("The market answers with a visible stir.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(sceneBeatView(), "scene_beat")))
+      .toThrow("Scene-beat projection requires accepted Scene beat value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(
+      playerLocalConditionView(),
+      "player_condition_operation",
+    ))).toBe("Player is kneeling.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(
+      playerLocalConditionView(),
+      "player_condition_operation",
+    ))).toThrow("Player-local-condition projection requires accepted Player condition operation value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(supportActorView(), "visible_support_actor")))
+      .toBe("Local Vendor is present in Market as a vendor.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(supportActorView(), "visible_support_actor")))
+      .toThrow("Support-actor projection requires accepted Visible support actor value evidence.");
+
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "place_handle_label")))
+      .toBe("Tea Stall is now available here as a visible stall handle.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(minorPoiHandleView(), "place_handle_kind")))
+      .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
+  });
+
   it("fails terminal authority projections when their accepted story facts are missing", () => {
     const clarification = clarificationWithSceneFrameSnapshotView();
     clarification.acceptedEvidence[0] = {
@@ -1854,7 +1951,7 @@ describe("clean Stage 6 narration contracts", () => {
       backendFacts: [],
     };
     expect(() => renderCleanAuthorityProjection(clarification))
-      .toThrow("Clarification projection requires accepted Clarification request evidence.");
+      .toThrow("Clarification projection requires accepted Clarification request value evidence.");
 
     const item = itemStateView();
     item.acceptedEvidence[0] = {
@@ -1880,31 +1977,31 @@ describe("clean Stage 6 narration contracts", () => {
     supportActor.acceptedEvidence[0] = {
       ...supportActor.acceptedEvidence[0]!,
       backendFacts: supportActor.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        !fact.text.startsWith("Visible support actor: ")
+        fact.role !== "visible_support_actor"
       ),
     };
     expect(() => renderCleanAuthorityProjection(supportActor))
-      .toThrow("Support-actor projection requires accepted Visible support actor evidence.");
+      .toThrow("Support-actor projection requires accepted Visible support actor value evidence.");
 
     const condition = playerLocalConditionView();
     condition.acceptedEvidence[0] = {
       ...condition.acceptedEvidence[0]!,
       backendFacts: condition.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        !fact.text.startsWith("Player is ")
+        fact.role !== "player_condition_operation"
       ),
     };
     expect(() => renderCleanAuthorityProjection(condition))
-      .toThrow("Player-local-condition projection requires accepted Player condition evidence.");
+      .toThrow("Player-local-condition projection requires accepted Player condition operation value evidence.");
 
     const minorPoi = minorPoiHandleView();
     minorPoi.acceptedEvidence[0] = {
       ...minorPoi.acceptedEvidence[0]!,
       backendFacts: minorPoi.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        !fact.text.startsWith("Place handle kind: ")
+        fact.role !== "place_handle_kind"
       ),
     };
     expect(() => renderCleanAuthorityProjection(minorPoi))
-      .toThrow("Minor-POI projection requires accepted Place handle kind evidence.");
+      .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
 
     const oracle = oracleOutcomeView();
     oracle.acceptedEvidence[0] = {
@@ -1928,14 +2025,20 @@ describe("clean Stage 6 narration contracts", () => {
       }],
     });
     expect(() => buildCleanNarratorPromptInput(sceneBeat))
-      .toThrow("Scene-beat prompt input requires accepted Scene beat evidence.");
+      .toThrow("Scene-beat prompt input requires accepted Scene beat value evidence.");
     expect(() => renderCleanAuthorityProjection(sceneBeat))
-      .toThrow("Scene-beat projection requires accepted Scene beat evidence.");
+      .toThrow("Scene-beat projection requires accepted Scene beat value evidence.");
 
     const sceneBeatWithStoryFact = movementView({
       acceptedEvidence: [{
         ...sceneBeat.acceptedEvidence[0]!,
-        backendFacts: [{ factRef: "e1.f1", text: "Scene beat: The market answers with a visible stir.", exact: true }],
+        backendFacts: [{
+          factRef: "e1.f1",
+          role: "scene_beat",
+          value: "The market answers with a visible stir.",
+          text: "Scene beat: The market answers with a visible stir.",
+          exact: true,
+        }],
       }],
     });
     expect(renderCleanAuthorityProjection(sceneBeatWithStoryFact))
@@ -3694,7 +3797,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation"],
         text: routeBeat,
         backendFacts: [
-          { factRef: "e1.f1", text: `Local observation beat: ${routeBeat}`, exact: true },
+          { factRef: "e1.f1", role: "local_observation_beat", value: routeBeat, text: `Local observation beat: ${routeBeat}`, exact: true },
           { factRef: "e1.f2", text: "Searched visible surfaces: route options.", exact: true },
           { factRef: "e1.f3", text: "Observation query: visible routes and local targets.", exact: true },
           { factRef: "e1.f4", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },

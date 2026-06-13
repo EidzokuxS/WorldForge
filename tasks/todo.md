@@ -6473,7 +6473,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update Stage 6 direct-scene projection and direct-scene label validation to read `Route choice labels` / `Route choices beat` without parsing route prose.
     - [x] Remove `parseRouteOptionFact` once no route path depends on it.
     - [x] Add focused tests proving direct-scene snapshot routes preserve exact labels/costs and old string-shaped snapshot route facts no longer drive route projection.
-    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
   - Results:
     - [x] GitNexus impacts before edits: `stage4Evidence` LOW, `routeChoicesBeat` LOW, `renderSceneFrameSnapshotProjection` LOW, `parseRouteOptionFact` LOW, `renderRouteOptionsProjection` LOW, `preferredPromptFacts` LOW, `directSceneFactLabel` LOW, `directSceneVerbatimLabels` LOW, and `proseQualityIssues` LOW.
     - [x] Direct `scene_frame_snapshot` movement-option evidence now emits `Route choices beat`, `Route origin`, `Route choice labels`, `Open route labels`, `Closed route labels`, and `Route choice travel costs` from typed `AuthoritativeSceneFrame.movementOptions`.
@@ -6598,3 +6598,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 96 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no affected execution processes.
     - [x] Pushed commit `897e5e91`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P231 Stage 6 small receipt fact values:
+  - Plan:
+    - [x] Run GitNexus impact before editing small receipt settlement builders and projection renderers.
+    - [x] Emit typed backend fact `value` for `clarification_request`, `local_observation_beat`, `device_surface_beat`, `scene_beat`, `player_condition_operation`, `visible_support_actor`, `support_role`, `anchor_scene`, `place_handle_label`, `place_handle_kind`, and `handle_result`.
+    - [x] Render clarification, local/device observation, scene beat, player condition, support actor, and minor POI projections by `role + value`.
+    - [x] Add focused tests proving those projections ignore misleading fact text and fail when typed values are missing.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] GitNexus impacts before edits: `clarificationEvidence`, `stage4Evidence`, `localObservationRequiresDeterministicProjection`, local/device/scene-beat prompt assertions, and all edited projection helpers reported LOW.
+    - [x] Small receipt deterministic projections now read typed values by role; prompt story assertions for local/device/scene beat require value payloads.
+    - [x] Settlement now emits `value` for clarification, local/device/scene beats, player condition operation, support actor identity/role/scene, and minor POI label/kind/result.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM with the affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`; context review found the only caller is `runCleanNarration`.
