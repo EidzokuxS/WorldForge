@@ -34,8 +34,9 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
     packetId: "cgpacket_test",
     campaignId: "campaign-1",
     turnId: "clean-turn-1",
-    playerAction: "I walk to North Hall.",
     responseLanguage: "match_player_action",
+    language: "en",
+    languageSource: "derived_from_player_action_without_prompting_raw_action",
     preserveLabelsVerbatim: true,
     acceptedEvidence: [{
       ref: "e1",
@@ -120,7 +121,6 @@ function routeView(): CleanNarratorView {
 
 function routeWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
-    playerAction: "I check whether the route from Resonance Tower to Transmission Basement is open, without moving.",
     acceptedEvidence: [
       ...sceneFrameSnapshotView().acceptedEvidence,
       {
@@ -160,7 +160,6 @@ function timeView(): CleanNarratorView {
 
 function timeWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
-    playerAction: "I wait quietly in Market for 5 minutes, without moving or touching anything.",
     acceptedEvidence: [
       ...sceneFrameSnapshotView().acceptedEvidence,
       {
@@ -196,7 +195,6 @@ function routeOptionsView(): CleanNarratorView {
 
 function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
-    playerAction: "I hand it to them.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "clarification_request",
@@ -230,7 +228,6 @@ function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
 
 function sceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
-    playerAction: "I look around to see visible objects and exits, without moving.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "scene_frame_snapshot",
@@ -301,7 +298,6 @@ function dialogueView(): CleanNarratorView {
 function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
   const snapshot = sceneFrameSnapshotView().acceptedEvidence;
   return movementView({
-    playerAction: 'I ask Guide, "What happened upstairs?"',
     acceptedEvidence: [
       ...snapshot,
       {
@@ -325,7 +321,6 @@ function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
 
 function supportActorView(): CleanNarratorView {
   return movementView({
-    playerAction: "I look for a local vendor in the market.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "support_actor_materialization_receipt",
@@ -347,7 +342,6 @@ function supportActorView(): CleanNarratorView {
 
 function playerLocalConditionView(): CleanNarratorView {
   return movementView({
-    playerAction: "I kneel beside the stall.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "player_local_condition_receipt",
@@ -369,7 +363,6 @@ function playerLocalConditionView(): CleanNarratorView {
 
 function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
-    playerAction: "I keep both hands visible while staying in Market, without moving or touching anything.",
     acceptedEvidence: [
       ...sceneFrameSnapshotView().acceptedEvidence,
       {
@@ -402,7 +395,6 @@ function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
 
 function itemStateView(): CleanNarratorView {
   return movementView({
-    playerAction: "I hand the Brass Tube to Guide.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "item_transfer_receipt",
@@ -450,7 +442,6 @@ function itemStateView(): CleanNarratorView {
 
 function itemStateWithDialogueView(): CleanNarratorView {
   return movementView({
-    playerAction: 'I hand the Brass Tube to Guide and ask, "Can you hold this?"',
     acceptedEvidence: [
       ...itemStateView().acceptedEvidence,
       {
@@ -474,7 +465,6 @@ function itemStateWithDialogueView(): CleanNarratorView {
 
 function minorPoiHandleView(): CleanNarratorView {
   return movementView({
-    playerAction: "I mark the Tea Stall as a place to meet.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "minor_poi_handle_receipt",
@@ -516,7 +506,6 @@ function minorPoiHandleView(): CleanNarratorView {
 
 function localObservationView(): CleanNarratorView {
   return movementView({
-    playerAction: "Do I see a Violet Astrolabe here?",
     acceptedEvidence: [{
       ref: "e1",
       authority: "local_observation_receipt",
@@ -552,7 +541,6 @@ function localObservationView(): CleanNarratorView {
 
 function positiveLocalObservationView(): CleanNarratorView {
   return movementView({
-    playerAction: "I examine the central telegraph desk for visible marks or moving parts.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "local_observation_receipt",
@@ -589,7 +577,6 @@ function positiveLocalObservationView(): CleanNarratorView {
 
 function deviceSurfaceObservationView(): CleanNarratorView {
   return movementView({
-    playerAction: "I check whether the Burner phone has a message.",
     acceptedEvidence: [{
       ref: "e1",
       authority: "device_surface_observation_receipt",
@@ -813,6 +800,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(serialized).not.toContain("Hidden Watcher");
     expect(serialized).not.toContain("secret chamber");
     expect(serialized).not.toContain("I walk to North Hall.");
+    expect(serialized).not.toContain("playerAction");
     expect(promptInput.language).toBe("en");
     expect(promptInput.languageSource).toBe("derived_from_player_action_without_prompting_raw_action");
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
@@ -1202,7 +1190,6 @@ describe("clean Stage 6 narration contracts", () => {
     const routeSummary = "Current route options include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
     const result = await runCleanNarration({
       narratorView: movementView({
-        playerAction: "I look around for visible routes.",
         acceptedEvidence: [{
           ref: "e1",
           authority: "local_observation_receipt",
@@ -1339,7 +1326,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses Russian ordinary prose in deterministic authority projection while preserving English accepted labels", () => {
     const text = renderCleanAuthorityProjection(movementView({
-      playerAction: "Я иду в The Copper Tap.",
+      language: "ru",
       acceptedEvidence: [{
         ...movementView().acceptedEvidence[0]!,
         text: "Player location changed to The Copper Tap.",

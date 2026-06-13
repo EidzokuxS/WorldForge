@@ -17,8 +17,8 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Build a primitive ownership matrix for the clean runtime modules: GM Read, Judge, Oracle, Checklist, Stage4 request/execution, settlement, narration, turn persistence, and `/api/chat/action` boundary.
   - [ ] For each current primitive, map the contract path: admission -> checklist/request -> receipt -> settlement claim/limits -> narration projection -> live proof evidence.
   - [x] Mark any primitive step where rich prompt context still carries gameplay meaning that should live in a typed request, receipt field, settlement claim, or narration view.
-  - [ ] Promote the first concrete gap into code with GitNexus impact, focused contract tests, live proof, docs, detect_changes, commit/push, and post-commit `npx gitnexus analyze --embeddings`.
-  - [ ] Use P69/P153/P154 item-transfer plus dialogue as the first proof slice of the architecture: current item holder state comes from item receipts; dialogue records a speaker utterance; settlement composes accepted evidence; narration projects the accepted facts.
+  - [x] Promote concrete gaps into code with GitNexus impact, focused contract tests, live proof, docs, detect_changes, commit/push, and post-commit `npx gitnexus analyze --embeddings`.
+  - [x] Use P69/P153/P154 item-transfer plus dialogue as the first proof slice of the architecture: current item holder state comes from item receipts; dialogue records a speaker utterance; settlement composes accepted evidence; narration projects the accepted facts.
   - [ ] After architecture gaps are closed, restart final acceptance on fresh post-repair zero-turn clones with manual-chosen turns.
 - P155 diagnostic evidence:
   - [x] Fresh clone `p155-post-p154-acceptance-d-20260613` from `p69-item-transfer-045651` started at chat history 0, clock `0/0/0`, Player carrying `Brass Tube`, visible `Guide`, and old runtime stores at 0.
@@ -64,6 +64,21 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Fresh zero-turn clone `p159-dialogue-plan-item-transfer-proof-r2-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
   - [x] Live result: SSE stages and terminal `done.runtime` were `gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; player-facing text was multi-token item-state projection.
+- P160 narrator view language contract and item-transfer admission hardening:
+  - [x] Gap found in `settlement -> narration`: `CleanNarratorView` still carried raw `playerAction` and Stage 6 derived language from it, even though narration only needs accepted evidence plus an explicit language contract.
+  - [x] GitNexus impact before edits was LOW for `buildCleanNarratorView`, `buildCleanNarratorPromptInput`, `validateCleanNarrationCandidate`, `renderCleanAuthorityProjection`, `interactionIssues`, `validateGmReadCandidate`, `branchIssues`, and `validateJudgeUncertaintyCandidate`.
+  - [x] `CleanNarratorView` now carries `language` plus `languageSource`, and Stage 6 consumes that metadata while prompt input stays free of raw player action.
+  - [x] Settlement derives the language metadata once from the turn input audit and keeps raw action out of narrator view/prompt payloads.
+  - [x] Live diagnostics `output/clean-runtime-p160-narrator-view-language-proof-20260613/` and `output/clean-runtime-p160-narrator-view-language-proof-r2-20260613/` reached clean runtime but settled as direct scene snapshots for a receipt-required handoff. They exposed two admission gaps: GM Read accepted a supported inventory-plus-visible-actor target pair as non-transfer, and Judge accepted supported item transfer as blocked unsupported.
+  - [x] GM Read validation now rejects a structured `SceneFrame.inventory item + visible actor` target pair when it is assigned away from `item_transfer` / compound `visible_actor_dialogue`.
+  - [x] Judge validation now requires supported `item_transfer` with an `itemTransferNeed` and allowed `item_transfer` capability to reach `backend_action_plan_needed`, except for true impossible or underspecified admissions.
+  - [x] Focused tests cover raw-action-free narrator view/prompt, settlement language metadata, GM Read target-pair ownership, and Judge blocked-unsupported rejection.
+  - [x] Live proof artifact: `output/clean-runtime-p160-narrator-view-language-proof-r3-20260613/`.
+  - [x] Fresh zero-turn clone `p160-narrator-view-language-proof-r3-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, old stores all 0.
+  - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
+  - [x] Live result: `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; settled evidence includes `item_transfer_receipt -> item_state`; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; world time/current tick `0/0`; no turn clock ledger row; one authority trace `gameplay-cycle-runtime.item_transfer.v1`; old v2/saga/narrator/oracle/simulation stores all 0.
+  - [x] Narrator view DB check: `language=en`, `languageSource=derived_from_player_action_without_prompting_raw_action`, and no `playerAction` field or raw player-action text in the narrator view JSON.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 276 passed.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.

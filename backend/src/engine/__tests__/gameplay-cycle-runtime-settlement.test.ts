@@ -656,13 +656,14 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
 }
 
 function buildPacket(input: {
+  turn?: GameplayRuntimeTurnInput;
   frame?: AuthoritativeSceneFrame;
   gmRead?: GmRead | null;
   judgment?: JudgeUncertainty | null;
   checklist?: GmActionChecklist | null;
   execution?: CleanStage4ExecutionResult | null;
 } = {}) {
-  const inputTurn = turn();
+  const inputTurn = input.turn ?? turn();
   const inputFrame = input.frame ?? frame();
   return buildCleanSettledTurnPacket({
     turn: inputTurn,
@@ -698,6 +699,36 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
     expect(JSON.stringify(view)).not.toContain("privateResult");
     expect(packet.acceptedEvidence[0]?.limits.doesNotProve).toContain("no-change");
+  });
+
+  it("builds narrator view with explicit language metadata instead of raw player action", () => {
+    const rawActionMarker = "RAW_NARRATOR_VIEW_MARKER_NEVER_PROMPT";
+    const baseTurn = turn();
+    const inputTurn: GameplayRuntimeTurnInput = {
+      ...baseTurn,
+      playerAction: {
+        ...baseTurn.playerAction,
+        submitted: rawActionMarker,
+        normalized: rawActionMarker,
+      },
+    };
+    const inputFrame = frame({ playerAction: rawActionMarker });
+    const inputChecklist = checklist(inputFrame);
+    const packet = buildPacket({
+      turn: inputTurn,
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([movementReceipt(inputFrame, inputChecklist)], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+    const serializedView = JSON.stringify(view);
+
+    expect(packet.input.normalizedPlayerAction).toBe(rawActionMarker);
+    expect(view.language).toBe("en");
+    expect(view.languageSource).toBe("derived_from_player_action_without_prompting_raw_action");
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    expect(serializedView).not.toContain(rawActionMarker);
+    expect(serializedView).not.toContain("playerAction");
   });
 
   it("settles direct scene snapshots with visible targets and movement options for broad look actions", () => {

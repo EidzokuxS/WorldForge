@@ -503,8 +503,10 @@ function branchIssues(input: {
   }
   if (
     gmRead.actionInterpretation.interactionKind === "item_transfer"
-    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
-    && judgment.checkNeed === "no_roll_needed"
+    && hasAllowedCapability(frame, "item_transfer")
+    && gmRead.actionInterpretation.itemTransferNeed != null
+    && !["impossible", "underspecified"].includes(judgment.physicalPossibility)
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
   ) {
     add(
       "checkNeed",

@@ -2231,13 +2231,16 @@ const cleanNarratorGuardSchema = z.object({
   mayNarrateNoChangeWithoutExplicitEvidence: z.literal(false),
 }).strict();
 
+export const cleanNarrationLanguageSchema = z.enum(["en", "ru", "mixed"]);
+
 export const cleanNarratorViewSchema = z.object({
   version: z.literal("gameplay-runtime.narrator-view.v1"),
   packetId: shortText,
   campaignId: shortText,
   turnId: shortText,
-  playerAction: shortText,
   responseLanguage: z.literal("match_player_action"),
+  language: cleanNarrationLanguageSchema,
+  languageSource: z.literal("derived_from_player_action_without_prompting_raw_action"),
   preserveLabelsVerbatim: z.literal(true),
   acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
   stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
@@ -2260,8 +2263,6 @@ export const cleanNarratorViewSchema = z.object({
     ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose backend refs." });
   }
 });
-
-export const cleanNarrationLanguageSchema = z.enum(["en", "ru", "mixed"]);
 
 export const cleanNarratorPromptInputSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-prompt-input.v1"),

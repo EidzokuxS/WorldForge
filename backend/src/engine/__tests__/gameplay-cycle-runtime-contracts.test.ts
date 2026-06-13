@@ -1467,6 +1467,30 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
   });
 
+  it("rejects a supported inventory-to-visible-actor target pair when GM Read labels it unsupported", () => {
+    const frame = itemTransferActionPlanFrame();
+    const base = itemTransferGmRead(frame);
+    const wrongKind: GmRead = {
+      ...base,
+      actionInterpretation: {
+        ...base.actionInterpretation,
+        interactionKind: "unsupported_or_unclear",
+        itemTransferNeed: undefined,
+      },
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate: wrongKind });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.interactionKind",
+      }),
+    ]));
+  });
+
   it("keeps carried equipSlot as a model-generation near-miss, not an accepted item_transfer contract", () => {
     const frame = itemTransferActionPlanFrame();
     const nearMiss = {
@@ -2589,6 +2613,33 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
     expect(rejected.status).toBe("rejected");
     expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+
+    const blockedUnsupported: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      physicalPossibility: "unsupported_by_runtime",
+      checkNeed: "blocked_unsupported",
+      nextStep: "block_no_mutation",
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      possibilityRationale: "The candidate treated a supported item transfer primitive as unsupported.",
+      checkRationale: "The candidate blocked instead of admitting the backend receipt.",
+      noRollReason: {
+        code: "unsupported_runtime_scope",
+        explanation: "The candidate treated the item transfer as unsupported.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide"],
+      },
+    };
+    const blockedRejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: blockedUnsupported });
+    expect(blockedRejected.status).toBe("rejected");
+    expect(blockedRejected.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: "branch_invalid",

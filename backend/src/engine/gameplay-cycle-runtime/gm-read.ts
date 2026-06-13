@@ -418,6 +418,9 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   const visibleItemRefs = new Set(frame.targets
     .filter((target) => target.kind === "item")
     .map((target) => target.ref.toLowerCase()));
+  const allowedCapabilities = new Set(frame.capabilities
+    .filter((capability) => capability.allowed)
+    .map((capability) => capability.capabilityId));
   const movementOptionRefs = new Set(frame.movementOptions.map((option) => option.ref.toLowerCase()));
   const localConditionNeed = read.actionInterpretation.localConditionNeed ?? null;
   const itemTransferNeed = read.actionInterpretation.itemTransferNeed ?? null;
@@ -433,6 +436,22 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     .map((surface) => surface.deviceRef.toLowerCase()));
   const minorPoiSurface = frame.currentScenePlaceHandleSurface ?? null;
   const allowedMinorPoiKinds = new Set(minorPoiSurface?.allowedPlaceKinds ?? []);
+  const hasInventoryToVisibleActorTargetPair =
+    allowedCapabilities.has("item_transfer")
+    && loweredTargets.some((target) => inventoryRefs.has(target))
+    && loweredTargets.some((target) => visibleActorRefs.has(target));
+
+  if (
+    hasInventoryToVisibleActorTargetPair
+    && read.actionInterpretation.interactionKind !== "item_transfer"
+    && read.actionInterpretation.interactionKind !== "visible_actor_dialogue"
+  ) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.interactionKind",
+      message: "SceneFrame inventory item plus visible actor target refs require item_transfer, or visible_actor_dialogue when the action also asks the actor to speak.",
+    });
+  }
 
   if (read.actionInterpretation.interactionKind !== "time_passage" && timePassageNeed != null) {
     issues.push({

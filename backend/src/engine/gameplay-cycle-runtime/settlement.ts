@@ -2,6 +2,7 @@ import {
   assertCleanNarratorView,
   assertCleanSettledTurnPacket,
   type AuthoritativeSceneFrame,
+  type CleanNarrationLanguage,
   type CleanNarratorView,
   type CleanSettledEvidence,
   type CleanSettledStepAudit,
@@ -25,6 +26,14 @@ const FORBIDDEN_WITHOUT_EVIDENCE = [
   "condition_or_hp_change",
   "world_fact",
 ] as const;
+
+function deriveNarrationLanguage(playerAction: string): CleanNarrationLanguage {
+  const hasCyrillic = /[\u0400-\u04ff]/u.test(playerAction);
+  const hasLatin = /[A-Za-z]/u.test(playerAction);
+  if (hasCyrillic && hasLatin) return "mixed";
+  if (hasCyrillic) return "ru";
+  return "en";
+}
 
 const ROUTE_DOES_NOT_PROVE = [
   "movement",
@@ -1067,8 +1076,9 @@ export function buildCleanNarratorView(packet: CleanSettledTurnPacket): CleanNar
     packetId: packet.packetId,
     campaignId: packet.campaignId,
     turnId: packet.turnId,
-    playerAction: packet.input.normalizedPlayerAction,
     responseLanguage: "match_player_action",
+    language: deriveNarrationLanguage(packet.input.normalizedPlayerAction),
+    languageSource: "derived_from_player_action_without_prompting_raw_action",
     preserveLabelsVerbatim: true,
     acceptedEvidence: packet.acceptedEvidence.map((evidence) => ({
       ref: evidence.evidenceId,

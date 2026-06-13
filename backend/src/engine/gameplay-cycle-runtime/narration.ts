@@ -71,15 +71,6 @@ function normalizeText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
-function expectedLanguage(view: CleanNarratorView): CleanNarrationLanguage {
-  const action = view.playerAction;
-  const hasCyrillic = /[\u0400-\u04ff]/u.test(action);
-  const hasLatin = /[A-Za-z]/u.test(action);
-  if (hasCyrillic && hasLatin) return "mixed";
-  if (hasCyrillic) return "ru";
-  return "en";
-}
-
 function zodIssue(issue: { path: PropertyKey[]; message: string }): CleanNarrationValidationIssue {
   return {
     code: "schema_invalid",
@@ -136,8 +127,8 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     packetId: view.packetId,
     turnId: view.turnId,
     responseLanguage: view.responseLanguage,
-    language: expectedLanguage(view),
-    languageSource: "derived_from_player_action_without_prompting_raw_action",
+    language: view.language,
+    languageSource: view.languageSource,
     preserveLabelsVerbatim: view.preserveLabelsVerbatim,
     acceptedEvidence: view.acceptedEvidence,
     stepAuditForGrounding: view.stepAuditForGrounding,
@@ -210,11 +201,11 @@ export function validateCleanNarrationCandidate(input: {
       message: "Narration candidate turnId must match the narrator view.",
     });
   }
-  if (candidate.language !== expectedLanguage(input.view)) {
+  if (candidate.language !== input.view.language) {
     issues.push({
       code: "language_mismatch",
       path: "language",
-      message: "Narration candidate language must match the player action language.",
+      message: "Narration candidate language must match the narrator view language contract.",
     });
   }
 
@@ -316,7 +307,7 @@ export function validateCleanNarrationCandidate(input: {
 }
 
 function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
-  return /[\u0400-\u04ff]/u.test(view.playerAction) ? "ru" : "en";
+  return view.language === "ru" || view.language === "mixed" ? "ru" : "en";
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
