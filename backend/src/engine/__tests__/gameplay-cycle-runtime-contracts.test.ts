@@ -48,6 +48,7 @@ import {
   validateGmReadCandidate,
 } from "../gameplay-cycle-runtime/gm-read.js";
 import {
+  buildJudgeUncertaintyPrompt,
   buildJudgeUncertaintySystemPrompt,
   CleanJudgeUncertaintyValidationError,
   judgeUncertaintyGenerationSchema,
@@ -1491,6 +1492,40 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     ]));
   });
 
+  it("requires typed itemTransferNeed for an exact current-frame handoff even when targetRefs omit the item", () => {
+    const frame = itemTransferActionPlanFrame();
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Guide", "Market"],
+      liveSceneQuestion: "Which current-scene consequence should be resolved?",
+      actionInterpretation: {
+        summary: "The player gives a carried item to Guide.",
+        playerIntent: "Give the Brass Tube to Guide.",
+        method: "give",
+        targetRefs: ["Guide"],
+        interactionKind: "unsupported_or_unclear",
+      },
+      interpretationRationale: "The action names a current visible actor but omits the item-state contract.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.interactionKind",
+      }),
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+      }),
+    ]));
+  });
+
   it("keeps carried equipSlot as a model-generation near-miss, not an accepted item_transfer contract", () => {
     const frame = itemTransferActionPlanFrame();
     const nearMiss = {
@@ -2227,6 +2262,29 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("\"equipSlot\": null");
   });
 
+  it("keeps operational inventory tags out of GM Read and Judge prompt frames", () => {
+    const frame = itemTransferActionPlanFrame({
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: ["fixture-item", "transfer-proof"],
+      }],
+    });
+    const gmRead = itemTransferGmRead(frame);
+    const gmReadPrompt = buildGmReadPrompt(frame);
+    const judgePrompt = buildJudgeUncertaintyPrompt({ frame, gmRead });
+
+    expect(gmReadPrompt).toContain("\"label\": \"Brass Tube\"");
+    expect(judgePrompt).toContain("\"label\": \"Brass Tube\"");
+    expect(gmReadPrompt).toContain("\"equipState\": \"carried\"");
+    expect(judgePrompt).toContain("\"equipState\": \"carried\"");
+    expect(gmReadPrompt).not.toContain("transfer-proof");
+    expect(judgePrompt).not.toContain("transfer-proof");
+    expect(gmReadPrompt).not.toContain("\"tags\"");
+    expect(judgePrompt).not.toContain("\"tags\"");
+  });
+
   it("exposes a current-frame cue for compound handoff plus spoken confirmation", () => {
     const prompt = buildGmReadPrompt(minimalFrame({
       playerAction: 'I hand the Brass Tube to Guide, then ask, "Do you have it now?"',
@@ -2272,6 +2330,51 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(calls).toEqual(["initial", "repair"]);
     expect(result.status).toBe("accepted");
     expect(result.repairAttempted).toBe(true);
+  });
+
+  it("repairs an exact current-frame handoff into typed item_transfer admission", async () => {
+    const frame = itemTransferActionPlanFrame();
+    const calls: string[] = [];
+    const prompts: string[] = [];
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async (request) => {
+        calls.push(request.repairOf ? "repair" : "initial");
+        prompts.push(request.prompt);
+        if (!request.repairOf) {
+          return {
+            ...validGmRead(frame),
+            path: "procedural",
+            focalRefs: ["Player", "Guide"],
+            evidenceRefs: ["Player", "Guide", "Market"],
+            actionInterpretation: {
+              summary: "The player gives a carried item to Guide.",
+              playerIntent: "Give the Brass Tube to Guide.",
+              method: "give",
+              targetRefs: ["Guide"],
+              interactionKind: "unsupported_or_unclear",
+            },
+            interpretationRationale: "The action names a visible actor but omits the item-state contract.",
+          };
+        }
+        return itemTransferGmRead(frame);
+      },
+    });
+
+    expect(calls).toEqual(["initial", "repair"]);
+    expect(prompts[1]).toContain("Current-frame item_transfer admission card");
+    expect(prompts[1]).toContain("\"itemRef\": \"Brass Tube\"");
+    expect(prompts[1]).toContain("\"targetRef\": \"Guide\"");
+    expect(result.repairAttempted).toBe(true);
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "item_transfer",
+      itemTransferNeed: {
+        operation: "give_to_visible_actor",
+        itemRef: "Brass Tube",
+        targetRef: "Guide",
+      },
+    });
   });
 
   it("surfaces GM Read generation transport errors before settled clarification", async () => {
@@ -2753,6 +2856,75 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
   });
 
+  it("requires supported visible-actor list observations to use backend receipt admission", () => {
+    const frame = localObservationFrame({
+      playerAction: "I look for visible people here without moving.",
+    });
+    const gmRead: GmRead = {
+      ...localObservationGmRead(frame),
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "Which visible actor surface should Stage 4 list?",
+      actionInterpretation: {
+        summary: "The player asks which people are visible here.",
+        playerIntent: "List visible people here.",
+        method: "look",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "visible people here",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "Visible people are exposed through the current SceneFrame actor surface.",
+    };
+    const blockedUnsupported: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      physicalPossibility: "unsupported_by_runtime",
+      checkNeed: "blocked_unsupported",
+      nextStep: "block_no_mutation",
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      possibilityRationale: "The candidate treated a supported visible-actor list observation as unsupported.",
+      checkRationale: "The candidate blocked instead of admitting the backend receipt.",
+      noRollReason: {
+        code: "unsupported_runtime_scope",
+        explanation: "The candidate treated visible-actor surface listing as unsupported.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: blockedUnsupported });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "branch_invalid",
+        path: "checkNeed",
+      }),
+    ]));
+
+    const accepted: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      checkRationale: "Visible-actor list observation needs backend local-observation receipt authority.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Stage 4 must issue the local_observation receipt before narration lists visible actors.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: accepted }).status).toBe("accepted");
+  });
+
   it("requires device_status_observation to use the backend action-plan branch instead of no-roll narration", () => {
     const frame = deviceSurfaceFrame();
     const gmRead = deviceSurfaceGmRead(frame);
@@ -2769,6 +2941,31 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         }),
       ]),
     );
+
+    const blockedUnsupported: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      physicalPossibility: "unsupported_by_runtime",
+      checkNeed: "blocked_unsupported",
+      nextStep: "block_no_mutation",
+      actorRefs: ["Player"],
+      targetRefs: ["Burner phone"],
+      evidenceRefs: ["Player", "Market", "Burner phone"],
+      possibilityRationale: "The candidate treated a supported device surface observation as unsupported.",
+      checkRationale: "The candidate blocked instead of admitting the backend receipt.",
+      noRollReason: {
+        code: "unsupported_runtime_scope",
+        explanation: "The candidate treated device surface observation as unsupported.",
+        evidenceRefs: ["Player", "Burner phone", "Market"],
+      },
+    };
+    const blockedRejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: blockedUnsupported });
+    expect(blockedRejected.status).toBe("rejected");
+    expect(blockedRejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "branch_invalid",
+        path: "checkNeed",
+      }),
+    ]));
 
     const accepted: JudgeUncertainty = {
       ...actionPlanJudge(frame, gmRead),

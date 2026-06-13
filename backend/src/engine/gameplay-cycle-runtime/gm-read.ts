@@ -79,6 +79,8 @@ const ITEM_TRANSFER_OPERATION_SHAPE: Record<CleanItemTransferOperation, {
   unequip_inventory_item: { sourceKind: "player_inventory", targetKind: "player_inventory", equipSlot: null },
 };
 
+const FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS = new Set(["hand", "give", "pass", "offer", "transfer"]);
+
 const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
   operation: cleanItemTransferOperationSchema,
@@ -410,6 +412,110 @@ function frameMismatchIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
   return issues;
 }
 
+interface GiveToVisibleActorAdmissionCue {
+  itemRef: string;
+  itemLabel: string;
+  actorRef: string;
+  actorLabel: string;
+  sceneRef: string;
+  evidenceRefs: string[];
+}
+
+function asciiWordTokens(text: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  for (const char of text.toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const isDigit = code >= 48 && code <= 57;
+    const isLowerAsciiLetter = code >= 97 && code <= 122;
+    if (isDigit || isLowerAsciiLetter) {
+      current += char;
+      continue;
+    }
+    if (current) {
+      tokens.push(current);
+      current = "";
+    }
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function containsTokenSequence(tokens: string[], sequence: string[]): boolean {
+  if (sequence.length === 0 || sequence.length > tokens.length) return false;
+  for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
+    let matches = true;
+    for (let offset = 0; offset < sequence.length; offset += 1) {
+      if (tokens[index + offset] !== sequence[offset]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+function actionMentionsSurface(tokens: string[], ref: string, label: string): boolean {
+  return [ref, label].some((surfaceText) => containsTokenSequence(tokens, asciiWordTokens(surfaceText)));
+}
+
+function hasFirstPersonGiveToVisibleActorCue(tokens: string[]): boolean {
+  if (tokens.length === 0) return false;
+  if (FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS.has(tokens[0])) return true;
+  return tokens[0] === "i" && tokens.length > 1 && FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS.has(tokens[1]);
+}
+
+function giveToVisibleActorAdmissionCue(frame: AuthoritativeSceneFrame): GiveToVisibleActorAdmissionCue | null {
+  const itemTransferAllowed = frame.capabilities.some((capability) => capability.capabilityId === "item_transfer" && capability.allowed);
+  if (!itemTransferAllowed) return null;
+
+  const actionTokens = asciiWordTokens(frame.playerAction);
+  if (!hasFirstPersonGiveToVisibleActorCue(actionTokens)) return null;
+
+  const matchingItems = frame.inventory.filter((item) => actionMentionsSurface(actionTokens, item.ref, item.label));
+  const matchingActors = frame.actors.filter((actor) => actionMentionsSurface(actionTokens, actor.ref, actor.label));
+  if (matchingItems.length !== 1 || matchingActors.length !== 1) return null;
+
+  const item = matchingItems[0];
+  const actor = matchingActors[0];
+  return {
+    itemRef: item.ref,
+    itemLabel: item.label,
+    actorRef: actor.ref,
+    actorLabel: actor.label,
+    sceneRef: frame.scene.currentScene.ref,
+    evidenceRefs: Array.from(new Set(["Player", item.ref, actor.ref, frame.scene.currentScene.ref])),
+  };
+}
+
+function itemTransferNeedForGiveCue(cue: GiveToVisibleActorAdmissionCue) {
+  return {
+    actorRef: "Player",
+    operation: "give_to_visible_actor",
+    itemRef: cue.itemRef,
+    sourceKind: "player_inventory",
+    targetKind: "visible_actor",
+    targetRef: cue.actorRef,
+    equipSlot: null,
+    requestedItemText: cue.itemLabel,
+    evidenceRefs: cue.evidenceRefs,
+  };
+}
+
+function itemTransferRepairCard(frame: AuthoritativeSceneFrame): string {
+  const cue = giveToVisibleActorAdmissionCue(frame);
+  if (!cue) {
+    return "Current-frame item_transfer admission card: no exact first-person inventory-to-visible-actor handoff cue is active for this SceneFrame.";
+  }
+  return [
+    "Current-frame item_transfer admission card:",
+    `The player action names one Player inventory item (${cue.itemRef}) and one visible actor recipient (${cue.actorRef}).`,
+    "Represent the physical item-state transition with this exact itemTransferNeed shape:",
+    JSON.stringify(itemTransferNeedForGiveCue(cue), null, 2),
+  ].join("\n");
+}
+
 function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmReadValidationIssue[] {
   const issues: GmReadValidationIssue[] = [];
   const loweredTargets = read.actionInterpretation.targetRefs.map((ref) => ref.toLowerCase());
@@ -436,10 +542,44 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     .map((surface) => surface.deviceRef.toLowerCase()));
   const minorPoiSurface = frame.currentScenePlaceHandleSurface ?? null;
   const allowedMinorPoiKinds = new Set(minorPoiSurface?.allowedPlaceKinds ?? []);
+  const giveToVisibleActorCue = giveToVisibleActorAdmissionCue(frame);
   const hasInventoryToVisibleActorTargetPair =
     allowedCapabilities.has("item_transfer")
     && loweredTargets.some((target) => inventoryRefs.has(target))
     && loweredTargets.some((target) => visibleActorRefs.has(target));
+
+  if (giveToVisibleActorCue) {
+    if (
+      read.actionInterpretation.interactionKind !== "item_transfer"
+      && read.actionInterpretation.interactionKind !== "visible_actor_dialogue"
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.interactionKind",
+        message: "A current-frame Player inventory handoff to one visible actor requires item_transfer, or visible_actor_dialogue when the action also asks the actor to speak.",
+      });
+    }
+    if (itemTransferNeed == null) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "A current-frame Player inventory handoff to one visible actor requires itemTransferNeed.",
+      });
+    } else if (
+      itemTransferNeed.operation !== "give_to_visible_actor"
+      || itemTransferNeed.itemRef.toLowerCase() !== giveToVisibleActorCue.itemRef.toLowerCase()
+      || itemTransferNeed.sourceKind !== "player_inventory"
+      || itemTransferNeed.targetKind !== "visible_actor"
+      || itemTransferNeed.targetRef.toLowerCase() !== giveToVisibleActorCue.actorRef.toLowerCase()
+      || itemTransferNeed.equipSlot !== null
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+        message: "itemTransferNeed must represent the exact current-frame inventory item handoff to the visible actor.",
+      });
+    }
+  }
 
   if (
     hasInventoryToVisibleActorTargetPair
@@ -1236,7 +1376,11 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     })),
     movementOptions: frame.movementOptions,
     targets: frame.targets,
-    inventory: frame.inventory,
+    inventory: frame.inventory.map((item) => ({
+      ref: item.ref,
+      label: item.label,
+      equipState: item.equipState,
+    })),
     deviceStatusSurfaces: frame.deviceStatusSurfaces ?? [],
     currentScenePlaceHandleSurface: frame.currentScenePlaceHandleSurface ?? null,
     capabilities: frame.capabilities,
@@ -1410,6 +1554,7 @@ function buildGmReadRepairPrompt(input: {
     "Repair the GM Read candidate so it satisfies gm-read.v1.",
     "Do not add executable, admission, mutation, Oracle, checklist, receipt, narration, or state-delta fields.",
     "Use only refs from SceneFrame.citableRefs.",
+    itemTransferRepairCard(input.frame),
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
     "Original candidate:",

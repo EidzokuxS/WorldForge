@@ -543,8 +543,9 @@ function branchIssues(input: {
   if (
     gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     && gmRead.actionInterpretation.localObservationNeed != null
-    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
-    && judgment.checkNeed === "no_roll_needed"
+    && hasAllowedCapability(frame, "local_observation")
+    && !["impossible", "underspecified"].includes(judgment.physicalPossibility)
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
   ) {
     add(
       "checkNeed",
@@ -554,8 +555,9 @@ function branchIssues(input: {
   if (
     gmRead.actionInterpretation.interactionKind === "device_status_observation"
     && gmRead.actionInterpretation.deviceObservationNeed != null
-    && ["possible", "possible_but_uncertain"].includes(judgment.physicalPossibility)
-    && judgment.checkNeed === "no_roll_needed"
+    && hasAllowedCapability(frame, "device_surface_observation")
+    && !["impossible", "underspecified"].includes(judgment.physicalPossibility)
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
   ) {
     add(
       "checkNeed",
@@ -637,7 +639,11 @@ function promptFrame(frame: AuthoritativeSceneFrame): unknown {
     actors: frame.actors,
     movementOptions: frame.movementOptions,
     targets: frame.targets,
-    inventory: frame.inventory,
+    inventory: frame.inventory.map((item) => ({
+      ref: item.ref,
+      label: item.label,
+      equipState: item.equipState,
+    })),
     currentScenePlaceHandleSurface: frame.currentScenePlaceHandleSurface ?? null,
     capabilities: frame.capabilities,
     citableRefs: frame.citableRefs,
