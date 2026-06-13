@@ -722,7 +722,11 @@ describe("clean Stage 5 settlement contracts", () => {
     const scene = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("current_scene"));
     const texture = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("scene_texture"));
     const movement = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("player_location_change"));
-    expect(scene?.backendFacts.map((entry) => entry.text)).toContain("Current scene is North Hall.");
+    expect(scene?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Scene placement: You are at North Hall.",
+      "Scene label: North Hall.",
+      "Place label: North Hall.",
+    ]);
     expect(texture?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: North Hall narrows beneath a row of iron lamps.",
     ]);
@@ -804,9 +808,15 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
     const targetEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_target"));
     const actorEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_actor"));
-    expect(actorEvidence?.text).toBe("Guide is visible in the current scene.");
+    expect(actorEvidence?.text).toBe("Guide is in view here.");
     expect(actorEvidence?.limits.proves).toEqual(["actor visible in the current scene"]);
-    expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toContain("Visible target: Notice Board (place_handle).");
+    expect(targetEvidence?.text).toBe("Targets in view here include Guide, Notice Board, North Hall.");
+    expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Visible target labels: Guide; Notice Board; North Hall.",
+      "Visible actor target labels: Guide.",
+      "Visible place-handle target labels: Notice Board.",
+      "Visible location target labels: North Hall.",
+    ]);
     expect(targetEvidence?.limits.doesNotProve).toContain("movement");
     const routeEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("movement_option"));
     expect(routeEvidence?.text).toBe("From Market, visible route choices are North Hall (1 minute).");

@@ -348,10 +348,11 @@ function currentSceneAnchorEvidence(ref = "e3"): CleanNarratorView["acceptedEvid
     ref,
     authority: "scene_frame_snapshot",
     claimKinds: ["current_scene", "current_location"],
-    text: "Current scene is Market.",
+    text: "You are at Market.",
     backendFacts: [
-      { factRef: `${ref}.f1`, text: "Current scene is Market.", exact: true },
-      { factRef: `${ref}.f2`, text: "Current place is Market.", exact: true },
+      { factRef: `${ref}.f1`, text: "Scene placement: You are at Market.", exact: true },
+      { factRef: `${ref}.f2`, text: "Scene label: Market.", exact: true },
+      { factRef: `${ref}.f3`, text: "Place label: Market.", exact: true },
     ],
     limits: {
       proves: ["current scene label"],
@@ -400,10 +401,10 @@ function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Visible current-frame targets include Guide, Courier.",
+      text: "Targets in view here include Guide, Courier.",
       backendFacts: [
-        { factRef: "e2.f1", text: "Visible target: Guide (actor).", exact: true },
-        { factRef: "e2.f2", text: "Visible target: Courier (actor).", exact: true },
+        { factRef: "e2.f1", text: "Visible target labels: Guide; Courier.", exact: true },
+        { factRef: "e2.f2", text: "Visible actor target labels: Guide; Courier.", exact: true },
       ],
       limits: {
         proves: ["visible current-scene target labels"],
@@ -419,10 +420,11 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e1",
       authority: "scene_frame_snapshot",
       claimKinds: ["current_scene", "current_location"],
-      text: "Current scene is Market.",
+      text: "You are at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current scene is Market.", exact: true },
-        { factRef: "e1.f2", text: "Current place is Market.", exact: true },
+        { factRef: "e1.f1", text: "Scene placement: You are at Market.", exact: true },
+        { factRef: "e1.f2", text: "Scene label: Market.", exact: true },
+        { factRef: "e1.f3", text: "Place label: Market.", exact: true },
       ],
       limits: {
         proves: ["current scene label"],
@@ -432,8 +434,8 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: "Courier satchel is visible in the inventory snapshot.",
-      backendFacts: [{ factRef: "e2.f1", text: "Inventory item: Courier satchel.", exact: true }],
+      text: "Courier satchel is in your inventory.",
+      backendFacts: [{ factRef: "e2.f1", text: "Inventory labels: Courier satchel.", exact: true }],
       limits: {
         proves: ["inventory item label only"],
         doesNotProve: ["item contents", "item use", "ownership transfer"],
@@ -442,8 +444,11 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e3",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Visible current-frame targets include Notice Board.",
-      backendFacts: [{ factRef: "e3.f1", text: "Visible target: Notice Board (place_handle).", exact: true }],
+      text: "Targets in view here include Notice Board.",
+      backendFacts: [
+        { factRef: "e3.f1", text: "Visible target labels: Notice Board.", exact: true },
+        { factRef: "e3.f2", text: "Visible place-handle target labels: Notice Board.", exact: true },
+      ],
       limits: {
         proves: ["visible target labels exposed by the current SceneFrame snapshot"],
         doesNotProve: ["hidden targets", "movement", "arrival", "absence of other targets"],
@@ -484,10 +489,11 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e1",
       authority: "scene_frame_snapshot",
       claimKinds: ["current_scene", "current_location"],
-      text: "Current scene is Market.",
+      text: "You are at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current scene is Market.", exact: true },
-        { factRef: "e1.f2", text: "Current place is Market.", exact: true },
+        { factRef: "e1.f1", text: "Scene placement: You are at Market.", exact: true },
+        { factRef: "e1.f2", text: "Scene label: Market.", exact: true },
+        { factRef: "e1.f3", text: "Place label: Market.", exact: true },
       ],
       limits: {
         proves: ["current scene label"],
@@ -497,8 +503,8 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
-      text: "Guide is visible in the current scene.",
-      backendFacts: [{ factRef: "e2.f1", text: "Visible actor: Guide.", exact: true }],
+      text: "Guide is in view here.",
+      backendFacts: [{ factRef: "e2.f1", text: "Visible actor labels: Guide.", exact: true }],
       limits: {
         proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "future actor action"],
@@ -507,8 +513,8 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e3",
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: "Courier satchel is visible in the inventory snapshot.",
-      backendFacts: [{ factRef: "e3.f1", text: "Inventory item: Courier satchel.", exact: true }],
+      text: "Courier satchel is in your inventory.",
+      backendFacts: [{ factRef: "e3.f1", text: "Inventory labels: Courier satchel.", exact: true }],
       limits: {
         proves: ["inventory item label only"],
         doesNotProve: ["item contents", "item use", "ownership transfer"],
@@ -517,13 +523,13 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e4",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Visible current-frame targets include Guide, Courier satchel, North Hall, Brass Tube, Notice Board.",
+      text: "Targets in view here include Guide, Courier satchel, North Hall, Brass Tube, Notice Board.",
       backendFacts: [
-        { factRef: "e4.f1", text: "Visible target: Guide (actor).", exact: true },
-        { factRef: "e4.f2", text: "Visible target: Courier satchel (item).", exact: true },
-        { factRef: "e4.f3", text: "Visible target: North Hall (location).", exact: true },
-        { factRef: "e4.f4", text: "Visible target: Brass Tube (item).", exact: true },
-        { factRef: "e4.f5", text: "Visible target: Notice Board (place_handle).", exact: true },
+        { factRef: "e4.f1", text: "Visible target labels: Guide; Courier satchel; North Hall; Brass Tube; Notice Board.", exact: true },
+        { factRef: "e4.f2", text: "Visible actor target labels: Guide.", exact: true },
+        { factRef: "e4.f3", text: "Visible item target labels: Courier satchel; Brass Tube.", exact: true },
+        { factRef: "e4.f4", text: "Visible place-handle target labels: Notice Board.", exact: true },
+        { factRef: "e4.f5", text: "Visible location target labels: North Hall.", exact: true },
       ],
       limits: {
         proves: ["visible current-scene target labels"],
@@ -602,7 +608,7 @@ function modelNarrationView(): CleanNarratorView {
       claimKinds: ["visible_fact"],
       text: "Guide stands nearby.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Guide stands nearby.", exact: true },
+        { factRef: "e1.f1", text: "Visible scene facts: Guide stands nearby.", exact: true },
       ],
       limits: {
         proves: ["accepted visible fact"],
@@ -1267,7 +1273,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.currentContext[0]?.claimKinds).toEqual(["current_scene", "current_location"]);
     expect(promptInput.storyFrame.currentContext[0]?.proseCue).toBe("current_scene_anchor");
     expect(promptInput.storyFrame.currentContext[0]?.compositionSlot).toBe("opening_context");
-    expect(promptInput.storyFrame.currentContext[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+    expect(promptInput.storyFrame.currentContext[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f3"]);
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "open_with_context", entryRefs: ["e1"] },
       { step: "narrate_turn_event", entryRefs: ["e5"] },
@@ -1590,6 +1596,23 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Scene-frame route prompt input requires accepted Route choices beat evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
       .toThrow("Route-options projection requires accepted Route choices beat evidence.");
+  });
+
+  it("fails scene_frame_snapshot handling when accepted direct-scene story facts are missing", () => {
+    const oldFactView = sceneFrameSnapshotView();
+    oldFactView.acceptedEvidence[0] = {
+      ...oldFactView.acceptedEvidence[0]!,
+      text: "Current scene is Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current scene is Market.", exact: true },
+        { factRef: "e1.f2", text: "Current place is Market.", exact: true },
+      ],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement evidence.");
   });
 
   it("fails scene_observation receipt handling when accepted story evidence is missing", () => {
@@ -2427,7 +2450,7 @@ describe("clean Stage 6 narration contracts", () => {
             {
               text: "You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.",
               evidenceRefs: ["e1", "e2", "e3", "e4"],
-              backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4"],
+              backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3"],
               claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
             },
           ]);
@@ -2453,7 +2476,7 @@ describe("clean Stage 6 narration contracts", () => {
           {
             text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible.",
             evidenceRefs: ["e1", "e2", "e3", "e4"],
-            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5"],
+            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3", "e4.f4"],
             claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
           },
           {

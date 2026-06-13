@@ -539,22 +539,23 @@ function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
 
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
   const evidenceId = nextEvidenceId(evidence);
-  evidence.push({
-    evidenceId,
-    sourceKind: "scene_frame",
-    sourceRef: frame.frameId,
-    authority: "scene_frame_snapshot",
-    claimKinds: ["current_scene", "current_location"],
-    text: `Current scene is ${frame.scene.currentScene.label} at ${frame.scene.currentLocation.label}.`,
-    visibleRefs: uniqueStrings([
-      frame.player.ref,
-      frame.scene.currentScene.ref,
-      frame.scene.currentLocation.ref,
-    ]),
-    backendFacts: [
-      fact(evidenceId, 1, `Current scene is ${frame.scene.currentScene.label}.`),
-      fact(evidenceId, 2, `Current place is ${frame.scene.currentLocation.label}.`),
-    ],
+    evidence.push({
+      evidenceId,
+      sourceKind: "scene_frame",
+      sourceRef: frame.frameId,
+      authority: "scene_frame_snapshot",
+      claimKinds: ["current_scene", "current_location"],
+      text: scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label),
+      visibleRefs: uniqueStrings([
+        frame.player.ref,
+        frame.scene.currentScene.ref,
+        frame.scene.currentLocation.ref,
+      ]),
+      backendFacts: [
+        fact(evidenceId, 1, `Scene placement: ${scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label)}`),
+        fact(evidenceId, 2, `Scene label: ${frame.scene.currentScene.label}.`),
+        fact(evidenceId, 3, `Place label: ${frame.scene.currentLocation.label}.`),
+      ],
     limits: {
       proves: ["current scene label", "current location label"],
       doesNotProve: SCENE_DOES_NOT_PROVE,
@@ -597,7 +598,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_fact"],
       text: visible.summary,
       visibleRefs: [visible.source],
-      backendFacts: [fact(visibleEvidenceId, 1, visible.summary)],
+      backendFacts: [fact(visibleEvidenceId, 1, `Visible scene facts: ${trimTrailingSentencePunctuation(visible.summary)}.`)],
       limits: {
         proves: ["current visible scene fact"],
         doesNotProve: SCENE_DOES_NOT_PROVE,
@@ -613,9 +614,9 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
-      text: `${actor.label} is visible in the current scene.`,
+      text: `${actor.label} is in view here.`,
       visibleRefs: [actor.ref],
-      backendFacts: [fact(actorEvidenceId, 1, `Visible actor: ${actor.label}.`)],
+      backendFacts: [fact(actorEvidenceId, 1, `Visible actor labels: ${actor.label}.`)],
       limits: {
         proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "absence of other actors", "future actor action"],
@@ -631,9 +632,9 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: `${item.label} is visible in the inventory snapshot.`,
+      text: `${item.label} is in your inventory.`,
       visibleRefs: [item.ref],
-      backendFacts: [fact(itemEvidenceId, 1, `Inventory item: ${item.label}.`)],
+      backendFacts: [fact(itemEvidenceId, 1, `Inventory labels: ${item.label}.`)],
       limits: {
         proves: ["inventory item label in the current inventory view"],
         doesNotProve: ["item state change", "item transfer", "absence of other items"],
@@ -647,16 +648,44 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
     .slice(0, 6);
   if (visibleTargets.length > 0) {
     const targetEvidenceId = nextEvidenceId(evidence);
+    const visibleTargetLabels = visibleTargets.map((target) => target.label);
+    const actorTargetLabels = visibleTargets
+      .filter((target) => target.kind === "actor")
+      .map((target) => target.label);
+    const itemTargetLabels = visibleTargets
+      .filter((target) => target.kind === "item")
+      .map((target) => target.label);
+    const placeHandleTargetLabels = visibleTargets
+      .filter((target) => target.kind === "place_handle")
+      .map((target) => target.label);
+    const locationTargetLabels = visibleTargets
+      .filter((target) => target.kind === "location")
+      .map((target) => target.label);
+    const targetFactTexts = [
+      `Visible target labels: ${evidenceSemicolonList(visibleTargetLabels)}.`,
+      actorTargetLabels.length > 0
+        ? `Visible actor target labels: ${evidenceSemicolonList(actorTargetLabels)}.`
+        : null,
+      itemTargetLabels.length > 0
+        ? `Visible item target labels: ${evidenceSemicolonList(itemTargetLabels)}.`
+        : null,
+      placeHandleTargetLabels.length > 0
+        ? `Visible place-handle target labels: ${evidenceSemicolonList(placeHandleTargetLabels)}.`
+        : null,
+      locationTargetLabels.length > 0
+        ? `Visible location target labels: ${evidenceSemicolonList(locationTargetLabels)}.`
+        : null,
+    ].filter((text): text is string => text !== null);
     evidence.push({
       evidenceId: targetEvidenceId,
       sourceKind: "scene_frame",
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: `Visible current-frame targets include ${visibleTargets.map((target) => target.label).join(", ")}.`,
+      text: `Targets in view here include ${visibleTargetLabels.join(", ")}.`,
       visibleRefs: visibleTargets.map((target) => target.ref),
-      backendFacts: boundedBackendFacts(visibleTargets.map((target, index) =>
-        fact(targetEvidenceId, index + 1, `Visible target: ${target.label} (${target.kind}).`)
+      backendFacts: boundedBackendFacts(targetFactTexts.map((text, index) =>
+        fact(targetEvidenceId, index + 1, text)
       )),
       limits: {
         proves: ["visible current-scene target labels"],

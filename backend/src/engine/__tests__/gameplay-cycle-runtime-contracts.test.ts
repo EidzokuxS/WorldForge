@@ -529,7 +529,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
       events.push(event);
     }
 
-    expect(order).toEqual(["commit:Current scene is Market.", "done"]);
+    expect(order).toEqual(["commit:Scene placement: You are at Market.", "done"]);
     const done = events.at(-1);
     expect(done?.type).toBe("done");
     expect(done?.data).toMatchObject({

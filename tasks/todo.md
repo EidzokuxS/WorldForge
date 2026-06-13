@@ -6524,3 +6524,18 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 90 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported HIGH because changed hunks map to `runCleanNarration` / `renderCleanAuthorityProjection`; context review traced the edited boundary to prompt evidence limiting and deterministic projection, covered by the focused checks above.
     - [x] Pushed commit `acbf79d0`; `npx gitnexus analyze --embeddings` completed successfully after Ladybug lock warnings.
+
+- P226 Stage 6 scene-frame snapshot story evidence:
+  - Plan:
+    - [x] Run GitNexus impact before editing scene-frame settlement/projection and direct-scene label readers.
+    - [x] Replace `scene_frame_snapshot` raw backend facts (`Current scene is`, `Current place is`, `Visible actor:`, `Inventory item:`, `Visible target:`) with typed story facts.
+    - [x] Make prompt input and direct-scene projection fail when snapshot evidence lacks accepted story facts.
+    - [x] Remove the `Visible target:` regex decoder from Stage 6 direct-scene label handling.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, and diff whitespace checks.
+    - [x] Run GitNexus detect.
+    - [ ] Commit/push and refresh index.
+  - Review:
+    - [x] Direct scene snapshot evidence now emits `Scene placement`, `Scene label`, `Place label`, `Visible actor labels`, `Inventory labels`, and typed visible-target aggregate labels by kind.
+    - [x] Direct-scene projection uses typed target label facts and keeps visible item/place targets out of inventory phrasing.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 91 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` prompt evidence selection.
