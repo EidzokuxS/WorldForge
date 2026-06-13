@@ -4196,17 +4196,11 @@ describe("clean Stage 6 narration contracts", () => {
     ]));
   });
 
-  it("rejects one-token, mixed-script, receipt-shaped, and donor-banned prose shapes", () => {
+  it("rejects one-token, mixed-script, and receipt-shaped structural prose issues", () => {
     for (const text of [
       "Done.",
       "Вы идете.",
       "Operation: give_to_visible_actor. Target: Guide.",
-      "She weighed the name like a coin.",
-      "Interesting. Or dangerous.",
-      "Most people would miss it.",
-      "The air turns thick with ozone.",
-      "The world narrowed around the signal.",
-      "Not quite a smile.",
     ]) {
       const result = validateCleanNarrationCandidate({
         view: movementView(),
@@ -4220,6 +4214,15 @@ describe("clean Stage 6 narration contracts", () => {
         text,
       ).toBe(true);
     }
+  });
+
+  it("does not reject accepted narration only for old donor prose shapes", () => {
+    const result = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate("After one minute, you reach North Hall, and the world narrowed around the step."),
+    });
+
+    expect(result.status).toBe("accepted");
   });
 
   it("rejects copied deterministic authority projection text on literary narration claim shapes", () => {

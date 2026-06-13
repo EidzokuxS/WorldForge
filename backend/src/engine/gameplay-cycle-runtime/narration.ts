@@ -70,36 +70,6 @@ const ONE_WORD = /[\p{L}\p{N}]+/gu;
 const CYRILLIC_WORD = /[\u0400-\u04FF]+/gu;
 const RUSSIAN_ENGLISH_SCAFFOLD = /\b(?:Current scene|Current place|Inventory item|Visible target|Route option|The settled route check confirms|World clock advances|item state changed|Operation|Final equip state|Item transfer result)\b/iu;
 const RECEIPT_PROSE_MARKER = /\b(?:Operation:|Source:|Target:|Final equip state:|Current scene anchor:|Item transfer result:|Player location changed|Travel cost|Current scene is|Current place is|Inventory item:|Visible target:|Route option:|minute\(s\)|transferred_to_actor|give_to_visible_actor|movement_option|message_indicator)\b/iu;
-const PROSE_SHAPE_MARKERS: Array<{ name: string; pattern: RegExp }> = [
-  {
-    name: "word_as_object",
-    pattern: /\b(?:taste[sd]?|weigh(?:ed|s)?|roll(?:ed|s)?|repeat(?:ed|s)?|testing|working through)\b[\s\S]{0,80}\b(?:name|word|phrase|syllable)s?\b/iu,
-  },
-  {
-    name: "novelty_tag",
-    pattern: /\b(?:interesting|intriguing|full of surprises|that's new|we'll see)\b/iu,
-  },
-  {
-    name: "crowd_foil",
-    pattern: /\b(?:most people|everyone else|people usually|most would)\b/iu,
-  },
-  {
-    name: "bottled_atmosphere",
-    pattern: /\b(?:velvet|velvety|silk(?:en)?|husky|charged air|thick air|stretched silence|pregnant pause|barely above a whisper|ozone)\b/iu,
-  },
-  {
-    name: "negation_as_description",
-    pattern: /\b(?:not quite|not anymore|not yet|not\s+\w+(?:\s+\w+){0,3}\s*,?\s+but)\b/iu,
-  },
-  {
-    name: "option_menu_verdict",
-    pattern: /\beither\b[\s\S]{0,90}\bor\b|\b[A-Z][\w-]+\. Or [A-Z][\w-]+\b/u,
-  },
-  {
-    name: "cosmic_fluff",
-    pattern: /\b(?:world (?:narrowed|tilted|fell away)|something (?:dark|ancient|feral)|[\p{L}\p{N}_-]+ was a [\p{L}\p{N}_-]+ thing)\b/iu,
-  },
-];
 const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
   /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
@@ -1169,16 +1139,6 @@ function proseQualityIssues(input: {
       path: "finalText",
       message: "Russian narration finalText used English scaffold or receipt phrasing.",
     });
-  }
-
-  for (const marker of PROSE_SHAPE_MARKERS) {
-    if (marker.pattern.test(unquotedText)) {
-      issues.push({
-        code: "prose_quality",
-        path: "finalText",
-        message: `Narration finalText used tired prose shape: ${marker.name}.`,
-      });
-    }
   }
 
   if (literaryExpected) {
