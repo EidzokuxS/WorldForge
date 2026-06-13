@@ -607,6 +607,26 @@ function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
   });
 }
 
+function supportActorWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...supportActorView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
+function playerLocalConditionWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...playerLocalConditionView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
 function itemStateView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -760,6 +780,16 @@ function minorPoiHandleView(): CleanNarratorView {
         ],
       },
     }],
+  });
+}
+
+function minorPoiHandleWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...minorPoiHandleView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
   });
 }
 
@@ -1188,6 +1218,23 @@ describe("clean Stage 6 narration contracts", () => {
       "Scene texture: Canvas awnings hang over the market lanes.",
       "Scene texture: Rain taps the brass gutters.",
     ]);
+  });
+
+  it("includes scene_texture beside small scene-result evidence when literary prose can cite texture", () => {
+    for (const view of [
+      supportActorWithSceneTextureView(),
+      playerLocalConditionWithSceneTextureView(),
+      minorPoiHandleWithSceneTextureView(),
+    ]) {
+      const promptInput = buildCleanNarratorPromptInput(view);
+
+      expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
+      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
+      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
+        "Scene texture: Canvas awnings hang over the market lanes.",
+        "Scene texture: Rain taps the brass gutters.",
+      ]);
+    }
   });
 
   it("accepts model narration from accepted movement evidence", () => {
@@ -1752,6 +1799,47 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
   });
 
+  it("repairs missing scene_texture for support_actor_materialization inside Stage 6", async () => {
+    const view = supportActorWithSceneTextureView();
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [{
+            text: "Local Vendor is present as a vendor at Market.",
+            evidenceRefs: ["e1", "e3"],
+            backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+            claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+          }]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("Support-actor, player-condition, and minor-POI narration with accepted scene_texture");
+        expect(request.prompt).toContain("For support_actor_materialization, use e2.f1 for the scene_texture sentence.");
+        return acceptedCandidate(view, [
+          {
+            text: "Canvas awnings hang over the market lanes.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f1"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "Local Vendor is present as a vendor at Market.",
+            evidenceRefs: ["e1", "e3"],
+            backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+            claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is present as a vendor at Market.");
+  });
+
   it("repairs direct-scene implied action inside Stage 6 before player-facing narration", async () => {
     const view = movementView({
       acceptedEvidence: [
@@ -2122,6 +2210,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
+  it("uses accepted scene_texture for support_actor_materialization prose when texture is available", async () => {
+    const view = supportActorWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Local Vendor is present as a vendor at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is present as a vendor at Market.");
+    expect(result.text).not.toMatch(/\b(says|offers|service|knows|future|relationship|route|movement|no change|nothing changed)\b/iu);
+  });
+
+  it("rejects support_actor_materialization prose that omits texture or uses a later texture first", () => {
+    const view = supportActorWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Local Vendor is present as a vendor at Market.",
+        evidenceRefs: ["e1", "e3"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+        claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
+    )).toBe(true);
+
+    const laterTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Local Vendor is present as a vendor at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+        },
+      ]),
+    });
+    expect(laterTexture.status).toBe("rejected");
+    if (laterTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(laterTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Support-actor scene_texture")
+    )).toBe(true);
+  });
+
   it("renders Player local condition evidence without inventing HP, cover, combat, movement, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
     const text = renderCleanAuthorityProjection(playerLocalConditionView());
@@ -2161,6 +2316,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe("Player is hands visible.");
     expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
+  });
+
+  it("uses accepted scene_texture for player_local_condition prose when texture is available", async () => {
+    const view = playerLocalConditionWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Player is kneeling at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["player_local_condition", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Player is kneeling at Market.");
+    expect(result.text).not.toMatch(/\b(hp|damage|cover|combat|moves?|route|item custody|dialogue|no change|nothing changed)\b/iu);
+  });
+
+  it("rejects player_local_condition prose that omits texture or repeats the first texture fact", () => {
+    const view = playerLocalConditionWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Player is kneeling at Market.",
+        evidenceRefs: ["e1", "e3"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
+        claimKinds: ["player_local_condition", "current_scene"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
+    )).toBe(true);
+
+    const firstTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Player is kneeling at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["player_local_condition", "current_scene"],
+        },
+      ]),
+    });
+    expect(firstTexture.status).toBe("rejected");
+    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Player-condition scene_texture")
+    )).toBe(true);
   });
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
@@ -2386,6 +2608,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toContain("Tea Stall is now available here as a visible stall handle.");
     expect(result.text).not.toMatch(/Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
+  });
+
+  it("uses accepted scene_texture for minor_poi_handle prose when texture is available", async () => {
+    const view = minorPoiHandleWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Tea Stall is available here as a visible stall handle at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
+          claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall is available here as a visible stall handle at Market.");
+    expect(result.text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|business|discover|world fact|no change|nothing changed)\b/iu);
+  });
+
+  it("rejects minor_poi_handle prose that omits texture or repeats the first texture fact", () => {
+    const view = minorPoiHandleWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Tea Stall is available here as a visible stall handle at Market.",
+        evidenceRefs: ["e1", "e3"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
+        claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
+    )).toBe(true);
+
+    const firstTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Tea Stall is available here as a visible stall handle at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
+          claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+        },
+      ]),
+    });
+    expect(firstTexture.status).toBe("rejected");
+    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Minor-POI scene_texture")
+    )).toBe(true);
   });
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
@@ -2861,6 +3150,51 @@ describe("clean Stage 6 narration contracts", () => {
     expect(localObservationDigest.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("summary-digest")
     )).toBe(true);
+
+    const supportActorDigest = validateCleanNarrationCandidate({
+      view: supportActorView(),
+      candidate: acceptedCandidate(supportActorView(), [{
+        text: "Local Vendor is present in Market as a vendor.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        claimKinds: ["visible_actor", "support_actor_materialization"],
+      }]),
+    });
+    expect(supportActorDigest.status).toBe("rejected");
+    if (supportActorDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(supportActorDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const playerConditionDigest = validateCleanNarrationCandidate({
+      view: playerLocalConditionView(),
+      candidate: acceptedCandidate(playerLocalConditionView(), [{
+        text: "Player is kneeling.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["player_local_condition"],
+      }]),
+    });
+    expect(playerConditionDigest.status).toBe("rejected");
+    if (playerConditionDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(playerConditionDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const minorPoiDigest = validateCleanNarrationCandidate({
+      view: minorPoiHandleView(),
+      candidate: acceptedCandidate(minorPoiHandleView(), [{
+        text: "Tea Stall is now available here as a visible stall handle.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3"],
+        claimKinds: ["minor_poi_handle", "visible_target"],
+      }]),
+    });
+    expect(minorPoiDigest.status).toBe("rejected");
+    if (minorPoiDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(minorPoiDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
   });
 
   it("rejects Russian narration that falls back to English scaffold wording", () => {
@@ -2969,6 +3303,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");
     expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_materialization uses the first accepted texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("player_local_condition uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("minor_poi_handle uses a later texture fact");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");

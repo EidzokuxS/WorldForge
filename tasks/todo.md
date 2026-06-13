@@ -6072,3 +6072,24 @@ Session: `gm-v1-consequenc-slice`.
   - Completion decision:
     - [x] The clean gameplay-cycle runtime meets the primitive-owned architecture target for the implemented clean primitive set: player intent is admitted through typed primitive contracts, executable work is carried by typed checklist/request data, gameplay truth is persisted as backend-owned receipts, settlement exposes bounded accepted evidence, and narration projects only that evidence.
     - [x] The current focused contract suite, edge live proofs, and three fresh post-repair 60-turn lanes satisfy the stated clean-runtime acceptance bar for this goal.
+
+- P202 Stage 6 literary narration for small scene-result primitives:
+  - Plan:
+    - [x] Create a fresh zero-turn clean-start clone from `p69-item-transfer-045651`.
+    - [x] Load and inspect the clone through the clean backend before choosing the player action.
+    - [x] Run one manually chosen `/api/chat/action` proving `player_local_condition` with accepted scene texture.
+    - [x] Write DB/prose proof artifacts covering clean runtime, accepted receipt, clock deltas, old-store zeros, item custody, multi-token narration, and exact accepted texture use.
+    - [x] Run prose audit on the proof root.
+    - [x] Re-run backend typecheck and focused clean-runtime suites.
+    - [x] Run GitNexus `detect_changes` and focused impact review before commit.
+  - Results:
+    - [x] Fresh clone `p202-small-scene-results-qa-20260613-182305` loaded through clean backend `http://127.0.0.1:31716`.
+    - [x] Preflight: chat history 0, clean/old stores 0, clock `0/0/0`, player at `Lowwater Bazaar`, Guide visible, Brass Tube carried by `Mira Voss`.
+    - [x] Turn 1 action `I crouch down beside the market walkway and keep my hands visible.` returned clean-runtime `done`, one accepted `condition_set` receipt, one active `crouched` player condition, one authority trace `gameplay-cycle-runtime.player.condition_set.v1`, worldVersion `0 -> 1`, world time/current tick stable, old stores 0, Brass Tube still carried by `Mira Voss`.
+    - [x] Player-facing narration used exact accepted texture fact `e2.f2` and stayed multi-token: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. You crouch low at Lowwater Bazaar, body folded against the shifting wooden platform beneath you.`
+    - [x] Proof artifacts: `output/clean-runtime-p202-small-scene-results-qa-20260613-182305/db-proof.json`, `output/clean-runtime-p202-small-scene-results-qa-20260613-182305/prose-audit.json`.
+    - [x] Prose audit: 1 narrative, 32 words, zero one-token outputs, zero digest/debug/enum/flat-shape hits.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 335 tests.
+    - [x] GitNexus `detect_changes` reported central Stage 6 narration flow scope; focused impacts for `selectPromptAcceptedEvidence`, `validateCleanNarrationCandidate`, `renderCleanAuthorityProjection`, `proseQualityIssues`, `buildCleanNarrationSystemPrompt`, and `preferredPromptFacts` were all LOW.
+    - [x] Note: the reused P155 verifier helper sent the turn successfully, then crashed on stale `clean_gameplay_turn_records.id` SQL. P202 proof uses a current-schema verifier over the committed SSE/DB state.
