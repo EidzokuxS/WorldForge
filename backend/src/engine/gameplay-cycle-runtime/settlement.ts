@@ -813,9 +813,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, "travel_beat", `Travel beat: ${travelBeat}`, travelBeat),
-          fact(evidenceId, 2, "destination_label", `Destination label: ${location}.`),
-          fact(evidenceId, 3, "elapsed_travel_time", `Elapsed travel time: ${travelDuration}.`),
-          fact(evidenceId, 4, "current_place_after_movement", `Current place after movement: ${location}.`),
+          fact(evidenceId, 2, "destination_label", `Destination label: ${location}.`, location),
+          fact(evidenceId, 3, "elapsed_travel_time", `Elapsed travel time: ${travelDuration}.`, travelDuration),
+          fact(evidenceId, 4, "current_place_after_movement", `Current place after movement: ${location}.`, location),
         ],
         limits: {
           proves: ["player location change", "elapsed travel time", "movement result phrasing for the player"],
@@ -1171,12 +1171,12 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         backendFacts: [
           fact(evidenceId, 1, "custody_change", `Custody change: ${custodyChangeText}`, custodyChangeText),
           fact(evidenceId, 2, "settled_custody", `Settled custody: ${settledCustodyText}`, settledCustodyText),
-          fact(evidenceId, 3, "item_label", `Item label: ${itemTransfer.itemLabel}.`),
-          fact(evidenceId, 4, "source_label", `Source: ${itemTransfer.sourceLabel}.`),
-          fact(evidenceId, 5, "target_label", `Target: ${itemTransfer.targetLabel}.`),
-          fact(evidenceId, 6, "final_equip_state", `Final equip state: ${itemTransfer.finalEquipState}.`),
-          fact(evidenceId, 7, "current_scene_anchor", `Current scene anchor: ${itemTransfer.anchorSceneLabel}.`),
-          fact(evidenceId, 8, "item_transfer_result", `Item transfer result: ${itemTransfer.resultKind}.`),
+          fact(evidenceId, 3, "item_label", `Item label: ${itemTransfer.itemLabel}.`, itemTransfer.itemLabel),
+          fact(evidenceId, 4, "source_label", `Source: ${itemTransfer.sourceLabel}.`, itemTransfer.sourceLabel),
+          fact(evidenceId, 5, "target_label", `Target: ${itemTransfer.targetLabel}.`, itemTransfer.targetLabel),
+          fact(evidenceId, 6, "final_equip_state", `Final equip state: ${itemTransfer.finalEquipState}.`, itemTransfer.finalEquipState),
+          fact(evidenceId, 7, "current_scene_anchor", `Current scene anchor: ${itemTransfer.anchorSceneLabel}.`, itemTransfer.anchorSceneLabel),
+          fact(evidenceId, 8, "item_transfer_result", `Item transfer result: ${itemTransfer.resultKind}.`, itemTransfer.resultKind),
         ],
         limits: {
           proves: [

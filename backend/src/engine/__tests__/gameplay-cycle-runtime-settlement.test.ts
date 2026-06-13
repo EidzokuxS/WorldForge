@@ -838,6 +838,12 @@ describe("clean Stage 5 settlement contracts", () => {
       "elapsed_travel_time",
       "current_place_after_movement",
     ]);
+    expect(movement?.backendFacts.map((entry) => entry.value)).toEqual([
+      "After 1 minute, you reach North Hall.",
+      "North Hall",
+      "1 minute",
+      "North Hall",
+    ]);
     expect(movement?.limits.proves).toContain("movement result phrasing for the player");
     expect(JSON.stringify(view)).not.toContain("player-1");
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
@@ -1291,6 +1297,16 @@ describe("clean Stage 5 settlement contracts", () => {
       "Final equip state: carried.",
       "Current scene anchor: Market.",
       "Item transfer result: transferred_to_actor.",
+    ]);
+    expect(itemState?.backendFacts.map((entry) => entry.value)).toEqual([
+      "Brass Tube passes from Player to Guide at Market.",
+      "Brass Tube is carried by Guide at Market.",
+      "Brass Tube",
+      "Player",
+      "Guide",
+      "carried",
+      "Market",
+      "transferred_to_actor",
     ]);
     expect(itemState?.limits.doesNotProve).toEqual(expect.arrayContaining([
       "item discovery",

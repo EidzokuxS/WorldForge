@@ -48,9 +48,9 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
       text: "After 1 minute, you reach North Hall.",
       backendFacts: [
         { factRef: "e1.f1", role: "travel_beat", value: "After 1 minute, you reach North Hall.", text: "Travel beat: After 1 minute, you reach North Hall.", exact: true },
-        { factRef: "e1.f2", text: "Destination label: North Hall.", exact: true },
-        { factRef: "e1.f3", text: "Elapsed travel time: 1 minute.", exact: true },
-        { factRef: "e1.f4", text: "Current place after movement: North Hall.", exact: true },
+        { factRef: "e1.f2", role: "destination_label", value: "North Hall", text: "Destination label: North Hall.", exact: true },
+        { factRef: "e1.f3", role: "elapsed_travel_time", value: "1 minute", text: "Elapsed travel time: 1 minute.", exact: true },
+        { factRef: "e1.f4", role: "current_place_after_movement", value: "North Hall", text: "Current place after movement: North Hall.", exact: true },
       ],
       limits: {
         proves: ["player location change", "elapsed travel time", "movement result phrasing for the player"],
@@ -736,12 +736,12 @@ function itemStateView(): CleanNarratorView {
       backendFacts: [
         { factRef: "e1.f1", role: "custody_change", value: "Brass Tube passes from Player to Guide at Market.", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
         { factRef: "e1.f2", role: "settled_custody", value: "Brass Tube is carried by Guide at Market.", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
-        { factRef: "e1.f3", role: "item_label", text: "Item label: Brass Tube.", exact: true },
-        { factRef: "e1.f4", role: "source_label", text: "Source: Player.", exact: true },
-        { factRef: "e1.f5", role: "target_label", text: "Target: Guide.", exact: true },
-        { factRef: "e1.f6", role: "final_equip_state", text: "Final equip state: carried.", exact: true },
-        { factRef: "e1.f7", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f8", role: "item_transfer_result", text: "Item transfer result: transferred_to_actor.", exact: true },
+        { factRef: "e1.f3", role: "item_label", value: "Brass Tube", text: "Item label: Brass Tube.", exact: true },
+        { factRef: "e1.f4", role: "source_label", value: "Player", text: "Source: Player.", exact: true },
+        { factRef: "e1.f5", role: "target_label", value: "Guide", text: "Target: Guide.", exact: true },
+        { factRef: "e1.f6", role: "final_equip_state", value: "carried", text: "Final equip state: carried.", exact: true },
+        { factRef: "e1.f7", role: "current_scene_anchor", value: "Market", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f8", role: "item_transfer_result", value: "transferred_to_actor", text: "Item transfer result: transferred_to_actor.", exact: true },
       ],
       limits: {
         proves: [
@@ -1258,6 +1258,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.language).toBe("en");
     expect(promptInput.languageSource).toBe("derived_from_player_action_without_prompting_raw_action");
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
+    expect(promptInput.acceptedEvidence[0]?.backendFacts.map((fact) => fact.text)).toEqual([
+      "After 1 minute, you reach North Hall.",
+      "North Hall",
+      "1 minute",
+      "North Hall",
+    ]);
     expect(promptInput.storyFrame.version).toBe("gameplay-runtime.clean-narrator-story-frame.v1");
     expect(promptInput.storyFrame.source).toBe("derived_from_prompt_accepted_evidence");
     expect(promptInput.storyFrame.pagePlan.version).toBe("gameplay-runtime.clean-narrator-page-plan.v1");
@@ -1408,11 +1414,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(facts.map((fact) => fact.text)).toEqual([
       "Brass Tube passes from Player to Guide at Market.",
       "Brass Tube is carried by Guide at Market.",
-      "Item label: Brass Tube.",
-      "Source: Player.",
-      "Target: Guide.",
-      "Final equip state: carried.",
+      "Brass Tube",
+      "Player",
+      "Guide",
+      "carried",
     ]);
+    expect(facts.map((fact) => fact.text).join("\n")).not.toContain("Item label:");
     expect(facts[0]).toMatchObject({
       factRef: "e1.f1",
       role: "custody_change",
@@ -1449,10 +1456,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(facts.map((fact) => fact.text)).toEqual([
       "Brass Tube passes from Player to Guide at Market.",
       "Brass Tube is carried by Guide at Market.",
-      "Opaque accepted fact 3.",
-      "Opaque accepted fact 4.",
-      "Opaque accepted fact 5.",
-      "Opaque accepted fact 6.",
+      "Brass Tube",
+      "Player",
+      "Guide",
+      "carried",
     ]);
   });
 
