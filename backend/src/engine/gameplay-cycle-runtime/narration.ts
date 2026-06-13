@@ -244,17 +244,16 @@ function localObservationRequiresDeterministicProjection(
 ): boolean {
   if (!evidence.claimKinds.includes("local_observation") || hasSceneTexture) return false;
   if (evidence.claimKinds.includes("bounded_visibility_negative")) return true;
-  if (evidence.backendFacts.some((entry) => entry.text.startsWith("Current route options include:"))) return true;
+  if (factValue(evidence, "Searched visible surfaces: ") === "route options") return true;
   const hasPositiveVisibleClaim = evidence.claimKinds.some((claimKind) =>
     claimKind === "visible_actor"
     || claimKind === "visible_fact"
     || claimKind === "visible_target"
   );
-  const hasPositiveVisibleFact = evidence.backendFacts.some((entry) =>
-    entry.text.startsWith("Current visible match:")
-    || /^Observed (?!route option\b)/u.test(entry.text)
-  );
-  return !(hasPositiveVisibleClaim && hasPositiveVisibleFact);
+  const hasPositiveVisibleStoryFacts = factValue(evidence, "Local observation beat: ") !== null
+    && factValue(evidence, "Observed entry labels: ") !== null
+    && factValue(evidence, "Observed entry surfaces: ") !== null;
+  return !(hasPositiveVisibleClaim && hasPositiveVisibleStoryFacts);
 }
 
 function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
@@ -341,8 +340,17 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
   if (evidence.claimKinds.includes("local_observation")) {
+    const localObservationPrefixes = [
+      "Local observation beat: ",
+      "Searched visible surfaces: ",
+      "Observation query: ",
+      "Observed entry labels: ",
+      "Observed entry surfaces: ",
+      "Anchor scene: ",
+      "Anchor location: ",
+    ];
     const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Current visible match:|Current route options include:|Observed |Current visible .+ show no match)/u.test(fact.text)
+      localObservationPrefixes.some((prefix) => fact.text.startsWith(prefix))
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
@@ -365,8 +373,17 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
   if (evidence.claimKinds.includes("device_surface_observation")) {
+    const deviceSurfacePrefixes = [
+      "Device surface beat: ",
+      "Device label: ",
+      "Requested surface facets: ",
+      "Observed device facets: ",
+      "Unavailable surface facets: ",
+      "Anchor scene: ",
+      "Anchor location: ",
+    ];
     const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Device:|Requested surface facets:|Current visible device surface|Modeled public device surface)/u.test(fact.text)
+      deviceSurfacePrefixes.some((prefix) => fact.text.startsWith(prefix))
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
@@ -383,6 +400,8 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   assertRouteOptionsReceiptStoryEvidence(evidence);
   assertSceneFrameRouteStoryEvidence(evidence);
   assertSceneObservationStoryEvidence(evidence);
+  assertLocalObservationStoryEvidence(evidence);
+  assertDeviceSurfaceStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
@@ -1899,6 +1918,20 @@ function assertSceneObservationStoryEvidence(evidence: AcceptedNarrationEvidence
   }
 }
 
+function assertLocalObservationStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "local_observation_receipt") return;
+  if (!factValue(evidence, "Local observation beat: ")) {
+    throw new Error("Local-observation prompt input requires accepted Local observation beat evidence.");
+  }
+}
+
+function assertDeviceSurfaceStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "device_surface_observation_receipt") return;
+  if (!factValue(evidence, "Device surface beat: ")) {
+    throw new Error("Device-surface prompt input requires accepted Device surface beat evidence.");
+  }
+}
+
 function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string) => boolean): string | null {
   return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
 }
@@ -2043,50 +2076,21 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
 }
 
 function renderDeviceSurfaceProjection(evidence: AcceptedNarrationEvidence): string {
-  const summary = evidence.backendFacts[0]?.text ?? evidence.text;
-  const device = factValue(evidence, "Device: ");
-  if (!device) return summary;
-  const unavailable = evidence.backendFacts.find((entry) =>
-    entry.text.startsWith("Current visible device surface exposes no requested ")
+  const beat = requireFactValue(
+    evidence,
+    "Device surface beat: ",
+    "Device-surface projection requires accepted Device surface beat evidence.",
   );
-  if (unavailable) {
-    const facet = unavailable.text
-      .replace(/^Current visible device surface exposes no requested /u, "")
-      .replace(new RegExp(`\\s+for\\s+${device.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.$`, "u"), "");
-    return `${device}'s visible surface shows no requested ${facet}.`;
-  }
-  const facetFacts = evidence.backendFacts.filter((entry) =>
-    !entry.text.startsWith("Device: ")
-    && !entry.text.startsWith("Requested surface facets: ")
-    && entry.text !== summary
-  );
-  return facetFacts.length > 0
-    ? `${device}: ${facetFacts.map((entry) => trimSentencePeriod(entry.text)).join("; ")}.`
-    : summary;
+  return `${beat}.`;
 }
 
 function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): string {
-  const summary = evidence.backendFacts[0]?.text ?? evidence.text;
-  if (evidence.claimKinds.includes("bounded_visibility_negative")) {
-    return summary.replace(/^Current visible /u, "The visible ");
-  }
-  const routeSummary = summary.startsWith("Current route options include:")
-    ? trimSentencePeriod(summary.replace(/^Current route options include:\s*/u, ""))
-    : null;
-  const observed = evidence.backendFacts
-    .filter((entry) => entry.text.startsWith("Observed "))
-    .map((entry) =>
-      trimSentencePeriod(entry.text.replace(/^Observed\s+/u, ""))
-        .replace(/^visible\s+(actor|target|item|route|device)\s+/u, "")
-        .replace(/^route option\s+/u, "")
-    );
-  if (observed.length > 0) {
-    if (routeSummary) {
-      return `The visible ways here lead to ${routeSummary}. ${englishList(observed)} ${observed.length === 1 ? "is" : "are"} in that visible set.`;
-    }
-    return `${englishList(observed)} ${observed.length === 1 ? "is" : "are"} in view here.`;
-  }
-  return summary;
+  const beat = requireFactValue(
+    evidence,
+    "Local observation beat: ",
+    "Local-observation projection requires accepted Local observation beat evidence.",
+  );
+  return `${beat}.`;
 }
 
 function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidence): string {
@@ -2239,13 +2243,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("local_observation")
   );
   if (localObservation) {
-    const narratableFacts = localObservation.backendFacts.filter((entry) =>
-      !entry.text.startsWith("Checked current ")
-    );
-    return renderLocalObservationProjection({
-      ...localObservation,
-      backendFacts: narratableFacts.length > 0 ? narratableFacts : localObservation.backendFacts,
-    });
+    return renderLocalObservationProjection(localObservation);
   }
 
   const observation = view.acceptedEvidence.find((evidence) =>

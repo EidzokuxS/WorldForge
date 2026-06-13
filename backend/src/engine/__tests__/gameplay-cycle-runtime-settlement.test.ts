@@ -1213,9 +1213,13 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
+    expect(observation?.text).toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
-      "Checked current visible actors and visible targets.",
+      "Local observation beat: The visible actors and visible targets show no match for \"Violet Astrolabe\".",
+      "Searched visible surfaces: visible actors and visible targets.",
+      "Observation query: Violet Astrolabe.",
+      "Anchor scene: Market.",
+      "Anchor location: Market.",
     ]);
     expect(observation?.limits.proves).toEqual([
       "bounded no-match against enumerated current visible entries",
@@ -1243,6 +1247,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Upper Dam Ruins",
     ];
     const routeSummary = `Current route options include: ${routeLabels.join(", ")}.`;
+    const routeBeat = `The visible route choices here are ${routeLabels.join(", ")}.`;
     const inputFrame = frame({
       playerAction: "I look around for visible routes and local targets.",
       targets: [],
@@ -1284,15 +1289,15 @@ describe("clean Stage 5 settlement contracts", () => {
     });
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.text).toBe(routeBeat);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      routeSummary,
-      "Checked current route options.",
-      "Observed route option North Hall.",
-      "Observed route option East Gate.",
-      "Observed route option South Dock.",
-      "Observed route option West Yard.",
-      "Observed route option Bell Tower.",
-      "Observed route option Lantern Row.",
+      `Local observation beat: ${routeBeat}`,
+      "Searched visible surfaces: route options.",
+      "Observation query: visible routes and local targets.",
+      "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.",
+      "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.",
+      "Anchor scene: Market.",
+      "Anchor location: Market.",
     ]);
     expect(observation?.backendFacts[0]?.text).toContain("The Copper Tap");
     expect(observation?.backendFacts[0]?.text).toContain("Upper Dam Ruins");
@@ -1324,11 +1329,14 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const deviceSurface = packet.acceptedEvidence.find((entry) => entry.authority === "device_surface_observation_receipt");
     expect(deviceSurface?.claimKinds).toEqual(["device_surface_observation", "device_surface_unavailable"]);
+    expect(deviceSurface?.text).toBe("Burner phone's visible surface shows no requested message indicator.");
     expect(deviceSurface?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Current visible device surface for Burner phone exposes no requested message indicator.",
-      "Device: Burner phone.",
+      "Device surface beat: Burner phone's visible surface shows no requested message indicator.",
+      "Device label: Burner phone.",
       "Requested surface facets: message indicator.",
-      "Current visible device surface exposes no requested message indicator for Burner phone.",
+      "Unavailable surface facets: message indicator.",
+      "Anchor scene: Market.",
+      "Anchor location: Market.",
     ]);
     expect(deviceSurface?.limits.proves).toEqual([
       "bounded current visible device surface result for requested facets",

@@ -879,10 +879,13 @@ function localObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "local_observation_receipt",
       claimKinds: ["local_observation", "bounded_visibility_negative"],
-      text: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
+      text: "The visible actors and visible targets show no match for \"Violet Astrolabe\".",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".", exact: true },
-        { factRef: "e1.f2", text: "Checked current visible actors and visible targets.", exact: true },
+        { factRef: "e1.f1", text: "Local observation beat: The visible actors and visible targets show no match for \"Violet Astrolabe\".", exact: true },
+        { factRef: "e1.f2", text: "Searched visible surfaces: visible actors and visible targets.", exact: true },
+        { factRef: "e1.f3", text: "Observation query: Violet Astrolabe.", exact: true },
+        { factRef: "e1.f4", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f5", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["bounded no-match against enumerated current visible entries"],
@@ -914,11 +917,15 @@ function positiveLocalObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "local_observation_receipt",
       claimKinds: ["local_observation", "visible_target"],
-      text: "Current visible match: visible target central telegraph desk.",
+      text: "central telegraph desk is in view here.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current visible match: visible target central telegraph desk.", exact: true },
-        { factRef: "e1.f2", text: "Checked current visible targets.", exact: true },
-        { factRef: "e1.f3", text: "Observed visible target central telegraph desk.", exact: true },
+        { factRef: "e1.f1", text: "Local observation beat: central telegraph desk is in view here.", exact: true },
+        { factRef: "e1.f2", text: "Searched visible surfaces: visible targets.", exact: true },
+        { factRef: "e1.f3", text: "Observation query: central telegraph desk.", exact: true },
+        { factRef: "e1.f4", text: "Observed entry labels: central telegraph desk.", exact: true },
+        { factRef: "e1.f5", text: "Observed entry surfaces: visible target central telegraph desk.", exact: true },
+        { factRef: "e1.f6", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f7", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["matching current visible entries"],
@@ -996,12 +1003,14 @@ function deviceSurfaceObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "device_surface_observation_receipt",
       claimKinds: ["device_surface_observation", "device_surface_unavailable"],
-      text: "Current visible device surface for Burner phone exposes no requested message indicator.",
+      text: "Burner phone's visible surface shows no requested message indicator.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Current visible device surface for Burner phone exposes no requested message indicator.", exact: true },
-        { factRef: "e1.f2", text: "Device: Burner phone.", exact: true },
+        { factRef: "e1.f1", text: "Device surface beat: Burner phone's visible surface shows no requested message indicator.", exact: true },
+        { factRef: "e1.f2", text: "Device label: Burner phone.", exact: true },
         { factRef: "e1.f3", text: "Requested surface facets: message indicator.", exact: true },
-        { factRef: "e1.f4", text: "Current visible device surface exposes no requested message indicator for Burner phone.", exact: true },
+        { factRef: "e1.f4", text: "Unavailable surface facets: message indicator.", exact: true },
+        { factRef: "e1.f5", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f6", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: [
@@ -1603,6 +1612,42 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
       .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
+  });
+
+  it("fails local_observation receipt handling when accepted story evidence is missing", () => {
+    const oldFactView = localObservationView();
+    oldFactView.acceptedEvidence[0] = {
+      ...oldFactView.acceptedEvidence[0]!,
+      text: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current visible actors and visible targets show no match for \"Violet Astrolabe\".", exact: true },
+        { factRef: "e1.f2", text: "Checked current visible actors and visible targets.", exact: true },
+      ],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Local-observation prompt input requires accepted Local observation beat evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Local-observation projection requires accepted Local observation beat evidence.");
+  });
+
+  it("fails device_surface_observation receipt handling when accepted story evidence is missing", () => {
+    const oldFactView = deviceSurfaceObservationView();
+    oldFactView.acceptedEvidence[0] = {
+      ...oldFactView.acceptedEvidence[0]!,
+      text: "Current visible device surface for Burner phone exposes no requested message indicator.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current visible device surface for Burner phone exposes no requested message indicator.", exact: true },
+        { factRef: "e1.f2", text: "Device: Burner phone.", exact: true },
+        { factRef: "e1.f3", text: "Requested surface facets: message indicator.", exact: true },
+        { factRef: "e1.f4", text: "Current visible device surface exposes no requested message indicator for Burner phone.", exact: true },
+      ],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Device-surface prompt input requires accepted Device surface beat evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Device-surface projection requires accepted Device surface beat evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -3272,7 +3317,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => acceptedCandidate(view, [{
         text: "The central telegraph desk is in view here.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -3288,7 +3333,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "You stand in Market and scan the central telegraph desk.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -3303,7 +3348,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "The Lowwater Bazaar stretches around you, its current scene and place. Among the visible actors here, a Guide stands present.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -3344,7 +3389,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "The central telegraph desk is in view here.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f3"],
+          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
           claimKinds: ["local_observation", "visible_target"],
         },
       ]),
@@ -3366,7 +3411,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "The central telegraph desk is in view here.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f3"],
+          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
           claimKinds: ["local_observation", "visible_target"],
         },
       ]),
@@ -3382,7 +3427,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "The central telegraph desk is in view here.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -3393,7 +3438,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Market stalls surround you while central telegraph desk is in view here.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -3408,7 +3453,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Market stalls surround you while the central telegraph desk is in view here.",
         evidenceRefs: ["e1", "e2"],
-        backendFactRefs: ["e1.f1", "e1.f3", "e2.f1"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5", "e2.f1"],
         claimKinds: ["local_observation", "visible_target", "scene_texture"],
       }]),
     });
@@ -3420,17 +3465,21 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("deterministically projects local_observation movement options without hidden placeholders", async () => {
-    const routeSummary = "Current route options include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
+    const routeBeat = "The visible route choices here are North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
     const view = movementView({
       acceptedEvidence: [{
         ref: "e1",
         authority: "local_observation_receipt",
         claimKinds: ["local_observation"],
-        text: routeSummary,
+        text: routeBeat,
         backendFacts: [
-          { factRef: "e1.f1", text: routeSummary, exact: true },
-          { factRef: "e1.f2", text: "Checked current route options.", exact: true },
-          { factRef: "e1.f3", text: "Observed route option North Hall.", exact: true },
+          { factRef: "e1.f1", text: `Local observation beat: ${routeBeat}`, exact: true },
+          { factRef: "e1.f2", text: "Searched visible surfaces: route options.", exact: true },
+          { factRef: "e1.f3", text: "Observation query: visible routes and local targets.", exact: true },
+          { factRef: "e1.f4", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },
+          { factRef: "e1.f5", text: "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.", exact: true },
+          { factRef: "e1.f6", text: "Anchor scene: Market.", exact: true },
+          { factRef: "e1.f7", text: "Anchor location: Market.", exact: true },
         ],
         limits: {
           proves: ["matching exposed current SceneFrame observation surface entries"],
@@ -3447,7 +3496,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("The visible ways here lead to North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. North Hall is in that visible set.");
+    expect(result.text).toBe("The visible route choices here are North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
@@ -3609,7 +3658,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => acceptedCandidate(view, [{
         text: "The Burner phone gives back no requested message indicator on its visible surface.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
@@ -3625,7 +3674,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
         text: "Burner phone's visible surface shows no requested message indicator.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
@@ -3652,7 +3701,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Burner phone shows no requested message indicator on its visible surface.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
           claimKinds: ["device_surface_observation", "device_surface_unavailable"],
         },
       ]),
@@ -3670,7 +3719,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Burner phone shows no requested message indicator on its visible surface.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
@@ -3692,7 +3741,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Burner phone shows no requested message indicator on its visible surface.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
           claimKinds: ["device_surface_observation", "device_surface_unavailable"],
         },
       ]),
@@ -3718,7 +3767,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "The Burner phone screen shows no signal indicator, no message indicator, and no call indicator lit on its current surface.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
           claimKinds: ["device_surface_observation", "device_surface_unavailable"],
         },
       ]),
@@ -3924,7 +3973,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(positiveLocalObservationView(), [{
         text: "central telegraph desk is visible here.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f3"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });

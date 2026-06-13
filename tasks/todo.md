@@ -6509,3 +6509,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Stage 5 scene-beat evidence now emits `Scene beat: ...` so scene-beat projection has its own positive story fact.
     - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 88 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because changed hunks mapped to the public `runCleanNarration` entry flow; context review traced the edited runtime boundary to `renderCleanAuthorityProjection`, covered by the focused checks above.
+
+- P225 Stage 6 local/device observation story evidence:
+  - Plan:
+    - [x] Run GitNexus impact before editing local/device settlement and projection symbols.
+    - [x] Replace `local_observation` deterministic projection parsing with accepted `Local observation beat` story facts derived from `publicResult.localObservation`.
+    - [x] Replace `device_surface_observation` deterministic projection parsing with accepted `Device surface beat` story facts derived from `publicResult.deviceSurfaceObservation`.
+    - [x] Make prompt input and deterministic projection fail when accepted local/device story facts are missing.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, and GitNexus detect.
+    - [ ] Commit/push and refresh index.
+  - Review:
+    - [x] `local_observation_receipt` accepted evidence now emits `Local observation beat`, searched surfaces, query, observed labels/surfaces, and anchor facts; deterministic projection requires the beat.
+    - [x] `device_surface_observation_receipt` accepted evidence now emits `Device surface beat`, device label, requested/observed/unavailable facet facts, and anchor facts; deterministic projection requires the beat.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 90 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported HIGH because changed hunks map to `runCleanNarration` / `renderCleanAuthorityProjection`; context review traced the edited boundary to prompt evidence limiting and deterministic projection, covered by the focused checks above.

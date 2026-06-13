@@ -266,12 +266,50 @@ function localObservationSurfaceEntryLabel(entry: { surfaceKind: string; label: 
   return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
 }
 
+function localObservationSurfaceEntryLabels(entries: readonly { surfaceKind: string; label: string }[]): string[] {
+  return entries.map(localObservationSurfaceEntryLabel);
+}
+
+function evidenceEnglishList(labels: readonly string[]): string {
+  const values = uniqueStrings(labels);
+  if (values.length === 0) return "Nothing";
+  if (values.length === 1) return values[0]!;
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
 function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
   const labels = uniqueStrings(kinds.map(localObservationSurfaceKindPluralLabel));
   if (labels.length === 0) return "current visible entries";
   if (labels.length === 1) return labels[0]!;
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function localObservationStoryBeat(observation: {
+  resultKind: string;
+  queryText: string;
+  matchedEntries: readonly { surfaceKind: string; label: string }[];
+  searchedSurfaceKinds: readonly string[];
+}): string {
+  const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
+  if (observation.resultKind === "bounded_no_match") {
+    return `The ${surfaceGroup} show no match for "${observation.queryText}".`;
+  }
+  if (observation.matchedEntries.length === 0) {
+    throw new Error("Local observation story evidence requires matched entries for non-negative results.");
+  }
+  const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
+  if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
+    return `The visible route choices here are ${evidenceLabelList(labels)}.`;
+  }
+  if (observation.resultKind === "positive_list") {
+    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in the current visible set.`;
+  }
+  if (observation.resultKind === "ambiguous_match") {
+    return `Current visible matches are ${evidenceLabelList(localObservationSurfaceEntryLabels(observation.matchedEntries))}.`;
+  }
+  return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in view here.`;
 }
 
 function deviceFacetKindLabel(kind: string): string {
@@ -293,6 +331,25 @@ function deviceFacetKindListLabel(kinds: readonly string[]): string {
   if (labels.length === 1) return labels[0]!;
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function deviceSurfaceStoryBeat(observation: {
+  deviceLabel: string;
+  observedFacets: readonly { displayLabel: string; valueText: string }[];
+  unavailableFacetKinds: readonly string[];
+}): string {
+  if (observation.observedFacets.length === 0 && observation.unavailableFacetKinds.length === 0) {
+    throw new Error("Device surface story evidence requires observed or unavailable requested facets.");
+  }
+  if (observation.observedFacets.length === 0) {
+    return `${observation.deviceLabel}'s visible surface shows no requested ${deviceFacetKindListLabel(observation.unavailableFacetKinds)}.`;
+  }
+  const observed = observation.observedFacets
+    .map((facet) => `${trimTrailingSentencePunctuation(facet.displayLabel)}: ${trimTrailingSentencePunctuation(facet.valueText)}`);
+  const unavailable = observation.unavailableFacetKinds.length > 0
+    ? ` Unavailable requested surface facets: ${deviceFacetKindListLabel(observation.unavailableFacetKinds)}.`
+    : "";
+  return `${observation.deviceLabel}: ${evidenceSemicolonList(observed)}.${unavailable}`;
 }
 
 const DEVICE_SURFACE_OBSERVATION_DOES_NOT_PROVE = [
@@ -810,27 +867,39 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const evidenceId = nextEvidenceId(evidence);
       const observation = receipt.publicResult.localObservation;
       const boundedNegative = observation.resultKind === "bounded_no_match";
+      const localBeat = localObservationStoryBeat(observation);
+      const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
+      const observedLabels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
+      const observedSurfaceLabels = localObservationSurfaceEntryLabels(observation.matchedEntries);
       const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
         ? ["local_observation", "bounded_visibility_negative"]
         : observation.resultKind === "positive_list"
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
-      const matchFacts = observation.matchedEntries.slice(0, 6).map((entry, index) =>
-        fact(evidenceId, index + 3, `Observed ${localObservationSurfaceEntryLabel(entry)}.`)
-      );
+      const backendFactTexts = [
+        `Local observation beat: ${localBeat}`,
+        `Searched visible surfaces: ${surfaceGroup}.`,
+        `Observation query: ${observation.queryText}.`,
+        observedLabels.length > 0
+          ? `Observed entry labels: ${evidenceSemicolonList(observedLabels)}.`
+          : null,
+        observedSurfaceLabels.length > 0
+          ? `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.`
+          : null,
+        `Anchor scene: ${observation.anchorSceneLabel}.`,
+        `Anchor location: ${observation.anchorLocationLabel}.`,
+      ].filter((text): text is string => text !== null);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "local_observation_receipt",
         claimKinds,
-        text: observation.summary,
+        text: localBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [
-          fact(evidenceId, 1, observation.summary),
-          fact(evidenceId, 2, `Checked current ${localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds)}.`),
-          ...matchFacts,
-        ],
+        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
+          fact(evidenceId, index + 1, text)
+        )),
         limits: {
           proves: boundedNegative
             ? ["bounded no-match against enumerated current visible entries"]
@@ -847,29 +916,35 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const claimKinds: CleanSettledEvidence["claimKinds"] = noSurface
         ? ["device_surface_observation", "device_surface_unavailable"]
         : ["device_surface_observation"];
-      const facetFacts = observation.observedFacets.slice(0, 5).map((facet, index) =>
-        fact(evidenceId, index + 4, `${facet.displayLabel}: ${facet.valueText}.`)
-      );
+      const deviceBeat = deviceSurfaceStoryBeat(observation);
       const requestedFacetText = deviceFacetKindListLabel(observation.requestedFacetKinds);
       const unavailableFacetText = deviceFacetKindListLabel(observation.unavailableFacetKinds);
-      const unavailableFacts = observation.unavailableFacetKinds.length > 0
-        ? [fact(evidenceId, facetFacts.length + 4, `Current visible device surface exposes no requested ${unavailableFacetText} for ${observation.deviceLabel}.`)]
-        : [];
+      const observedFacetFacts = observation.observedFacets.slice(0, 5)
+        .map((facet) => `${trimTrailingSentencePunctuation(facet.displayLabel)}: ${trimTrailingSentencePunctuation(facet.valueText)}`);
+      const backendFactTexts = [
+        `Device surface beat: ${deviceBeat}`,
+        `Device label: ${observation.deviceLabel}.`,
+        `Requested surface facets: ${requestedFacetText}.`,
+        observedFacetFacts.length > 0
+          ? `Observed device facets: ${evidenceSemicolonList(observedFacetFacts)}.`
+          : null,
+        observation.unavailableFacetKinds.length > 0
+          ? `Unavailable surface facets: ${unavailableFacetText}.`
+          : null,
+        `Anchor scene: ${observation.anchorSceneLabel}.`,
+        `Anchor location: ${observation.anchorLocationLabel}.`,
+      ].filter((text): text is string => text !== null);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "device_surface_observation_receipt",
         claimKinds,
-        text: observation.summary,
+        text: deviceBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts([
-          fact(evidenceId, 1, observation.summary),
-          fact(evidenceId, 2, `Device: ${observation.deviceLabel}.`),
-          fact(evidenceId, 3, `Requested surface facets: ${requestedFacetText}.`),
-          ...facetFacts,
-          ...unavailableFacts,
-        ]),
+        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
+          fact(evidenceId, index + 1, text)
+        )),
         limits: {
           proves: noSurface
             ? ["bounded current visible device surface result for requested facets", "requested device label"]
