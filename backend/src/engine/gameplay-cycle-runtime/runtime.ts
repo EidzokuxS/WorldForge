@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 
 import type { ProviderConfig } from "../../ai/provider-registry.js";
-import { getChatHistory, readCampaignConfig } from "../../campaign/index.js";
+import { getChatHistory } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { worldClocks } from "../../db/schema.js";
 import { buildAuthoritativeSceneFrame } from "./frame.js";
@@ -147,27 +147,30 @@ function providerSummary(provider: ProviderConfig): GameplayRuntimeProviderSumma
 }
 
 function readExistingWorldClock(campaignId: string): {
+  currentTick: number;
   worldVersion: number;
   worldTimeMinutes: number;
 } {
   const row = getDb()
     .select({
+      currentTick: worldClocks.currentTick,
       worldVersion: worldClocks.worldVersion,
       worldTimeMinutes: worldClocks.worldTimeMinutes,
     })
     .from(worldClocks)
     .where(eq(worldClocks.campaignId, campaignId))
     .get();
-  return {
-    worldVersion: row?.worldVersion ?? 0,
-    worldTimeMinutes: row?.worldTimeMinutes ?? 0,
-  };
+  if (!row) {
+    throw new CleanGameplayRuntimeInvariantError(
+      `Clean gameplay runtime requires an authoritative world clock row for campaign ${campaignId}.`,
+    );
+  }
+  return row;
 }
 
 export function buildGameplayRuntimeTurnInput(
   options: CleanGameplayRuntimeOptions,
 ): GameplayRuntimeTurnInput {
-  const baseTick = readCampaignConfig(options.campaignId).currentTick ?? 0;
   const clock = readExistingWorldClock(options.campaignId);
   const source = options.quickActionSelection ? "quick_action" : "typed";
   const turnId = `clean-turn-${randomUUID()}`;
@@ -183,7 +186,7 @@ export function buildGameplayRuntimeTurnInput(
       quickActionSelection: options.quickActionSelection ?? undefined,
     },
     base: {
-      tick: baseTick,
+      tick: clock.currentTick,
       worldVersion: clock.worldVersion,
       worldTimeMinutes: clock.worldTimeMinutes,
       chatHistoryLengthBeforeTurn: getChatHistory(options.campaignId).length,
@@ -194,7 +197,7 @@ export function buildGameplayRuntimeTurnInput(
       storyteller: providerSummary(options.storytellerProvider),
       embedder: options.embedderProvider ? providerSummary(options.embedderProvider) : undefined,
     },
-    idempotencyKey: `${options.campaignId}:${baseTick}:${clock.worldVersion}:${turnId}`,
+    idempotencyKey: `${options.campaignId}:${clock.currentTick}:${clock.worldVersion}:${turnId}`,
   });
 }
 

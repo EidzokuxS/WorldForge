@@ -10,6 +10,7 @@ import { buildAuthoritativeSceneFrame } from "../gameplay-cycle-runtime/frame.js
 import {
   buildStage4DialogueRequestPrompt,
   buildStage4DialogueRequestSystemPrompt,
+  CleanStage4InvariantError,
   runCleanStage4Execution,
 } from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
@@ -1460,6 +1461,47 @@ describe("clean Stage 4 executor DB contracts", () => {
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
     expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("requires an authoritative world clock row before item_transfer execution", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    getSqliteConnection()
+      .prepare("DELETE FROM world_clocks WHERE campaign_id = ?")
+      .run(CAMPAIGN_ID);
+    const inputFrame = itemTransferFrame();
+
+    await expect(runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: itemTransferChecklist(inputFrame),
+    })).rejects.toThrow(CleanStage4InvariantError);
+
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube")).toEqual({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+    expect(getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM clean_gameplay_stage4_receipts WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ count: 0 });
+    expect(getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM authority_traces WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ count: 0 });
   });
 
   it("transfers a carried item to a visible current-scene actor through clean item_transfer authority", async () => {

@@ -1,7 +1,10 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { closeDb, connectDb, getSqliteConnection } from "../../db/index.js";
+import { runMigrations } from "../../db/migrate.js";
 import {
   type AuthoritativeSceneFrame,
   authoritativeSceneFrameSchema,
@@ -33,6 +36,7 @@ import {
   cleanStage4MinorPoiCreateEffectSchema,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
+  buildGameplayRuntimeTurnInput,
   CleanGameplayRuntimeInvariantError,
   type CleanGameplayRuntimeEvent,
   isCleanGameplayRuntimeEnabled,
@@ -1037,6 +1041,76 @@ function validTurnInput(): GameplayRuntimeTurnInput {
     idempotencyKey: "campaign-1:0:0:clean-turn-1",
   });
 }
+
+const runtimeClockCampaignId = "runtime-clock-campaign";
+
+function withRuntimeClockFixture(input: {
+  clock?: { tick: number; worldVersion: number; worldTimeMinutes: number };
+}, run: () => void): void {
+  const tempRoot = mkdtempSync(join(tmpdir(), "worldforge-clean-runtime-clock-"));
+  const previousCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
+  process.env.GSD_CAMPAIGNS_ROOT = tempRoot;
+  connectDb(join(tempRoot, "state.db"));
+  try {
+    runMigrations();
+    const campaignDir = join(tempRoot, runtimeClockCampaignId);
+    mkdirSync(campaignDir, { recursive: true });
+    writeFileSync(join(campaignDir, "chat_history.json"), "[]", "utf-8");
+    const now = Date.now();
+    getSqliteConnection()
+      .prepare("INSERT INTO campaigns (id, name, premise, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run(runtimeClockCampaignId, "Runtime clock campaign", "Clock authority fixture.", now, now);
+    if (input.clock) {
+      getSqliteConnection()
+        .prepare("INSERT INTO world_clocks (campaign_id, world_version, world_time_minutes, current_tick, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run(runtimeClockCampaignId, input.clock.worldVersion, input.clock.worldTimeMinutes, input.clock.tick, now);
+    }
+    run();
+  } finally {
+    closeDb();
+    if (previousCampaignRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;
+    else process.env.GSD_CAMPAIGNS_ROOT = previousCampaignRoot;
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+describe("gameplay-cycle-runtime authoritative clock boundary", () => {
+  it("builds turn input base from the required world_clocks row", () => {
+    withRuntimeClockFixture({
+      clock: { tick: 9, worldVersion: 7, worldTimeMinutes: 42 },
+    }, () => {
+      const turn = buildGameplayRuntimeTurnInput({
+        campaignId: runtimeClockCampaignId,
+        submittedPlayerAction: "I look around.",
+        normalizedPlayerAction: "I look around.",
+        judgeProvider: provider,
+        storytellerProvider: provider,
+        preTurnSnapshot: { bundleDir: "snapshot-dir", capturedAt: 1 },
+      });
+
+      expect(turn.base).toMatchObject({
+        tick: 9,
+        worldVersion: 7,
+        worldTimeMinutes: 42,
+        chatHistoryLengthBeforeTurn: 0,
+      });
+      expect(turn.idempotencyKey).toContain(`${runtimeClockCampaignId}:9:7:`);
+    });
+  });
+
+  it("requires a world_clocks row before building player-facing turn input", () => {
+    withRuntimeClockFixture({}, () => {
+      expect(() => buildGameplayRuntimeTurnInput({
+        campaignId: runtimeClockCampaignId,
+        submittedPlayerAction: "I look around.",
+        normalizedPlayerAction: "I look around.",
+        judgeProvider: provider,
+        storytellerProvider: provider,
+        preTurnSnapshot: { bundleDir: "snapshot-dir", capturedAt: 1 },
+      })).toThrow(CleanGameplayRuntimeInvariantError);
+    });
+  });
+});
 
 async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTurn>[0]) {
   const userMessageSha256 = "a".repeat(64);

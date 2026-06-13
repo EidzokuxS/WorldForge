@@ -79,6 +79,19 @@ type ClockRow = {
   current_tick: number;
 };
 
+export class CleanStage4InvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CleanStage4InvariantError";
+  }
+}
+
+function rethrowStage4Invariant(error: unknown): void {
+  if (error instanceof CleanStage4InvariantError) {
+    throw error;
+  }
+}
+
 type LocationRow = {
   id: string;
   name: string;
@@ -359,7 +372,12 @@ function readClock(campaignId: string): ClockRow {
       LIMIT 1
     `)
     .get(campaignId) as ClockRow | undefined;
-  return row ?? { world_version: 0, world_time_minutes: 0, current_tick: 0 };
+  if (!row) {
+    throw new CleanStage4InvariantError(
+      `Clean Stage 4 requires an authoritative world clock row for campaign ${campaignId}.`,
+    );
+  }
+  return row;
 }
 
 function publicPathLabels(locationIds: readonly string[], locations: readonly { id: string; name: string }[]): string[] {
@@ -4416,7 +4434,8 @@ async function executePlayerLocalConditionSet(input: {
 
     try {
       return transaction();
-    } catch {
+    } catch (error) {
+      rethrowStage4Invariant(error);
       const receipt = failReceipt({
         frame: input.frame,
         checklist: input.checklist,
@@ -4859,7 +4878,8 @@ async function executeItemTransfer(input: {
 
     try {
       return transaction();
-    } catch {
+    } catch (error) {
+      rethrowStage4Invariant(error);
       const receipt = failReceipt({
         frame: input.frame,
         checklist: input.checklist,
@@ -5174,7 +5194,8 @@ async function executeMinorPoiCreate(input: {
 
     try {
       return transaction();
-    } catch {
+    } catch (error) {
+      rethrowStage4Invariant(error);
       const receipt = failReceipt({
         frame: input.frame,
         checklist: input.checklist,

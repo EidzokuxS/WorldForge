@@ -5395,3 +5395,20 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Manual-chosen action after preflight inspection: `I hand the Brass Tube to Guide.`.
     - [x] SSE `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; world time/current tick stayed `0/0`; no turn clock ledger; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; settlement includes `item_transfer_receipt` accepted evidence with claim kind `item_state`; old stores all 0; narration is multi-token.
     - [x] DB verification artifact: `output/clean-runtime-p170-item-transfer-effect-contract-proof-20260613/db-verification.json` with all checks passing.
+
+- P171 clean gameplay runtime authoritative clock boundary:
+  - Plan:
+    - [x] Audit clean-runtime base/clock defaults and identify gameplay-time semantics created from missing DB rows.
+    - [x] Run GitNexus impact for `readExistingWorldClock`, `buildGameplayRuntimeTurnInput`, and `readClock`; `readClock` blast radius is CRITICAL because it feeds movement, route check, time advance, support actor, condition, item transfer, minor POI, and `runCleanStage4Execution`.
+    - [x] Patch runtime turn input to require a `world_clocks` row and read `tick/worldVersion/worldTimeMinutes` atomically from that row.
+    - [x] Patch Stage4 clock reads to require a `world_clocks` row before primitive execution.
+    - [x] Add focused runtime/Stage4 tests for missing-clock invariant and DB-clock base construction.
+    - [x] Run typecheck and focused clean-runtime tests (`287 passed`).
+    - [x] Run one fresh live `/api/chat/action` proof for the original Brass Tube handoff path.
+    - [ ] Run GitNexus detect, commit, push, and `npx gitnexus analyze --embeddings`.
+  - Live proof:
+    - [x] Artifact root: `output/clean-runtime-p171-authoritative-clock-proof-20260613/`.
+    - [x] Fresh zero-turn clone `p171-authoritative-clock-proof-20260613` from `p69-item-transfer-045651`; preflight had chat history 0, authoritative `world_clocks` row `0/0/0`, Player carrying `Brass Tube`, visible exact-scene `Guide`, clean runtime stores 0, and old v2/saga/narrator/oracle/simulation stores 0.
+    - [x] Manual-chosen action after preflight inspection: `I hand the Brass Tube to Guide.`.
+    - [x] SSE `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; world time/current tick stayed `0/0`; turn input base matched the authoritative preflight clock row; no turn clock ledger; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; settlement includes `item_transfer_receipt` accepted evidence with claim kind `item_state`; old stores all 0; narration is multi-token.
+    - [x] DB verification artifact: `output/clean-runtime-p171-authoritative-clock-proof-20260613/db-verification.json` with all checks passing.
