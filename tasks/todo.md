@@ -5388,7 +5388,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Add a Stage4 test proving a malformed equip request fails the Stage4 request invariant before mutation/receipt insertion instead of accepting a backend-invented equip slot.
     - [x] Run typecheck and focused clean-runtime tests (`284 passed`).
     - [x] Run one fresh live `/api/chat/action` proof for the original Brass Tube handoff path.
-    - [ ] Run GitNexus detect, commit, push, and `npx gitnexus analyze --embeddings`.
+    - [x] Run GitNexus detect, commit/push (`c0fbfbb9`), and `npx gitnexus analyze --embeddings` (exit 0 with recurring `.gitnexus/lbug` lock warnings).
   - Live proof:
     - [x] Artifact root: `output/clean-runtime-p170-item-transfer-effect-contract-proof-20260613/`.
     - [x] Fresh zero-turn clone `p170-item-transfer-effect-contract-proof-20260613` from `p69-item-transfer-045651`; preflight had chat history 0, clock `0/0/0`, Player carrying `Brass Tube`, visible exact-scene `Guide`, clean runtime stores 0, and old v2/saga/narrator/oracle/simulation stores 0.
