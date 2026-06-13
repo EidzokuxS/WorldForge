@@ -143,6 +143,11 @@ export function buildCleanNarrationSystemPrompt(): string {
     "World-truth source: acceptedEvidence[].backendFacts.",
     "raw player action is intentionally omitted; write the settled result described by accepted evidence.",
     "Stage authority: narration phrases accepted evidence into player-facing prose.",
+    "Style role: write compact, concrete fiction from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
+    "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
+    "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
+    "Shape pass: replace word-as-object phrasing, novelty tags, crowd-foil contrasts, bottled atmosphere, negation-as-description, either/or verdict menus, and cosmic abstractions with the accepted concrete fact.",
+    "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from acceptedEvidence.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -310,6 +315,267 @@ function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
   return view.language === "ru" || view.language === "mixed" ? "ru" : "en";
 }
 
+type AcceptedNarrationEvidence = CleanNarratorView["acceptedEvidence"][number];
+
+function trimSentencePeriod(value: string): string {
+  return normalizeText(value).replace(/\.$/u, "");
+}
+
+function factValue(evidence: AcceptedNarrationEvidence, prefix: string): string | null {
+  const fact = evidence.backendFacts.find((entry) => entry.text.startsWith(prefix));
+  if (!fact) return null;
+  return trimSentencePeriod(fact.text.slice(prefix.length));
+}
+
+function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string) => boolean): string | null {
+  return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
+}
+
+function englishList(values: readonly string[]): string {
+  const labels = uniqueStrings(values);
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0]!;
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function formatMinutes(value: string | null): string | null {
+  if (!value) return null;
+  return `${value} minute${value === "1" ? "" : "s"}`;
+}
+
+function stableVariant(seed: string, count: number): number {
+  if (count <= 1) return 0;
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash % count;
+}
+
+function renderMovementProjection(view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string | null {
+  const language = projectionLanguage(view);
+  const location = factValue(evidence, "Player location changed to ");
+  if (!location) return null;
+  const travelCost = factValue(evidence, "Travel cost: ")?.match(/^(\d+)\s+minute/u)?.[1] ?? null;
+  const minutes = formatMinutes(travelCost);
+  if (language === "ru") {
+    return minutes
+      ? `Через ${minutes} вы добираетесь до ${location}.`
+      : `Вы добираетесь до ${location}.`;
+  }
+
+  const variants = minutes
+    ? [
+      `After ${minutes}, you reach ${location}.`,
+      `The route brings you to ${location} in ${minutes}.`,
+      `You make it to ${location} after ${minutes}.`,
+    ]
+    : [
+      `You reach ${location}.`,
+      `The route brings you to ${location}.`,
+      `You make it to ${location}.`,
+    ];
+  return variants[stableVariant(`${view.turnId}:${location}`, variants.length)]!;
+}
+
+function parseRouteOptionFact(text: string): { label: string; connected: boolean; travelCost: string | null } | null {
+  const match = text.match(/^Route option:\s+(.+?)\s+\((connected|not connected)(?:,\s+(\d+)\s+minute\(s\))?\)\.$/u);
+  if (!match) return null;
+  return {
+    label: match[1]!,
+    connected: match[2] === "connected",
+    travelCost: match[3] ?? null,
+  };
+}
+
+function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): string {
+  const options = evidence.backendFacts
+    .map((entry) => parseRouteOptionFact(entry.text))
+    .filter((option): option is NonNullable<typeof option> => option !== null);
+  if (options.length === 0) return evidence.backendFacts.map((entry) => entry.text).join(" ");
+
+  const connected = options.filter((option) => option.connected);
+  const blocked = options.filter((option) => !option.connected);
+  const sentences: string[] = [];
+  if (connected.length > 0) {
+    const costs = uniqueStrings(connected.map((option) => option.travelCost ?? ""));
+    const routeLabels = englishList(connected.map((option) => option.label));
+    if (connected.length === 1) {
+      const minutes = formatMinutes(connected[0]!.travelCost);
+      sentences.push(minutes
+        ? `A visible route leads to ${routeLabels}; it takes ${minutes}.`
+        : `A visible route leads to ${routeLabels}.`);
+    } else if (costs.length === 1 && costs[0]) {
+      sentences.push(`Visible routes lead to ${routeLabels}; each takes ${formatMinutes(costs[0]!)!}.`);
+    } else {
+      sentences.push(`Visible routes lead to ${routeLabels}.`);
+    }
+  }
+  if (blocked.length > 0) {
+    sentences.push(`Closed visible routes: ${englishList(blocked.map((option) => option.label))}.`);
+  }
+  return sentences.join(" ");
+}
+
+function renderRouteStatusProjection(
+  view: CleanNarratorView,
+  evidence: AcceptedNarrationEvidence,
+): string {
+  const language = projectionLanguage(view);
+  const routeText = evidence.backendFacts[0]?.text ?? evidence.text;
+  const reachable = routeText.match(/^(.+?)\s+is reachable from (?:the current scene|here|.+)\.$/u);
+  if (reachable) {
+    return language === "ru"
+      ? `Отсюда можно пройти к ${reachable[1]}.`
+      : `${reachable[1]} is reachable from here.`;
+  }
+  const blocked = routeText.match(/^(.+?)\s+is not reachable from (?:the current scene|here|.+)\.$/u);
+  if (blocked) {
+    return language === "ru"
+      ? `Путь к ${blocked[1]} отсюда закрыт.`
+      : `The path to ${blocked[1]} is closed from here.`;
+  }
+  return routeText;
+}
+
+function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | null {
+  const sceneFacts = view.acceptedEvidence
+    .filter((evidence) => evidence.authority === "scene_frame_snapshot");
+  if (sceneFacts.length === 0) return null;
+
+  const currentScene = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .find((entry) => entry.text.startsWith("Current scene is "))
+    ?.text.replace(/^Current scene is /u, "").replace(/\.$/u, "");
+  const currentPlace = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .find((entry) => entry.text.startsWith("Current place is "))
+    ?.text.replace(/^Current place is /u, "").replace(/\.$/u, "");
+  const actors = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .filter((entry) => entry.text.startsWith("Visible actor: "))
+    .map((entry) => trimSentencePeriod(entry.text.replace(/^Visible actor:\s*/u, "")));
+  const inventory = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .filter((entry) => entry.text.startsWith("Inventory item: "))
+    .map((entry) => trimSentencePeriod(entry.text.replace(/^Inventory item:\s*/u, "")));
+  const targets = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .filter((entry) => entry.text.startsWith("Visible target: "))
+    .map((entry) => trimSentencePeriod(entry.text.replace(/^Visible target:\s*/u, "")).replace(/\s+\([^)]+\)$/u, ""));
+  const routeEvidence: AcceptedNarrationEvidence = {
+    ...sceneFacts[0]!,
+    backendFacts: sceneFacts
+      .flatMap((evidence) => evidence.backendFacts)
+      .filter((entry) => entry.text.startsWith("Route option: ")),
+  };
+  const sentences: string[] = [];
+  if (currentScene && currentPlace && currentScene !== currentPlace) {
+    sentences.push(`You are at ${currentScene}, inside ${currentPlace}.`);
+  } else if (currentScene) {
+    sentences.push(`You are at ${currentScene}.`);
+  } else if (currentPlace) {
+    sentences.push(`You are at ${currentPlace}.`);
+  }
+  if (actors.length > 0) sentences.push(`${englishList(actors)} ${actors.length === 1 ? "is" : "are"} here.`);
+  if (inventory.length > 0) sentences.push(`You have ${englishList(inventory)}.`);
+  if (targets.length > 0) sentences.push(`${englishList(targets)} ${targets.length === 1 ? "is" : "are"} visible.`);
+  if (routeEvidence.backendFacts.length > 0) sentences.push(renderRouteOptionsProjection(routeEvidence));
+  return sentences.length > 0 ? sentences.join(" ") : null;
+}
+
+function renderDeviceSurfaceProjection(evidence: AcceptedNarrationEvidence): string {
+  const summary = evidence.backendFacts[0]?.text ?? evidence.text;
+  const device = factValue(evidence, "Device: ");
+  if (!device) return summary;
+  const unavailable = evidence.backendFacts.find((entry) =>
+    entry.text.startsWith("Current visible device surface exposes no requested ")
+  );
+  if (unavailable) {
+    const facet = unavailable.text
+      .replace(/^Current visible device surface exposes no requested /u, "")
+      .replace(new RegExp(`\\s+for\\s+${device.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.$`, "u"), "");
+    return `${device}'s visible surface shows no requested ${facet}.`;
+  }
+  const facetFacts = evidence.backendFacts.filter((entry) =>
+    !entry.text.startsWith("Device: ")
+    && !entry.text.startsWith("Requested surface facets: ")
+    && entry.text !== summary
+  );
+  return facetFacts.length > 0
+    ? `${device}: ${facetFacts.map((entry) => trimSentencePeriod(entry.text)).join("; ")}.`
+    : summary;
+}
+
+function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): string {
+  const summary = evidence.backendFacts[0]?.text ?? evidence.text;
+  if (evidence.claimKinds.includes("bounded_visibility_negative")) {
+    return summary.replace(/^Current visible /u, "The visible ");
+  }
+  const observed = evidence.backendFacts
+    .filter((entry) => entry.text.startsWith("Observed "))
+    .map((entry) => trimSentencePeriod(entry.text.replace(/^Observed\s+/u, "")));
+  const visibleSummary = summary
+    .replace(/^Current route options include:/u, "Visible routes here include:")
+    .replace(/^Current visible match:/u, "Visible match:");
+  if (observed.length > 0) {
+    const observedSentence = `The ${englishList(observed)} ${observed.length === 1 ? "is" : "are"} visible here.`;
+    return /include:/u.test(visibleSummary)
+      ? `${visibleSummary} ${observedSentence}`
+      : observedSentence;
+  }
+  return summary;
+}
+
+function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidence): string {
+  const operation = evidence.backendFacts[0]?.text ?? evidence.text;
+  return operation;
+}
+
+function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string {
+  const itemLabel = factValue(evidence, "Item label: ");
+  const operation = factValue(evidence, "Operation: ");
+  const target = factValue(evidence, "Target: ");
+  const result = factValue(evidence, "Item transfer result: ");
+  const firstFact = evidence.backendFacts[0]?.text ?? evidence.text;
+  if (!itemLabel || !operation) return firstFact;
+  if (result === "already_satisfied") return `${itemLabel} is already in that state.`;
+  switch (operation) {
+    case "give_to_visible_actor":
+      return target ? `${itemLabel} is now with ${target}.` : firstFact;
+    case "drop_in_current_scene":
+      return target ? `${itemLabel} is now at ${target}.` : firstFact;
+    case "pickup_from_current_scene":
+      return `You now carry ${itemLabel}.`;
+    case "equip_inventory_item":
+      return `You equip ${itemLabel}.`;
+    case "unequip_inventory_item":
+      return `You now carry ${itemLabel}.`;
+    default:
+      return firstFact;
+  }
+}
+
+function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
+  const label = factValue(evidence, "Place handle label: ");
+  const kind = factValue(evidence, "Place handle kind: ");
+  const result = factValue(evidence, "Handle result: ");
+  if (!label) return evidence.backendFacts[0]?.text ?? evidence.text;
+  const noun = kind ? `${kind} handle` : "place handle";
+  return result === "reused"
+    ? `${label} remains available here as a visible ${kind ?? "place"} handle.`
+    : `${label} is now available here as a visible ${noun}.`;
+}
+
+function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
+  const actor = factValue(evidence, "Visible support actor: ");
+  const role = factValue(evidence, "Support role: ");
+  const scene = factValue(evidence, "Anchor scene: ");
+  if (!actor) return evidence.backendFacts[0]?.text ?? evidence.text;
+  if (role && scene) return `${actor} is present in ${scene} as a ${role}.`;
+  if (role) return `${actor} is present as a ${role}.`;
+  return `${actor} is present.`;
+}
+
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
     && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
@@ -317,7 +583,8 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
     evidence.claimKinds.includes("player_location_change")
   );
   return view.acceptedEvidence.some((evidence) =>
-    evidence.claimKinds.includes("item_state")
+    evidence.claimKinds.includes("player_location_change")
+    || evidence.claimKinds.includes("item_state")
     || evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
@@ -361,12 +628,8 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     entry.text.startsWith("Player location changed to ")
   );
   if (movementFact) {
-    const location = movementFact.text
-      .replace(/^Player location changed to /u, "")
-      .replace(/\.$/u, "");
-    return language === "ru"
-      ? `Вы перемещаетесь в ${location}.`
-      : `You move to ${location}.`;
+    const rendered = renderMovementProjection(view, movement!);
+    if (rendered) return rendered;
   }
 
   const oracle = view.acceptedEvidence.find((evidence) =>
@@ -380,17 +643,14 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("route_status")
   );
   if (route) {
-    const routeText = route.backendFacts[0]?.text ?? route.text;
-    return language === "ru"
-      ? `Проверка маршрута подтверждает: ${routeText}`
-      : `The settled route check confirms: ${routeText}`;
+    return renderRouteStatusProjection(view, route);
   }
 
   const routeOptions = view.acceptedEvidence.find((evidence) =>
     evidence.authority === "route_options_receipt"
   );
   if (routeOptions) {
-    return routeOptions.backendFacts.map((entry) => entry.text).join(" ");
+    return renderRouteOptionsProjection(routeOptions);
   }
 
   const onlySceneFrameSnapshotEvidence = view.acceptedEvidence.length > 0
@@ -406,14 +666,15 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
       .flatMap((evidence) => evidence.backendFacts.map((entry) => entry.text))
     : [];
   if (sceneFrameSnapshotFacts.length > 0) {
-    return sceneFrameSnapshotFacts.join(" ");
+    const rendered = renderSceneFrameSnapshotProjection(view);
+    if (rendered) return rendered;
   }
 
   const deviceSurfaceObservation = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("device_surface_observation")
   );
   if (deviceSurfaceObservation) {
-    return deviceSurfaceObservation.backendFacts.map((entry) => entry.text).join(" ");
+    return renderDeviceSurfaceProjection(deviceSurfaceObservation);
   }
 
   const localObservation = view.acceptedEvidence.find((evidence) =>
@@ -423,9 +684,10 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     const narratableFacts = localObservation.backendFacts.filter((entry) =>
       !entry.text.startsWith("Checked current ")
     );
-    return (narratableFacts.length > 0 ? narratableFacts : localObservation.backendFacts)
-      .map((entry) => entry.text)
-      .join(" ");
+    return renderLocalObservationProjection({
+      ...localObservation,
+      backendFacts: narratableFacts.length > 0 ? narratableFacts : localObservation.backendFacts,
+    });
   }
 
   const observation = view.acceptedEvidence.find((evidence) =>
@@ -449,7 +711,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("dialogue_response")
   );
   if (itemState && dialogue) {
-    const itemStateText = itemState.backendFacts.map((entry) => entry.text).join(" ");
+    const itemStateText = renderItemStateProjection(itemState);
     const quoteFact = dialogue.backendFacts.find((entry) =>
       entry.text.includes(" says: ") || entry.text.includes("dialogue response")
     );
@@ -457,14 +719,14 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     return [itemStateText, dialogueText].filter((text) => normalizeText(text).length > 0).join(" ");
   }
   if (itemState) {
-    return itemState.backendFacts.map((entry) => entry.text).join(" ");
+    return renderItemStateProjection(itemState);
   }
 
   const minorPoiHandle = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("minor_poi_handle")
   );
   if (minorPoiHandle) {
-    return minorPoiHandle.backendFacts.map((entry) => entry.text).join(" ");
+    return renderMinorPoiProjection(minorPoiHandle);
   }
 
   if (dialogue) {
@@ -478,14 +740,14 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("support_actor_materialization")
   );
   if (supportActor) {
-    return supportActor.backendFacts.map((entry) => entry.text).join(" ");
+    return renderSupportActorProjection(supportActor);
   }
 
   const playerLocalCondition = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("player_local_condition")
   );
   if (playerLocalCondition) {
-    return playerLocalCondition.backendFacts.map((entry) => entry.text).join(" ");
+    return renderPlayerLocalConditionProjection(playerLocalCondition);
   }
 
   const sceneBeat = view.acceptedEvidence.find((evidence) =>

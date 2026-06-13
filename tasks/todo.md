@@ -8,6 +8,30 @@ Explicitly excluded as implementation guidance: `docs/WorldForge_runtime_problem
 
 ## Current Session Focus 2026-06-13
 
+P189 clean runtime prose quality pass:
+- Objective:
+  - Improve player-facing clean-runtime prose while preserving the primitive-owned truth path: backend receipts own gameplay truth, settled evidence owns claim boundaries, Stage 6 owns readable phrasing.
+  - Adapt proven prose mechanisms from `R:\Projects\SillytavernUpgrade\Template\Zetta Micro v1.1.3.json` and `Freaky Frankenstein Micro FF5.json` through the Template preset inspector CLI, then bind them to WorldForge narration contracts.
+  - Replace receipt-shaped player-facing deterministic projections with grounded, compact, readable sentences that preserve exact labels and accepted facts.
+- Baseline evidence:
+  - [x] Used Template inspector CLI (`npm run presets -- summary|list|search|show|diff`) to mine the donor presets.
+  - [x] Extracted transferable mechanisms: concrete sensory/world-facing realism, anti-echo/anti-parrot, seven prose-shape bans, NPC voice/knowledge boundaries, VAD-visible delivery, and opener rotation.
+  - [x] Scanned P185/P186/P187 180-turn narration artifacts. Baseline: average 27.8 words; 67/180 open with `You`; 46 repeat `The settled route check confirms`; 45 repeat `You arrive at`; 70 contain current-scene/current-location style backend phrasing; 11 leak enum-like item-transfer text.
+- Plan:
+  - [x] Add a WorldForge Stage 6 style contract based on the donor mechanisms: accepted-evidence truth, fresh player-facing phrasing, no receipt/debug vocabulary, no echo/menu/word-object/cosmic-fluff forms.
+  - [x] Refactor deterministic authority projection into small claim-kind renderers that keep exact labels and claims while producing readable text for route status, route options, scene snapshots, item state, local condition, support actor, minor POI, local observation, and device surface results.
+  - [x] Add focused narration tests that protect prose quality, grounding, and the clean no-fallback boundary.
+  - [x] Re-run the P185/P186/P187 prose audit against updated deterministic samples and run focused clean-runtime tests.
+  - [x] Run typecheck, GitNexus detect_changes, commit/push to `develop`, and `npx gitnexus analyze --embeddings`.
+- Verification:
+  - [x] Updated deterministic/live prose audit: `output/clean-runtime-p189-prose-audit-20260613/updated-deterministic-samples-audit.json`; 13 samples, zero hits for receipt/debug vocabulary, enum leaks, old route/scene formulas, menu shape, or name-tasting pattern.
+  - [x] `npm --prefix backend run typecheck` passed.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 294 tests.
+  - [x] Fresh zero-turn live proof artifact: `output/clean-runtime-p189-prose-item-transfer-20260613-090607/`.
+  - [x] Live proof clone `p189-prose-item-transfer-20260613-090607` from source `p69-item-transfer-045651`; action `I hand the Brass Tube to Guide.` through `/api/chat/action` on clean runtime.
+  - [x] Live DB proof: one accepted `item_transfer` receipt with `item_transfer_receipt` authority and `may_claim_item_state_change` visible result authority; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no `turn_clock_ledger`; one authority trace `gameplay-cycle-runtime.item_transfer.v1`; old v2/saga/narrator/oracle/simulation stores all 0.
+  - [x] Player-facing proof text: `Brass Tube is now with Guide.`
+
 P155 primitive-owned clean runtime architecture pass:
 - Objective:
   - Finish the clean gameplay-cycle runtime as a primitive-owned architecture. Every player turn flows through explicit ownership: player intent -> typed admission -> primitive checklist/request -> backend-owned receipt -> settlement evidence -> bounded narration projection.

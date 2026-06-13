@@ -815,6 +815,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
+  it("uses deterministic authority projection for movement receipts with travel cost", async () => {
+    const result = await runCleanNarration({
+      narratorView: movementView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("player_location_change should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("After 1 minute, you reach North Hall.");
+    expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
+  });
+
   it("rejects route_check candidates that declare movement", () => {
     const result = validateCleanNarrationCandidate({
       view: routeView(),
@@ -837,10 +851,10 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("The settled route check confirms: Transmission Basement is reachable from the current scene.");
+    expect(result.text).toBe("Transmission Basement is reachable from here.");
     expect(result.text).toContain("Transmission Basement");
     expect(result.text).not.toContain("Transmission Basin");
-    expect(result.text).not.toMatch(/\b(visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
+    expect(result.text).not.toMatch(/\b(settled route check|current scene|visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
   });
 
   it("projects P64 elapsed-time evidence without no-change claims", () => {
@@ -867,8 +881,8 @@ describe("clean Stage 6 narration contracts", () => {
   it("renders route-options evidence without converting options into movement", () => {
     const text = renderCleanAuthorityProjection(routeOptionsView());
 
-    expect(text).toBe("Route option: North Hall (connected, 1 minute(s)).");
-    expect(text).not.toMatch(/\b(move|arrive|travel to|you go)\b/iu);
+    expect(text).toBe("A visible route leads to North Hall; it takes 1 minute.");
+    expect(text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -914,8 +928,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Current scene is Market. Current place is Market. Inventory item: Courier satchel. Visible target: Notice Board (place_handle). Route option: North Hall (connected, 1 minute(s)).");
-    expect(result.text).not.toMatch(/\b(move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
+    expect(result.text).toBe("You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
@@ -970,8 +984,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
     const text = renderCleanAuthorityProjection(supportActorView());
 
-    expect(text).toBe("Visible support actor: Local Vendor. Support role: vendor. Anchor scene: Market. Materialization result: created.");
-    expect(text).not.toMatch(/\bsays|offers|knows|service|future\b/iu);
+    expect(text).toBe("Local Vendor is present in Market as a vendor.");
+    expect(text).not.toMatch(/\bVisible support actor|Support role|Anchor scene|Materialization result|says|offers|knows|service|future\b/iu);
 
     const inventedDialogue = validateCleanNarrationCandidate({
       view: supportActorView(),
@@ -997,8 +1011,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
     const text = renderCleanAuthorityProjection(playerLocalConditionView());
 
-    expect(text).toBe("Player is kneeling. Condition key: kneeling. Current scene anchor: Market. Condition result: applied.");
-    expect(text).not.toMatch(/\bhp|damage|cover|combat|moves?|nothing changed|no change\b/iu);
+    expect(text).toBe("Player is kneeling.");
+    expect(text).not.toMatch(/\bCondition key|Current scene anchor|Condition result|hp|damage|cover|combat|moves?|nothing changed|no change\b/iu);
 
     const inventedHp = validateCleanNarrationCandidate({
       view: playerLocalConditionView(),
@@ -1030,18 +1044,16 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe(
-      "Player is hands visible. Condition key: hands_visible. Current scene anchor: Market. Condition result: applied. Condition target: Market.",
-    );
-    expect(result.text).not.toMatch(/\b(inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
+    expect(result.text).toBe("Player is hands visible.");
+    expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For item_state");
     const text = renderCleanAuthorityProjection(itemStateView());
 
-    expect(text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
-    expect(text).not.toMatch(/\bsays|discovers?|uses?|activates?|consents?|reacts?|nothing changed|no change\b/iu);
+    expect(text).toBe("Brass Tube is now with Guide.");
+    expect(text).not.toMatch(/\b(item state|Item label|Operation|Source|Target|Final equip state|Current scene anchor|Item transfer result|says|discovers?|uses?|activates?|consents?|reacts?|nothing changed|no change)\b/iu);
 
     for (const unsupportedClaim of [
       "dialogue_response",
@@ -1081,8 +1093,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.");
-    expect(result.text).not.toMatch(/\bsays|accepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
+    expect(result.text).toBe("Brass Tube is now with Guide.");
+    expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
   it("deterministically composes item_state with accepted dialogue_response", async () => {
@@ -1095,18 +1107,18 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Brass Tube item state changed: transferred_to_actor. Item label: Brass Tube. Operation: give_to_visible_actor. Source: Player. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor. Guide says: "The north stairs flooded before dawn."');
-    expect(result.text).toContain("Item transfer result: transferred_to_actor.");
+    expect(result.text).toBe('Brass Tube is now with Guide. Guide says: "The north stairs flooded before dawn."');
+    expect(result.text).toContain("Brass Tube is now with Guide.");
     expect(result.text).toContain('Guide says: "The north stairs flooded before dawn."');
-    expect(result.text).not.toMatch(/\baccepts|reacts|consents|uses|activates|nothing changed|no change\b/iu);
+    expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
   it("renders minor_poi_handle evidence without route, location, service, sign-text, or no-change claims", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
     const text = renderCleanAuthorityProjection(minorPoiHandleView());
 
-    expect(text).toBe("Visible current-scene place handle created: Tea Stall. Place handle label: Tea Stall. Place handle kind: stall. Current scene anchor: Market. Handle result: created. This is a visible current-scene target handle only, not a movement destination.");
-    expect(text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|nothing changed|no change)\b/iu);
+    expect(text).toBe("Tea Stall is now available here as a visible stall handle.");
+    expect(text).not.toMatch(/\b(Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|arrive|service|inventory|sign says|nothing changed|no change)\b/iu);
 
     const unsupported = validateCleanNarrationCandidate({
       view: minorPoiHandleView(),
@@ -1138,15 +1150,15 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toContain("Visible current-scene place handle created: Tea Stall.");
-    expect(result.text).not.toMatch(/route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
+    expect(result.text).toContain("Tea Stall is now available here as a visible stall handle.");
+    expect(result.text).not.toMatch(/Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
   });
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
     const text = renderCleanAuthorityProjection(localObservationView());
 
-    expect(text).toBe("Current visible actors and visible targets show no match for \"Violet Astrolabe\".");
+    expect(text).toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
     expect(text).not.toMatch(/\b(SceneFrame|worldVersion|surface entry)\b/u);
     expect(text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
 
@@ -1181,7 +1193,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe(
-      "Current visible match: visible target central telegraph desk. Observed visible target central telegraph desk.",
+      "The visible target central telegraph desk is visible here.",
     );
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible marks|moving parts|touch|move/iu);
   });
@@ -1213,7 +1225,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe(`${routeSummary} Observed route option North Hall.`);
+    expect(result.text).toBe("Visible routes here include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. The route option North Hall is visible here.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
@@ -1226,7 +1238,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
     const text = renderCleanAuthorityProjection(deviceSurfaceObservationView());
 
-    expect(text).toBe("Current visible device surface for Burner phone exposes no requested message indicator. Device: Burner phone. Requested surface facets: message indicator. Current visible device surface exposes no requested message indicator for Burner phone.");
+    expect(text).toBe("Burner phone's visible surface shows no requested message indicator.");
     expect(text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
 
     const unsupported = validateCleanNarrationCandidate({
@@ -1259,7 +1271,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toContain("Current visible device surface");
+    expect(result.text).toContain("Burner phone's visible surface");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
   });
 
@@ -1308,7 +1320,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("rejects generation failure before player-facing narration", async () => {
     await expect(runCleanNarration({
-      narratorView: movementView(),
+      narratorView: dialogueWithSceneFrameSnapshotView(),
       provider,
       generateCandidate: async () => {
         throw new Error("model offline");
@@ -1316,7 +1328,7 @@ describe("clean Stage 6 narration contracts", () => {
     })).rejects.toThrow(CleanNarrationGenerationError);
 
     await expect(runCleanNarration({
-      narratorView: movementView(),
+      narratorView: dialogueWithSceneFrameSnapshotView(),
       provider,
       generateCandidate: async () => {
         throw new Error("model offline");
@@ -1336,11 +1348,13 @@ describe("clean Stage 6 narration contracts", () => {
       }],
     }));
 
-    expect(text).toBe("Вы перемещаетесь в The Copper Tap.");
+    expect(text).toBe("Вы добираетесь до The Copper Tap.");
   });
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("raw player action is intentionally omitted");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write compact, concrete fiction from accepted facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Shape pass:");
   });
 
   it("composes runtime through Stage 6 with only CleanNarratorView input", async () => {
