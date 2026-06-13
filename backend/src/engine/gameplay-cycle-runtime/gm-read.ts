@@ -247,6 +247,13 @@ function hasAllowedCleanCapability(frame: AuthoritativeSceneFrame, capabilityId:
   );
 }
 
+function isBroadRouteListSurface(surfaceKinds: readonly string[]): boolean {
+  const allowedAnchorKinds = new Set(["movement_option", "current_scene", "current_location"]);
+  const kinds = uniqueStrings(surfaceKinds);
+  return kinds.includes("movement_option")
+    && kinds.every((surfaceKind) => allowedAnchorKinds.has(surfaceKind));
+}
+
 function normalizeGmReadRouteListObservation(input: {
   frame: AuthoritativeSceneFrame;
   read: GmRead;
@@ -258,9 +265,7 @@ function normalizeGmReadRouteListObservation(input: {
   if (localObservationNeed.mode !== "list_surface") return read;
   if (localObservationNeed.targetRef !== null) return read;
 
-  const surfaceKinds = uniqueStrings(localObservationNeed.surfaceKinds);
-  const isMovementOptionList = surfaceKinds.length === 1 && surfaceKinds[0] === "movement_option";
-  if (!isMovementOptionList) return read;
+  if (!isBroadRouteListSurface(localObservationNeed.surfaceKinds)) return read;
   if (!hasAllowedCleanCapability(input.frame, "route_options")) return read;
 
   return {
@@ -955,12 +960,14 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   }
 
   if (read.actionInterpretation.interactionKind === "route_inquiry") {
-    const invalidTargets = loweredTargets.filter((target) => !movementOptionRefs.has(target));
+    const invalidTargets = loweredTargets.filter((target) =>
+      !movementOptionRefs.has(target) && !sceneRefs.has(target)
+    );
     if (invalidTargets.length > 0) {
       issues.push({
         code: "interaction_invalid",
         path: "actionInterpretation.targetRefs",
-        message: "route_inquiry targetRefs must cite visible SceneFrame.movementOptions, or stay empty for broad route-option questions.",
+        message: "route_inquiry targetRefs must cite visible SceneFrame.movementOptions, current scene/location refs, or stay empty for broad route-option questions.",
       });
     }
     if (read.actionInterpretation.supportActorNeed != null) {

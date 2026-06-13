@@ -5586,3 +5586,44 @@ Session: `gm-v1-consequenc-slice`.
   - Acceptance status:
     - P181 is a clean 60-turn runtime/DB/player-facing candidate lane after the restore-ledger repair.
     - Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P182 clean gameplay runtime post-restore-ledger Acceptance-Candidate Lane B / fresh clone 0 -> 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p182-post-restore-ledger-repair-acceptance-b-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative clock `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carrying `Brass Tube`, clean runtime stores zero, and old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Restart stable clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute turns one action at a time from inspected current state until first runtime fallout.
+  - Diagnostic evidence:
+    - [x] Artifact root: `output/clean-runtime-p182-post-restore-ledger-repair-acceptance-b-20260613/`.
+    - [x] Turns 001-030 passed cleanly with accepted item_transfer/dialogue/route_options/route_check/movement/direct-scene coverage; `Brass Tube.owner=Guide`, old stores zero, restore ledger zero.
+    - [x] Turn 031 action `I list the routes I can take from Lowwater Bazaar now.` emitted player-facing SSE `error` during `gm-action-checklist`, committed no clean turn record/chat/receipt, restored the pre-turn boundary, and left old stores zero. Artifact: `turn-031/`.
+    - [x] Root cause: broad route-list intent still had two admitted GM Read shapes when `localObservationNeed.surfaceKinds` combined `movement_option` with current scene/location anchor surfaces; that allowed the same player request to drift between route_options and local_observation/checklist paths.
+  - Repair:
+    - [x] `normalizeGmReadRouteListObservation` now maps broad `list_surface` requests whose surface set contains `movement_option` plus only current scene/location anchors into `route_inquiry`.
+    - [x] `route_inquiry` validation now accepts current scene/location refs as broad route-list anchors, matching Judge/Checklist route_options semantics.
+    - [x] Added contract coverage for anchored broad route inquiry and mixed movement_option/current_scene surface canonicalization.
+  - Verification:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 203 passed.
+    - [x] Focused clean-runtime suite -> 291 passed.
+    - [x] Restarted clean backend on port `31703` after repair.
+    - [x] Diagnostic retry `turn-031-retry-after-route-contract/` passed with one accepted `route_options` receipt, `Brass Tube.owner=Guide`, clock deltas `0/0/0`, restore ledger 0, old stores zero.
+  - Acceptance status:
+    - P182 is diagnostic only because original turn 031 produced a player-facing error/restore boundary.
+
+- P183 clean gameplay runtime post-route-contract-repair Acceptance-Candidate Lane C / fresh clone 0 -> 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p183-post-route-contract-repair-acceptance-c-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative clock `0/0/0`, player at `Lowwater Bazaar`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores zero, old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Reuse clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Run first three manually selected post-repair live turns: item transfer, transfer-state dialogue, and route-list with `now`.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p183-post-route-contract-repair-acceptance-c-20260613/`.
+    - [x] Turn 001 `I hand the Brass Tube to Guide.` passed with one accepted `item_transfer` receipt, `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, world time/current tick stayed `0/0`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores zero.
+    - [x] Turn 002 `I ask Guide, "Are you carrying the Brass Tube now?"` passed with accepted `dialogue_record`, item owner remained `Guide`, clock deltas `0/0/0`, old stores zero.
+    - [x] Turn 003 `I list the routes I can take from Lowwater Bazaar now.` passed with accepted `route_options`, item owner remained `Guide`, clock deltas `0/0/0`, old stores zero.
+    - [x] Audit after turn 003: 3 clean turn records, 3 accepted Stage4 receipts, 1 authority trace, turn clock ledger 0, restore ledger 0, old stores all 0, clock `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, chat history 6.
+  - Acceptance status:
+    - P183 is clean through 3/60 on a fresh post-repair zero-turn clone. It remains an acceptance-candidate lane in progress.
+  - Next scoped work:
+    - [ ] Continue P183 from turn 004 toward 60 by choosing each action from inspected state.

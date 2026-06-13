@@ -1484,6 +1484,37 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     }).status).toBe("rejected");
   });
 
+  it("accepts broad route_inquiry anchored on the current scene ref", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I list the routes I can take from Market now.",
+      citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Which current-scene routes can be listed?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player asks for the current route options from the scene.",
+        playerIntent: "List available routes from Market.",
+        method: "list routes",
+        targetRefs: ["Market"],
+        interactionKind: "route_inquiry",
+      },
+      interpretationRationale: "The current scene ref anchors a broad route-options list.",
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "route_inquiry",
+      targetRefs: ["Market"],
+    });
+  });
+
   it("canonicalizes broad movement-option surface lists to route_inquiry before Judge or Checklist", () => {
     const frame = actionPlanFrame({
       playerAction: "I list the routes I can take from Slip Twelve Berth.",
@@ -1517,7 +1548,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
           mode: "list_surface",
           queryText: "routes I can take",
           targetRef: null,
-          surfaceKinds: ["movement_option"],
+          surfaceKinds: ["movement_option", "current_scene"],
           allowBoundedNegative: false,
           evidenceRefs: ["Player", "Slip Twelve Berth"],
         },
