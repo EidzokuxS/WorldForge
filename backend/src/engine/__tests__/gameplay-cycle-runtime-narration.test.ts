@@ -122,10 +122,14 @@ function routeView(): CleanNarratorView {
       ref: "e1",
       authority: "route_check_receipt",
       claimKinds: ["route_status"],
-      text: "North Hall is reachable from Market.",
-      backendFacts: [{ factRef: "e1.f1", text: "North Hall is reachable from Market.", exact: true }],
+      text: "From here, the path to North Hall is open.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Route beat: From here, the path to North Hall is open.", exact: true },
+        { factRef: "e1.f2", text: "Route label: North Hall.", exact: true },
+        { factRef: "e1.f3", text: "Route status: connected.", exact: true },
+      ],
       limits: {
-        proves: ["route status only"],
+        proves: ["route status only", "route status phrasing for the player"],
         doesNotProve: ["movement", "arrival", "current-scene change"],
       },
     }],
@@ -140,14 +144,22 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "route_check_receipt",
         claimKinds: ["route_status"],
-        text: "Transmission Basement is reachable from the current scene.",
+        text: "From here, the path to Transmission Basement is open.",
         backendFacts: [{
           factRef: "e5.f1",
-          text: "Transmission Basement is reachable from the current scene.",
+          text: "Route beat: From here, the path to Transmission Basement is open.",
+          exact: true,
+        }, {
+          factRef: "e5.f2",
+          text: "Route label: Transmission Basement.",
+          exact: true,
+        }, {
+          factRef: "e5.f3",
+          text: "Route status: connected.",
           exact: true,
         }],
         limits: {
-          proves: ["route status only"],
+          proves: ["route status only", "route status phrasing for the player"],
           doesNotProve: ["movement", "arrival", "current-scene change", "clock advance", "no-change"],
         },
       },
@@ -1483,6 +1495,17 @@ describe("clean Stage 6 narration contracts", () => {
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
     expect(renderCleanAuthorityProjection(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
+  });
+
+  it("fails route_status projection when accepted Route beat evidence is missing", () => {
+    const view = routeView();
+    view.acceptedEvidence[0] = {
+      ...view.acceptedEvidence[0],
+      text: "North Hall is reachable from Market.",
+      backendFacts: [{ factRef: "e1.f1", text: "North Hall is reachable from Market.", exact: true }],
+    };
+
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Route-status projection requires accepted Route beat evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -3874,8 +3897,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Time beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Route beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Use player-facing route wording");
+    expect(buildCleanNarrationSystemPrompt()).toContain("with Route label and Route status as proof details");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");

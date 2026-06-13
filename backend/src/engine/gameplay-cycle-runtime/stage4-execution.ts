@@ -700,6 +700,7 @@ function baseReceipt(input: {
   summary: string;
   visibleRefs: string[];
   routeStatus?: "connected" | "disconnected" | null;
+  routeCheck?: CleanStage4Receipt["publicResult"]["routeCheck"];
   routeOptions?: CleanStage4Receipt["publicResult"]["routeOptions"];
   locationChange?: CleanStage4Receipt["publicResult"]["locationChange"];
   timeAdvance?: CleanStage4Receipt["publicResult"]["timeAdvance"];
@@ -824,6 +825,7 @@ function baseReceipt(input: {
       summary: input.summary,
       visibleRefs: input.visibleRefs,
       routeStatus: input.routeStatus ?? null,
+      routeCheck: input.routeCheck ?? null,
       routeOptions: input.routeOptions ?? null,
       locationChange: input.locationChange ?? null,
       timeAdvance: input.timeAdvance ?? null,
@@ -5453,6 +5455,10 @@ function executeRouteCheck(input: {
       : `${option.label} is not currently reachable from the current scene.`,
     visibleRefs: ["Player", option.ref],
     routeStatus: connected ? "connected" : "disconnected",
+    routeCheck: {
+      label: option.label,
+      status: connected ? "connected" : "disconnected",
+    },
     playerId: player.id,
     fromLocationId: player.current_location_id,
     destinationLocationId: destination.id,
@@ -6499,6 +6505,7 @@ export async function runCleanStage4Execution(input: {
       authority: receipt.authority.evidenceAuthority,
       summary: receipt.publicResult.summary,
       visibleRefs: receipt.publicResult.visibleRefs,
+      routeCheck: receipt.publicResult.routeCheck ?? null,
       locationChange: receipt.publicResult.locationChange,
       timeAdvance: receipt.publicResult.timeAdvance,
       dialogue: receipt.publicResult.dialogue,

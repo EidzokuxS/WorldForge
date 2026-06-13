@@ -1675,6 +1675,10 @@ export const cleanStage4ReceiptSchema = z.object({
     summary: shortText,
     visibleRefs: z.array(modelSafeRef).min(1).max(12),
     routeStatus: z.enum(["connected", "disconnected"]).nullable(),
+    routeCheck: z.object({
+      label: shortText,
+      status: z.enum(["connected", "disconnected"]),
+    }).strict().nullable().optional(),
     routeOptions: z.object({
       type: z.literal("route_options"),
       fromLabel: shortText,
@@ -1812,6 +1816,9 @@ export const cleanStage4ReceiptSchema = z.object({
     }
     if (receipt.authority.mutationAuthority !== "none") {
       ctx.addIssue({ code: "custom", path: ["authority", "mutationAuthority"], message: "Route check mutation authority must be none." });
+    }
+    if (receipt.status === "accepted" && receipt.publicResult.routeCheck == null) {
+      ctx.addIssue({ code: "custom", path: ["publicResult", "routeCheck"], message: "Accepted route check requires public route check result." });
     }
   }
   if (receipt.status === "accepted" && receipt.capabilityId === "time_advance") {
@@ -2119,6 +2126,10 @@ export const cleanStage4ExecutionResultSchema = z.object({
     ]),
     summary: shortText,
     visibleRefs: z.array(modelSafeRef).min(1).max(12),
+    routeCheck: z.object({
+      label: shortText,
+      status: z.enum(["connected", "disconnected"]),
+    }).strict().nullable().optional(),
     locationChange: z.object({
       type: z.literal("location_change"),
       locationName: shortText,

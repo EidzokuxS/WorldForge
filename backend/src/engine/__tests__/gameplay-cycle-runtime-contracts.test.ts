@@ -6331,6 +6331,10 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
         summary: "North Hall is reachable from the current scene.",
         visibleRefs: ["Player", "North Hall"],
         routeStatus: "connected",
+        routeCheck: {
+          label: "North Hall",
+          status: "connected",
+        },
         locationChange: null,
         routeOptions: null,
         timeAdvance: null,

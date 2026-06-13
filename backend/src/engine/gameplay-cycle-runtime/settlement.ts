@@ -668,17 +668,30 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     }
     if (receipt.authority.evidenceAuthority === "route_check_receipt") {
       const evidenceId = nextEvidenceId(evidence);
+      const routeCheck = receipt.publicResult.routeCheck;
+      if (!routeCheck) {
+        throw new Error("Accepted route_check receipt is missing public route check result.");
+      }
+      const routeStatus = routeCheck.status;
+      const routeLabel = routeCheck.label;
+      const routeBeat = routeStatus === "connected"
+        ? `From here, the path to ${routeLabel} is open.`
+        : `The path to ${routeLabel} is closed from here.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "route_check_receipt",
         claimKinds: ["route_status"],
-        text: receipt.publicResult.summary,
+        text: routeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [fact(evidenceId, 1, receipt.publicResult.summary)],
+        backendFacts: [
+          fact(evidenceId, 1, `Route beat: ${routeBeat}`),
+          fact(evidenceId, 2, `Route label: ${routeLabel}.`),
+          fact(evidenceId, 3, `Route status: ${routeStatus}.`),
+        ],
         limits: {
-          proves: ["route status only"],
+          proves: ["route status only", "route status phrasing for the player"],
           doesNotProve: ROUTE_DOES_NOT_PROVE,
         },
       });

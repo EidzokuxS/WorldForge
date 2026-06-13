@@ -667,6 +667,7 @@ function stage4(receipts: CleanStage4Receipt[], inputFrame = frame()): CleanStag
         authority: receipt.authority.evidenceAuthority,
         summary: receipt.publicResult.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
+        routeCheck: receipt.publicResult.routeCheck ?? null,
         locationChange: receipt.publicResult.locationChange,
         timeAdvance: receipt.publicResult.timeAdvance,
         dialogue: receipt.publicResult.dialogue,
@@ -948,6 +949,10 @@ describe("clean Stage 5 settlement contracts", () => {
         summary: "North Hall is reachable from Market.",
         visibleRefs: ["Player", "North Hall"],
         routeStatus: "connected",
+        routeCheck: {
+          label: "North Hall",
+          status: "connected",
+        },
         locationChange: null,
         routeOptions: null,
         timeAdvance: null,
@@ -973,6 +978,13 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const route = packet.acceptedEvidence.find((entry) => entry.authority === "route_check_receipt");
     expect(route?.claimKinds).toEqual(["route_status"]);
+    expect(route?.text).toBe("From here, the path to North Hall is open.");
+    expect(route?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Route beat: From here, the path to North Hall is open.",
+      "Route label: North Hall.",
+      "Route status: connected.",
+    ]);
+    expect(route?.limits.proves).toContain("route status phrasing for the player");
     expect(route?.limits.doesNotProve).toContain("movement");
     expect(route?.limits.doesNotProve).toContain("current-scene change");
   });

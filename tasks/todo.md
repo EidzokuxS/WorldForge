@@ -6412,3 +6412,24 @@ Session: `gm-v1-consequenc-slice`.
     - [x] DB proof `p218-fixed-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `time_advance` receipt, one authority trace `gameplay-cycle-runtime.clock.advance.v1`, `worldVersion/worldTime/currentTick +1/+5/+5`, scene unchanged, old v2/saga/narrator/oracle/simulation stores all 0.
     - [x] Fixed elapsed-time evidence no longer contains `World clock advances...`; backend facts are `Time beat` and `Elapsed time`.
     - [x] Prose audit `prose-audit.json`: 1 narrative, 23 words, zero one-token/debug/enum/summary/digest/slop hits.
+
+- P219 Stage 6 route-check story evidence:
+  - Plan:
+    - [x] Run GitNexus impact before editing route-check settlement, projection, prompt, and Stage 4 receipt touchpoints.
+    - [x] Add a typed public `routeCheck` result to accepted `route_check` receipts so Stage 5 reads route label/status from the receipt contract instead of summary text.
+    - [x] Replace raw reachability summary evidence with player-facing `Route beat`, `Route label`, and `Route status` facts.
+    - [x] Keep route checks on their primary `route_check` receipt -> storyFrame -> Stage 6 narration path; no movement, scene-change, generic scene substitute, or fallback UX.
+    - [x] Verify focused tests, typecheck, live proof, prose audit, GitNexus detect, commit/push, and index refresh.
+  - Results:
+    - [x] GitNexus impacts before edits: `stage4Evidence` LOW, `renderRouteStatusProjection` LOW, `buildCleanNarrationSystemPrompt` LOW, `executeRouteCheck` LOW. `baseReceipt` returned CRITICAL because it is the shared receipt builder; accepted scope is bounded to an optional nullable `publicResult.routeCheck` populated only by `route_check` and verified by focused Stage 4/5/6 tests.
+    - [x] `route_check` receipts now expose `publicResult.routeCheck = { label, status }`; the enclosing field owns the type, so no technical discriminator enters public receipt JSON.
+    - [x] Stage 5 `route_check` settlement now fails if an accepted route-check receipt lacks `routeCheck`, then emits accepted route evidence: `Route beat`, `Route label`, and `Route status`.
+    - [x] Stage 6 prompt now teaches route-status narration from accepted `Route beat` plus `Route label`/`Route status` proof details; deterministic projection reads `Route beat` directly when explicitly invoked and fails if that contract fact is missing.
+    - [x] User no-fallback correction broadened in `tasks/lessons.md`: every gameplay system stage must fail through its typed boundary instead of substituting another mechanic, generic scene text, downgraded UX, or alternate affordance.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts` -> 208 tests, `stage4` -> 39 tests, `settlement` -> 20 tests, `narration` -> 83 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Fresh fixed live proof `output/clean-runtime-p219-route-check-story-r2-20260613-223303/`, clone `p219-route-check-story-r2-20260613-223303`, action `Can I reach Anchor Chain Pylon from here without moving?`
+    - [x] Fixed live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. The path to Anchor Chain Pylon stands open from Lowwater Bazaar.`
+    - [x] DB proof `p219-fixed-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `route_check` receipt, `mutationApplied=false`, `worldVersion/worldTime/currentTick +0/+0/+0`, no authority trace, no clock ledger, old v2/saga/narrator/oracle/simulation stores all 0.
+    - [x] Fixed route-check evidence no longer relies on `Anchor Chain Pylon is reachable from the current scene.` as narrator truth; backend facts are `Route beat`, `Route label`, and `Route status`.
+    - [x] Prose audit `prose-audit.json`: 1 narrative, 47 words, zero one-token/debug/enum/movement-arrival/summary-digest hits.
