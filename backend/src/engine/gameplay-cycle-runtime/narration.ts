@@ -655,21 +655,50 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function directSceneFactValue(fact: AcceptedNarrationBackendFact, message: string): string {
+  const value = fact.value?.trim();
+  if (!value) throw new Error(message);
+  return normalizeText(value);
+}
+
+function directSceneFactLabels(fact: AcceptedNarrationBackendFact): string[] {
+  switch (fact.role) {
+    case "scene_label":
+      return [directSceneFactValue(fact, "Direct-scene label guard requires accepted Scene label value evidence.")];
+    case "place_label":
+      return [directSceneFactValue(fact, "Direct-scene label guard requires accepted Place label value evidence.")];
+    case "visible_actor_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible actor labels value evidence."));
+    case "inventory_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Inventory labels value evidence."));
+    case "visible_target_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible target labels value evidence."));
+    case "visible_actor_target_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible actor target labels value evidence."));
+    case "visible_item_target_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible item target labels value evidence."));
+    case "visible_place_handle_target_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible place-handle target labels value evidence."));
+    case "visible_location_target_labels":
+      return splitEvidenceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Visible location target labels value evidence."));
+    case "route_choice_labels":
+      return splitRouteChoiceLabels(directSceneFactValue(fact, "Direct-scene label guard requires accepted Route choice labels value evidence."));
+    default:
+      return [];
+  }
+}
+
 function directSceneActorLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) =>
       isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("visible_actor") || evidence.claimKinds.includes("visible_target"))
     )
-    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) => {
-      if (fact.text.startsWith("Visible actor labels: ")) {
-        return splitEvidenceLabels(fact.text.slice("Visible actor labels: ".length));
-      }
-      if (fact.text.startsWith("Visible actor target labels: ")) {
-        return splitEvidenceLabels(fact.text.slice("Visible actor target labels: ".length));
-      }
-      return [];
-    }))
+    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) =>
+      fact.role === "visible_actor_labels" || fact.role === "visible_actor_target_labels"
+        ? directSceneFactLabels(fact)
+        : []
+    ))
     .filter((label) => label.length > 0));
 }
 
@@ -679,18 +708,13 @@ function directSceneObjectLabels(view: CleanNarratorView): string[] {
       isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("inventory_status") || evidence.claimKinds.includes("visible_target"))
     )
-    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) => {
-      if (fact.text.startsWith("Inventory labels: ")) {
-        return splitEvidenceLabels(fact.text.slice("Inventory labels: ".length));
-      }
-      if (fact.text.startsWith("Visible item target labels: ")) {
-        return splitEvidenceLabels(fact.text.slice("Visible item target labels: ".length));
-      }
-      if (fact.text.startsWith("Visible place-handle target labels: ")) {
-        return splitEvidenceLabels(fact.text.slice("Visible place-handle target labels: ".length));
-      }
-      return [];
-    }))
+    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) =>
+      fact.role === "inventory_labels"
+      || fact.role === "visible_item_target_labels"
+      || fact.role === "visible_place_handle_target_labels"
+        ? directSceneFactLabels(fact)
+        : []
+    ))
     .filter((label) => label.length > 0));
 }
 
@@ -718,45 +742,11 @@ function directSceneUsesUnsupportedItemHandling(view: CleanNarratorView, text: s
   );
 }
 
-function directSceneFactLabels(text: string): string[] {
-  if (text.startsWith("Scene label: ")) {
-    return [trimSentencePeriod(text.slice("Scene label: ".length))];
-  }
-  if (text.startsWith("Place label: ")) {
-    return [trimSentencePeriod(text.slice("Place label: ".length))];
-  }
-  if (text.startsWith("Visible actor labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible actor labels: ".length));
-  }
-  if (text.startsWith("Inventory labels: ")) {
-    return splitEvidenceLabels(text.slice("Inventory labels: ".length));
-  }
-  if (text.startsWith("Visible target labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible target labels: ".length));
-  }
-  if (text.startsWith("Visible actor target labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible actor target labels: ".length));
-  }
-  if (text.startsWith("Visible item target labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible item target labels: ".length));
-  }
-  if (text.startsWith("Visible place-handle target labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible place-handle target labels: ".length));
-  }
-  if (text.startsWith("Visible location target labels: ")) {
-    return splitEvidenceLabels(text.slice("Visible location target labels: ".length));
-  }
-  if (text.startsWith("Route choice labels: ")) {
-    return splitRouteChoiceLabels(text.slice("Route choice labels: ".length));
-  }
-  return [];
-}
-
 function directSceneVerbatimLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) => isDirectSceneEvidence(evidence))
     .flatMap((evidence) => evidence.backendFacts)
-    .flatMap((fact) => directSceneFactLabels(fact.text))
+    .flatMap((fact) => directSceneFactLabels(fact))
     .filter((label) => label.length > 0));
 }
 
@@ -769,7 +759,7 @@ function directSceneUsesNonVerbatimCitedLabel(
   for (const evidence of view.acceptedEvidence) {
     if (!isDirectSceneEvidence(evidence)) continue;
     for (const fact of evidence.backendFacts) {
-      const labels = directSceneFactLabels(fact.text);
+      const labels = directSceneFactLabels(fact);
       if (labels.length > 0) factLabels.set(fact.factRef, labels);
     }
   }
@@ -1089,10 +1079,11 @@ function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) => evidence.authority === "route_options_receipt")
     .flatMap((evidence) => {
-      const labels = factValue(evidence, "Route choice labels: ");
-      if (labels === null) {
-        throw new Error("Route-options narration requires accepted Route choice labels evidence.");
-      }
+      const labels = requireFactValueByRole(
+        evidence,
+        "route_choice_labels",
+        "Route-options narration requires accepted Route choice labels value evidence.",
+      );
       return splitRouteChoiceLabels(labels);
     }));
 }
@@ -1112,10 +1103,11 @@ function acceptedDirectSceneRouteOptionLabels(view: CleanNarratorView): string[]
       && evidence.claimKinds.includes("movement_option")
     )
     .flatMap((evidence) => {
-      const labels = factValue(evidence, "Route choice labels: ");
-      if (labels === null) {
-        throw new Error("Direct-scene route narration requires accepted Route choice labels evidence.");
-      }
+      const labels = requireFactValueByRole(
+        evidence,
+        "route_choice_labels",
+        "Direct-scene route narration requires accepted Route choice labels value evidence.",
+      );
       return splitRouteChoiceLabels(labels);
     }));
 }
@@ -1879,11 +1871,11 @@ function splitRouteChoiceLabels(value: string): string[] {
 
 function assertRouteOptionsReceiptStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "route_options_receipt") return;
-  if (!factValue(evidence, "Route choices beat: ")) {
-    throw new Error("Route-options prompt input requires accepted Route choices beat evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "route_choices_beat" && fact.value?.trim())) {
+    throw new Error("Route-options prompt input requires accepted Route choices beat value evidence.");
   }
-  if (factValue(evidence, "Route choice labels: ") === null) {
-    throw new Error("Route-options prompt input requires accepted Route choice labels evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "route_choice_labels" && fact.value?.trim())) {
+    throw new Error("Route-options prompt input requires accepted Route choice labels value evidence.");
   }
 }
 
@@ -1892,48 +1884,48 @@ function assertSceneFrameRouteStoryEvidence(evidence: AcceptedNarrationEvidence)
     evidence.authority !== "scene_frame_snapshot"
     || !evidence.claimKinds.includes("movement_option")
   ) return;
-  if (!factValue(evidence, "Route choices beat: ")) {
-    throw new Error("Scene-frame route prompt input requires accepted Route choices beat evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "route_choices_beat" && fact.value?.trim())) {
+    throw new Error("Scene-frame route prompt input requires accepted Route choices beat value evidence.");
   }
-  if (factValue(evidence, "Route choice labels: ") === null) {
-    throw new Error("Scene-frame route prompt input requires accepted Route choice labels evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "route_choice_labels" && fact.value?.trim())) {
+    throw new Error("Scene-frame route prompt input requires accepted Route choice labels value evidence.");
   }
 }
 
 function assertSceneObservationStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "scene_observation_receipt") return;
-  if (!factValue(evidence, "Scene placement: ")) {
-    throw new Error("Scene-observation prompt input requires accepted Scene placement evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "scene_placement" && fact.value?.trim())) {
+    throw new Error("Scene-observation prompt input requires accepted Scene placement value evidence.");
   }
-  if (factValue(evidence, "Scene label: ") === null) {
-    throw new Error("Scene-observation prompt input requires accepted Scene label evidence.");
+  if (!evidence.backendFacts.some((fact) => fact.role === "scene_label" && fact.value?.trim())) {
+    throw new Error("Scene-observation prompt input requires accepted Scene label value evidence.");
   }
 }
 
 function assertSceneFrameSnapshotStoryEvidence(evidence: AcceptedNarrationEvidence): void {
   if (evidence.authority !== "scene_frame_snapshot") return;
   if (evidence.claimKinds.includes("current_scene") || evidence.claimKinds.includes("current_location")) {
-    if (!factValue(evidence, "Scene placement: ")) {
-      throw new Error("Scene-frame snapshot prompt input requires accepted Scene placement evidence.");
+    if (!evidence.backendFacts.some((fact) => fact.role === "scene_placement" && fact.value?.trim())) {
+      throw new Error("Scene-frame snapshot prompt input requires accepted Scene placement value evidence.");
     }
-    if (!factValue(evidence, "Scene label: ")) {
-      throw new Error("Scene-frame snapshot prompt input requires accepted Scene label evidence.");
+    if (!evidence.backendFacts.some((fact) => fact.role === "scene_label" && fact.value?.trim())) {
+      throw new Error("Scene-frame snapshot prompt input requires accepted Scene label value evidence.");
     }
-    if (!factValue(evidence, "Place label: ")) {
-      throw new Error("Scene-frame snapshot prompt input requires accepted Place label evidence.");
+    if (!evidence.backendFacts.some((fact) => fact.role === "place_label" && fact.value?.trim())) {
+      throw new Error("Scene-frame snapshot prompt input requires accepted Place label value evidence.");
     }
   }
-  if (evidence.claimKinds.includes("visible_fact") && !factValue(evidence, "Visible scene facts: ")) {
-    throw new Error("Scene-frame snapshot prompt input requires accepted Visible scene facts evidence.");
+  if (evidence.claimKinds.includes("visible_fact") && !evidence.backendFacts.some((fact) => fact.role === "visible_scene_facts" && fact.value?.trim())) {
+    throw new Error("Scene-frame snapshot prompt input requires accepted Visible scene facts value evidence.");
   }
-  if (evidence.claimKinds.includes("visible_actor") && !factValue(evidence, "Visible actor labels: ")) {
-    throw new Error("Scene-frame snapshot prompt input requires accepted Visible actor labels evidence.");
+  if (evidence.claimKinds.includes("visible_actor") && !evidence.backendFacts.some((fact) => fact.role === "visible_actor_labels" && fact.value?.trim())) {
+    throw new Error("Scene-frame snapshot prompt input requires accepted Visible actor labels value evidence.");
   }
-  if (evidence.claimKinds.includes("inventory_status") && !factValue(evidence, "Inventory labels: ")) {
-    throw new Error("Scene-frame snapshot prompt input requires accepted Inventory labels evidence.");
+  if (evidence.claimKinds.includes("inventory_status") && !evidence.backendFacts.some((fact) => fact.role === "inventory_labels" && fact.value?.trim())) {
+    throw new Error("Scene-frame snapshot prompt input requires accepted Inventory labels value evidence.");
   }
-  if (evidence.claimKinds.includes("visible_target") && !factValue(evidence, "Visible target labels: ")) {
-    throw new Error("Scene-frame snapshot prompt input requires accepted Visible target labels evidence.");
+  if (evidence.claimKinds.includes("visible_target") && !evidence.backendFacts.some((fact) => fact.role === "visible_target_labels" && fact.value?.trim())) {
+    throw new Error("Scene-frame snapshot prompt input requires accepted Visible target labels value evidence.");
   }
 }
 
@@ -2052,38 +2044,44 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     assertSceneFrameSnapshotStoryEvidence(evidence);
   }
 
-  const firstFactValue = (prefix: string): string | null => {
+  const firstRoleValue = (role: AcceptedNarrationBackendFactRole): string | null => {
     for (const evidence of sceneFacts) {
-      const value = factValue(evidence, prefix);
-      if (value !== null) return value;
+      const fact = evidence.backendFacts.find((entry) => entry.role === role);
+      const value = fact?.value?.trim();
+      if (value) return normalizeText(value);
     }
     return null;
   };
-  const labelsFromFacts = (prefix: string): string[] => sceneFacts.flatMap((evidence) => {
-    const labels = factValue(evidence, prefix);
-    return labels === null ? [] : splitEvidenceLabels(labels);
+  const labelsFromRole = (role: AcceptedNarrationBackendFactRole): string[] => sceneFacts.flatMap((evidence) => {
+    const fact = evidence.backendFacts.find((entry) => entry.role === role);
+    const labels = fact?.value?.trim();
+    return labels ? splitEvidenceLabels(labels) : [];
   });
 
-  const currentScene = firstFactValue("Scene label: ");
-  const currentPlace = firstFactValue("Place label: ");
+  const currentScene = firstRoleValue("scene_label");
+  const currentPlace = firstRoleValue("place_label");
   const actors = uniqueStrings([
-    ...labelsFromFacts("Visible actor labels: "),
-    ...labelsFromFacts("Visible actor target labels: "),
+    ...labelsFromRole("visible_actor_labels"),
+    ...labelsFromRole("visible_actor_target_labels"),
   ]);
-  const inventory = uniqueStrings(labelsFromFacts("Inventory labels: "));
-  const visibleSceneFacts = labelsFromFacts("Visible scene facts: ");
+  const inventory = uniqueStrings(labelsFromRole("inventory_labels"));
+  const visibleSceneFacts = labelsFromRole("visible_scene_facts");
   const routeOptionLabels = uniqueStrings(sceneFacts
     .filter((evidence) => evidence.claimKinds.includes("movement_option"))
     .flatMap((evidence) => {
-      const labels = factValue(evidence, "Route choice labels: ");
-      return labels === null ? [] : splitRouteChoiceLabels(labels);
+      const labels = requireFactValueByRole(
+        evidence,
+        "route_choice_labels",
+        "Direct-scene projection requires accepted Route choice labels value evidence.",
+      );
+      return splitRouteChoiceLabels(labels);
     }));
   const alreadyNamed = new Set([
     ...actors,
     ...inventory,
     ...routeOptionLabels,
   ].map((label) => label.toLocaleLowerCase("en-US")));
-  const targets = labelsFromFacts("Visible target labels: ")
+  const targets = labelsFromRole("visible_target_labels")
     .filter((label) => !alreadyNamed.has(label.toLocaleLowerCase("en-US")));
   const routeFacts = sceneFacts
     .filter((evidence) => evidence.claimKinds.includes("movement_option"))

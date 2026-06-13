@@ -249,11 +249,11 @@ function routeOptionsView(): CleanNarratorView {
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
         { factRef: "e1.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
-        { factRef: "e1.f2", text: "Route origin: Market.", exact: true },
-        { factRef: "e1.f3", text: "Route choice labels: North Hall.", exact: true },
-        { factRef: "e1.f4", text: "Open route labels: North Hall.", exact: true },
-        { factRef: "e1.f5", text: "Closed route labels: none.", exact: true },
-        { factRef: "e1.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+        { factRef: "e1.f2", role: "route_origin", value: "Market", text: "Route origin: Market.", exact: true },
+        { factRef: "e1.f3", role: "route_choice_labels", value: "North Hall", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e1.f4", role: "open_route_labels", value: "North Hall", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e1.f5", role: "closed_route_labels", value: "none", text: "Closed route labels: none.", exact: true },
+        { factRef: "e1.f6", role: "route_choice_travel_costs", value: "North Hall: 1 minute", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
       ],
       limits: {
         proves: ["route options exposed by current SceneFrame", "route choice phrasing for the player"],
@@ -306,11 +306,11 @@ function routeOptionsManyView(): CleanNarratorView {
       text: routeChoicesBeat,
       backendFacts: [
         { factRef: "e1.f1", role: "route_choices_beat", value: routeChoicesBeat, text: `Route choices beat: ${routeChoicesBeat}`, exact: true },
-        { factRef: "e1.f2", text: "Route origin: Lowwater Bazaar.", exact: true },
-        { factRef: "e1.f3", text: `Route choice labels: ${labels.join("; ")}.`, exact: true },
-        { factRef: "e1.f4", text: `Open route labels: ${labels.join("; ")}.`, exact: true },
-        { factRef: "e1.f5", text: "Closed route labels: none.", exact: true },
-        { factRef: "e1.f6", text: `Route choice travel costs: ${labels.map((label) => `${label}: 1 minute`).join("; ")}.`, exact: true },
+        { factRef: "e1.f2", role: "route_origin", value: "Lowwater Bazaar", text: "Route origin: Lowwater Bazaar.", exact: true },
+        { factRef: "e1.f3", role: "route_choice_labels", value: labels.join("; "), text: `Route choice labels: ${labels.join("; ")}.`, exact: true },
+        { factRef: "e1.f4", role: "open_route_labels", value: labels.join("; "), text: `Open route labels: ${labels.join("; ")}.`, exact: true },
+        { factRef: "e1.f5", role: "closed_route_labels", value: "none", text: "Closed route labels: none.", exact: true },
+        { factRef: "e1.f6", role: "route_choice_travel_costs", value: labels.map((label) => `${label}: 1 minute`).join("; "), text: `Route choice travel costs: ${labels.map((label) => `${label}: 1 minute`).join("; ")}.`, exact: true },
       ],
       limits: {
         proves: ["route options exposed by current SceneFrame", "route choice phrasing for the player"],
@@ -329,11 +329,15 @@ function sceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"]
     backendFacts: [
       {
         factRef: `${ref}.f1`,
+        role: "scene_texture",
+        value: "Canvas awnings hang over the market lanes",
         text: "Scene texture: Canvas awnings hang over the market lanes.",
         exact: true,
       },
       {
         factRef: `${ref}.f2`,
+        role: "scene_texture",
+        value: "Rain taps the brass gutters",
         text: "Scene texture: Rain taps the brass gutters.",
         exact: true,
       },
@@ -352,9 +356,9 @@ function currentSceneAnchorEvidence(ref = "e3"): CleanNarratorView["acceptedEvid
     claimKinds: ["current_scene", "current_location"],
     text: "You are at Market.",
     backendFacts: [
-      { factRef: `${ref}.f1`, text: "Scene placement: You are at Market.", exact: true },
-      { factRef: `${ref}.f2`, text: "Scene label: Market.", exact: true },
-      { factRef: `${ref}.f3`, text: "Place label: Market.", exact: true },
+      { factRef: `${ref}.f1`, role: "scene_placement", value: "You are at Market.", text: "Scene placement: You are at Market.", exact: true },
+      { factRef: `${ref}.f2`, role: "scene_label", value: "Market", text: "Scene label: Market.", exact: true },
+      { factRef: `${ref}.f3`, role: "place_label", value: "Market", text: "Place label: Market.", exact: true },
     ],
     limits: {
       proves: ["current scene label"],
@@ -407,8 +411,8 @@ function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
       claimKinds: ["visible_target"],
       text: "Targets in view here include Guide, Courier.",
       backendFacts: [
-        { factRef: "e2.f1", text: "Visible target labels: Guide; Courier.", exact: true },
-        { factRef: "e2.f2", text: "Visible actor target labels: Guide; Courier.", exact: true },
+        { factRef: "e2.f1", role: "visible_target_labels", value: "Guide; Courier", text: "Visible target labels: Guide; Courier.", exact: true },
+        { factRef: "e2.f2", role: "visible_actor_target_labels", value: "Guide; Courier", text: "Visible actor target labels: Guide; Courier.", exact: true },
       ],
       limits: {
         proves: ["visible current-scene target labels"],
@@ -426,9 +430,9 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       claimKinds: ["current_scene", "current_location"],
       text: "You are at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Scene placement: You are at Market.", exact: true },
-        { factRef: "e1.f2", text: "Scene label: Market.", exact: true },
-        { factRef: "e1.f3", text: "Place label: Market.", exact: true },
+        { factRef: "e1.f1", role: "scene_placement", value: "You are at Market.", text: "Scene placement: You are at Market.", exact: true },
+        { factRef: "e1.f2", role: "scene_label", value: "Market", text: "Scene label: Market.", exact: true },
+        { factRef: "e1.f3", role: "place_label", value: "Market", text: "Place label: Market.", exact: true },
       ],
       limits: {
         proves: ["current scene label"],
@@ -439,7 +443,7 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
       text: "Courier satchel is in your inventory.",
-      backendFacts: [{ factRef: "e2.f1", text: "Inventory labels: Courier satchel.", exact: true }],
+      backendFacts: [{ factRef: "e2.f1", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true }],
       limits: {
         proves: ["inventory item label only"],
         doesNotProve: ["item contents", "item use", "ownership transfer"],
@@ -450,8 +454,8 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       claimKinds: ["visible_target"],
       text: "Targets in view here include Notice Board.",
       backendFacts: [
-        { factRef: "e3.f1", text: "Visible target labels: Notice Board.", exact: true },
-        { factRef: "e3.f2", text: "Visible place-handle target labels: Notice Board.", exact: true },
+        { factRef: "e3.f1", role: "visible_target_labels", value: "Notice Board", text: "Visible target labels: Notice Board.", exact: true },
+        { factRef: "e3.f2", role: "visible_place_handle_target_labels", value: "Notice Board", text: "Visible place-handle target labels: Notice Board.", exact: true },
       ],
       limits: {
         proves: ["visible target labels exposed by the current SceneFrame snapshot"],
@@ -464,11 +468,11 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
         { factRef: "e4.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
-        { factRef: "e4.f2", text: "Route origin: Market.", exact: true },
-        { factRef: "e4.f3", text: "Route choice labels: North Hall.", exact: true },
-        { factRef: "e4.f4", text: "Open route labels: North Hall.", exact: true },
-        { factRef: "e4.f5", text: "Closed route labels: none.", exact: true },
-        { factRef: "e4.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+        { factRef: "e4.f2", role: "route_origin", value: "Market", text: "Route origin: Market.", exact: true },
+        { factRef: "e4.f3", role: "route_choice_labels", value: "North Hall", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e4.f4", role: "open_route_labels", value: "North Hall", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e4.f5", role: "closed_route_labels", value: "none", text: "Closed route labels: none.", exact: true },
+        { factRef: "e4.f6", role: "route_choice_travel_costs", value: "North Hall: 1 minute", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
       ],
       limits: {
         proves: ["route option labels exposed by the current SceneFrame snapshot", "route choice phrasing for the player"],
@@ -495,9 +499,9 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       claimKinds: ["current_scene", "current_location"],
       text: "You are at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Scene placement: You are at Market.", exact: true },
-        { factRef: "e1.f2", text: "Scene label: Market.", exact: true },
-        { factRef: "e1.f3", text: "Place label: Market.", exact: true },
+        { factRef: "e1.f1", role: "scene_placement", value: "You are at Market.", text: "Scene placement: You are at Market.", exact: true },
+        { factRef: "e1.f2", role: "scene_label", value: "Market", text: "Scene label: Market.", exact: true },
+        { factRef: "e1.f3", role: "place_label", value: "Market", text: "Place label: Market.", exact: true },
       ],
       limits: {
         proves: ["current scene label"],
@@ -508,7 +512,7 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
       text: "Guide is in view here.",
-      backendFacts: [{ factRef: "e2.f1", text: "Visible actor labels: Guide.", exact: true }],
+      backendFacts: [{ factRef: "e2.f1", role: "visible_actor_labels", value: "Guide", text: "Visible actor labels: Guide.", exact: true }],
       limits: {
         proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "future actor action"],
@@ -518,7 +522,7 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
       text: "Courier satchel is in your inventory.",
-      backendFacts: [{ factRef: "e3.f1", text: "Inventory labels: Courier satchel.", exact: true }],
+      backendFacts: [{ factRef: "e3.f1", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true }],
       limits: {
         proves: ["inventory item label only"],
         doesNotProve: ["item contents", "item use", "ownership transfer"],
@@ -529,11 +533,11 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       claimKinds: ["visible_target"],
       text: "Targets in view here include Guide, Courier satchel, North Hall, Brass Tube, Notice Board.",
       backendFacts: [
-        { factRef: "e4.f1", text: "Visible target labels: Guide; Courier satchel; North Hall; Brass Tube; Notice Board.", exact: true },
-        { factRef: "e4.f2", text: "Visible actor target labels: Guide.", exact: true },
-        { factRef: "e4.f3", text: "Visible item target labels: Courier satchel; Brass Tube.", exact: true },
-        { factRef: "e4.f4", text: "Visible place-handle target labels: Notice Board.", exact: true },
-        { factRef: "e4.f5", text: "Visible location target labels: North Hall.", exact: true },
+        { factRef: "e4.f1", role: "visible_target_labels", value: "Guide; Courier satchel; North Hall; Brass Tube; Notice Board", text: "Visible target labels: Guide; Courier satchel; North Hall; Brass Tube; Notice Board.", exact: true },
+        { factRef: "e4.f2", role: "visible_actor_target_labels", value: "Guide", text: "Visible actor target labels: Guide.", exact: true },
+        { factRef: "e4.f3", role: "visible_item_target_labels", value: "Courier satchel; Brass Tube", text: "Visible item target labels: Courier satchel; Brass Tube.", exact: true },
+        { factRef: "e4.f4", role: "visible_place_handle_target_labels", value: "Notice Board", text: "Visible place-handle target labels: Notice Board.", exact: true },
+        { factRef: "e4.f5", role: "visible_location_target_labels", value: "North Hall", text: "Visible location target labels: North Hall.", exact: true },
       ],
       limits: {
         proves: ["visible current-scene target labels"],
@@ -546,11 +550,11 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
         { factRef: "e5.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
-        { factRef: "e5.f2", text: "Route origin: Market.", exact: true },
-        { factRef: "e5.f3", text: "Route choice labels: North Hall.", exact: true },
-        { factRef: "e5.f4", text: "Open route labels: North Hall.", exact: true },
-        { factRef: "e5.f5", text: "Closed route labels: none.", exact: true },
-        { factRef: "e5.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+        { factRef: "e5.f2", role: "route_origin", value: "Market", text: "Route origin: Market.", exact: true },
+        { factRef: "e5.f3", role: "route_choice_labels", value: "North Hall", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e5.f4", role: "open_route_labels", value: "North Hall", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e5.f5", role: "closed_route_labels", value: "none", text: "Closed route labels: none.", exact: true },
+        { factRef: "e5.f6", role: "route_choice_travel_costs", value: "North Hall: 1 minute", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
       ],
       limits: {
         proves: ["route option labels exposed by the current SceneFrame snapshot", "route choice phrasing for the player"],
@@ -612,7 +616,7 @@ function modelNarrationView(): CleanNarratorView {
       claimKinds: ["visible_fact"],
       text: "Guide stands nearby.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Visible scene facts: Guide stands nearby.", exact: true },
+        { factRef: "e1.f1", role: "visible_scene_facts", value: "Guide stands nearby", text: "Visible scene facts: Guide stands nearby.", exact: true },
       ],
       limits: {
         proves: ["accepted visible fact"],
@@ -981,13 +985,13 @@ function sceneObservationReceiptView(): CleanNarratorView {
         claimKinds: ["current_scene", "current_location", "visible_actor", "inventory_status", "movement_option"],
         text: "You are at Market.",
         backendFacts: [
-          { factRef: "e5.f1", text: "Scene placement: You are at Market.", exact: true },
-          { factRef: "e5.f2", text: "Scene label: Market.", exact: true },
-          { factRef: "e5.f3", text: "Place label: Market.", exact: true },
-          { factRef: "e5.f4", text: "Visible actor labels: Guide.", exact: true },
-          { factRef: "e5.f5", text: "Inventory labels: Courier satchel.", exact: true },
+          { factRef: "e5.f1", role: "scene_placement", value: "You are at Market.", text: "Scene placement: You are at Market.", exact: true },
+          { factRef: "e5.f2", role: "scene_label", value: "Market", text: "Scene label: Market.", exact: true },
+          { factRef: "e5.f3", role: "place_label", value: "Market", text: "Place label: Market.", exact: true },
+          { factRef: "e5.f4", role: "visible_actor_labels", value: "Guide", text: "Visible actor labels: Guide.", exact: true },
+          { factRef: "e5.f5", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true },
           { factRef: "e5.f6", role: "route_choices_beat", value: "From Market, visible route choices are North Hall.", text: "Route choices beat: From Market, visible route choices are North Hall.", exact: true },
-          { factRef: "e5.f7", text: "Route choice labels: North Hall.", exact: true },
+          { factRef: "e5.f7", role: "route_choice_labels", value: "North Hall", text: "Route choice labels: North Hall.", exact: true },
         ],
         limits: {
           proves: ["accepted current visible scene observation result", "scene observation phrasing for the player"],
@@ -1622,18 +1626,24 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Route-options prompt input requires accepted Route choices beat evidence.");
+      .toThrow("Route-options prompt input requires accepted Route choices beat value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
       .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
 
     const missingLabelsView = routeOptionsView();
     missingLabelsView.acceptedEvidence[0] = {
       ...missingLabelsView.acceptedEvidence[0]!,
-      backendFacts: [{ factRef: "e1.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true }],
+      backendFacts: [{
+        factRef: "e1.f1",
+        role: "route_choices_beat",
+        value: "From Market, visible route choices are North Hall (1 minute).",
+        text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).",
+        exact: true,
+      }],
     };
 
     expect(() => buildCleanNarratorPromptInput(missingLabelsView))
-      .toThrow("Route-options prompt input requires accepted Route choice labels evidence.");
+      .toThrow("Route-options prompt input requires accepted Route choice labels value evidence.");
   });
 
   it("fails scene_frame_snapshot route handling when accepted story evidence is missing", () => {
@@ -1645,9 +1655,9 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Scene-frame route prompt input requires accepted Route choices beat evidence.");
+      .toThrow("Scene-frame route prompt input requires accepted Route choices beat value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
+      .toThrow("Direct-scene projection requires accepted Route choice labels value evidence.");
   });
 
   it("fails scene_frame_snapshot handling when accepted direct-scene story facts are missing", () => {
@@ -1662,9 +1672,9 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement evidence.");
+      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement evidence.");
+      .toThrow("Scene-frame snapshot prompt input requires accepted Scene placement value evidence.");
   });
 
   it("fails scene_observation receipt handling when accepted story evidence is missing", () => {
@@ -1684,9 +1694,9 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => buildCleanNarratorPromptInput(oldFactView))
-      .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
+      .toThrow("Scene-observation prompt input requires accepted Scene placement value evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
+      .toThrow("Scene-observation prompt input requires accepted Scene placement value evidence.");
   });
 
   it("fails local_observation receipt handling when accepted story evidence is missing", () => {

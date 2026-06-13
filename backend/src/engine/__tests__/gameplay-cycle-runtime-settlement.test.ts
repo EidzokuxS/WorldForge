@@ -823,6 +823,12 @@ describe("clean Stage 5 settlement contracts", () => {
       "Visible place-handle target labels: Notice Board.",
       "Visible location target labels: North Hall.",
     ]);
+    expect(targetEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
+      "Guide; Notice Board; North Hall",
+      "Guide",
+      "Notice Board",
+      "North Hall",
+    ]);
     expect(targetEvidence?.limits.doesNotProve).toContain("movement");
     const routeEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("movement_option"));
     expect(routeEvidence?.text).toBe("From Market, visible route choices are North Hall (1 minute).");
@@ -833,6 +839,14 @@ describe("clean Stage 5 settlement contracts", () => {
       "Open route labels: North Hall.",
       "Closed route labels: none.",
       "Route choice travel costs: North Hall: 1 minute.",
+    ]);
+    expect(routeEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
+      "From Market, visible route choices are North Hall (1 minute).",
+      "Market",
+      "North Hall",
+      "North Hall",
+      "none",
+      "North Hall: 1 minute",
     ]);
     expect(routeEvidence?.limits.proves).toContain("route choice phrasing for the player");
     expect(routeEvidence?.limits.doesNotProve).toContain("arrival");
@@ -1821,6 +1835,16 @@ describe("clean Stage 5 settlement contracts", () => {
       "Route choices beat: From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
       "Route choice labels: North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door.",
     ]);
+    expect(observation?.backendFacts.map((entry) => entry.value)).toEqual([
+      "You are at Market.",
+      "Market",
+      "Market",
+      "Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier",
+      "Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge",
+      "Brass Tube; Field Notebook; Pocket Lens; Token Pouch",
+      "From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
+      "North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door",
+    ]);
     expect(observation?.limits.proves).toContain("scene observation phrasing for the player");
     const routes = packet.acceptedEvidence.find((entry) => entry.authority === "route_options_receipt");
     expect(routes?.text).toBe("From Market, visible route choices are North Hall (1 minute), South Arcade (2 minutes), East Gate (2 minutes), West Stairs (3 minutes), Canal Walk (4 minutes), Archive Door (closed), Clock Yard (5 minutes), Glasshouse (6 minutes).");
@@ -1831,6 +1855,14 @@ describe("clean Stage 5 settlement contracts", () => {
       "Open route labels: North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Clock Yard; Glasshouse.",
       "Closed route labels: Archive Door.",
       "Route choice travel costs: North Hall: 1 minute; South Arcade: 2 minutes; East Gate: 2 minutes; West Stairs: 3 minutes; Canal Walk: 4 minutes; Archive Door: closed; Clock Yard: 5 minutes; Glasshouse: 6 minutes.",
+    ]);
+    expect(routes?.backendFacts.map((entry) => entry.value)).toEqual([
+      "From Market, visible route choices are North Hall (1 minute), South Arcade (2 minutes), East Gate (2 minutes), West Stairs (3 minutes), Canal Walk (4 minutes), Archive Door (closed), Clock Yard (5 minutes), Glasshouse (6 minutes).",
+      "Market",
+      "North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door; Clock Yard; Glasshouse",
+      "North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Clock Yard; Glasshouse",
+      "Archive Door",
+      "North Hall: 1 minute; South Arcade: 2 minutes; East Gate: 2 minutes; West Stairs: 3 minutes; Canal Walk: 4 minutes; Archive Door: closed; Clock Yard: 5 minutes; Glasshouse: 6 minutes",
     ]);
     expect(routes?.limits.proves).toContain("route choice phrasing for the player");
     expect(routes?.limits.doesNotProve).toContain("hidden routes");

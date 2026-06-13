@@ -549,22 +549,23 @@ function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
 
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
   const evidenceId = nextEvidenceId(evidence);
+  const scenePlacement = scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label);
     evidence.push({
       evidenceId,
       sourceKind: "scene_frame",
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["current_scene", "current_location"],
-      text: scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label),
+      text: scenePlacement,
       visibleRefs: uniqueStrings([
         frame.player.ref,
         frame.scene.currentScene.ref,
         frame.scene.currentLocation.ref,
       ]),
       backendFacts: [
-        fact(evidenceId, 1, "scene_placement", `Scene placement: ${scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label)}`),
-        fact(evidenceId, 2, "scene_label", `Scene label: ${frame.scene.currentScene.label}.`),
-        fact(evidenceId, 3, "place_label", `Place label: ${frame.scene.currentLocation.label}.`),
+        fact(evidenceId, 1, "scene_placement", `Scene placement: ${scenePlacement}`, scenePlacement),
+        fact(evidenceId, 2, "scene_label", `Scene label: ${frame.scene.currentScene.label}.`, frame.scene.currentScene.label),
+        fact(evidenceId, 3, "place_label", `Place label: ${frame.scene.currentLocation.label}.`, frame.scene.currentLocation.label),
       ],
     limits: {
       proves: ["current scene label", "current location label"],
@@ -589,7 +590,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
         frame.scene.currentLocation.ref,
       ]),
       backendFacts: textures.map((texture, index) =>
-        fact(textureEvidenceId, index + 1, "scene_texture", `Scene texture: ${texture}.`)
+        fact(textureEvidenceId, index + 1, "scene_texture", `Scene texture: ${texture}.`, texture)
       ),
       limits: {
         proves: ["public current-scene description texture"],
@@ -608,7 +609,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_fact"],
       text: visible.summary,
       visibleRefs: [visible.source],
-      backendFacts: [fact(visibleEvidenceId, 1, "visible_scene_facts", `Visible scene facts: ${trimTrailingSentencePunctuation(visible.summary)}.`)],
+      backendFacts: [fact(visibleEvidenceId, 1, "visible_scene_facts", `Visible scene facts: ${trimTrailingSentencePunctuation(visible.summary)}.`, trimTrailingSentencePunctuation(visible.summary))],
       limits: {
         proves: ["current visible scene fact"],
         doesNotProve: SCENE_DOES_NOT_PROVE,
@@ -626,7 +627,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_actor"],
       text: `${actor.label} is in view here.`,
       visibleRefs: [actor.ref],
-      backendFacts: [fact(actorEvidenceId, 1, "visible_actor_labels", `Visible actor labels: ${actor.label}.`)],
+      backendFacts: [fact(actorEvidenceId, 1, "visible_actor_labels", `Visible actor labels: ${actor.label}.`, actor.label)],
       limits: {
         proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "absence of other actors", "future actor action"],
@@ -644,7 +645,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["inventory_status"],
       text: `${item.label} is in your inventory.`,
       visibleRefs: [item.ref],
-      backendFacts: [fact(itemEvidenceId, 1, "inventory_labels", `Inventory labels: ${item.label}.`)],
+      backendFacts: [fact(itemEvidenceId, 1, "inventory_labels", `Inventory labels: ${item.label}.`, item.label)],
       limits: {
         proves: ["inventory item label in the current inventory view"],
         doesNotProve: ["item state change", "item transfer", "absence of other items"],
@@ -671,19 +672,19 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
     const locationTargetLabels = visibleTargets
       .filter((target) => target.kind === "location")
       .map((target) => target.label);
-    const targetFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
-      { role: "visible_target_labels", text: `Visible target labels: ${evidenceSemicolonList(visibleTargetLabels)}.` },
+    const targetFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value: string }> = [
+      { role: "visible_target_labels", text: `Visible target labels: ${evidenceSemicolonList(visibleTargetLabels)}.`, value: evidenceSemicolonList(visibleTargetLabels) },
       ...(actorTargetLabels.length > 0
-        ? [{ role: "visible_actor_target_labels" as const, text: `Visible actor target labels: ${evidenceSemicolonList(actorTargetLabels)}.` }]
+        ? [{ role: "visible_actor_target_labels" as const, text: `Visible actor target labels: ${evidenceSemicolonList(actorTargetLabels)}.`, value: evidenceSemicolonList(actorTargetLabels) }]
         : []),
       ...(itemTargetLabels.length > 0
-        ? [{ role: "visible_item_target_labels" as const, text: `Visible item target labels: ${evidenceSemicolonList(itemTargetLabels)}.` }]
+        ? [{ role: "visible_item_target_labels" as const, text: `Visible item target labels: ${evidenceSemicolonList(itemTargetLabels)}.`, value: evidenceSemicolonList(itemTargetLabels) }]
         : []),
       ...(placeHandleTargetLabels.length > 0
-        ? [{ role: "visible_place_handle_target_labels" as const, text: `Visible place-handle target labels: ${evidenceSemicolonList(placeHandleTargetLabels)}.` }]
+        ? [{ role: "visible_place_handle_target_labels" as const, text: `Visible place-handle target labels: ${evidenceSemicolonList(placeHandleTargetLabels)}.`, value: evidenceSemicolonList(placeHandleTargetLabels) }]
         : []),
       ...(locationTargetLabels.length > 0
-        ? [{ role: "visible_location_target_labels" as const, text: `Visible location target labels: ${evidenceSemicolonList(locationTargetLabels)}.` }]
+        ? [{ role: "visible_location_target_labels" as const, text: `Visible location target labels: ${evidenceSemicolonList(locationTargetLabels)}.`, value: evidenceSemicolonList(locationTargetLabels) }]
         : []),
     ];
     evidence.push({
@@ -695,7 +696,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       text: `Targets in view here include ${visibleTargetLabels.join(", ")}.`,
       visibleRefs: visibleTargets.map((target) => target.ref),
       backendFacts: boundedBackendFacts(targetFactTexts.map((entry, index) =>
-        fact(targetEvidenceId, index + 1, entry.role, entry.text)
+        fact(targetEvidenceId, index + 1, entry.role, entry.text, entry.value)
       )),
       limits: {
         proves: ["visible current-scene target labels"],
@@ -728,11 +729,11 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       visibleRefs: routeOptions.map((option) => option.ref),
       backendFacts: boundedBackendFacts([
         fact(routeEvidenceId, 1, "route_choices_beat", `Route choices beat: ${routeBeat}`, routeBeat),
-        fact(routeEvidenceId, 2, "route_origin", `Route origin: ${frame.scene.currentScene.label}.`),
-        fact(routeEvidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`),
+        fact(routeEvidenceId, 2, "route_origin", `Route origin: ${frame.scene.currentScene.label}.`, frame.scene.currentScene.label),
+        fact(routeEvidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`, routeLabels.join("; ") || "none"),
+        fact(routeEvidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`, openRouteLabels.join("; ") || "none"),
+        fact(routeEvidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`, closedRouteLabels.join("; ") || "none"),
+        fact(routeEvidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`, routeCostSummary),
       ]),
       limits: {
         proves: ["route option labels visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
@@ -865,23 +866,23 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       if (observation.inventory.length > 0) claimKinds.push("inventory_status");
       if (observation.movementOptions.length > 0) claimKinds.push("movement_option");
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
-        { role: "scene_placement", text: `Scene placement: ${scenePlacement}` },
-        { role: "scene_label", text: `Scene label: ${observation.currentScene}.` },
-        { role: "place_label", text: `Place label: ${observation.currentLocation}.` },
+        { role: "scene_placement", text: `Scene placement: ${scenePlacement}`, value: scenePlacement },
+        { role: "scene_label", text: `Scene label: ${observation.currentScene}.`, value: observation.currentScene },
+        { role: "place_label", text: `Place label: ${observation.currentLocation}.`, value: observation.currentLocation },
         ...(observation.visibleActors.length > 0
-          ? [{ role: "visible_actor_labels" as const, text: `Visible actor labels: ${evidenceSemicolonList(observation.visibleActors)}.` }]
+          ? [{ role: "visible_actor_labels" as const, text: `Visible actor labels: ${evidenceSemicolonList(observation.visibleActors)}.`, value: evidenceSemicolonList(observation.visibleActors) }]
           : []),
         ...(observation.visibleFacts.length > 0
-          ? [{ role: "visible_scene_facts" as const, text: `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.` }]
+          ? [{ role: "visible_scene_facts" as const, text: `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.`, value: evidenceSemicolonList(observation.visibleFacts.slice(0, 4)) }]
           : []),
         ...(observation.inventory.length > 0
-          ? [{ role: "inventory_labels" as const, text: `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.` }]
+          ? [{ role: "inventory_labels" as const, text: `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.`, value: evidenceSemicolonList(observation.inventory) }]
           : []),
         ...(observation.movementOptions.length > 0
           ? [{ role: "route_choices_beat" as const, text: `Route choices beat: ${routeBeat}`, value: routeBeat }]
           : []),
         ...(observation.movementOptions.length > 0
-          ? [{ role: "route_choice_labels" as const, text: `Route choice labels: ${evidenceSemicolonList(observation.movementOptions)}.` }]
+          ? [{ role: "route_choice_labels" as const, text: `Route choice labels: ${evidenceSemicolonList(observation.movementOptions)}.`, value: evidenceSemicolonList(observation.movementOptions) }]
           : []),
       ];
       evidence.push({
@@ -1019,11 +1020,11 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: boundedBackendFacts([
           fact(evidenceId, 1, "route_choices_beat", `Route choices beat: ${routeBeat}`, routeBeat),
-          fact(evidenceId, 2, "route_origin", `Route origin: ${routeOptions.fromLabel}.`),
-          fact(evidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`),
+          fact(evidenceId, 2, "route_origin", `Route origin: ${routeOptions.fromLabel}.`, routeOptions.fromLabel),
+          fact(evidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`, routeLabels.join("; ") || "none"),
+          fact(evidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`, openRouteLabels.join("; ") || "none"),
+          fact(evidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`, closedRouteLabels.join("; ") || "none"),
+          fact(evidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`, routeCostSummary),
         ]),
         limits: {
           proves: ["route options visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
