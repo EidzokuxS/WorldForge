@@ -6138,3 +6138,26 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 340 tests.
     - [x] GitNexus staged `detect_changes` reported MEDIUM central narration scope, with changed steps limited to `runCleanNarration` literary selection and `renderCleanAuthorityProjection` deterministic projection.
+
+- P205 Stage 6 route-options no-texture literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow `route_options_receipt` without accepted `scene_texture` to use model-authored literary narration.
+    - [x] Preserve route truth contract: every accepted visible route label and cost must remain grounded; movement, arrival, current-scene change, hidden-route, route-safety, and travel-mode claims remain rejected.
+    - [x] Add validation rejecting old stock route-list projection wording on route-options model output, including no-texture turns.
+    - [x] Update focused narration tests for model-authored no-texture route-options plus movement-drift, missing-label, summary-digest, stock-shape, and unsupported-texture rejection.
+    - [x] Run focused narration tests, typecheck, clean-runtime suite, live route-options proof, and prose audit.
+    - [x] Run GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts for `needsDeterministicAuthorityProjection`, `proseQualityIssues`, and `buildCleanNarrationSystemPrompt` were LOW; direct caller scope stays inside `runCleanNarration` / `validateCleanNarrationCandidate`.
+    - [x] No-texture `route_options_receipt` now enters model-authored narration instead of deterministic authority projection.
+    - [x] Route-options validation now rejects the old `From here, the visible way leads... It takes...` stock projection shape for both textured and no-texture model output.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 73 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 340 tests.
+    - [x] Live clone `p205-route-options-literary-20260613-1917` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`, backend `http://127.0.0.1:31719`, clean runtime flags on.
+    - [x] Turn 001 action `I list every route I can take from Lowwater Bazaar now, without moving.` accepted one `route_options` receipt, `mutationApplied=false`, no authority trace, no clock ledger, old stores 0, and final clock `0/0/0`.
+    - [x] Player-facing prose used model-authored route-choice wording, exact accepted scene texture, all eight accepted route labels, and one-minute cost: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here at Lowwater Bazaar.`
+    - [x] DB proof `output/clean-runtime-p205-route-options-literary-20260613-1917/db-proof.json`: pass true; no movement, current-scene change, hidden-route, route-safety, internal route/backend terms, or old runtime stores.
+    - [x] Prose audit `output/clean-runtime-p205-route-options-literary-20260613-1917/prose-audit.json`: 1 narrative, 50 words, zero one-token/debug/enum/stock-route/slop hits.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope, mapping the code change to `proseQualityIssues` with no affected process expansion.

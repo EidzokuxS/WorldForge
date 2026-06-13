@@ -1438,19 +1438,38 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
-  it("deterministically projects route-options evidence without converting options into movement", async () => {
+  it("uses model-authored route-options prose without scene texture while preserving route-only truth", async () => {
     const view = routeOptionsView();
+    let modelCalls = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("route_options should use deterministic accepted-evidence projection");
+        modelCalls += 1;
+        return acceptedCandidate(view, [{
+          text: "North Hall is the one-minute route choice from here now.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        }]);
       },
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(modelCalls).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("North Hall is the one-minute route choice from here now.");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
+
+    const manyRoutes = validateCleanNarrationCandidate({
+      view: routeOptionsManyView(),
+      candidate: acceptedCandidate(routeOptionsManyView(), [{
+        text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(manyRoutes.status).toBe("accepted");
 
     const movementDrift = validateCleanNarrationCandidate({
       view,
@@ -1495,6 +1514,21 @@ describe("clean Stage 6 narration contracts", () => {
     if (availableRouteDigest.status !== "rejected") throw new Error("expected rejected");
     expect(availableRouteDigest.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const stockRouteListShape = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(stockRouteListShape.status).toBe("rejected");
+    if (stockRouteListShape.status !== "rejected") throw new Error("expected rejected");
+    expect(stockRouteListShape.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("stock route-list wording")
     )).toBe(true);
 
     const unsupportedRouteTexture = validateCleanNarrationCandidate({

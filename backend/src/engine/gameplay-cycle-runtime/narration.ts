@@ -154,7 +154,7 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     pattern: /^[\p{L}\p{N}' -]+ (?:is now available|remains available) here as a visible [\p{L}\p{N}' -]+(?: handle)?\.$/iu,
   },
 ];
-const TEXTURED_ROUTE_OPTIONS_STOCK_SHAPE =
+const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
   /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -1113,13 +1113,12 @@ function proseQualityIssues(input: {
 
   if (
     hasClaimKind(input.view, "movement_option")
-    && hasAcceptedSceneTextureEvidence(input.view)
-    && TEXTURED_ROUTE_OPTIONS_STOCK_SHAPE.test(input.candidate.finalText)
+    && ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE.test(input.candidate.finalText)
   ) {
     issues.push({
       code: "prose_quality",
       path: "finalText",
-      message: "Textured route-options prose used stock route-list wording; write a fresh route-choice beat while preserving every accepted label and cost.",
+      message: "Route-options prose used stock route-list wording; write a fresh route-choice beat while preserving every accepted label and cost.",
     });
   }
 
@@ -1922,7 +1921,6 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
     || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
     || (evidence.claimKinds.includes("player_local_condition") && !hasSceneTexture)
     || (evidence.claimKinds.includes("support_actor_materialization") && !hasSceneTexture)
-    || (evidence.authority === "route_options_receipt" && !hasSceneTexture)
     || evidence.authority === "scene_observation_receipt"
     || (evidence.claimKinds.includes("device_surface_observation") && !hasSceneTexture)
   );
