@@ -47,7 +47,7 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
       claimKinds: ["player_location_change", "elapsed_time"],
       text: "After 1 minute, you reach North Hall.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Travel beat: After 1 minute, you reach North Hall.", exact: true },
+        { factRef: "e1.f1", role: "travel_beat", value: "After 1 minute, you reach North Hall.", text: "Travel beat: After 1 minute, you reach North Hall.", exact: true },
         { factRef: "e1.f2", text: "Destination label: North Hall.", exact: true },
         { factRef: "e1.f3", text: "Elapsed travel time: 1 minute.", exact: true },
         { factRef: "e1.f4", text: "Current place after movement: North Hall.", exact: true },
@@ -124,7 +124,7 @@ function routeView(): CleanNarratorView {
       claimKinds: ["route_status"],
       text: "From here, the path to North Hall is open.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Route beat: From here, the path to North Hall is open.", exact: true },
+        { factRef: "e1.f1", role: "route_beat", value: "From here, the path to North Hall is open.", text: "Route beat: From here, the path to North Hall is open.", exact: true },
         { factRef: "e1.f2", text: "Route label: North Hall.", exact: true },
         { factRef: "e1.f3", text: "Route status: connected.", exact: true },
       ],
@@ -147,6 +147,8 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
         text: "From here, the path to Transmission Basement is open.",
         backendFacts: [{
           factRef: "e5.f1",
+          role: "route_beat",
+          value: "From here, the path to Transmission Basement is open.",
           text: "Route beat: From here, the path to Transmission Basement is open.",
           exact: true,
         }, {
@@ -175,7 +177,7 @@ function timeView(): CleanNarratorView {
       claimKinds: ["elapsed_time"],
       text: "5 minutes pass.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Time beat: 5 minutes pass.", exact: true },
+        { factRef: "e1.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
         { factRef: "e1.f2", text: "Elapsed time: 5 minutes.", exact: true },
       ],
       limits: {
@@ -226,7 +228,7 @@ function timeWithSceneFrameSnapshotView(): CleanNarratorView {
         claimKinds: ["elapsed_time"],
         text: "5 minutes pass.",
         backendFacts: [
-          { factRef: "e5.f1", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
           { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -246,7 +248,7 @@ function routeOptionsView(): CleanNarratorView {
       claimKinds: ["movement_option"],
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
-        { factRef: "e1.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e1.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
         { factRef: "e1.f2", text: "Route origin: Market.", exact: true },
         { factRef: "e1.f3", text: "Route choice labels: North Hall.", exact: true },
         { factRef: "e1.f4", text: "Open route labels: North Hall.", exact: true },
@@ -272,7 +274,7 @@ function timeWithSceneTextureView(): CleanNarratorView {
         claimKinds: ["elapsed_time"],
         text: "5 minutes pass.",
         backendFacts: [
-          { factRef: "e5.f1", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
           { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -303,7 +305,7 @@ function routeOptionsManyView(): CleanNarratorView {
       claimKinds: ["movement_option"],
       text: routeChoicesBeat,
       backendFacts: [
-        { factRef: "e1.f1", text: `Route choices beat: ${routeChoicesBeat}`, exact: true },
+        { factRef: "e1.f1", role: "route_choices_beat", value: routeChoicesBeat, text: `Route choices beat: ${routeChoicesBeat}`, exact: true },
         { factRef: "e1.f2", text: "Route origin: Lowwater Bazaar.", exact: true },
         { factRef: "e1.f3", text: `Route choice labels: ${labels.join("; ")}.`, exact: true },
         { factRef: "e1.f4", text: `Open route labels: ${labels.join("; ")}.`, exact: true },
@@ -459,7 +461,7 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       claimKinds: ["movement_option"],
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
-        { factRef: "e4.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e4.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
         { factRef: "e4.f2", text: "Route origin: Market.", exact: true },
         { factRef: "e4.f3", text: "Route choice labels: North Hall.", exact: true },
         { factRef: "e4.f4", text: "Open route labels: North Hall.", exact: true },
@@ -541,7 +543,7 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       claimKinds: ["movement_option"],
       text: "From Market, visible route choices are North Hall (1 minute).",
       backendFacts: [
-        { factRef: "e5.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e5.f1", role: "route_choices_beat", value: "From Market, visible route choices are North Hall (1 minute).", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
         { factRef: "e5.f2", text: "Route origin: Market.", exact: true },
         { factRef: "e5.f3", text: "Route choice labels: North Hall.", exact: true },
         { factRef: "e5.f4", text: "Open route labels: North Hall.", exact: true },
@@ -982,7 +984,7 @@ function sceneObservationReceiptView(): CleanNarratorView {
           { factRef: "e5.f3", text: "Place label: Market.", exact: true },
           { factRef: "e5.f4", text: "Visible actor labels: Guide.", exact: true },
           { factRef: "e5.f5", text: "Inventory labels: Courier satchel.", exact: true },
-          { factRef: "e5.f6", text: "Route choices beat: From Market, visible route choices are North Hall.", exact: true },
+          { factRef: "e5.f6", role: "route_choices_beat", value: "From Market, visible route choices are North Hall.", text: "Route choices beat: From Market, visible route choices are North Hall.", exact: true },
           { factRef: "e5.f7", text: "Route choice labels: North Hall.", exact: true },
         ],
         limits: {
@@ -1606,7 +1608,7 @@ describe("clean Stage 6 narration contracts", () => {
       backendFacts: [{ factRef: "e1.f1", text: "North Hall is reachable from Market.", exact: true }],
     };
 
-    expect(() => renderCleanAuthorityProjection(view)).toThrow("Route-status projection requires accepted Route beat evidence.");
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Route-status projection requires accepted Route beat value evidence.");
   });
 
   it("fails route_options receipt handling when accepted story evidence is missing", () => {
@@ -1620,7 +1622,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(() => buildCleanNarratorPromptInput(oldFactView))
       .toThrow("Route-options prompt input requires accepted Route choices beat evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Route-options projection requires accepted Route choices beat evidence.");
+      .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
 
     const missingLabelsView = routeOptionsView();
     missingLabelsView.acceptedEvidence[0] = {
@@ -1643,7 +1645,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(() => buildCleanNarratorPromptInput(oldFactView))
       .toThrow("Scene-frame route prompt input requires accepted Route choices beat evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
-      .toThrow("Route-options projection requires accepted Route choices beat evidence.");
+      .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
   });
 
   it("fails scene_frame_snapshot handling when accepted direct-scene story facts are missing", () => {
@@ -1756,7 +1758,93 @@ describe("clean Stage 6 narration contracts", () => {
       backendFacts: [{ factRef: "e1.f1", text: "World clock advances by 5 minute(s).", exact: true }],
     };
 
-    expect(() => renderCleanAuthorityProjection(view)).toThrow("Elapsed-time projection requires accepted Time beat evidence.");
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Elapsed-time projection requires accepted Time beat value evidence.");
+  });
+
+  it("renders movement, time, and route projections from role values instead of beat-shaped fact text", () => {
+    const movement = movementView();
+    movement.acceptedEvidence[0] = {
+      ...movement.acceptedEvidence[0]!,
+      backendFacts: movement.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "travel_beat" ? { ...fact, text: "Opaque accepted travel fact." } : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(movement)).toBe("After 1 minute, you reach North Hall.");
+
+    const movementMissingValue = movementView();
+    movementMissingValue.acceptedEvidence[0] = {
+      ...movementMissingValue.acceptedEvidence[0]!,
+      backendFacts: movementMissingValue.acceptedEvidence[0]!.backendFacts.map((fact) => {
+        if (fact.role !== "travel_beat") return fact;
+        const { value: _value, ...withoutValue } = fact;
+        return withoutValue;
+      }),
+    };
+    expect(() => renderCleanAuthorityProjection(movementMissingValue))
+      .toThrow("Movement projection requires accepted Travel beat value evidence.");
+
+    const elapsed = timeView();
+    elapsed.acceptedEvidence[0] = {
+      ...elapsed.acceptedEvidence[0]!,
+      backendFacts: elapsed.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "time_beat" ? { ...fact, text: "Opaque accepted time fact." } : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(elapsed)).toBe("5 minutes pass.");
+
+    const elapsedMissingValue = timeView();
+    elapsedMissingValue.acceptedEvidence[0] = {
+      ...elapsedMissingValue.acceptedEvidence[0]!,
+      backendFacts: elapsedMissingValue.acceptedEvidence[0]!.backendFacts.map((fact) => {
+        if (fact.role !== "time_beat") return fact;
+        const { value: _value, ...withoutValue } = fact;
+        return withoutValue;
+      }),
+    };
+    expect(() => renderCleanAuthorityProjection(elapsedMissingValue))
+      .toThrow("Elapsed-time projection requires accepted Time beat value evidence.");
+
+    const routeStatus = routeView();
+    routeStatus.acceptedEvidence[0] = {
+      ...routeStatus.acceptedEvidence[0]!,
+      backendFacts: routeStatus.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "route_beat" ? { ...fact, text: "Opaque accepted route-status fact." } : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(routeStatus)).toBe("From here, the path to North Hall is open.");
+
+    const routeStatusMissingValue = routeView();
+    routeStatusMissingValue.acceptedEvidence[0] = {
+      ...routeStatusMissingValue.acceptedEvidence[0]!,
+      backendFacts: routeStatusMissingValue.acceptedEvidence[0]!.backendFacts.map((fact) => {
+        if (fact.role !== "route_beat") return fact;
+        const { value: _value, ...withoutValue } = fact;
+        return withoutValue;
+      }),
+    };
+    expect(() => renderCleanAuthorityProjection(routeStatusMissingValue))
+      .toThrow("Route-status projection requires accepted Route beat value evidence.");
+
+    const routeOptions = routeOptionsView();
+    routeOptions.acceptedEvidence[0] = {
+      ...routeOptions.acceptedEvidence[0]!,
+      backendFacts: routeOptions.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "route_choices_beat" ? { ...fact, text: "Opaque accepted route-options fact." } : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(routeOptions)).toBe("From Market, visible route choices are North Hall (1 minute).");
+
+    const routeOptionsMissingValue = routeOptionsView();
+    routeOptionsMissingValue.acceptedEvidence[0] = {
+      ...routeOptionsMissingValue.acceptedEvidence[0]!,
+      backendFacts: routeOptionsMissingValue.acceptedEvidence[0]!.backendFacts.map((fact) => {
+        if (fact.role !== "route_choices_beat") return fact;
+        const { value: _value, ...withoutValue } = fact;
+        return withoutValue;
+      }),
+    };
+    expect(() => renderCleanAuthorityProjection(routeOptionsMissingValue))
+      .toThrow("Route-options projection requires accepted Route choices beat value evidence.");
   });
 
   it("fails terminal authority projections when their accepted story facts are missing", () => {
@@ -4249,7 +4337,7 @@ describe("clean Stage 6 narration contracts", () => {
       }],
     });
 
-    expect(() => renderCleanAuthorityProjection(view)).toThrow("Movement projection requires accepted Travel beat evidence.");
+    expect(() => renderCleanAuthorityProjection(view)).toThrow("Movement projection requires accepted Travel beat value evidence.");
   });
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {

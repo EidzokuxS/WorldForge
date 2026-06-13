@@ -6584,3 +6584,16 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 95 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no affected execution processes.
     - [x] Pushed commit `b3b05cbe`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P230 Stage 6 movement/time/route fact values:
+  - Plan:
+    - [x] Run GitNexus impact before editing movement/time/route settlement builders and projection renderers.
+    - [x] Emit typed backend fact `value` for `travel_beat`, `time_beat`, `route_beat`, and `route_choices_beat`.
+    - [x] Render movement, elapsed-time, route-status, and route-options deterministic projections by `role + value`.
+    - [x] Add focused tests proving those projections ignore misleading fact text and fail when the typed value is missing.
+    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] GitNexus impacts before edits: `sceneEvidence` LOW, `stage4Evidence` LOW, `renderElapsedTimeProjection` LOW, `renderMovementProjection` LOW, `renderRouteOptionsProjection` LOW, and `renderRouteStatusProjection` LOW.
+    - [x] Movement/time/route beat facts now carry typed `value`; deterministic projection reads `travel_beat`, `time_beat`, `route_beat`, and `route_choices_beat` by role/value.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 96 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no affected execution processes.

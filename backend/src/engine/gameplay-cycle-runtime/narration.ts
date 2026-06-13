@@ -2054,30 +2054,42 @@ function englishList(values: readonly string[]): string {
 }
 
 function renderElapsedTimeProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
-  const timeBeat = factValue(evidence, "Time beat: ");
-  if (timeBeat) return `${timeBeat}.`;
-  throw new Error("Elapsed-time projection requires accepted Time beat evidence.");
+  const timeBeat = trimSentencePeriod(requireFactValueByRole(
+    evidence,
+    "time_beat",
+    "Elapsed-time projection requires accepted Time beat value evidence.",
+  ));
+  return `${timeBeat}.`;
 }
 
 function renderMovementProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string | null {
-  const travelBeat = factValue(evidence, "Travel beat: ");
-  if (travelBeat) return `${travelBeat}.`;
-  throw new Error("Movement projection requires accepted Travel beat evidence.");
+  const travelBeat = trimSentencePeriod(requireFactValueByRole(
+    evidence,
+    "travel_beat",
+    "Movement projection requires accepted Travel beat value evidence.",
+  ));
+  return `${travelBeat}.`;
 }
 
 function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): string {
-  const routeChoicesBeat = factValue(evidence, "Route choices beat: ");
-  if (routeChoicesBeat) return `${routeChoicesBeat}.`;
-  throw new Error("Route-options projection requires accepted Route choices beat evidence.");
+  const routeChoicesBeat = trimSentencePeriod(requireFactValueByRole(
+    evidence,
+    "route_choices_beat",
+    "Route-options projection requires accepted Route choices beat value evidence.",
+  ));
+  return `${routeChoicesBeat}.`;
 }
 
 function renderRouteStatusProjection(
   _view: CleanNarratorView,
   evidence: AcceptedNarrationEvidence,
 ): string {
-  const routeBeat = factValue(evidence, "Route beat: ");
-  if (routeBeat) return `${routeBeat}.`;
-  throw new Error("Route-status projection requires accepted Route beat evidence.");
+  const routeBeat = trimSentencePeriod(requireFactValueByRole(
+    evidence,
+    "route_beat",
+    "Route-status projection requires accepted Route beat value evidence.",
+  ));
+  return `${routeBeat}.`;
 }
 
 function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | null {
