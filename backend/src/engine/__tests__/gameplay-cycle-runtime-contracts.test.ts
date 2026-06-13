@@ -3443,6 +3443,166 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     expect(JSON.stringify(parsed)).not.toContain("oracleResult");
   });
 
+  it("requires typed checklist plans for every receipt-owned primitive kind", () => {
+    const planCases = [
+      {
+        kind: "condition_set" as const,
+        capabilityId: "condition_set" as const,
+        stateOrEvidence: "state" as const,
+        planKey: "localConditionPlan" as const,
+        targetRefs: ["Market"],
+        evidenceRefs: ["Player", "Market"],
+        plan: {
+          actorRef: "Player" as const,
+          operation: "apply" as const,
+          conditionKey: "kneeling" as const,
+          conditionScope: "current_scene" as const,
+          anchorRef: "Market",
+          targetKind: "current_scene" as const,
+          targetRef: "Market",
+          replacementPolicy: "replace_same_condition_group" as const,
+        },
+      },
+      {
+        kind: "item_transfer" as const,
+        capabilityId: "item_transfer" as const,
+        stateOrEvidence: "state" as const,
+        planKey: "itemTransferPlan" as const,
+        targetRefs: ["Brass Tube", "Guide", "Market"],
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+        plan: {
+          actorRef: "Player" as const,
+          operation: "give_to_visible_actor" as const,
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory" as const,
+          targetKind: "visible_actor" as const,
+          targetRef: "Guide",
+          targetEquipState: "carried" as const,
+          targetEquippedSlot: null,
+          anchorRef: "Market",
+        },
+      },
+      {
+        kind: "minor_poi_create" as const,
+        capabilityId: "minor_poi_create" as const,
+        stateOrEvidence: "state" as const,
+        planKey: "minorPoiPlan" as const,
+        targetRefs: ["Market"],
+        evidenceRefs: ["Player", "Market"],
+        plan: {
+          actorRef: "Player" as const,
+          placeLabel: "Tea Stall",
+          placeKind: "stall" as const,
+          anchorRef: "Market",
+          reusePolicy: "reuse_matching_current_scene_place_handle_or_create" as const,
+        },
+      },
+      {
+        kind: "local_observation" as const,
+        capabilityId: "local_observation" as const,
+        stateOrEvidence: "evidence" as const,
+        planKey: "localObservationPlan" as const,
+        targetRefs: ["Guide", "Market"],
+        evidenceRefs: ["Player", "Guide", "Market"],
+        plan: {
+          actorRef: "Player" as const,
+          mode: "target_match" as const,
+          queryText: "Guide",
+          targetRef: "Guide",
+          surfaceKinds: ["visible_actor"] as const,
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+      {
+        kind: "device_surface_observation" as const,
+        capabilityId: "device_surface_observation" as const,
+        stateOrEvidence: "evidence" as const,
+        planKey: "deviceObservationPlan" as const,
+        targetRefs: ["Burner phone", "Market"],
+        evidenceRefs: ["Player", "Burner phone", "Market"],
+        plan: {
+          actorRef: "Player" as const,
+          deviceRef: "Burner phone",
+          requestedDeviceText: "Burner phone",
+          requestedFacetText: "screen and signal indicator",
+          facetKinds: ["screen_state", "signal_indicator"] as const,
+          allowNoSurface: true,
+          anchorRef: "Market",
+        },
+      },
+    ];
+
+    function checklistForCase(input: {
+      kind: GmActionChecklist["steps"][number]["intended"]["kind"];
+      capabilityId: GmActionChecklist["steps"][number]["intended"]["requiredCapabilityId"];
+      stateOrEvidence: GmActionChecklist["steps"][number]["intended"]["stateOrEvidence"];
+      targetRefs: string[];
+      evidenceRefs: string[];
+      planKey?: (typeof planCases)[number]["planKey"];
+      plan?: unknown;
+    }): GmActionChecklist {
+      const base = validActionChecklist();
+      const step = base.steps[0]!;
+      const intended: GmActionChecklist["steps"][number]["intended"] = {
+        kind: input.kind,
+        stateOrEvidence: input.stateOrEvidence,
+        requiredCapabilityId: input.capabilityId,
+        summary: `Plan ${input.kind} through typed checklist contract.`,
+      };
+      if (input.planKey && input.plan) {
+        Object.assign(intended, { [input.planKey]: input.plan });
+      }
+      return {
+        ...base,
+        steps: [{
+          ...step,
+          targetRefs: input.targetRefs,
+          evidenceRefs: input.evidenceRefs,
+          intended,
+        }],
+      };
+    }
+
+    for (const testCase of planCases) {
+      expect(gmActionChecklistSchema.safeParse(checklistForCase({
+        kind: testCase.kind,
+        capabilityId: testCase.capabilityId,
+        stateOrEvidence: testCase.stateOrEvidence,
+        targetRefs: testCase.targetRefs,
+        evidenceRefs: testCase.evidenceRefs,
+        planKey: testCase.planKey,
+        plan: testCase.plan,
+      })).success).toBe(true);
+
+      const missing = gmActionChecklistSchema.safeParse(checklistForCase({
+        kind: testCase.kind,
+        capabilityId: testCase.capabilityId,
+        stateOrEvidence: testCase.stateOrEvidence,
+        targetRefs: testCase.targetRefs,
+        evidenceRefs: testCase.evidenceRefs,
+      }));
+      expect(missing.success).toBe(false);
+      expect(JSON.stringify(missing.error?.issues ?? [])).toContain(
+        `${testCase.kind} checklist steps require a typed ${testCase.planKey}.`,
+      );
+
+      const foreign = gmActionChecklistSchema.safeParse(checklistForCase({
+        kind: "movement",
+        capabilityId: "movement",
+        stateOrEvidence: "state",
+        targetRefs: ["North Hall"],
+        evidenceRefs: ["Player", "North Hall"],
+        planKey: testCase.planKey,
+        plan: testCase.plan,
+      }));
+      expect(foreign.success).toBe(false);
+      expect(JSON.stringify(foreign.error?.issues ?? [])).toContain(
+        `${testCase.planKey} is allowed only for ${testCase.kind} checklist steps.`,
+      );
+    }
+  });
+
   it("keeps P60 production source free of LLM generation and repair ownership", () => {
     const source = readFileSync(join(runtimeDir, "action-checklist.ts"), "utf8");
 

@@ -758,6 +758,17 @@ export const gmActionChecklistDependencyBindingSchema = z.discriminatedUnion("bi
   gmActionChecklistMinorPoiHandleBindingSchema,
 ]);
 
+const gmActionChecklistTypedPlanRequirements = [
+  { kind: "time_advance", planKey: "timeAdvancePlan" },
+  { kind: "support_actor_create", planKey: "supportActorPlan" },
+  { kind: "dialogue_record", planKey: "dialoguePlan" },
+  { kind: "condition_set", planKey: "localConditionPlan" },
+  { kind: "item_transfer", planKey: "itemTransferPlan" },
+  { kind: "minor_poi_create", planKey: "minorPoiPlan" },
+  { kind: "local_observation", planKey: "localObservationPlan" },
+  { kind: "device_surface_observation", planKey: "deviceObservationPlan" },
+] as const;
+
 export const gmActionChecklistStepSchema = z.object({
   stepId: gmActionChecklistStepIdSchema,
   purpose: shortText,
@@ -855,47 +866,22 @@ export const gmActionChecklistStepSchema = z.object({
     visibleRefs: z.array(modelSafeRef).min(1).max(8),
   }).strict(),
 }).strict().superRefine((step, ctx) => {
-  if (step.intended.kind === "time_advance" && !step.intended.timeAdvancePlan) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "timeAdvancePlan"],
-      message: "time_advance checklist steps require a typed timeAdvancePlan.",
-    });
-  }
-  if (step.intended.kind !== "time_advance" && step.intended.timeAdvancePlan != null) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "timeAdvancePlan"],
-      message: "timeAdvancePlan is allowed only for time_advance checklist steps.",
-    });
-  }
-  if (step.intended.kind === "support_actor_create" && !step.intended.supportActorPlan) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "supportActorPlan"],
-      message: "support_actor_create checklist steps require a typed supportActorPlan.",
-    });
-  }
-  if (step.intended.kind !== "support_actor_create" && step.intended.supportActorPlan != null) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "supportActorPlan"],
-      message: "supportActorPlan is allowed only for support_actor_create checklist steps.",
-    });
-  }
-  if (step.intended.kind === "dialogue_record" && !step.intended.dialoguePlan) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "dialoguePlan"],
-      message: "dialogue_record checklist steps require a typed dialoguePlan.",
-    });
-  }
-  if (step.intended.kind !== "dialogue_record" && step.intended.dialoguePlan != null) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["intended", "dialoguePlan"],
-      message: "dialoguePlan is allowed only for dialogue_record checklist steps.",
-    });
+  for (const requirement of gmActionChecklistTypedPlanRequirements) {
+    const plan = step.intended[requirement.planKey];
+    if (step.intended.kind === requirement.kind && plan == null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", requirement.planKey],
+        message: `${requirement.kind} checklist steps require a typed ${requirement.planKey}.`,
+      });
+    }
+    if (step.intended.kind !== requirement.kind && plan != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", requirement.planKey],
+        message: `${requirement.planKey} is allowed only for ${requirement.kind} checklist steps.`,
+      });
+    }
   }
   if (step.intended.dialoguePlan?.speakerSource === "existing_visible_actor") {
     if (!step.intended.dialoguePlan.speakerRef) {

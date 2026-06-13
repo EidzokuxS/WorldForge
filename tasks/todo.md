@@ -101,6 +101,16 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Fresh zero-turn clone `p166-stage4-plan-boundary-item-transfer-proof-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
   - [x] Live result: SSE stages included `gm-action-checklist` and `stage4-execution`; `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; receipt authority `item_transfer_receipt` / `item_custody_location_equip_state` / `may_claim_item_state_change`; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; settled evidence includes `item_state`; player-facing narrative is multi-token.
+- P167 checklist schema typed-plan boundary:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`: checklist schema required typed plans for `time_advance`, `support_actor_create`, and `dialogue_record`, while `condition_set`, `item_transfer`, `minor_poi_create`, `local_observation`, and `device_surface_observation` could still validate without their typed plans until Stage4 request construction.
+  - [x] GitNexus impact before edits for `assertGmActionChecklist` was LOW: direct caller `runCleanGmActionChecklist`.
+  - [x] Checklist step schema now requires the matching typed plan for every receipt-owned primitive and rejects those plan fields on other primitive kinds.
+  - [x] Contract test covers required/foreign typed-plan behavior for condition, item transfer, minor POI, local observation, and device surface observation.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 282 passed.
+  - [x] Live proof artifact `output/clean-runtime-p167-checklist-plan-schema-proof-20260613/`.
+  - [x] Fresh zero-turn clone `p167-checklist-plan-schema-proof-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
+  - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
+  - [x] Live result: SSE stages included `gm-action-checklist` and `stage4-execution`; `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; settled evidence includes `item_state`; player-facing narrative is multi-token.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.
