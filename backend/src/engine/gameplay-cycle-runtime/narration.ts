@@ -412,6 +412,19 @@ function sceneTextureSourceTexts(view: CleanNarratorView): string[] {
     .filter((value) => value.length > 0);
 }
 
+function sceneTextureBackendFactTexts(view: CleanNarratorView): Array<{ factRef: string; text: string }> {
+  return view.acceptedEvidence
+    .filter((evidence) => evidence.claimKinds.includes("scene_texture"))
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((fact) => ({
+      factRef: fact.factRef,
+      text: normalizeText(fact.text)
+        .replace(/^scene\s+texture:\s*/iu, "")
+        .replace(/\.$/u, ""),
+    }))
+    .filter((fact) => fact.text.length > 0);
+}
+
 function isAcceptedSceneTextureSentence(
   view: CleanNarratorView,
   sentenceText: string,
@@ -432,6 +445,30 @@ function hasParaphrasedSceneTexture(
     sentence.claimKinds.includes("scene_texture")
     && !isAcceptedSceneTextureSentence(view, sentence.text)
   );
+}
+
+function localObservationUsesFirstSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "local_observation")) return false;
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length <= 1) return false;
+  const [firstTextureFact, ...laterTextureFacts] = textureFacts;
+  if (!firstTextureFact) return false;
+  const laterFactRefs = new Set(laterTextureFacts.map((fact) => fact.factRef));
+  const firstTextureText = firstTextureFact.text.toLowerCase();
+  for (const sentence of candidate.sentences) {
+    if (!sentence.claimKinds.includes("scene_texture")) continue;
+    const sentenceText = normalizeText(sentence.text)
+      .replace(/\.$/u, "")
+      .toLowerCase();
+    const citesLaterTexture = sentence.backendFactRefs.some((factRef) => laterFactRefs.has(factRef));
+    const usesFirstTexture = sentence.backendFactRefs.includes(firstTextureFact.factRef)
+      || firstTextureText.includes(sentenceText);
+    if (usesFirstTexture && !citesLaterTexture) return true;
+  }
+  return false;
 }
 
 function patternMatches(pattern: RegExp, text: string): string[] {
@@ -588,6 +625,14 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (localObservationUsesFirstSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Local-observation scene_texture must use a later accepted texture fact when several scene_texture facts are available, or omit texture for that turn.",
+    });
+  }
+
   const routeOptionLabels = acceptedRouteOptionLabels(input.view);
   if (routeOptionLabels.length > 0) {
     const missingLabels = routeOptionLabels.filter((label) => !text.includes(label));
@@ -711,8 +756,8 @@ export function buildCleanNarrationSystemPrompt(
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
-    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' With scene_texture evidence, one short scene-texture beat may precede or frame the route list. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
-    "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
+    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' With scene_texture evidence, one short scene-texture beat may precede or frame the route list; when several texture facts exist, route-options may use the first. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
+    "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
@@ -885,6 +930,29 @@ function summarizeNarrationValidationIssues(issues: readonly CleanNarrationValid
     .slice(0, 6)
     .map((issue) => `${issue.code} at ${issue.path}: ${issue.message}`)
     .join("; ");
+}
+
+function narrationValidationRepairLines(
+  view: CleanNarratorView,
+  issues: readonly CleanNarrationValidationIssue[],
+): string[] {
+  const hasSceneTextureIssue = issues.some((issue) => issue.message.includes("scene_texture")
+    || issue.message.includes("scene-texture")
+    || issue.message.includes("scene texture")
+    || issue.message.includes("texture fact")
+    || issue.message.includes("texture clause"));
+  if (!hasSceneTextureIssue) return [];
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length === 0) return [];
+  const lines = [
+    "Allowed scene_texture sentence texts, copied exactly from accepted backend facts:",
+    ...textureFacts.slice(0, 6).map((fact) => `- ${fact.factRef}: ${fact.text}.`),
+  ];
+  if (hasClaimKind(view, "local_observation") && textureFacts.length > 1) {
+    lines.push(`For local_observation, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} if you include scene_texture; otherwise omit scene_texture.`);
+  }
+  lines.push("Put scene_texture in its own accepted_evidence sentence object.");
+  return lines;
 }
 
 function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
@@ -1423,6 +1491,7 @@ export async function runCleanNarration(input: {
           "",
           "Stage 6 validation feedback from the previous candidate:",
           summarizeNarrationValidationIssues(validationIssues),
+          ...narrationValidationRepairLines(input.narratorView, validationIssues),
           "Return a replacement JSON candidate that satisfies the same accepted evidence refs and fixes the validation feedback.",
         ].join("\n");
     let candidate: unknown;

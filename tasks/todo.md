@@ -96,6 +96,29 @@ P196 accepted scene-texture evidence:
 - Next prose target:
   - [ ] Add cross-turn texture variety support so adjacent same-scene turns can choose different accepted texture clauses or omit texture after recent use, while preserving exact accepted public-description wording.
 
+P197 scene-texture clause variety:
+- Goal:
+  - Reduce adjacent same-scene `scene_texture` repetition after P196 while preserving exact accepted public-description truth.
+  - Expose multiple exact public-description clauses as separate `scene_texture` backend facts so Stage 6 can choose a different safe texture line per route/local shape.
+  - Keep gameplay truth owned by accepted receipts and scene-frame evidence; texture variety chooses among accepted clauses or omits texture.
+- Plan:
+  - [x] Split public current-scene/current-location descriptions into bounded exact texture clauses instead of one full-description fact.
+  - [x] Update Stage 6 prompt so route-options prefers the first relevant texture clause and local-observation prefers a later texture clause when available.
+  - [x] Add validation/tests proving local_observation with multiple texture facts uses a non-first texture fact when it cites texture, while omitted texture remains valid.
+  - [x] Run typecheck, focused clean-runtime tests, live route/local proof, prose audit, GitNexus detect, commit/push/analyze.
+- Changes:
+  - [x] `scene_texture` evidence now exposes up to six exact public-description clauses as separate backend facts.
+  - [x] Stage 6 repair feedback now includes copyable allowed `scene_texture` sentence texts with fact refs when texture validation fails.
+  - [x] Local-observation texture use rotates away from the first scene texture fact when multiple facts exist; texture can be omitted for compact visible-result turns.
+- Verification:
+  - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
+  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 313 tests.
+  - [x] Fresh zero-turn live proof artifact: `output/clean-runtime-p197-texture-variety-qa-20260613-130155/`.
+  - [x] Live proof clone `p197-texture-variety-qa-20260613-130155` from source `p69-item-transfer-045651`, clean runtime flags on, GLM 5.2 provider active.
+  - [x] Route-options turn used exact texture fact 0 and listed all visible route labels; local-observation turn used exact texture fact 1 and reported `Guide` visible.
+  - [x] DB proof `output/clean-runtime-p197-texture-variety-qa-20260613-130155/db-proof.json`: two clean turn records, accepted `route_options` and `local_observation` receipts, scene texture fact count 3, both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`.
+  - [x] Prose audit passed: `output/clean-runtime-p197-texture-variety-qa-20260613-130155/prose-audit.json`; 2 narratives, zero one-token output, zero receipt/debug/enum/old-formula/surface/list/digest hits, no repeated exact sentence starts.
+
 P189 clean runtime prose quality pass:
 - Objective:
   - Improve player-facing clean-runtime prose while preserving the primitive-owned truth path: backend receipts own gameplay truth, settled evidence owns claim boundaries, Stage 6 owns readable phrasing.

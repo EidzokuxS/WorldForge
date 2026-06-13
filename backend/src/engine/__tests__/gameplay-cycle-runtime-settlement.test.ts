@@ -783,7 +783,7 @@ describe("clean Stage 5 settlement contracts", () => {
         },
         currentScene: {
           ...baseFrame.scene.currentScene,
-          description: "Lantern smoke clings to the ticket counter beside the wet stone floor.",
+          description: "Lantern smoke clings to the ticket counter beside the wet stone floor. Brass bells tremble above the ticket window.",
         },
       },
     });
@@ -807,11 +807,13 @@ describe("clean Stage 5 settlement contracts", () => {
     });
     expect(textureEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.",
+      "Scene texture: Brass bells tremble above the ticket window.",
     ]);
     expect(textureEvidence?.limits.proves).toEqual(["public current-scene description texture"]);
     expect(textureEvidence?.limits.doesNotProve).toContain("route truth");
     expect(textureEvidence?.limits.doesNotProve).toContain("actor presence");
     expect(JSON.stringify(view)).toContain("Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.");
+    expect(JSON.stringify(view)).toContain("Scene texture: Brass bells tremble above the ticket window.");
   });
 
   it("settles clarification as an explicit player-facing request before scene snapshot context", () => {

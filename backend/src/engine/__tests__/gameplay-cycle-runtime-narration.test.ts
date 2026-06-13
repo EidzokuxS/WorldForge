@@ -238,12 +238,19 @@ function sceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"]
     ref,
     authority: "scene_frame_snapshot",
     claimKinds: ["scene_texture"],
-    text: "Current scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.",
-    backendFacts: [{
-      factRef: `${ref}.f1`,
-      text: "Scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.",
-      exact: true,
-    }],
+    text: "Current scene texture: Canvas awnings hang over the market lanes. Rain taps the brass gutters.",
+    backendFacts: [
+      {
+        factRef: `${ref}.f1`,
+        text: "Scene texture: Canvas awnings hang over the market lanes.",
+        exact: true,
+      },
+      {
+        factRef: `${ref}.f2`,
+        text: "Scene texture: Rain taps the brass gutters.",
+        exact: true,
+      },
+    ],
     limits: {
       proves: ["public current-scene description texture"],
       doesNotProve: ["route truth", "movement", "actor presence", "NPC action", "item state", "discovery", "absence", "no-change"],
@@ -1083,7 +1090,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts[0]?.text)
-      .toBe("Scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.");
+      .toBe("Scene texture: Canvas awnings hang over the market lanes.");
   });
 
   it("accepts model narration from accepted movement evidence", () => {
@@ -1245,7 +1252,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+          text: "Canvas awnings hang over the market lanes.",
           evidenceRefs: ["e2"],
           backendFactRefs: ["e2.f1"],
           claimKinds: ["scene_texture"],
@@ -1260,7 +1267,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. From here, the visible way leads to North Hall. It takes 1 minute.");
     expect(result.text).toContain("North Hall");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|you go|you walk|arrive)\b/iu);
 
@@ -1268,7 +1275,7 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang overhead while rain taps the brass gutters.",
+          text: "Canvas awnings hang overhead.",
           evidenceRefs: ["e2"],
           backendFactRefs: ["e2.f1"],
           claimKinds: ["scene_texture"],
@@ -1336,9 +1343,11 @@ describe("clean Stage 6 narration contracts", () => {
         }
         expect(request.prompt).toContain("Stage 6 validation feedback");
         expect(request.prompt).toContain("unsupported scene texture");
+        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
+        expect(request.prompt).toContain("e2.f1: Canvas awnings hang over the market lanes.");
         return acceptedCandidate(view, [
           {
-            text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+            text: "Canvas awnings hang over the market lanes.",
             evidenceRefs: ["e2"],
             backendFactRefs: ["e2.f1"],
             claimKinds: ["scene_texture"],
@@ -1355,7 +1364,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(2);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. From here, the visible way leads to North Hall. It takes 1 minute.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -1778,9 +1787,9 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -1793,8 +1802,42 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. The central telegraph desk is in view here.");
+    expect(result.text).toBe("Rain taps the brass gutters. The central telegraph desk is in view here.");
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
+
+    const firstTextureRepeated = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The central telegraph desk is in view here.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f3"],
+          claimKinds: ["local_observation", "visible_target"],
+        },
+      ]),
+    });
+    expect(firstTextureRepeated.status).toBe("rejected");
+    if (firstTextureRepeated.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTextureRepeated.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("later accepted texture fact")
+    )).toBe(true);
+
+    const omittedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The central telegraph desk is in view here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(omittedTexture.status).toBe("accepted");
 
     const uncitedTexture = validateCleanNarrationCandidate({
       view,

@@ -368,13 +368,25 @@ function compactSceneTexture(value: string | null | undefined): string | null {
   return compact.length <= 420 ? compact : `${compact.slice(0, 417).trimEnd()}...`;
 }
 
+function splitSceneTextureClauses(value: string): string[] {
+  return uniqueStrings((value.match(/[^.!?]+(?:[.!?]+|$)/gu) ?? [value])
+    .map((clause) =>
+      clause
+        .replace(/\s+/gu, " ")
+        .trim()
+        .replace(/[.!?]+$/u, "")
+    )
+    .filter((clause) => clause.length > 0));
+}
+
 function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
-  return uniqueStrings([
+  const textures = [
     compactSceneTexture(frame.scene.currentScene.description),
     frame.scene.currentScene.label === frame.scene.currentLocation.label
       ? null
       : compactSceneTexture(frame.scene.currentLocation.description),
-  ].filter((value): value is string => value !== null));
+  ].filter((value): value is string => value !== null);
+  return uniqueStrings(textures.flatMap(splitSceneTextureClauses)).slice(0, 6);
 }
 
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
