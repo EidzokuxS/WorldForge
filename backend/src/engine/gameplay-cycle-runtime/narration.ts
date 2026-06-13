@@ -399,13 +399,67 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
   return selected;
 }
 
+type CleanNarratorStoryFrameEntry = CleanNarratorPromptInput["storyFrame"]["turnEvents"][number];
+type CleanNarratorProseCue = CleanNarratorStoryFrameEntry["proseCue"];
+type CleanNarratorCompositionSlot = CleanNarratorStoryFrameEntry["compositionSlot"];
+
+function evidenceIncludesClaimKind(
+  evidence: AcceptedNarrationEvidence,
+  claimKind: CleanNarrationClaimKind,
+): boolean {
+  return evidence.claimKinds.includes(claimKind);
+}
+
+function storyFrameProseCue(evidence: AcceptedNarrationEvidence): CleanNarratorProseCue {
+  if (evidenceIncludesClaimKind(evidence, "bounded_visibility_negative")) return "bounded_visibility_negative";
+  if (evidenceIncludesClaimKind(evidence, "clarification_request")) return "clarification_request";
+  if (evidenceIncludesClaimKind(evidence, "oracle_outcome")) return "oracle_outcome";
+  if (evidenceIncludesClaimKind(evidence, "player_location_change")) return "movement_result";
+  if (evidenceIncludesClaimKind(evidence, "route_status")) return "route_status";
+  if (evidenceIncludesClaimKind(evidence, "movement_option")) return "route_options";
+  if (evidenceIncludesClaimKind(evidence, "item_state")) return "item_state";
+  if (evidenceIncludesClaimKind(evidence, "dialogue_response")) return "dialogue_response";
+  if (evidenceIncludesClaimKind(evidence, "local_observation")) return "local_observation";
+  if (evidenceIncludesClaimKind(evidence, "device_surface_observation")) return "device_surface_observation";
+  if (evidenceIncludesClaimKind(evidence, "support_actor_materialization")) return "support_actor_materialization";
+  if (evidenceIncludesClaimKind(evidence, "player_local_condition")) return "player_local_condition";
+  if (evidenceIncludesClaimKind(evidence, "minor_poi_handle")) return "minor_poi_handle";
+  if (evidenceIncludesClaimKind(evidence, "scene_beat")) return "scene_beat";
+  if (evidenceIncludesClaimKind(evidence, "elapsed_time")) return "elapsed_time";
+  if (evidenceIncludesClaimKind(evidence, "scene_texture")) return "scene_texture";
+  if (
+    evidenceIncludesClaimKind(evidence, "current_scene")
+    || evidenceIncludesClaimKind(evidence, "current_location")
+  ) {
+    return "current_scene_anchor";
+  }
+  if (evidence.authority === "scene_frame_snapshot") return "direct_scene_snapshot";
+  return "generic_accepted_evidence";
+}
+
+function storyFrameCompositionSlot(evidence: AcceptedNarrationEvidence): CleanNarratorCompositionSlot {
+  const cue = storyFrameProseCue(evidence);
+  if (cue === "clarification_request") return "clarification";
+  if (cue === "scene_texture") return "texture_context";
+  if (cue === "current_scene_anchor") return "opening_context";
+  if (
+    cue === "route_options"
+    || (evidence.authority === "scene_frame_snapshot" && cue === "direct_scene_snapshot")
+  ) {
+    return "next_action_context";
+  }
+  return "event_beat";
+}
+
 function cleanNarratorStoryFrameEntry(
   evidence: AcceptedNarrationEvidence,
-): CleanNarratorPromptInput["storyFrame"]["turnEvents"][number] {
+): CleanNarratorStoryFrameEntry {
   return {
     ref: evidence.ref,
     authority: evidence.authority,
     claimKinds: evidence.claimKinds,
+    proseCue: storyFrameProseCue(evidence),
+    compositionSlot: storyFrameCompositionSlot(evidence),
     summary: evidence.text,
     backendFactRefs: evidence.backendFacts.map((fact) => fact.factRef),
     limits: evidence.limits,
@@ -1370,6 +1424,7 @@ export function buildCleanNarrationSystemPrompt(
     "Stage authority: narration phrases accepted evidence into player-facing prose.",
     "Story frame: promptInput.storyFrame.currentContext is compressed current playable context; promptInput.storyFrame.turnEvents is the authoritative summary of what happened this turn. storyFrame derives from promptInput.acceptedEvidence and adds no separate world truth.",
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
+    "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Style role: write playable text-RPG adventure prose from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
     "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",

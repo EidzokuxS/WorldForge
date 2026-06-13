@@ -2342,10 +2342,42 @@ const cleanNarratorAcceptedEvidenceSchema = z.object({
   limits: cleanEvidenceLimitSchema,
 }).strict();
 
+const cleanNarratorProseCueSchema = z.enum([
+  "bounded_visibility_negative",
+  "clarification_request",
+  "current_scene_anchor",
+  "device_surface_observation",
+  "dialogue_response",
+  "direct_scene_snapshot",
+  "elapsed_time",
+  "item_state",
+  "local_observation",
+  "minor_poi_handle",
+  "movement_result",
+  "oracle_outcome",
+  "player_local_condition",
+  "route_options",
+  "route_status",
+  "scene_beat",
+  "scene_texture",
+  "support_actor_materialization",
+  "generic_accepted_evidence",
+]);
+
+const cleanNarratorCompositionSlotSchema = z.enum([
+  "clarification",
+  "event_beat",
+  "next_action_context",
+  "opening_context",
+  "texture_context",
+]);
+
 const cleanNarratorStoryFrameEntrySchema = z.object({
   ref: shortText,
   authority: cleanSettledEvidenceAuthoritySchema,
   claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+  proseCue: cleanNarratorProseCueSchema,
+  compositionSlot: cleanNarratorCompositionSlotSchema,
   summary: shortText,
   backendFactRefs: z.array(shortText).min(1).max(8),
   limits: cleanEvidenceLimitSchema,

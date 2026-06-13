@@ -6276,3 +6276,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 347 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk; hunk attribution listed four touched narration symbols and no affected process expansion.
+
+- P212 Stage 6 structured story composition cues:
+  - Plan:
+    - [x] Run GitNexus impact before editing story-frame builder, prompt, and prompt-input contract touchpoints.
+    - [x] Add derived `proseCue` and `compositionSlot` fields to story-frame entries without reading or regex-matching prose text.
+    - [x] Map cues from structured evidence authority and claim kinds so the narrator sees movement results, dialogue beats, oracle outcomes, scene texture, and scene anchors as story roles.
+    - [x] Teach the Stage 6 prompt to use cues for page flow while keeping accepted evidence refs/backend fact refs as the proof path.
+    - [x] Add tests proving movement/dialogue/oracle/context cues are derived from structured evidence and add no new authority.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts before edits: `buildCleanNarratorStoryFrame` LOW -> `buildCleanNarratorPromptInput` -> `runCleanNarration`; `cleanNarratorStoryFrameEntry` LOW; `buildCleanNarrationSystemPrompt` LOW -> `runCleanNarration`; `assertCleanNarratorPromptInput` LOW with no upstream expansion.
+    - [x] `storyFrame` entries now include `proseCue` and `compositionSlot`, both derived from evidence authority and claim kinds.
+    - [x] Cue mapping covers movement results, dialogue responses, oracle outcomes, route options, scene texture, current scene anchors, and the existing Stage 6 receipt families without text matching.
+    - [x] Stage 6 prompt now tells the narrator to use cues for page flow and treats them as derived routing hints, while accepted evidence refs/backend fact refs remain the proof path.
+    - [x] Tests cover movement result/event beat, dialogue response/event beat, oracle outcome/event beat, scene texture/texture context, current scene anchor/opening context, and route options/next-action context.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 81 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 348 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk with no affected process expansion.

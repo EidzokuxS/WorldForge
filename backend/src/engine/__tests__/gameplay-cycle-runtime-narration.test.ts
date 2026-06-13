@@ -1191,6 +1191,8 @@ describe("clean Stage 6 narration contracts", () => {
       ref: "e5",
       authority: "terminal_dialogue_receipt",
       claimKinds: ["dialogue_response"],
+      proseCue: "dialogue_response",
+      compositionSlot: "event_beat",
       summary: 'Guide says: "The north stairs flooded before dawn."',
       backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
       limits: {
@@ -1200,6 +1202,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(promptInput.storyFrame.currentContext.map((entry) => entry.ref)).toEqual(["e1"]);
     expect(promptInput.storyFrame.currentContext[0]?.claimKinds).toEqual(["current_scene", "current_location"]);
+    expect(promptInput.storyFrame.currentContext[0]?.proseCue).toBe("current_scene_anchor");
+    expect(promptInput.storyFrame.currentContext[0]?.compositionSlot).toBe("opening_context");
     expect(promptInput.storyFrame.currentContext[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
   });
 
@@ -1209,6 +1213,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.currentContext).toEqual([]);
     expect(promptInput.storyFrame.turnEvents.map((entry) => entry.ref)).toEqual(["e1"]);
     expect(promptInput.storyFrame.turnEvents[0]?.claimKinds).toEqual(["player_location_change", "elapsed_time"]);
+    expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("movement_result");
+    expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("event_beat");
     expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("Player location changed to North Hall.");
     expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
   });
@@ -1221,6 +1227,8 @@ describe("clean Stage 6 narration contracts", () => {
       ref: "e1",
       authority: "oracle_visible_outcome",
       claimKinds: ["oracle_outcome"],
+      proseCue: "oracle_outcome",
+      compositionSlot: "event_beat",
       summary: "The loose grate holds under your weight.",
       backendFactRefs: ["e1.f1"],
       limits: {
@@ -1240,6 +1248,24 @@ describe("clean Stage 6 narration contracts", () => {
         ],
       },
     }]);
+  });
+
+  it("derives route-option texture and next-action composition cues from structured evidence", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView());
+
+    expect(promptInput.storyFrame.turnEvents.map((entry) => [
+      entry.ref,
+      entry.proseCue,
+      entry.compositionSlot,
+    ])).toEqual([["e1", "route_options", "next_action_context"]]);
+    expect(promptInput.storyFrame.currentContext.map((entry) => [
+      entry.ref,
+      entry.proseCue,
+      entry.compositionSlot,
+    ])).toEqual([
+      ["e2", "scene_texture", "texture_context"],
+      ["e3", "current_scene_anchor", "opening_context"],
+    ]);
   });
 
   it("narrows literary receipt prompt input to terminal evidence and scene anchors", () => {
