@@ -15,11 +15,11 @@ P155 primitive-owned clean runtime architecture pass:
   - Keep state truth in backend receipts, dialogue truth in utterance receipts, player-facing truth in settlement evidence, and final prose in bounded narration projection.
 - Work plan:
   - [x] Build a primitive ownership matrix for the clean runtime modules: GM Read, Judge, Oracle, Checklist, Stage4 request/execution, settlement, narration, turn persistence, and `/api/chat/action` boundary.
-  - [ ] For each current primitive, map the contract path: admission -> checklist/request -> receipt -> settlement claim/limits -> narration projection -> live proof evidence.
+  - [x] For each current primitive, map the contract path: admission -> checklist/request -> receipt -> settlement claim/limits -> narration projection -> live proof evidence.
   - [x] Mark any primitive step where rich prompt context still carries gameplay meaning that should live in a typed request, receipt field, settlement claim, or narration view.
   - [x] Promote concrete gaps into code with GitNexus impact, focused contract tests, live proof, docs, detect_changes, commit/push, and post-commit `npx gitnexus analyze --embeddings`.
   - [x] Use P69/P153/P154 item-transfer plus dialogue as the first proof slice of the architecture: current item holder state comes from item receipts; dialogue records a speaker utterance; settlement composes accepted evidence; narration projects the accepted facts.
-  - [ ] After architecture gaps are closed, restart final acceptance on fresh post-repair zero-turn clones with manual-chosen turns.
+  - [x] After architecture gaps are closed, restart final acceptance on fresh post-repair zero-turn clones with manual-chosen turns.
 - P155 diagnostic evidence:
   - [x] Fresh clone `p155-post-p154-acceptance-d-20260613` from `p69-item-transfer-045651` started at chat history 0, clock `0/0/0`, Player carrying `Brass Tube`, visible `Guide`, and old runtime stores at 0.
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide, then ask, "Do you have it now?"`
@@ -5376,7 +5376,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`267 passed`).
   - Remaining edge live proofs:
-    - [ ] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action`.
+    - [x] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action` was completed by P152.
 
 - P170 clean gameplay runtime item-transfer effect self-validation:
   - Plan:
@@ -5729,3 +5729,38 @@ Session: `gm-v1-consequenc-slice`.
   - Acceptance status:
     - [x] P187 is a clean 60-turn runtime/DB/player-facing candidate lane after P186.
     - [ ] Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P188 clean gameplay runtime current full-goal completion audit:
+  - Plan:
+    - [x] Re-read the active goal, P69 handoff, current top-level P155 plan, P149/P150/P151/P152 edge audit, and P185/P186/P187 post-repair lane evidence.
+    - [x] Re-run current verification: `npm --prefix backend run typecheck`; focused clean-runtime suite.
+    - [x] Map every current clean primitive to its positive ownership path and proof surface.
+  - Current primitive contract path audit:
+    - [x] Direct scene / broad look: SceneFrame snapshot -> settled `scene_frame_snapshot` evidence -> deterministic visible current-scene projection; live proof in P185/P187 direct-scene turns.
+    - [x] Clarification: GM Read/Judge accepted clarification question -> `clarification_request` evidence -> deterministic player-facing question; live proof P150.
+    - [x] Oracle visible outcome: Judge admits `oracle_roll` -> Oracle settlement receipt -> `oracle_outcome` evidence -> bounded outcome projection; live proof P151.
+    - [x] Route options and route check: GM Read `route_inquiry` -> Checklist `route_options`/`route_check` -> backend receipt -> `movement_option`/`route_status` evidence -> deterministic route projection; live proof across P185/P186/P187.
+    - [x] Movement: GM Read `movement_intent` -> Checklist `movement` -> terminal mutation receipt -> `player_location_change` / travel clock evidence -> deterministic arrival projection; live proof across P185/P186/P187.
+    - [x] Dialogue: GM Read `visible_actor_dialogue` -> Checklist `dialoguePlan` -> terminal dialogue receipt -> `dialogue_response` evidence -> utterance projection; live proof across P185/P186/P187 plus P67 support-dialogue chain.
+    - [x] Support actor: GM Read `ordinary_support_actor_needed` -> Checklist `supportActorPlan` -> materialization receipt -> `support_actor_materialization` evidence -> bounded visible actor projection; live proof P66/P67/P152.
+    - [x] Player local condition: GM Read `player_local_condition` -> Checklist `localConditionPlan` -> `condition_set` receipt -> `player_local_condition` evidence -> bounded posture/readiness projection; live proof P68/P125/P127/P172.
+    - [x] Item transfer: GM Read `item_transfer` / compound `itemTransferNeed` -> Checklist `itemTransferPlan` and `item_transfer_state` refresh binding -> `item_transfer_receipt` -> `item_state` evidence -> deterministic item-state projection; live proof P69/P153/P170/P185/P186/P187.
+    - [x] Time advance: GM Read `time_passage` with `timePassageNeed` -> Checklist `timeAdvancePlan` -> `time_advance` receipt -> `elapsed_time` evidence -> clock-only projection; live proof P185/P186/P187.
+    - [x] Local observation: GM Read `current_scene_observation` with `localObservationNeed` -> Checklist `localObservationPlan` -> `local_observation_receipt` -> `local_observation` / `bounded_visibility_negative` evidence -> bounded observation projection; live proof P70/P106/P125/P127/P162.
+    - [x] Device surface observation: GM Read `device_status_observation` with `deviceObservationNeed` -> Checklist `deviceObservationPlan` -> `device_surface_observation_receipt` -> `device_surface_observation` / `device_surface_unavailable` evidence -> bounded public device surface projection; live proof P71/P125/P127.
+    - [x] Minor POI handle: GM Read `minor_poi_create` with `minorPoiNeed` -> Checklist `minorPoiPlan` -> `minor_poi_handle_receipt` -> `minor_poi_handle` evidence -> visible current-scene handle projection; live proof P72/P77/P78.
+    - [x] Stage4 failed/skipped branch: typed failed/skip receipts -> `stage4_failed_or_skipped` packet with audit-only step evidence -> current accepted scene evidence projection; live proof P152.
+  - Fresh post-repair lane audit:
+    - [x] P185, P186, and P187 are three different fresh zero-turn post-repair clones from `p69-item-transfer-045651`, each with 60 clean manually selected turns.
+    - [x] P185 final audit: 60 clean records, 56 accepted receipts, 17 traces, 16 clock-ledger rows, restore ledger 0, old stores 0, final scene `Anchor Chain Pylon`, `Brass Tube.owner=Guide`, pass true.
+    - [x] P186 final audit: 60 clean records, 56 accepted receipts, 21 traces, 16 clock-ledger rows, restore ledger 0, old stores 0, final scene `The Copper Tap`, `Brass Tube.owner=Guide`, pass true.
+    - [x] P187 final audit: 60 clean records, 57 accepted receipts, 21 traces, 16 clock-ledger rows, restore ledger 0, old stores 0, final scene `The Copper Tap`, `Brass Tube.owner=Guide`, pass true.
+    - [x] P185/P186/P187 scans show zero failed verifier turns, zero SSE errors, zero restore/replay evidence, zero one-token narration, zero public internal-token leaks, and zero old v2/saga/narrator/oracle/simulation store writes.
+  - Verification executed:
+    - [x] `git status --short --branch` clean and synced on `codex/rebuild-gm-turn-cycle`.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 293 passed.
+    - [x] Clean runtime grep check found zero `fallback_clarification`, `fallback_no_mutation`, `settled_with_fallback`, `conservative_miss`, `fallback_generation_error`, `fallback_validation_error`, or `minimal_safe` markers in `backend/src/engine/gameplay-cycle-runtime` and the focused clean-runtime tests.
+  - Completion decision:
+    - [x] The clean gameplay-cycle runtime meets the primitive-owned architecture target for the implemented clean primitive set: player intent is admitted through typed primitive contracts, executable work is carried by typed checklist/request data, gameplay truth is persisted as backend-owned receipts, settlement exposes bounded accepted evidence, and narration projects only that evidence.
+    - [x] The current focused contract suite, edge live proofs, and three fresh post-repair 60-turn lanes satisfy the stated clean-runtime acceptance bar for this goal.
