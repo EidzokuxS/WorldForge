@@ -6449,3 +6449,19 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `renderRouteStatusProjection` now returns the accepted `Route beat` with punctuation and keeps the P219 missing-Route-beat invariant.
     - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 84 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, `settlement` -> 20 tests, and `npm --prefix backend run typecheck`.
     - [x] No new live clone was required for P220: normal movement/time live paths were already proven in P217/P218 and this slice removes only legacy projection fallback semantics.
+
+- P221 Stage 6 route-options story evidence no-fallback boundary:
+  - Plan:
+    - [x] Run GitNexus impact before editing route-options settlement, prompt-fact selection, route label validation, and deterministic projection symbols.
+    - [x] Replace receipt-owned string-shaped `Route option: ...` evidence with typed route-options story facts derived from `publicResult.routeOptions`.
+    - [x] Make `route_options_receipt` deterministic projection require accepted `Route choices beat` evidence and fail the Stage 6 invariant when it is missing.
+    - [x] Keep `scene_frame_snapshot` route-option projection as the bounded snapshot path for this slice; convert it separately.
+    - [x] Add focused tests proving route-options prompt input, label validation, settlement evidence, and missing-beat failure behavior.
+    - [x] Run focused narration, contracts, Stage 4, settlement, typecheck, and GitNexus detect.
+  - Results:
+    - [x] GitNexus impacts before edits: `stage4Evidence` LOW, `renderRouteOptionsProjection` LOW, `preferredPromptFacts` LOW, and `acceptedRouteOptionLabels` LOW.
+    - [x] Stage 5 route-options receipt evidence now emits `Route choices beat`, `Route origin`, `Route choice labels`, `Open route labels`, `Closed route labels`, and `Route choice travel costs` from typed `publicResult.routeOptions`.
+    - [x] Stage 6 prompt input now requires `route_options_receipt` story facts before model narration, so old `Route option: ...` receipt evidence fails before player-facing response.
+    - [x] Deterministic route-options projection now renders only accepted `Route choices beat`; missing beat throws `Route-options projection requires accepted Route choices beat evidence.`
+    - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 85 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because inserted helper code widened indexed touched symbols in `narration.ts`/`settlement.ts`; context review traced affected entry points to `runCleanNarration`, `renderCleanAuthorityProjection`, and `buildCleanSettledTurnPacket`, all covered by the focused checks above.

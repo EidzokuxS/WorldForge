@@ -327,8 +327,17 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
   if (evidence.claimKinds.includes("movement_option")) {
+    const routeOptionsReceiptPrefixes = [
+      "Route choices beat: ",
+      "Route origin: ",
+      "Route choice labels: ",
+      "Open route labels: ",
+      "Closed route labels: ",
+      "Route choice travel costs: ",
+    ];
     const preferred = evidence.backendFacts.filter((fact) =>
-      /^Route option:/u.test(fact.text)
+      routeOptionsReceiptPrefixes.some((prefix) => fact.text.startsWith(prefix))
+      || fact.text.startsWith("Route option:")
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
@@ -372,6 +381,7 @@ function maxPromptBackendFactsForEvidence(evidence: AcceptedNarrationEvidence): 
 }
 
 function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
+  assertRouteOptionsReceiptStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
@@ -1073,9 +1083,13 @@ function hasUnsupportedTexture(
 function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) => evidence.authority === "route_options_receipt")
-    .flatMap((evidence) => evidence.backendFacts)
-    .map((fact) => parseRouteOptionFact(fact.text)?.label ?? "")
-    .filter((label) => label.length > 0));
+    .flatMap((evidence) => {
+      const labels = factValue(evidence, "Route choice labels: ");
+      if (labels === null) {
+        throw new Error("Route-options narration requires accepted Route choice labels evidence.");
+      }
+      return splitRouteChoiceLabels(labels);
+    }));
 }
 
 function hasTerminalRouteEvidence(view: CleanNarratorView): boolean {
@@ -1502,7 +1516,7 @@ export function buildCleanNarrationSystemPrompt(
     "Cinematic realism: render what can be seen, heard, handled, smelled, or felt through accepted evidence; use ordinary concrete words and fluid complete sentences.",
     "Adventure prose floor: item transfers, dialogue responses, route checks, route options, local observations, and direct scene observations should read as scene beats, not status lines or inventory lists.",
     ...cleanNarrationStyleLines(styleMode),
-    "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Travel beat, Destination label, Elapsed travel time, Current place after movement, Time beat, Elapsed time, Route beat, Route label, Route status, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
+    "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Travel beat, Destination label, Elapsed travel time, Current place after movement, Time beat, Elapsed time, Route beat, Route label, Route status, Route choices beat, Route origin, Route choice labels, Open route labels, Closed route labels, Route choice travel costs, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
     "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
     "Scene-texture evidence: scene_texture may color the prose with public current-scene description texture only. It does not prove route truth, movement, actor action, discovery, absence, no-change, item state, or private knowledge.",
@@ -1519,7 +1533,7 @@ export function buildCleanNarrationSystemPrompt(
     "Movement surface: for player_location_change, render accepted Travel beat as the turn event, with Destination label, Elapsed travel time, and Current place after movement as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, render accepted Time beat as the turn event, with Elapsed time as the proof detail and exact scene anchor if present. With scene_texture evidence, put one exact scene_texture sentence first, then one concise elapsed-time beat such as '<time> pass at <scene>.' When several scene_texture backendFacts exist, choose a later texture fact than the first. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
-    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Build it as a route-choice beat such as '<label> is the one-minute route choice here.' or '<labels> are the available one-minute route choices here.' With scene_texture evidence, one exact scene-texture sentence may precede or frame the route-choice beat; when several texture facts exist, route-options uses the first accepted texture fact. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
+    "Route-options surface: for movement_option and route_options_receipt, render accepted Route choices beat as the turn event, with Route choice labels, Open route labels, Closed route labels, and Route choice travel costs as proof details. With scene_texture evidence, one exact scene-texture sentence may precede or frame the route-choice beat; when several texture facts exist, route-options uses the first accepted texture fact. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Support-actor surface: for support_actor_materialization, phrase only the accepted visible support actor label, ordinary support role, materialization result, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the presence beat; when several texture facts exist, support_actor_materialization uses the first accepted texture fact. Dialogue, services, actor actions, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, and no-change require separate accepted evidence.",
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the condition beat; when several texture facts exist, player_local_condition uses a later texture fact than the first. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
@@ -1806,6 +1820,25 @@ function factValue(evidence: AcceptedNarrationEvidence, prefix: string): string 
   return trimSentencePeriod(fact.text.slice(prefix.length));
 }
 
+function splitRouteChoiceLabels(value: string): string[] {
+  const compact = trimSentencePeriod(value).trim();
+  if (compact.length === 0 || compact === "none") return [];
+  return uniqueStrings(compact
+    .split(";")
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0 && label !== "none"));
+}
+
+function assertRouteOptionsReceiptStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "route_options_receipt") return;
+  if (!factValue(evidence, "Route choices beat: ")) {
+    throw new Error("Route-options prompt input requires accepted Route choices beat evidence.");
+  }
+  if (factValue(evidence, "Route choice labels: ") === null) {
+    throw new Error("Route-options prompt input requires accepted Route choice labels evidence.");
+  }
+}
+
 function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string) => boolean): string | null {
   return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
 }
@@ -1855,6 +1888,12 @@ function parseVisibleTargetFact(text: string): { label: string; kind: string | n
 }
 
 function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): string {
+  const routeChoicesBeat = factValue(evidence, "Route choices beat: ");
+  if (routeChoicesBeat) return `${routeChoicesBeat}.`;
+  if (evidence.authority === "route_options_receipt") {
+    throw new Error("Route-options projection requires accepted Route choices beat evidence.");
+  }
+
   const options = evidence.backendFacts
     .map((entry) => parseRouteOptionFact(entry.text))
     .filter((option): option is NonNullable<typeof option> => option !== null);

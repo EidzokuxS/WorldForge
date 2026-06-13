@@ -244,10 +244,17 @@ function routeOptionsView(): CleanNarratorView {
       ref: "e1",
       authority: "route_options_receipt",
       claimKinds: ["movement_option"],
-      text: "Visible route options: North Hall.",
-      backendFacts: [{ factRef: "e1.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      text: "From Market, visible route choices are North Hall (1 minute).",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true },
+        { factRef: "e1.f2", text: "Route origin: Market.", exact: true },
+        { factRef: "e1.f3", text: "Route choice labels: North Hall.", exact: true },
+        { factRef: "e1.f4", text: "Open route labels: North Hall.", exact: true },
+        { factRef: "e1.f5", text: "Closed route labels: none.", exact: true },
+        { factRef: "e1.f6", text: "Route choice travel costs: North Hall: 1 minute.", exact: true },
+      ],
       limits: {
-        proves: ["route options exposed by current SceneFrame"],
+        proves: ["route options exposed by current SceneFrame", "route choice phrasing for the player"],
         doesNotProve: ["hidden routes", "absence of other routes", "movement", "discovery", "no-change"],
       },
     }],
@@ -288,19 +295,23 @@ function routeOptionsManyView(): CleanNarratorView {
     "The Copper Tap",
     "Upper Dam Ruins",
   ];
+  const routeChoicesBeat = `From Lowwater Bazaar, visible route choices are ${labels.map((label) => `${label} (1 minute)`).join(", ")}.`;
   return movementView({
     acceptedEvidence: [{
       ref: "e1",
       authority: "route_options_receipt",
       claimKinds: ["movement_option"],
-      text: `Visible route options from Lowwater Bazaar include ${labels.join(", ")}.`,
-      backendFacts: labels.map((label, index) => ({
-        factRef: `e1.f${index + 1}`,
-        text: `Route option: ${label} (connected, 1 minute(s)).`,
-        exact: true,
-      })),
+      text: routeChoicesBeat,
+      backendFacts: [
+        { factRef: "e1.f1", text: `Route choices beat: ${routeChoicesBeat}`, exact: true },
+        { factRef: "e1.f2", text: "Route origin: Lowwater Bazaar.", exact: true },
+        { factRef: "e1.f3", text: `Route choice labels: ${labels.join("; ")}.`, exact: true },
+        { factRef: "e1.f4", text: `Open route labels: ${labels.join("; ")}.`, exact: true },
+        { factRef: "e1.f5", text: "Closed route labels: none.", exact: true },
+        { factRef: "e1.f6", text: `Route choice travel costs: ${labels.map((label) => `${label}: 1 minute`).join("; ")}.`, exact: true },
+      ],
       limits: {
-        proves: ["route options exposed by current SceneFrame"],
+        proves: ["route options exposed by current SceneFrame", "route choice phrasing for the player"],
         doesNotProve: ["hidden routes", "absence of other routes", "movement", "discovery", "no-change"],
       },
     }],
@@ -1383,16 +1394,14 @@ describe("clean Stage 6 narration contracts", () => {
     const promptInput = buildCleanNarratorPromptInput(routeOptionsManyView());
     const routeEvidence = promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1");
 
-    expect(routeEvidence?.backendFacts).toHaveLength(8);
+    expect(routeEvidence?.backendFacts).toHaveLength(6);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Route option: Anchor Chain Pylon (connected, 1 minute(s)).",
-      "Route option: Auditor Spire (connected, 1 minute(s)).",
-      "Route option: Charter Gallery (connected, 1 minute(s)).",
-      "Route option: Resonance Tower (connected, 1 minute(s)).",
-      "Route option: Silt Warrens (connected, 1 minute(s)).",
-      "Route option: Slip Twelve Berth (connected, 1 minute(s)).",
-      "Route option: The Copper Tap (connected, 1 minute(s)).",
-      "Route option: Upper Dam Ruins (connected, 1 minute(s)).",
+      "Route choices beat: From Lowwater Bazaar, visible route choices are Anchor Chain Pylon (1 minute), Auditor Spire (1 minute), Charter Gallery (1 minute), Resonance Tower (1 minute), Silt Warrens (1 minute), Slip Twelve Berth (1 minute), The Copper Tap (1 minute), Upper Dam Ruins (1 minute).",
+      "Route origin: Lowwater Bazaar.",
+      "Route choice labels: Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins.",
+      "Open route labels: Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins.",
+      "Closed route labels: none.",
+      "Route choice travel costs: Anchor Chain Pylon: 1 minute; Auditor Spire: 1 minute; Charter Gallery: 1 minute; Resonance Tower: 1 minute; Silt Warrens: 1 minute; Slip Twelve Berth: 1 minute; The Copper Tap: 1 minute; Upper Dam Ruins: 1 minute.",
     ]);
   });
 
@@ -1506,6 +1515,29 @@ describe("clean Stage 6 narration contracts", () => {
     };
 
     expect(() => renderCleanAuthorityProjection(view)).toThrow("Route-status projection requires accepted Route beat evidence.");
+  });
+
+  it("fails route_options receipt handling when accepted story evidence is missing", () => {
+    const oldFactView = routeOptionsView();
+    oldFactView.acceptedEvidence[0] = {
+      ...oldFactView.acceptedEvidence[0]!,
+      text: "Visible route options: North Hall.",
+      backendFacts: [{ factRef: "e1.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Route-options prompt input requires accepted Route choices beat evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Route-options projection requires accepted Route choices beat evidence.");
+
+    const missingLabelsView = routeOptionsView();
+    missingLabelsView.acceptedEvidence[0] = {
+      ...missingLabelsView.acceptedEvidence[0]!,
+      backendFacts: [{ factRef: "e1.f1", text: "Route choices beat: From Market, visible route choices are North Hall (1 minute).", exact: true }],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(missingLabelsView))
+      .toThrow("Route-options prompt input requires accepted Route choice labels evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -1734,7 +1766,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(routeOptionsManyView(), [{
         text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f6"],
         claimKinds: ["movement_option"],
       }]),
     });
@@ -1760,7 +1792,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(routeOptionsManyView(), [{
         text: "Passages from here lead toward Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, and Slip Twelve Berth, each about a minute's walk.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f6"],
         claimKinds: ["movement_option"],
       }]),
     });
@@ -1805,7 +1837,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(routeOptionsManyView(), [{
         text: "Lowwater Bazaar surrounds you, its walkways branching outward in every direction. Eight routes fan out from here - Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins - each a minute's walk away.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f6"],
         claimKinds: ["movement_option"],
       }]),
     });

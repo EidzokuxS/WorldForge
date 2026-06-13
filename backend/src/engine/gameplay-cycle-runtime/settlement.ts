@@ -101,6 +101,8 @@ const DIALOGUE_DOES_NOT_PROVE = [
 ];
 
 type CleanDialogueResult = NonNullable<CleanStage4Receipt["publicResult"]["dialogue"]>;
+type CleanRouteOptionsResult = NonNullable<CleanStage4Receipt["publicResult"]["routeOptions"]>;
+type CleanRouteOptionResult = CleanRouteOptionsResult["options"][number];
 
 function formatDialogueQuoteFact(dialogue: CleanDialogueResult): string {
   const quotedSpeech = dialogue.quotedSpeech?.trim();
@@ -398,6 +400,27 @@ function boundedBackendFacts(facts: Array<ReturnType<typeof fact>>): Array<Retur
 
 function evidenceLabelList(labels: readonly string[]): string {
   return uniqueStrings(labels).join(", ");
+}
+
+function routeTravelCostPhrase(travelCost: number | null): string {
+  if (travelCost === null) return "travel time unlisted";
+  const unit = travelCost === 1 ? "minute" : "minutes";
+  return `${travelCost} ${unit}`;
+}
+
+function routeChoiceStatusPhrase(option: CleanRouteOptionResult): string {
+  return option.connected ? routeTravelCostPhrase(option.travelCost) : "closed";
+}
+
+function routeChoiceDisplay(option: CleanRouteOptionResult): string {
+  return `${option.label} (${routeChoiceStatusPhrase(option)})`;
+}
+
+function routeChoicesBeat(routeOptions: CleanRouteOptionsResult, boundedOptions: readonly CleanRouteOptionResult[]): string {
+  if (boundedOptions.length === 0) {
+    return `No visible route choices are listed from ${routeOptions.fromLabel}.`;
+  }
+  return `From ${routeOptions.fromLabel}, visible route choices are ${evidenceLabelList(boundedOptions.map(routeChoiceDisplay))}.`;
 }
 
 function compactSceneTexture(value: string | null | undefined): string | null {
@@ -808,23 +831,36 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "route_options_receipt" && receipt.publicResult.routeOptions) {
       const evidenceId = nextEvidenceId(evidence);
       const routeOptions = receipt.publicResult.routeOptions;
+      const boundedOptions = routeOptions.options.slice(0, 8);
+      const routeBeat = routeChoicesBeat(routeOptions, boundedOptions);
+      const routeLabels = boundedOptions.map((option) => option.label);
+      const openRouteLabels = boundedOptions
+        .filter((option) => option.connected)
+        .map((option) => option.label);
+      const closedRouteLabels = boundedOptions
+        .filter((option) => !option.connected)
+        .map((option) => option.label);
+      const routeCostSummary = boundedOptions
+        .map((option) => `${option.label}: ${routeChoiceStatusPhrase(option)}`)
+        .join("; ") || "none";
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "route_options_receipt",
         claimKinds: ["movement_option"],
-        text: receipt.publicResult.summary,
+        text: routeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts(routeOptions.options.slice(0, 12).map((option, index) =>
-          fact(
-            evidenceId,
-            index + 1,
-            `Route option: ${option.label} (${option.connected ? "connected" : "not connected"}${option.travelCost === null ? "" : `, ${option.travelCost} minute(s)`}).`,
-          )
-        )),
+        backendFacts: boundedBackendFacts([
+          fact(evidenceId, 1, `Route choices beat: ${routeBeat}`),
+          fact(evidenceId, 2, `Route origin: ${routeOptions.fromLabel}.`),
+          fact(evidenceId, 3, `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 4, `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 5, `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 6, `Route choice travel costs: ${routeCostSummary}.`),
+        ]),
         limits: {
-          proves: ["route options visible from the current scene"],
+          proves: ["route options visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
           doesNotProve: ROUTE_OPTIONS_DOES_NOT_PROVE,
         },
       });
