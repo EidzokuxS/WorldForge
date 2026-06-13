@@ -109,9 +109,16 @@ const gmReadGenerationTimePassageNeedSchema = z.object({
   evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
 }).strict();
 
+const gmReadGenerationUncertaintySchema = z.object({
+  present: z.boolean(),
+  question: z.string().trim().max(500).nullable().optional(),
+  basis: z.string().trim().max(500).nullable().optional(),
+}).strict();
+
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
   liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
+  uncertainty: gmReadGenerationUncertaintySchema,
   actionInterpretation: gmReadActionInterpretationSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
@@ -302,8 +309,23 @@ function normalizeGmReadItemTransferShapeCandidate(candidate: unknown): unknown 
   };
 }
 
+function normalizeGmReadUncertaintyCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const uncertainty = candidate.uncertainty;
+  if (!isRecord(uncertainty) || uncertainty.present !== false) return candidate;
+  return {
+    ...candidate,
+    uncertainty: {
+      ...uncertainty,
+      question: uncertainty.question ?? null,
+      basis: uncertainty.basis ?? null,
+    },
+  };
+}
+
 function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
-  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(candidate);
+  const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(candidate);
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedUncertainty);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
   return {
     ...normalizedTransfer,

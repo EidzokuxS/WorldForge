@@ -5626,7 +5626,43 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Turns 004-020 passed one action at a time from inspected state with route_check, movement, dialogue_record, route_options, and direct_scene coverage. Each verifier recorded clean-runtime `done`, one new clean turn record, one chat exchange, accepted-only receipts when applicable, multi-token narration, restore ledger 0, old stores 0, and `Brass Tube.owner=Guide`.
     - [x] Route-list repair continued to hold after movement: turns 007, 011, 015, and 019 accepted `route_options` for anchored `now` route-list wording from `Slip Twelve Berth`, `Silt Warrens`, `Transmission Basement`, and `Resonance Tower`.
     - [x] Audit after turn 020: 20 clean turn records, 18 accepted Stage4 receipts, 5 authority traces, 4 travel clock ledger rows, restore ledger 0, old stores all 0, clock `worldVersion=5`, `worldTimeMinutes=4`, `currentTick=4`, chat history 40, current scene `Resonance Tower`, `Brass Tube.owner=Guide`.
+    - [x] Turns 021-039 continued cleanly through `Ground-Floor Barricade`, `Anchor Chain Pylon`, and `Upper Dam Ruins`; each verifier preserved `Brass Tube.owner=Guide`, restore ledger 0, old stores 0, and accepted-only receipts/direct scene records.
+    - [x] Turn 040 action `I go to Lowwater Bazaar.` emitted player-facing SSE `error` during `gm-read`; no turn record/chat/receipt/trace committed, and the pre-turn boundary restored. Artifact: `turn-040/`.
+    - [x] Root cause: `gmReadModelGenerationSchema` required full `uncertainty.question` and `uncertainty.basis` even when the model correctly expressed uncertainty absence as `{ present: false }`, so native JSON parsing failed before runtime validation.
+  - Repair:
+    - [x] Added a model-generation uncertainty schema that accepts the terse absence form.
+    - [x] `normalizeGmReadCandidateForValidation` now canonicalizes `uncertainty.present=false` to `question:null` and `basis:null` before strict `GmRead` validation.
+    - [x] Added contract coverage proving the generation schema accepts the terse form and the runtime validator returns canonical null fields.
+  - Verification:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 204 passed.
+    - [x] Focused clean-runtime suite -> 292 passed.
+    - [x] Restarted clean backend on port `31703` after repair.
+    - [x] Diagnostic retry `turn-040-retry-after-uncertainty-contract/` passed with one accepted `movement` receipt, `Brass Tube.owner=Guide`, clock deltas `1/1/1`, restore ledger 0, and old stores zero.
   - Acceptance status:
-    - P183 is clean through 20/60 on a fresh post-repair zero-turn clone. It remains an acceptance-candidate lane in progress.
+    - P183 is diagnostic only because original turn 040 produced a player-facing error/restore boundary.
+
+- P184 clean gameplay runtime post-uncertainty-contract repair diagnostics:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p184-post-uncertainty-contract-repair-acceptance-d-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative clock `0/0/0`, player at `Lowwater Bazaar`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores zero, old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Restart clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p184-post-uncertainty-contract-repair-acceptance-d-20260613/`.
+    - [x] Turns 001-013 passed cleanly across item transfer, dialogue, route options, route checks, movement, and direct scene. The previous P183 turn 040 movement shape succeeded as P184 turn 013 from `Upper Dam Ruins` to `Lowwater Bazaar`.
+    - [x] Turn 014 action `I ask Guide which route from the bazaar looks safest right now.` emitted player-facing SSE `error` during `gm-action-checklist`; no turn record/chat/receipt/trace committed, and the pre-turn boundary restored. Artifact: `turn-014/`.
+    - [x] Debug pipeline artifact `turn-014-debug-checklist-issues.json` reproduced the failure without commit path: accepted GM Read/Judge for visible actor dialogue, then Checklist rejected `steps.0.evidenceRefs` because route-advice evidence carried more than 8 refs.
+  - Repair:
+    - [x] `stepFor` now bounds checklist step `evidenceRefs` at the schema limit while preserving the ordered actor/target/scene anchors first.
+    - [x] Added contract coverage for route-advice dialogue where GM Read/Judge include many visible route refs but Checklist still compiles one valid `dialogue_record` step.
+  - Verification:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` -> 205 passed.
+    - [x] Focused clean-runtime suite -> 293 passed.
+    - [x] Restarted clean backend on port `31703` after repair.
+    - [x] Diagnostic retry `turn-014-retry-after-checklist-evidence-bound/` passed with one accepted `dialogue_record` receipt, `Brass Tube.owner=Guide`, clock deltas `0/0/0`, restore ledger 0, and old stores zero.
+  - Acceptance status:
+    - P184 is diagnostic only because original turn 014 produced a player-facing error/restore boundary.
   - Next scoped work:
-    - [ ] Continue P183 from turn 021 toward 60 by choosing each action from inspected state. Current scene: `Resonance Tower`; visible actors: none; routes: `Ground-Floor Barricade`, `Lowwater Bazaar`, `Silt Warrens`, `Transmission Basement`.
+    - [ ] Commit/push the GM Read uncertainty and Checklist evidence-bound repairs after GitNexus detect.
+    - [ ] Start a fresh post-repair zero-turn clone for the next 0 -> about 60 manual acceptance lane.

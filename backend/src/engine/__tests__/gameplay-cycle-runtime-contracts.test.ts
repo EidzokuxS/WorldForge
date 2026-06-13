@@ -1314,6 +1314,28 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(gmReadSchema.safeParse(candidate).success).toBe(false);
   });
 
+  it("canonicalizes terse model uncertainty absence before strict GM Read validation", () => {
+    const frame = minimalFrame();
+    const candidate = {
+      ...validGmRead(frame),
+      uncertainty: { present: false },
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status === "accepted") {
+      expect(result.read.uncertainty).toEqual({
+        present: false,
+        question: null,
+        basis: null,
+      });
+    }
+  });
+
   it("requires GM Read candidates to choose an explicit primitive interaction kind", () => {
     const candidate = {
       ...validGmRead(),
@@ -4500,6 +4522,78 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "stage4_backend_resolution_required",
       },
     });
+  });
+
+  it("bounds dialogue checklist evidence refs when route advice names many visible routes", async () => {
+    const routeRefs = [
+      "Anchor Chain Pylon",
+      "Auditor Spire",
+      "Charter Gallery",
+      "Resonance Tower",
+      "Silt Warrens",
+      "Slip Twelve Berth",
+      "The Copper Tap",
+      "Upper Dam Ruins",
+    ];
+    const frame = actionPlanFrame({
+      playerAction: "I ask Guide which route from the bazaar looks safest right now.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [
+        { ref: "Guide", label: "Guide", kind: "actor" },
+        ...routeRefs.map((ref) => ({ ref, label: ref, kind: "location" as const })),
+      ],
+      movementOptions: routeRefs.map((ref) => ({
+        ref,
+        label: ref,
+        connected: true,
+        travelCost: 1,
+      })),
+      citableRefs: ["Player", "Market", "Guide", ...routeRefs],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Guide", ...routeRefs],
+      evidenceRefs: ["Player", "Market", "Guide", ...routeRefs],
+      liveSceneQuestion: "Which route does Guide say looks safest?",
+      actionInterpretation: {
+        summary: "The player asks Guide for a route safety recommendation.",
+        playerIntent: "Ask Guide which bazaar route looks safest right now.",
+        method: "ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide", ...routeRefs],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Visible dialogue needs a terminal dialogue receipt before narration.",
+        evidenceRefs: ["Player", "Guide", ...routeRefs],
+      },
+    };
+
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-dialogue-route-advice",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    const [step] = result.checklist.steps;
+    expect(step.evidenceRefs).toHaveLength(8);
+    expect(step.evidenceRefs.slice(0, 3)).toEqual(["Player", "Guide", "Market"]);
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
   });
 
   it("deterministically produces item_transfer checklist for an uncontested visible-actor handoff", async () => {

@@ -66,6 +66,7 @@ export const EFFECT_TO_CAPABILITY: Record<GmActionChecklistEffectKind, GameplayR
 };
 
 const CHECKLIST_STEP_IDS = ["step-1", "step-2", "step-3", "step-4", "step-5", "step-6"] as const;
+const MAX_CHECKLIST_STEP_EVIDENCE_REFS = 8;
 type GmActionChecklistStepId = GmActionChecklist["steps"][number]["stepId"];
 
 export interface GmActionChecklistValidationIssue {
@@ -114,6 +115,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function boundedStepEvidenceRefs(values: readonly string[]): string[] {
+  return uniqueStrings(values).slice(0, MAX_CHECKLIST_STEP_EVIDENCE_REFS);
 }
 
 function lowerSet(values: readonly string[]): Set<string> {
@@ -939,7 +944,7 @@ function stepFor(input: {
     purpose: input.purpose ?? `Plan ${input.kind} for later backend resolution.`,
     actorRef: input.actorRef,
     targetRefs: uniqueStrings(input.targetRefs),
-    evidenceRefs: uniqueStrings(input.evidenceRefs),
+    evidenceRefs: boundedStepEvidenceRefs(input.evidenceRefs),
     intended,
     disposition: {
       kind: "stage4_backend_resolution_required",
