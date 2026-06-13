@@ -6576,10 +6576,11 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Add typed backend fact `value` for unlabelled renderer-owned payloads while preserving labelled model-facing `text`.
     - [x] Render item-state and dialogue deterministic projections by `role + value`, not by text prefix/substring.
     - [x] Add focused tests proving item/dialogue projection ignores misleading fact text when role/value are correct and fails when value is missing.
-    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
   - Review:
     - [x] GitNexus impacts before edits: `fact` LOW, `renderItemStateProjection` LOW, and `renderDialogueProjection` LOW.
     - [x] Backend facts now allow typed `value`; settlement emits it for `custody_change`, `settled_custody`, and `dialogue_quote`.
     - [x] Item/dialogue deterministic projections now read `settled_custody` / `dialogue_quote` values by role and fail when those values are absent.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 95 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no affected execution processes.
+    - [x] Pushed commit `b3b05cbe`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
