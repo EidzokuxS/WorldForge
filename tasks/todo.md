@@ -6533,9 +6533,10 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Remove the `Visible target:` regex decoder from Stage 6 direct-scene label handling.
     - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, and diff whitespace checks.
     - [x] Run GitNexus detect.
-    - [ ] Commit/push and refresh index.
+    - [x] Commit/push and refresh index.
   - Review:
     - [x] Direct scene snapshot evidence now emits `Scene placement`, `Scene label`, `Place label`, `Visible actor labels`, `Inventory labels`, and typed visible-target aggregate labels by kind.
     - [x] Direct-scene projection uses typed target label facts and keeps visible item/place targets out of inventory phrasing.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 91 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` prompt evidence selection.
+    - [x] Pushed commit `226c2540`; index refresh completed with embeddings preserved.
