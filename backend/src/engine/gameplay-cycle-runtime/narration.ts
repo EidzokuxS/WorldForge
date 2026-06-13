@@ -539,6 +539,15 @@ function parseRouteOptionFact(text: string): { label: string; connected: boolean
   };
 }
 
+function parseVisibleTargetFact(text: string): { label: string; kind: string | null } | null {
+  const match = text.match(/^Visible target:\s+(.+?)(?:\s+\(([^)]+)\))?\.$/u);
+  if (!match) return null;
+  return {
+    label: match[1]!,
+    kind: match[2] ?? null,
+  };
+}
+
 function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): string {
   const options = evidence.backendFacts
     .map((entry) => parseRouteOptionFact(entry.text))
@@ -610,10 +619,21 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     .flatMap((evidence) => evidence.backendFacts)
     .filter((entry) => entry.text.startsWith("Inventory item: "))
     .map((entry) => trimSentencePeriod(entry.text.replace(/^Inventory item:\s*/u, "")));
+  const routeOptions = sceneFacts
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((entry) => parseRouteOptionFact(entry.text))
+    .filter((option): option is NonNullable<typeof option> => option !== null);
+  const alreadyNamed = new Set([
+    ...actors,
+    ...inventory,
+    ...routeOptions.map((option) => option.label),
+  ].map((label) => label.toLocaleLowerCase("en-US")));
   const targets = sceneFacts
     .flatMap((evidence) => evidence.backendFacts)
-    .filter((entry) => entry.text.startsWith("Visible target: "))
-    .map((entry) => trimSentencePeriod(entry.text.replace(/^Visible target:\s*/u, "")).replace(/\s+\([^)]+\)$/u, ""));
+    .map((entry) => parseVisibleTargetFact(entry.text))
+    .filter((target): target is NonNullable<typeof target> => target !== null)
+    .map((target) => target.label)
+    .filter((label) => !alreadyNamed.has(label.toLocaleLowerCase("en-US")));
   const routeEvidence: AcceptedNarrationEvidence = {
     ...sceneFacts[0]!,
     backendFacts: sceneFacts

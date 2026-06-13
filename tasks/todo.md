@@ -83,6 +83,31 @@ P191 clean runtime prose QA / multi-agent preset adaptation correction:
 - Acceptance status:
   - [x] P191 is a prose QA and repair proof, not a final 60-turn acceptance lane.
 
+P194 GLM 5.2 clean runtime prose QA / direct-scene target dedupe:
+- Objective:
+  - Run the clean runtime against local GLM 5.2 settings and keep the prose projection grounded while removing repeated direct-scene target lists.
+  - Preserve the primitive ownership path: GLM chooses typed/admissible intent and dialogue content; backend receipts and scene-frame evidence own state truth; Stage 6 renders accepted evidence only.
+- Diagnostic notes:
+  - [x] Local `settings.json` points GLM provider default to `GLM-5.2` and `judge`/`storyteller`/`generator` role models to `glm-5.2` (ignored local config).
+  - [x] P192 replay after backend log restart proved `glm-5.2` native JSON success on dialogue (`dialogue_record`, no state delta, old stores 0); the earlier unlogged SSE error keeps P192 diagnostic-only.
+  - [x] P193 exposed a real prose weakness in `direct_scene`: scene snapshot projection repeated actor/route labels in the visible-target list (`Guide is here... Guide, Brass Tube...`).
+- Repair:
+  - [x] `renderSceneFrameSnapshotProjection` now parses visible targets structurally and removes labels already rendered as visible actors, inventory items, or route options.
+  - [x] Added narration contract test for overlapping actor/inventory/route targets. The expected player text keeps `Guide` once, route labels in the route sentence, and item/place targets in the visible sentence.
+- Executed verification:
+  - [x] GitNexus impact before edits: LOW for `renderCleanAuthorityProjection` and `renderSceneFrameSnapshotProjection`; direct path stays `runCleanNarration`.
+  - [x] `npm --prefix backend run typecheck` passed.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 35 tests.
+  - [x] Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 298 tests.
+  - [x] Fresh zero-turn live artifact: `output/clean-runtime-p194-glm52-prose-qa-fresh-20260613-130037/`.
+  - [x] P194 turn 1 manual action `I hand the Brass Tube to Guide.` passed: one accepted `item_transfer`, `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores 0, restore ledger 0.
+  - [x] P194 turn 2 manual action `I ask Guide, "Do you have the Brass Tube now?"` passed: one accepted `dialogue_record`, no state/time/tick delta, old stores 0, restore ledger 0, narration quoted GLM 5.2 dialogue.
+  - [x] P194 turn 3 manual action `I look around Lowwater Bazaar.` passed as `direct_scene`, no receipt required, no state/time/tick delta, old stores 0, restore ledger 0.
+  - [x] P194 patched direct-scene narration: `You are at Lowwater Bazaar. Guide is here. You have Courier satchel and Sealed lacquer message tube. Brass Tube is visible. Visible routes lead to Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins; each takes 1 minute.`
+  - [x] `node scripts/audit-clean-runtime-prose.mjs --fail-on-hits --out output/clean-runtime-p194-glm52-prose-qa-fresh-20260613-130037/prose-audit.json output/clean-runtime-p194-glm52-prose-qa-fresh-20260613-130037` passed: 3/3 narratives, one-token 0, all prose/leak counters 0.
+- Acceptance status:
+  - [x] P194 is a GLM 5.2/prose regression proof, not a final 60-turn acceptance lane.
+
 P155 primitive-owned clean runtime architecture pass:
 - Objective:
   - Finish the clean gameplay-cycle runtime as a primitive-owned architecture. Every player turn flows through explicit ownership: player intent -> typed admission -> primitive checklist/request -> backend-owned receipt -> settlement evidence -> bounded narration projection.

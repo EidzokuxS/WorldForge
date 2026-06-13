@@ -257,6 +257,71 @@ function sceneFrameSnapshotView(): CleanNarratorView {
   });
 }
 
+function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["current_scene", "current_location"],
+      text: "Current scene is Market.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Current scene is Market.", exact: true },
+        { factRef: "e1.f2", text: "Current place is Market.", exact: true },
+      ],
+      limits: {
+        proves: ["current scene label"],
+        doesNotProve: ["hidden areas", "movement", "arrival"],
+      },
+    }, {
+      ref: "e2",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_actor"],
+      text: "Guide is visible in the current scene.",
+      backendFacts: [{ factRef: "e2.f1", text: "Visible actor: Guide.", exact: true }],
+      limits: {
+        proves: ["actor visible in the current scene"],
+        doesNotProve: ["actor private knowledge", "actor intent", "future actor action"],
+      },
+    }, {
+      ref: "e3",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["inventory_status"],
+      text: "Courier satchel is visible in the inventory snapshot.",
+      backendFacts: [{ factRef: "e3.f1", text: "Inventory item: Courier satchel.", exact: true }],
+      limits: {
+        proves: ["inventory item label only"],
+        doesNotProve: ["item contents", "item use", "ownership transfer"],
+      },
+    }, {
+      ref: "e4",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_target"],
+      text: "Visible current-frame targets include Guide, Courier satchel, North Hall, Brass Tube, Notice Board.",
+      backendFacts: [
+        { factRef: "e4.f1", text: "Visible target: Guide (actor).", exact: true },
+        { factRef: "e4.f2", text: "Visible target: Courier satchel (item).", exact: true },
+        { factRef: "e4.f3", text: "Visible target: North Hall (location).", exact: true },
+        { factRef: "e4.f4", text: "Visible target: Brass Tube (item).", exact: true },
+        { factRef: "e4.f5", text: "Visible target: Notice Board (place_handle).", exact: true },
+      ],
+      limits: {
+        proves: ["visible current-scene target labels"],
+        doesNotProve: ["hidden targets", "movement", "arrival", "absence of other targets"],
+      },
+    }, {
+      ref: "e5",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["movement_option"],
+      text: "Visible route options include North Hall.",
+      backendFacts: [{ factRef: "e5.f1", text: "Route option: North Hall (connected, 1 minute(s)).", exact: true }],
+      limits: {
+        proves: ["route option labels exposed by the current SceneFrame snapshot"],
+        doesNotProve: ["hidden routes", "route safety", "movement", "arrival", "absence of other routes"],
+      },
+    }],
+  });
+}
+
 function dialogueView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -930,6 +995,24 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe("You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
+  });
+
+  it("deduplicates direct scene targets already rendered as actors, inventory, or routes", async () => {
+    const result = await runCleanNarration({
+      narratorView: sceneFrameSnapshotWithOverlappingTargetsView(),
+      provider,
+      generateCandidate: async () => {
+        throw new Error("scene_frame_snapshot route/target facts should not call the model");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(result.text).not.toContain("Guide, Courier satchel");
+    expect(result.text).not.toContain("Guide, Brass Tube");
+    expect(result.text).not.toContain("Courier satchel is visible");
+    expect(result.text).not.toContain("North Hall is visible");
+    expect(result.text.match(/\bGuide\b/gu)).toHaveLength(1);
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
