@@ -6655,3 +6655,18 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected process limited to `RunCleanNarration -> NormalizeText`.
     - [x] Pushed commit `433d6603`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P235 Stage 6 oracle outcome typed value:
+  - Plan:
+    - [x] Run GitNexus impact before editing oracle settlement evidence and authority projection.
+    - [x] Emit typed `value` for `oracle_selected_meaning`.
+    - [x] Render oracle deterministic projection by `role + value`, not arbitrary fact text.
+    - [x] Remove unused fact-text helper functions from Stage 6 narration.
+    - [x] Update focused tests to prove old untyped oracle facts fail and role/value facts pass.
+    - [x] Run focused narration/settlement/contracts/stage4 tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] `oracleEvidence` now emits `oracle_selected_meaning` with typed `value`; `renderCleanAuthorityProjection` reads only that role/value and fails when it is absent.
+    - [x] Removed unused Stage 6 fact-text/prefix helpers (`factValue`, `factText`, `requireFactValue`, `requireFactText`).
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 21 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported MEDIUM with affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`.
+    - [x] Pushed commit `b7856001`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
