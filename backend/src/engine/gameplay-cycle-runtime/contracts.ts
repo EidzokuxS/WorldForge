@@ -2153,6 +2153,7 @@ export const cleanStage4ExecutionResultSchema = z.object({
 const cleanSettledClaimKindSchema = z.enum([
   "current_scene",
   "current_location",
+  "scene_texture",
   "visible_fact",
   "visible_actor",
   "visible_target",

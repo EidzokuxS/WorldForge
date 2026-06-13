@@ -172,6 +172,7 @@ const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
 const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
   "current_scene",
   "current_location",
+  "scene_texture",
 ];
 
 function hasClaimKind(view: CleanNarratorView, claimKind: CleanNarrationClaimKind): boolean {
@@ -193,6 +194,13 @@ function isLiteraryTerminalEvidence(evidence: AcceptedNarrationEvidence): boolea
 function hasOnlySceneFrameSnapshotEvidence(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.length > 0
     && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
+}
+
+function hasAcceptedSceneTextureEvidence(view: CleanNarratorView): boolean {
+  return view.acceptedEvidence.some((evidence) =>
+    evidence.authority === "scene_frame_snapshot"
+    && evidence.claimKinds.includes("scene_texture")
+  );
 }
 
 function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
@@ -371,6 +379,80 @@ const LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT = /\b(?:stretches?\s+around\s+y
 const LOCAL_OBSERVATION_SURFACE_KIND_TEXT = /\bvisible\s+(?:actors?|targets?|items?|routes?|devices?)\b/iu;
 const LOCAL_OBSERVATION_ACTOR_POSTURE_TEXT = /\bstands?\b/iu;
 
+function candidateCitesClaimKind(
+  candidate: CleanNarrationCandidate,
+  claimKind: CleanNarrationClaimKind,
+): boolean {
+  return candidate.sentences.some((sentence) => sentence.claimKinds.includes(claimKind));
+}
+
+function acceptedSceneTextureText(view: CleanNarratorView): string {
+  return view.acceptedEvidence
+    .filter((evidence) => evidence.claimKinds.includes("scene_texture"))
+    .flatMap((evidence) => [
+      evidence.text,
+      ...evidence.backendFacts.map((fact) => fact.text),
+    ])
+    .join("\n")
+    .toLowerCase();
+}
+
+function sceneTextureSourceTexts(view: CleanNarratorView): string[] {
+  return view.acceptedEvidence
+    .filter((evidence) => evidence.claimKinds.includes("scene_texture"))
+    .flatMap((evidence) => [
+      evidence.text,
+      ...evidence.backendFacts.map((fact) => fact.text),
+    ])
+    .map((value) =>
+      normalizeText(value)
+        .replace(/^(?:current\s+scene\s+texture|scene\s+texture):\s*/iu, "")
+        .replace(/\.$/u, "")
+    )
+    .filter((value) => value.length > 0);
+}
+
+function isAcceptedSceneTextureSentence(
+  view: CleanNarratorView,
+  sentenceText: string,
+): boolean {
+  const normalizedSentence = normalizeText(sentenceText)
+    .replace(/\.$/u, "")
+    .toLowerCase();
+  if (normalizedSentence.length === 0) return true;
+  return sceneTextureSourceTexts(view)
+    .some((sourceText) => sourceText.toLowerCase().includes(normalizedSentence));
+}
+
+function hasParaphrasedSceneTexture(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  return candidate.sentences.some((sentence) =>
+    sentence.claimKinds.includes("scene_texture")
+    && !isAcceptedSceneTextureSentence(view, sentence.text)
+  );
+}
+
+function patternMatches(pattern: RegExp, text: string): string[] {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return [...text.matchAll(new RegExp(pattern.source, flags))]
+    .map((match) => normalizeText(match[0]).toLowerCase());
+}
+
+function hasUnsupportedTexture(
+  pattern: RegExp,
+  text: string,
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  const matches = patternMatches(pattern, text);
+  if (matches.length === 0) return false;
+  if (!candidateCitesClaimKind(candidate, "scene_texture")) return true;
+  const acceptedTexture = acceptedSceneTextureText(view);
+  return matches.some((match) => !acceptedTexture.includes(match));
+}
+
 function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) => evidence.authority === "route_options_receipt")
@@ -484,12 +566,25 @@ function proseQualityIssues(input: {
 
   if (
     hasTerminalRouteEvidence(input.view)
-    && ROUTE_UNSUPPORTED_TEXTURE_TEXT.test(unquotedText)
+    && hasUnsupportedTexture(
+      ROUTE_UNSUPPORTED_TEXTURE_TEXT,
+      unquotedText,
+      input.view,
+      input.candidate,
+    )
   ) {
     issues.push({
       code: "prose_quality",
       path: "finalText",
       message: "Route narration must use accepted route labels and costs without unsupported scene texture or travel-mode detail.",
+    });
+  }
+
+  if (hasParaphrasedSceneTexture(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Scene_texture narration must use an exact contiguous accepted scene-texture clause instead of paraphrasing spatial or atmospheric facts.",
     });
   }
 
@@ -524,7 +619,12 @@ function proseQualityIssues(input: {
   if (
     hasClaimKind(input.view, "local_observation")
     && (
-      LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT.test(unquotedText)
+      hasUnsupportedTexture(
+        LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT,
+        unquotedText,
+        input.view,
+        input.candidate,
+      )
       || LOCAL_OBSERVATION_SURFACE_KIND_TEXT.test(unquotedText)
       || LOCAL_OBSERVATION_ACTOR_POSTURE_TEXT.test(unquotedText)
     )
@@ -597,6 +697,8 @@ export function buildCleanNarrationSystemPrompt(
     "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
     "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
+    "Scene-texture evidence: scene_texture may color the prose with public current-scene description texture only. It does not prove route truth, movement, actor action, discovery, absence, no-change, item state, or private knowledge.",
+    "Scene-texture exactness: for scene_texture sentences, select one exact contiguous accepted scene-texture clause; do not paraphrase spatial relation, crowd state, weather, lighting, sound, smell, or motion.",
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
@@ -609,14 +711,15 @@ export function buildCleanNarrationSystemPrompt(
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
-    "Route-options surface: for movement_option and route_options_receipt, phrase only accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' Include every accepted route label; do not add scene atmosphere, travel mode, street/market nouns, or player motion.",
-    "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' Scene labels are placement tokens only; player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
+    "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' With scene_texture evidence, one short scene-texture beat may precede or frame the route list. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
+    "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
     "For route_status, express the cited route_status backend fact.",
+    "For scene_texture, express only cited public current-scene description texture as atmosphere around another accepted claim.",
     "For player_location_change, express the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, express the selected visible outcome meaning.",
     "For standalone elapsed_time, express the accepted elapsed time fact.",
@@ -1091,12 +1194,13 @@ function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): stri
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
+  const hasSceneTexture = hasAcceptedSceneTextureEvidence(view);
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
-    || evidence.claimKinds.includes("local_observation")
+    || (evidence.claimKinds.includes("local_observation") && !hasSceneTexture)
     || evidence.claimKinds.includes("player_local_condition")
-    || evidence.authority === "route_options_receipt"
+    || (evidence.authority === "route_options_receipt" && !hasSceneTexture)
     || evidence.authority === "scene_observation_receipt"
     || evidence.claimKinds.includes("device_surface_observation")
   );
@@ -1310,36 +1414,49 @@ export async function runCleanNarration(input: {
       request,
     }));
 
-  let candidate: unknown;
-  try {
-    candidate = await generateCandidate({ system, prompt, promptInput, styleMode });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new CleanNarrationGenerationError(
-      `Clean Narration generation failed before validation: ${message.slice(0, 300)}`,
-      error,
-    );
-  }
+  let validationIssues: CleanNarrationValidationIssue[] = [];
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const requestPrompt = attempt === 1
+      ? prompt
+      : [
+          prompt,
+          "",
+          "Stage 6 validation feedback from the previous candidate:",
+          summarizeNarrationValidationIssues(validationIssues),
+          "Return a replacement JSON candidate that satisfies the same accepted evidence refs and fixes the validation feedback.",
+        ].join("\n");
+    let candidate: unknown;
+    try {
+      candidate = await generateCandidate({ system, prompt: requestPrompt, promptInput, styleMode });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CleanNarrationGenerationError(
+        `Clean Narration generation failed before validation: ${message.slice(0, 300)}`,
+        error,
+      );
+    }
 
-  const validation = validateCleanNarrationCandidate({
-    view: input.narratorView,
-    candidate,
-  });
-  if (validation.status === "accepted") {
-    return {
-      ...assertCleanNarrationResult({
-        version: "gameplay-runtime.clean-narration-result.v1",
-        packetId: input.narratorView.packetId,
-        turnId: input.narratorView.turnId,
-        text: validation.candidate.finalText,
-        source: "model",
-      }),
-      validationIssues: [],
-    };
+    const validation = validateCleanNarrationCandidate({
+      view: input.narratorView,
+      candidate,
+    });
+    if (validation.status === "accepted") {
+      return {
+        ...assertCleanNarrationResult({
+          version: "gameplay-runtime.clean-narration-result.v1",
+          packetId: input.narratorView.packetId,
+          turnId: input.narratorView.turnId,
+          text: validation.candidate.finalText,
+          source: "model",
+        }),
+        validationIssues: [],
+      };
+    }
+    validationIssues = validation.issues;
   }
 
   throw new CleanNarrationValidationError(
-    `Clean Narration validation failed: ${summarizeNarrationValidationIssues(validation.issues)}`,
-    validation.issues,
+    `Clean Narration validation failed: ${summarizeNarrationValidationIssues(validationIssues)}`,
+    validationIssues,
   );
 }

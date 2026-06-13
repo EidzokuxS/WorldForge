@@ -233,6 +233,51 @@ function routeOptionsManyView(): CleanNarratorView {
   });
 }
 
+function sceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"][number] {
+  return {
+    ref,
+    authority: "scene_frame_snapshot",
+    claimKinds: ["scene_texture"],
+    text: "Current scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+    backendFacts: [{
+      factRef: `${ref}.f1`,
+      text: "Scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+      exact: true,
+    }],
+    limits: {
+      proves: ["public current-scene description texture"],
+      doesNotProve: ["route truth", "movement", "actor presence", "NPC action", "item state", "discovery", "absence", "no-change"],
+    },
+  };
+}
+
+function currentSceneAnchorEvidence(ref = "e3"): CleanNarratorView["acceptedEvidence"][number] {
+  return {
+    ref,
+    authority: "scene_frame_snapshot",
+    claimKinds: ["current_scene", "current_location"],
+    text: "Current scene is Market.",
+    backendFacts: [
+      { factRef: `${ref}.f1`, text: "Current scene is Market.", exact: true },
+      { factRef: `${ref}.f2`, text: "Current place is Market.", exact: true },
+    ],
+    limits: {
+      proves: ["current scene label"],
+      doesNotProve: ["hidden areas", "movement", "arrival"],
+    },
+  };
+}
+
+function routeOptionsWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...routeOptionsView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
 function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -698,6 +743,16 @@ function positiveLocalObservationView(): CleanNarratorView {
   });
 }
 
+function positiveLocalObservationWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...positiveLocalObservationView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
 function sceneObservationReceiptView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
@@ -1022,6 +1077,15 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
   });
 
+  it("includes scene_texture beside terminal route evidence when literary route prose can cite texture", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView());
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts[0]?.text)
+      .toBe("Scene texture: Canvas awnings hang over the market lanes while rain taps the brass gutters.");
+  });
+
   it("accepts model narration from accepted movement evidence", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView(),
@@ -1172,6 +1236,126 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupportedRouteTexture.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
     )).toBe(true);
+  });
+
+  it("uses model-authored route-options prose when accepted scene_texture is available", async () => {
+    const view = routeOptionsWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).toContain("North Hall");
+    expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|you go|you walk|arrive)\b/iu);
+
+    const paraphrasedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang overhead while rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+    expect(paraphrasedTexture.status).toBe("rejected");
+    if (paraphrasedTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(paraphrasedTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("exact contiguous accepted scene-texture clause")
+    )).toBe(true);
+
+    const uncitedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Market stalls surround you while the visible way leads to North Hall.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(uncitedTexture.status).toBe("rejected");
+    if (uncitedTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(uncitedTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
+
+    const wrongCitedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Market stalls surround you while the visible way leads to North Hall.",
+        evidenceRefs: ["e1", "e2"],
+        backendFactRefs: ["e1.f1", "e2.f1"],
+        claimKinds: ["movement_option", "scene_texture"],
+      }]),
+    });
+    expect(wrongCitedTexture.status).toBe("rejected");
+    if (wrongCitedTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(wrongCitedTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
+  });
+
+  it("repairs unsupported scene_texture inside Stage 6 before player-facing narration", async () => {
+    const view = routeOptionsWithSceneTextureView();
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [{
+            text: "Market stalls surround you while the visible way leads to North Hall.",
+            evidenceRefs: ["e1"],
+            backendFactRefs: ["e1.f1"],
+            claimKinds: ["movement_option"],
+          }]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("unsupported scene texture");
+        return acceptedCandidate(view, [
+          {
+            text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f1"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "From here, the visible way leads to North Hall. It takes 1 minute.",
+            evidenceRefs: ["e1"],
+            backendFactRefs: ["e1.f1"],
+            claimKinds: ["movement_option"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. From here, the visible way leads to North Hall. It takes 1 minute.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -1583,6 +1767,62 @@ describe("clean Stage 6 narration contracts", () => {
     expect(surfaceTextureDrift.status).toBe("rejected");
     if (surfaceTextureDrift.status !== "rejected") throw new Error("expected rejected");
     expect(surfaceTextureDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
+  });
+
+  it("uses model-authored local_observation prose when accepted scene_texture is available", async () => {
+    const view = positiveLocalObservationWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes while rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The central telegraph desk is in view here.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f3"],
+          claimKinds: ["local_observation", "visible_target"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes while rain taps the brass gutters. The central telegraph desk is in view here.");
+    expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
+
+    const uncitedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Market stalls surround you while central telegraph desk is in view here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(uncitedTexture.status).toBe("rejected");
+    if (uncitedTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(uncitedTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
+
+    const wrongCitedTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Market stalls surround you while the central telegraph desk is in view here.",
+        evidenceRefs: ["e1", "e2"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e2.f1"],
+        claimKinds: ["local_observation", "visible_target", "scene_texture"],
+      }]),
+    });
+    expect(wrongCitedTexture.status).toBe("rejected");
+    if (wrongCitedTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(wrongCitedTexture.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
     )).toBe(true);
   });

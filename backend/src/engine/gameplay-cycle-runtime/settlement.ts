@@ -296,6 +296,21 @@ const SCENE_DOES_NOT_PROVE = [
   "offscreen events",
 ];
 
+const SCENE_TEXTURE_DOES_NOT_PROVE = [
+  "route truth",
+  "movement",
+  "arrival",
+  "current-scene change",
+  "actor presence",
+  "NPC action",
+  "item state",
+  "discovery",
+  "absence",
+  "no-change",
+  "private facts",
+  "offscreen events",
+];
+
 export interface BuildCleanSettlementInput {
   turn: GameplayRuntimeTurnInput;
   publicPacketId: string;
@@ -343,6 +358,25 @@ function evidenceLabelList(labels: readonly string[]): string {
   return uniqueStrings(labels).join(", ");
 }
 
+function compactSceneTexture(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const compact = value
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/\.$/u, "");
+  if (compact.length === 0) return null;
+  return compact.length <= 420 ? compact : `${compact.slice(0, 417).trimEnd()}...`;
+}
+
+function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
+  return uniqueStrings([
+    compactSceneTexture(frame.scene.currentScene.description),
+    frame.scene.currentScene.label === frame.scene.currentLocation.label
+      ? null
+      : compactSceneTexture(frame.scene.currentLocation.description),
+  ].filter((value): value is string => value !== null));
+}
+
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
   const evidenceId = nextEvidenceId(evidence);
   evidence.push({
@@ -366,6 +400,32 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       doesNotProve: SCENE_DOES_NOT_PROVE,
     },
   });
+
+  const textures = sceneTextureFacts(frame);
+  if (textures.length > 0) {
+    const textureEvidenceId = nextEvidenceId(evidence);
+    evidence.push({
+      evidenceId: textureEvidenceId,
+      sourceKind: "scene_frame",
+      sourceRef: frame.frameId,
+      authority: "scene_frame_snapshot",
+      claimKinds: ["scene_texture"],
+      text: textures.length === 1
+        ? `Current scene texture: ${textures[0]}.`
+        : `Current scene texture: ${textures.join(" ")}.`,
+      visibleRefs: uniqueStrings([
+        frame.scene.currentScene.ref,
+        frame.scene.currentLocation.ref,
+      ]),
+      backendFacts: textures.map((texture, index) =>
+        fact(textureEvidenceId, index + 1, `Scene texture: ${texture}.`)
+      ),
+      limits: {
+        proves: ["public current-scene description texture"],
+        doesNotProve: SCENE_TEXTURE_DOES_NOT_PROVE,
+      },
+    });
+  }
 
   for (const visible of frame.scene.visibleFacts.slice(0, 6)) {
     const visibleEvidenceId = nextEvidenceId(evidence);

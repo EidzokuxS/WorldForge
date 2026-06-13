@@ -771,6 +771,49 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("SceneFrame");
   });
 
+  it("settles public scene descriptions as bounded scene_texture evidence", () => {
+    const baseFrame = frame();
+    const inputFrame = frame({
+      playerAction: "I check the visible routes from here.",
+      scene: {
+        ...baseFrame.scene,
+        currentLocation: {
+          ...baseFrame.scene.currentLocation,
+          description: "Canvas awnings hang over the market lanes, and rain taps against the brass gutters.",
+        },
+        currentScene: {
+          ...baseFrame.scene.currentScene,
+          description: "Lantern smoke clings to the ticket counter beside the wet stone floor.",
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      gmRead: directGmRead(inputFrame),
+      checklist: null,
+      execution: null,
+    });
+    const view = buildCleanNarratorView(packet);
+    const textureEvidence = packet.acceptedEvidence.find((entry) =>
+      entry.claimKinds.includes("scene_texture")
+    );
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    expect(textureEvidence).toMatchObject({
+      authority: "scene_frame_snapshot",
+      sourceKind: "scene_frame",
+      claimKinds: ["scene_texture"],
+    });
+    expect(textureEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.",
+    ]);
+    expect(textureEvidence?.limits.proves).toEqual(["public current-scene description texture"]);
+    expect(textureEvidence?.limits.doesNotProve).toContain("route truth");
+    expect(textureEvidence?.limits.doesNotProve).toContain("actor presence");
+    expect(JSON.stringify(view)).toContain("Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.");
+  });
+
   it("settles clarification as an explicit player-facing request before scene snapshot context", () => {
     const inputFrame = frame({
       playerAction: "I hand it to them.",

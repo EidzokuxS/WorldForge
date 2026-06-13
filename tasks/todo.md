@@ -62,8 +62,39 @@ P195 Stage 6 literary adventure narration:
   - [x] Tighten item-transfer live prose so scene anchor contributes exact placement only unless observation evidence supplies additional texture.
   - [x] Add literary coverage and live proof for movement arrival and standalone time passage.
   - [x] Add label-only adventure-diction coverage and live proof for route inquiry/options and local observation.
-  - [ ] Add accepted scene-texture evidence so route/local turns can become richer model-authored adventure prose while keeping facts traceable.
+  - [x] Add accepted scene-texture evidence so route/local turns can become richer model-authored adventure prose while keeping facts traceable.
   - [ ] Run longer fresh GLM 5.2 manual-turn lanes after the next primitive group, with prose audit plus DB verification after each lane.
+
+P196 accepted scene-texture evidence:
+- Goal:
+  - Promote public current-scene/current-location descriptions from `AuthoritativeSceneFrame` into explicit accepted `scene_texture` evidence for Stage 6.
+  - Let route-options and local-observation turns use model-authored adventure prose when they cite both terminal receipt evidence and accepted scene texture.
+  - Keep label-only route/local receipts on deterministic projection until texture evidence is present.
+- Plan:
+  - [x] Add `scene_texture` claim kind with limits that prove only public scene description texture.
+  - [x] Emit bounded `scene_texture` evidence from public current scene/location descriptions.
+  - [x] Include `scene_texture` in literary prompt input beside terminal route/local evidence.
+  - [x] Let route/local bypass deterministic projection only when accepted scene texture exists.
+  - [x] Add validation/tests proving cited texture can enrich prose while uncited, unsupported, or paraphrased texture remains invalid.
+  - [x] Run typecheck, focused clean-runtime tests, live route/local proof, prose audit, GitNexus detect, commit/push/analyze.
+- Changes:
+  - [x] `scene_texture` is now a settled claim kind sourced from public current-scene/current-location descriptions in `AuthoritativeSceneFrame`.
+  - [x] Stage 6 prompt input carries `scene_texture` beside terminal route/local receipts and current scene anchors.
+  - [x] Route-options and local-observation turns with accepted `scene_texture` use model-authored Stage 6 narration; label-only route/local receipts still use deterministic accepted-evidence projection.
+  - [x] Scene texture is truth-bounded: it may add only exact contiguous public-description clauses, and does not prove route truth, movement, actor presence/action, item state, discovery, absence/no-change, private facts, or offscreen events.
+  - [x] Stage 6 now performs one validation-repair attempt inside the narrator stage before failing, so repairable candidate issues can be corrected against the same accepted evidence without introducing gameplay fallback semantics.
+- Verification:
+  - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
+  - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 313 tests.
+  - [x] Fresh zero-turn live proof artifact: `output/clean-runtime-p196-scene-texture-route-local-qa-20260613-124714/`.
+  - [x] Live proof clone `p196-scene-texture-route-local-qa-20260613-124714` from source `p69-item-transfer-045651`, clean runtime flags on, GLM 5.2 provider active.
+  - [x] Turn 1 route-options action returned model-authored prose with exact accepted scene texture plus every visible route label: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From here in Lowwater Bazaar, the visible ways lead to Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins, each a minute away.`
+  - [x] Turn 2 local-observation action returned model-authored prose with exact accepted scene texture plus visible actor result: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in view here at Lowwater Bazaar.`
+  - [x] DB proof `output/clean-runtime-p196-scene-texture-route-local-qa-20260613-124714/db-proof.json`: two clean turn records, accepted `route_options` and `local_observation` receipts, both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`, and each record contains accepted `scene_texture` evidence.
+  - [x] Prose audit passed: `output/clean-runtime-p196-scene-texture-route-local-qa-20260613-124714/prose-audit.json`; 2 narratives, zero one-token output, zero receipt/debug/enum/old-formula/surface/list/digest hits.
+  - [x] GitNexus detect_changes passed before commit with medium scope and no HIGH/CRITICAL risk: 11 changed indexed symbols, 4 affected narration/projection flows.
+- Next prose target:
+  - [ ] Add cross-turn texture variety support so adjacent same-scene turns can choose different accepted texture clauses or omit texture after recent use, while preserving exact accepted public-description wording.
 
 P189 clean runtime prose quality pass:
 - Objective:
