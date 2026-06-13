@@ -1484,6 +1484,59 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     }).status).toBe("rejected");
   });
 
+  it("canonicalizes broad movement-option surface lists to route_inquiry before Judge or Checklist", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I list the routes I can take from Slip Twelve Berth.",
+      scene: {
+        currentLocation: { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", description: null },
+        currentScene: { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [
+        { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", connected: true, travelCost: 1 },
+        { ref: "Silt Warrens", label: "Silt Warrens", connected: true, travelCost: 1 },
+        { ref: "The Copper Tap", label: "The Copper Tap", connected: true, travelCost: 1 },
+      ],
+      citableRefs: ["Player", "Slip Twelve Berth", "Lowwater Bazaar", "Silt Warrens", "The Copper Tap"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Which route surface should be listed?",
+      focalRefs: ["Player", "Slip Twelve Berth"],
+      evidenceRefs: ["Player", "Slip Twelve Berth"],
+      actionInterpretation: {
+        summary: "The player asks for the available routes from the current scene.",
+        playerIntent: "List available routes.",
+        method: "list",
+        targetRefs: ["Slip Twelve Berth"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "routes I can take",
+          targetRef: null,
+          surfaceKinds: ["movement_option"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Slip Twelve Berth"],
+        },
+      },
+      interpretationRationale: "The model used the exposed movement-option surface for a broad route list.",
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.path).toBe("procedural");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "route_inquiry",
+      targetRefs: [],
+      localObservationNeed: null,
+    });
+  });
+
   it("requires time_passage to carry a typed elapsed-minute need before checklist planning", () => {
     const frame = minimalFrame({
       playerAction: "I wait here for 3 minutes.",

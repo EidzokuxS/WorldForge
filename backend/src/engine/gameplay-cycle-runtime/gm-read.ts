@@ -241,6 +241,40 @@ function normalizeGmReadDeviceNoSurfaceAdmission(input: {
   };
 }
 
+function hasAllowedCleanCapability(frame: AuthoritativeSceneFrame, capabilityId: string): boolean {
+  return frame.capabilities.some((capability) =>
+    capability.capabilityId === capabilityId && capability.allowed
+  );
+}
+
+function normalizeGmReadRouteListObservation(input: {
+  frame: AuthoritativeSceneFrame;
+  read: GmRead;
+}): GmRead {
+  const { read } = input;
+  const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
+  if (read.actionInterpretation.interactionKind !== "current_scene_observation") return read;
+  if (!localObservationNeed) return read;
+  if (localObservationNeed.mode !== "list_surface") return read;
+  if (localObservationNeed.targetRef !== null) return read;
+
+  const surfaceKinds = uniqueStrings(localObservationNeed.surfaceKinds);
+  const isMovementOptionList = surfaceKinds.length === 1 && surfaceKinds[0] === "movement_option";
+  if (!isMovementOptionList) return read;
+  if (!hasAllowedCleanCapability(input.frame, "route_options")) return read;
+
+  return {
+    ...read,
+    path: "procedural",
+    actionInterpretation: {
+      ...read.actionInterpretation,
+      targetRefs: [],
+      interactionKind: "route_inquiry",
+      localObservationNeed: null,
+    },
+  };
+}
+
 function normalizeGmReadItemTransferShapeCandidate(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const actionInterpretation = candidate.actionInterpretation;
@@ -1330,9 +1364,13 @@ export function validateGmReadCandidate(input: {
   if (!parsed.success) {
     issues.push(...parsed.error.issues.map(zodIssue));
   } else {
-    parsedRead = normalizeGmReadDeviceNoSurfaceAdmission({
+    parsedRead = normalizeGmReadRouteListObservation({
       frame: input.frame,
       read: parsed.data,
+    });
+    parsedRead = normalizeGmReadDeviceNoSurfaceAdmission({
+      frame: input.frame,
+      read: parsedRead,
     });
     issues.push(...frameMismatchIssues(parsedRead, input.frame));
     issues.push(...refValidationIssues(parsedRead, input.frame));
@@ -1416,7 +1454,7 @@ export function buildGmReadSystemPrompt(): string {
     "Allowed path values: direct, continue, clarification, uncertain, procedural, combat_pressure.",
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
-    "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, or where it leads, including wording like without moving / do not go yet.",
+    "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, where it leads, or asks to list/show current routes/exits/options, including wording like without moving / do not go yet.",
     "route_inquiry targetRefs must cite SceneFrame.movementOptions when the question targets one route, or stay empty for broad route-option questions.",
     "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, walk back to, return to, or otherwise change current scene/location.",
     "movement_intent requires exactly one targetRef copied from SceneFrame.movementOptions. If the destination is not an exposed movement option, use clarification or unsupported_or_unclear.",
@@ -1446,7 +1484,7 @@ export function buildGmReadSystemPrompt(): string {
     "minorPoiNeed.placeLabel is the visible handle label the player is establishing. minorPoiNeed.anchorRef must be the current scene/location ref from SceneFrame.citableRefs. placeKind must be allowed by SceneFrame.currentScenePlaceHandleSurface.allowedPlaceKinds.",
     "minor_poi_create does not authorize actors, services, inventory, business facts, readable sign text, hidden discovery, search result, absence, no-change, world fact, location reveal, movement option, legal destination, route truth, or dialogue content.",
     "If the player establishes a current-scene place handle and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill minorPoiNeed for the handle part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
-    "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details.",
+    "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details. Broad route/exits/options lists over movement_option use route_inquiry.",
     "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
     "For who/anyone/people/person/NPC visible nearby or here, use localObservationNeed mode=list_surface, surfaceKinds=[\"visible_actor\"], targetRef=null, and allowBoundedNegative=true.",
     "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",

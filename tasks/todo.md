@@ -5513,4 +5513,45 @@ Session: `gm-v1-consequenc-slice`.
     - P174 is one 60-turn clean-runtime candidate lane by runtime/DB gates. Final gameplay-cycle acceptance remains pending because the bar requires several different fresh post-repair zero-turn campaigns/clones at about 60 turns each.
   - Next scoped work:
     - [x] Run the focused clean-runtime suite after P174 (`289 passed`) and `npm --prefix backend run typecheck`.
-    - [ ] Start another fresh post-repair zero-turn clone with different route coverage for the next ~60-turn manual lane.
+    - [x] Start another fresh post-repair zero-turn clone with different route coverage for the next ~60-turn manual lane.
+
+- P175/P176 clean gameplay runtime route-list primitive ambiguity diagnostics:
+  - Evidence:
+    - [x] P175 fresh clone `p175-post-typed-admission-acceptance-b-20260613` reached turn 009 with clean runtime/DB state, but verifier failed because action `I list the routes I can take from Slip Twelve Berth.` settled as accepted `local_observation` while the harness expected `route_options`.
+    - [x] P176 fresh clone `p176-post-typed-admission-acceptance-c-20260613` reached turn 020 with clean runtime/DB state, but the same route-list wording settled as accepted `route_options` while the harness expected `local_observation`.
+    - [x] Both diagnostic turns had no restore rows, no old v2/saga/narrator/oracle/simulation store rows, and valid player-facing route information; the acceptance-lane verifier still marks each clone diagnostic because primitive ownership was ambiguous.
+  - Root cause:
+    - [x] GM Read allowed broad route-list intent to enter either `route_inquiry` or `current_scene_observation.localObservationNeed` over `movement_option`, giving one player intent two backend primitive contracts.
+  - Repair:
+    - [x] `validateGmReadCandidate` now canonicalizes only broad `localObservationNeed.mode=list_surface` over the single surface kind `movement_option` into `route_inquiry` with empty `targetRefs` before Judge/Checklist.
+    - [x] Targeted local observations remain `local_observation`; concrete route-status questions remain `route_check` through `route_inquiry`.
+    - [x] GM Read prompt now assigns broad current routes/exits/options lists to `route_inquiry`.
+  - Verification:
+    - [x] Added contract test `canonicalizes broad movement-option surface lists to route_inquiry before Judge or Checklist`.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (`202 passed`).
+    - [x] Focused clean-runtime suite (`290 passed`).
+  - Acceptance status:
+    - P175 and P176 are diagnostic only because their verifier artifacts contain failed expected-capability checks.
+
+- P177 clean gameplay runtime post-route-list-canonicalization Acceptance-Candidate Lane B / fresh clone 0 -> 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p177-post-route-list-canonicalization-acceptance-a-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative `world_clocks` row `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carried `Brass Tube`, clean runtime stores zero, and old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Restart clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false` after the route-list canonicalization patch.
+    - [x] Execute turns 001-060 one action at a time from inspected post-turn state; actions were chosen manually by Codex after each actual result.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p177-post-route-list-canonicalization-acceptance-a-20260613/`; final audit: `final-lane-summary.json`.
+    - [x] All 60 per-turn verifier artifacts passed with `done.runtime=gameplay-cycle-runtime`, one new clean turn record, one chat exchange, accepted-only new receipts when applicable, multi-token narration, zero restore ledger rows, zero old v2/saga/narrator/oracle/simulation stores, and no SSE `error` event.
+    - [x] Route-list repair live proof: turns 007, 015, 019, 028, 046, and 050 each accepted `route_options` for broad route-list wording, including the exact P175/P176 problematic action on turn 007.
+    - [x] Final DB: 60 clean turn records, 49 accepted Stage4 receipts, 16 authority traces, 14 turn clock ledger rows, restore ledger 0, old stores all 0.
+    - [x] Receipt mix: item_transfer 1, dialogue_record 14, route_check 13, movement 13, route_options 6, condition_set 1, time_advance 1.
+    - [x] Final clock: `worldVersion=16`, `worldTimeMinutes=18`, `currentTick=18`; clock ledger reasons: travel 13, wait 1.
+    - [x] Final player scene: `Upper Dam Ruins`.
+    - [x] Final item state: `Brass Tube.owner=Guide`, `equipState=carried`, `equippedSlot=null`.
+    - [x] Artifact scan found no failed verifications, no SSE errors, no one-token narration, and no suspicious CJK/mixed-script tokens.
+  - Acceptance status:
+    - P177 is a second 60-turn clean-runtime candidate lane by runtime/DB/player-facing gates. Final gameplay-cycle acceptance remains pending because the bar requires several different fresh post-repair zero-turn campaigns/clones at about 60 clean manual turns each.
+  - Next scoped work:
+    - [ ] Run GitNexus detect, commit/push the route-list canonicalization repair and evidence docs, then `npx gitnexus analyze --embeddings`.
+    - [ ] Start another fresh post-repair zero-turn clone for the next ~60-turn manual lane.
