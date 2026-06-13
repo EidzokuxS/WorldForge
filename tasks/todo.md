@@ -6727,3 +6727,18 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused checks passed: narration 98, settlement 21, contracts 208, stage4 39, and `npm --prefix backend run typecheck`.
     - Inspected: GitNexus all-scope and staged `detect_changes` both reported LOW scope for `stage4Evidence`, affected processes 0.
     - Executed: code commit `d707d2f4` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P240 Stage 6 prompt contract wording:
+  - Plan:
+    - [x] Run GitNexus impact/context before editing `buildCleanNarrationSystemPrompt`.
+    - [x] Replace label-oriented prompt examples with role/value wording that matches P238/P239 prompt-safe evidence.
+    - [x] Keep the prompt contract positive: narrator writes from accepted evidence values and story frame, with provenance/fact refs as support.
+    - [x] Update focused narration tests proving the system prompt no longer teaches technical labels for movement/item facts.
+    - [x] Run focused narration tests, typecheck if runtime types move, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact/context for `buildCleanNarrationSystemPrompt` reported LOW scope; direct caller `runCleanNarration`.
+    - Executed: system prompt now explains prompt-safe backend facts through `text`, `role`, and `factRef`; movement, item_state, and scene_texture wording use values instead of receipt label examples.
+    - Executed: narration test now asserts the role/value prompt contract and guards against the old `Travel beat:`, `Destination label:`, `Scene texture:` label-extraction wording, and `Item label:` examples.
+    - Executed: `gameplay-cycle-runtime-narration` passed 98 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` both reported LOW scope for `buildCleanNarrationSystemPrompt`, affected processes 0.
+    - Executed: code commit `7fbe7b37` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
