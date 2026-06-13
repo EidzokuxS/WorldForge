@@ -4421,7 +4421,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Shape pass:");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Shape pass:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Echo firewall:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Texture scope:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Door rotation:");
