@@ -1933,10 +1933,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   const hasSceneTexture = hasAcceptedSceneTextureEvidence(view);
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
-    || (evidence.claimKinds.includes("minor_poi_handle") && !hasSceneTexture)
     || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
-    || (evidence.claimKinds.includes("player_local_condition") && !hasSceneTexture)
-    || (evidence.claimKinds.includes("support_actor_materialization") && !hasSceneTexture)
     || (evidence.claimKinds.includes("device_surface_observation") && !hasSceneTexture)
   );
 }

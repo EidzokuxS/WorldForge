@@ -2278,6 +2278,24 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
+  it("uses model-authored support_actor_materialization prose without scene_texture", async () => {
+    const view = supportActorView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "At Market, Local Vendor is visible as a vendor.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        claimKinds: ["visible_actor", "support_actor_materialization"],
+      }]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("At Market, Local Vendor is visible as a vendor.");
+    expect(result.text).not.toMatch(/\b(Visible support actor|Support role|Anchor scene|Materialization result|says|offers|knows|service|future|route|movement|no change|nothing changed)\b/iu);
+  });
+
   it("uses accepted scene_texture for support_actor_materialization prose when texture is available", async () => {
     const view = supportActorWithSceneTextureView();
     const result = await runCleanNarration({
@@ -2372,17 +2390,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("keeps player_local_condition deterministic when snapshot context includes inventory and routes", async () => {
+  it("uses model-authored player_local_condition prose without scene_texture even with snapshot context", async () => {
+    const view = playerLocalConditionWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
-      narratorView: playerLocalConditionWithSceneFrameSnapshotView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("player_local_condition should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "You hold your hands plainly visible at Market.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f3", "e5.f4", "e5.f5"],
+        claimKinds: ["player_local_condition"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Player is hands visible.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("You hold your hands plainly visible at Market.");
     expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
@@ -2664,17 +2686,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic authority projection for minor_poi_handle instead of model paraphrase", async () => {
+  it("uses model-authored minor_poi_handle prose without scene_texture", async () => {
+    const view = minorPoiHandleView();
     const result = await runCleanNarration({
-      narratorView: minorPoiHandleView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("minor_poi_handle should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "At Market, Tea Stall marks a visible stall handle.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+        claimKinds: ["minor_poi_handle", "visible_target"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toContain("Tea Stall is now available here as a visible stall handle.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("At Market, Tea Stall marks a visible stall handle.");
     expect(result.text).not.toMatch(/Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
   });
 

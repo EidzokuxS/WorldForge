@@ -6182,3 +6182,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Prose audit `output/clean-runtime-p206-scene-observation-literary-20260613-1932/prose-audit.json`: 1 narrative, 60 words, zero one-token/debug/enum/direct-scene/stock-route/slop hits.
     - [x] Receipt-targeting attempt `p206-scene-observation-receipt-attempt2-20260613-1935` is diagnostic-invalid: GM Read failed before settlement with malformed `localObservationNeed`; no player-facing `done` was produced.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope, with changed symbols limited to direct-scene validation/prompt helpers and no affected process expansion.
+
+- P207 Stage 6 no-texture small scene-result literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow no-texture `support_actor_materialization`, `player_local_condition`, and `minor_poi_handle` receipts to use model-authored literary narration.
+    - [x] Preserve deterministic authority projection for `clarification_request`, guarded local-observation cases, and no-texture `device_surface_observation`.
+    - [x] Keep summary-digest rejection as the guard against flat stock outputs for the three small scene-result receipt kinds.
+    - [x] Add tests proving no-texture model acceptance plus rejection of dialogue/service, HP/cover/combat, route/service/sign/world-fact drift.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, and GitNexus detect.
+    - [x] Commit/push the P207 slice and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impact for `needsDeterministicAuthorityProjection` was LOW; direct caller scope stays inside `runCleanNarration`.
+    - [x] No-texture `support_actor_materialization`, `player_local_condition`, and `minor_poi_handle` no longer force deterministic authority projection.
+    - [x] No-texture `device_surface_observation`, `clarification_request`, bounded negative local observations, and route-summary local observations still use deterministic authority projection.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 74 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 341 tests.
+    - [x] Exact P207 no-texture proof is unit-level through `runCleanNarration`; live clean-runtime traffic normally carries accepted `scene_texture`, so a live turn would exercise the already-covered textured sibling path rather than this new gate removal.
+    - [x] GitNexus all-scope `detect_changes` reported LOW scope: 3 changed files, no expanded affected processes.
