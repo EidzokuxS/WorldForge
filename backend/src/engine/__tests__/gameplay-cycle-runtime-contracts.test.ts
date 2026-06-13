@@ -17,6 +17,7 @@ import {
   type JudgeUncertainty,
   judgeUncertaintySchema,
   cleanPlayerFacingTurnRecordSchema,
+  cleanNarrationCandidateSchema,
   cleanNarratorViewSchema,
   cleanSettledTurnPacketSchema,
   cleanStage4ExecutionResultSchema,
@@ -156,6 +157,27 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       if (previousV2 === undefined) delete process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2;
       else process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2 = previousV2;
     }
+  });
+
+  it("allows Stage 6 direct-scene sentences to cite a dense scene-frame evidence set", () => {
+    const evidenceRefs = Array.from({ length: 12 }, (_, index) => `e${index + 1}`);
+    const parsed = cleanNarrationCandidateSchema.parse({
+      version: "gameplay-runtime.clean-narration-candidate.v1",
+      packetId: "cgpacket_test",
+      turnId: "clean-turn-1",
+      language: "en",
+      sentences: [{
+        kind: "accepted_evidence",
+        text: "At Lowwater Bazaar, Guide is here, Courier satchel is with you, and Brass Tube is visible.",
+        evidenceRefs,
+        backendFactRefs: evidenceRefs.map((ref) => `${ref}.f1`),
+        claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
+        auditStepIds: [],
+      }],
+      finalText: "At Lowwater Bazaar, Guide is here, Courier satchel is with you, and Brass Tube is visible.",
+    });
+
+    expect(parsed.sentences[0]?.evidenceRefs).toHaveLength(12);
   });
 
   it("accepts a Primitive 0 turn input without legacy intent/method or tool payloads", () => {

@@ -380,12 +380,140 @@ const LOCAL_OBSERVATION_PLAYER_ACTION_TEXT = /\byou\s+(?:stand|sit|crouch|step|m
 const LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT = /\b(?:stretches?\s+around\s+you|surrounds?\s+you|stalls?|walkways?|foot traffic|current scene and place)\b/iu;
 const LOCAL_OBSERVATION_SURFACE_KIND_TEXT = /\bvisible\s+(?:actors?|targets?|items?|routes?|devices?)\b/iu;
 const LOCAL_OBSERVATION_ACTOR_POSTURE_TEXT = /\bstands?\b/iu;
+const DIRECT_SCENE_PLAYER_ACTION_TEXT = /\byou\s+(?:look|scan|search|listen|watch|turn|step|stand|sit|crouch|move|walk|take|hold|grip)\b/iu;
+const DIRECT_SCENE_ACTOR_ACTION_TEXT =
+  /\b(?:waits?|stands?|sits?|leans?|turns?|watches?|stares?|gestures?|speaks?|shouts?|answers?|asks?|nods?|carries?|holds?|guards?|works?|moves?|walks?|looks?|listens?)\b/iu;
+const DIRECT_SCENE_ITEM_HANDLING_TEXT =
+  /\b(?:at hand|rides?\s+at\s+your\s+side|in\s+your\s+hand|in\s+reach|useful\s+things?\s+in\s+reach|set\s+where\s+it\s+can\s+be\s+read|ready\s+to|gripped|held|strapped|slung|tucked|equipped)\b/iu;
 
 function candidateCitesClaimKind(
   candidate: CleanNarrationCandidate,
   claimKind: CleanNarrationClaimKind,
 ): boolean {
   return candidate.sentences.some((sentence) => sentence.claimKinds.includes(claimKind));
+}
+
+function isDirectSceneSnapshotNarration(view: CleanNarratorView): boolean {
+  return hasOnlySceneFrameSnapshotEvidence(view)
+    && view.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("current_scene")
+      || evidence.claimKinds.includes("visible_actor")
+      || evidence.claimKinds.includes("inventory_status")
+      || evidence.claimKinds.includes("visible_target")
+      || evidence.claimKinds.includes("movement_option")
+    );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function directSceneActorLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && (evidence.claimKinds.includes("visible_actor") || evidence.claimKinds.includes("visible_target"))
+    )
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((fact) => {
+      if (fact.text.startsWith("Visible actor: ")) {
+        return trimSentencePeriod(fact.text.replace(/^Visible actor:\s*/u, ""));
+      }
+      const target = parseVisibleTargetFact(fact.text);
+      return target?.kind === "actor" ? target.label : "";
+    })
+    .filter((label) => label.length > 0));
+}
+
+function directSceneObjectLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && (evidence.claimKinds.includes("inventory_status") || evidence.claimKinds.includes("visible_target"))
+    )
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((fact) => {
+      if (fact.text.startsWith("Inventory item: ")) {
+        return trimSentencePeriod(fact.text.replace(/^Inventory item:\s*/u, ""));
+      }
+      const target = parseVisibleTargetFact(fact.text);
+      return target?.kind === "item" || target?.kind === "place_handle" ? target.label : "";
+    })
+    .filter((label) => label.length > 0));
+}
+
+function sentenceMentionsLabel(sentence: string, label: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(label)}\\b`, "iu").test(sentence);
+}
+
+function directSceneUsesUnsupportedActorAction(view: CleanNarratorView, text: string): boolean {
+  if (!isDirectSceneSnapshotNarration(view)) return false;
+  const actorLabels = directSceneActorLabels(view);
+  if (actorLabels.length === 0) return false;
+  return text.split(/(?<=[.!?])\s+/u).some((sentence) =>
+    DIRECT_SCENE_ACTOR_ACTION_TEXT.test(sentence)
+    && actorLabels.some((label) => sentenceMentionsLabel(sentence, label))
+  );
+}
+
+function directSceneUsesUnsupportedItemHandling(view: CleanNarratorView, text: string): boolean {
+  if (!isDirectSceneSnapshotNarration(view)) return false;
+  const objectLabels = directSceneObjectLabels(view);
+  if (objectLabels.length === 0) return false;
+  return text.split(/(?<=[.!?])\s+/u).some((sentence) =>
+    DIRECT_SCENE_ITEM_HANDLING_TEXT.test(sentence)
+    && objectLabels.some((label) => sentenceMentionsLabel(sentence, label))
+  );
+}
+
+function directSceneFactLabel(text: string): string | null {
+  if (text.startsWith("Current scene is ")) {
+    return trimSentencePeriod(text.replace(/^Current scene is\s*/u, ""));
+  }
+  if (text.startsWith("Current place is ")) {
+    return trimSentencePeriod(text.replace(/^Current place is\s*/u, ""));
+  }
+  if (text.startsWith("Visible actor: ")) {
+    return trimSentencePeriod(text.replace(/^Visible actor:\s*/u, ""));
+  }
+  if (text.startsWith("Inventory item: ")) {
+    return trimSentencePeriod(text.replace(/^Inventory item:\s*/u, ""));
+  }
+  const visibleTarget = parseVisibleTargetFact(text);
+  if (visibleTarget) return visibleTarget.label;
+  const routeOption = parseRouteOptionFact(text);
+  if (routeOption) return routeOption.label;
+  return null;
+}
+
+function directSceneVerbatimLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) => evidence.authority === "scene_frame_snapshot")
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((fact) => directSceneFactLabel(fact.text) ?? "")
+    .filter((label) => label.length > 0));
+}
+
+function directSceneUsesNonVerbatimCitedLabel(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!isDirectSceneSnapshotNarration(view)) return false;
+  const factLabels = new Map<string, string>();
+  for (const evidence of view.acceptedEvidence) {
+    if (evidence.authority !== "scene_frame_snapshot") continue;
+    for (const fact of evidence.backendFacts) {
+      const label = directSceneFactLabel(fact.text);
+      if (label) factLabels.set(fact.factRef, label);
+    }
+  }
+  for (const sentence of candidate.sentences) {
+    for (const factRef of sentence.backendFactRefs) {
+      const label = factLabels.get(factRef);
+      if (label && !sentence.text.includes(label)) return true;
+    }
+  }
+  return false;
 }
 
 function acceptedSceneTextureText(view: CleanNarratorView): string {
@@ -651,6 +779,53 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (
+    isDirectSceneSnapshotNarration(input.view)
+    && hasAcceptedSceneTextureEvidence(input.view)
+    && !candidateCitesClaimKind(input.candidate, "scene_texture")
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Direct-scene narration with accepted scene_texture must include one exact scene_texture sentence object.",
+    });
+  }
+
+  if (
+    isDirectSceneSnapshotNarration(input.view)
+    && DIRECT_SCENE_PLAYER_ACTION_TEXT.test(unquotedText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Direct-scene narration must describe accepted visible scene facts without adding player posture, search action, grip, or movement.",
+    });
+  }
+
+  if (directSceneUsesUnsupportedActorAction(input.view, unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Direct-scene visible-actor labels prove presence only; actor posture, speech, handling, or action require accepted action evidence.",
+    });
+  }
+
+  if (directSceneUsesUnsupportedItemHandling(input.view, unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Direct-scene inventory and target labels prove visible/carrying labels only; item handling, readiness, or placement detail require accepted item evidence.",
+    });
+  }
+
+  if (directSceneUsesNonVerbatimCitedLabel(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Direct-scene cited labels must appear verbatim; inventory, actor, target, route, and scene labels are fixed player-facing names.",
+    });
+  }
+
   if (localObservationUsesFirstSceneTextureFact(input.view, input.candidate)) {
     issues.push({
       code: "prose_quality",
@@ -789,7 +964,7 @@ export function buildCleanNarrationSystemPrompt(
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
     "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
     "Scene-texture evidence: scene_texture may color the prose with public current-scene description texture only. It does not prove route truth, movement, actor action, discovery, absence, no-change, item state, or private knowledge.",
-    "Scene-texture exactness: for scene_texture sentences, select one exact contiguous accepted scene-texture clause; do not paraphrase spatial relation, crowd state, weather, lighting, sound, smell, or motion.",
+    "Scene-texture exactness: for scene_texture sentences, set sentence.text to one exact contiguous accepted scene-texture clause from backendFacts after the 'Scene texture:' label, with the matching backendFactRefs for that clause.",
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
@@ -804,6 +979,7 @@ export function buildCleanNarrationSystemPrompt(
     "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
     "Route-options surface: for movement_option and route_options_receipt, phrase accepted visible route labels and accepted travel costs. Build it as a route-choice beat such as '<label> is the one-minute route choice here.' or '<labels> are the available one-minute route choices here.' With scene_texture evidence, one exact scene-texture sentence may precede or frame the route-choice beat; when several texture facts exist, route-options uses the first accepted texture fact. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
+    "Direct-scene surface: for scene_frame_snapshot-only direct scene observation, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
@@ -987,20 +1163,44 @@ function narrationValidationRepairLines(
     || issue.message.includes("scene texture")
     || issue.message.includes("texture fact")
     || issue.message.includes("texture clause"));
-  if (!hasSceneTextureIssue) return [];
-  const textureFacts = sceneTextureBackendFactTexts(view);
-  if (textureFacts.length === 0) return [];
-  const lines = [
-    "Allowed scene_texture sentence texts, copied exactly from accepted backend facts:",
-    ...textureFacts.slice(0, 6).map((fact) => `- ${fact.factRef}: ${fact.text}.`),
-  ];
-  if (hasClaimKind(view, "local_observation") && textureFacts.length > 1) {
-    lines.push(`For local_observation, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} if you include scene_texture; otherwise omit scene_texture.`);
+  const hasDirectSceneIssue = isDirectSceneSnapshotNarration(view)
+    && issues.some((issue) => issue.message.includes("Direct-scene"));
+  const lines: string[] = [];
+  const textureFacts = hasSceneTextureIssue || hasDirectSceneIssue
+    ? sceneTextureBackendFactTexts(view)
+    : [];
+  if (textureFacts.length > 0) {
+    lines.push(
+      "Allowed scene_texture sentence texts, copied exactly from accepted backend facts:",
+      ...textureFacts.slice(0, 6).map((fact) => `- ${fact.factRef}: ${fact.text}.`),
+    );
+    if (hasClaimKind(view, "local_observation") && textureFacts.length > 1) {
+      lines.push(`For local_observation, use ${textureFacts.slice(1).map((fact) => fact.factRef).join(" or ")} if you include scene_texture; otherwise omit scene_texture.`);
+    }
+    if (hasClaimKind(view, "movement_option") && textureFacts.length > 1 && textureFacts[0]) {
+      lines.push(`For route_options, use ${textureFacts[0].factRef} if you include scene_texture; otherwise omit scene_texture.`);
+    }
+    if (hasDirectSceneIssue && textureFacts[0]) {
+      lines.push(`For direct-scene snapshot narration, use ${textureFacts[0].factRef} as the scene_texture sentence.text exactly: "${textureFacts[0].text}."`);
+    }
+    lines.push("Set scene_texture sentence.text exactly to one listed text and cite only its matching backendFactRef in that sentence.");
+    lines.push("Put scene_texture in its own accepted_evidence sentence object.");
   }
-  if (hasClaimKind(view, "movement_option") && textureFacts.length > 1 && textureFacts[0]) {
-    lines.push(`For route_options, use ${textureFacts[0].factRef} if you include scene_texture; otherwise omit scene_texture.`);
+  if (hasDirectSceneIssue) {
+    const labels = directSceneVerbatimLabels(view);
+    lines.push(
+      "Direct-scene repair contract:",
+      "Use direct-scene snapshot facts as static visible scene state.",
+      "Use presence and visibility shapes: '<actor> is here.', '<actor> is in view here.', '<inventory item> is with you.', '<target> is visible.', '<route label> is the one-minute route choice here.'",
+      "Use current-scene placement shapes such as 'At <scene>, ...' for scene labels.",
+      "Replace player search, posture, grip, and movement wording with accepted scene placement or visible-state wording.",
+      "Replace actor posture, speech, handling, work, and movement verbs with presence wording backed by visible_actor or actor visible_target facts.",
+      "Replace item handling and readiness wording with carrying or visibility labels backed by inventory_status or visible_target facts.",
+    );
+    if (labels.length > 0) {
+      lines.push(`Preserve these exact labels when cited: ${labels.slice(0, 16).join("; ")}.`);
+    }
   }
-  lines.push("Put scene_texture in its own accepted_evidence sentence object.");
   return lines;
 }
 

@@ -367,6 +367,15 @@ function sceneFrameSnapshotView(): CleanNarratorView {
   });
 }
 
+function sceneFrameSnapshotWithTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      sceneTextureEvidence("e5"),
+      ...sceneFrameSnapshotView().acceptedEvidence,
+    ],
+  });
+}
+
 function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -1392,6 +1401,7 @@ describe("clean Stage 6 narration contracts", () => {
         expect(request.prompt).toContain("Allowed scene_texture sentence texts");
         expect(request.prompt).toContain("e2.f1: Canvas awnings hang over the market lanes.");
         expect(request.prompt).toContain("For route_options, use e2.f1");
+        expect(request.prompt).toContain("Set scene_texture sentence.text exactly to one listed text");
         return acceptedCandidate(view, [
           {
             text: "Canvas awnings hang over the market lanes.",
@@ -1412,6 +1422,74 @@ describe("clean Stage 6 narration contracts", () => {
     expect(attempts).toBe(2);
     expect(result.source).toBe("model");
     expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the one-minute route choice here.");
+  });
+
+  it("repairs direct-scene implied action inside Stage 6 before player-facing narration", async () => {
+    const view = movementView({
+      acceptedEvidence: [
+        sceneTextureEvidence("e6"),
+        ...sceneFrameSnapshotWithOverlappingTargetsView().acceptedEvidence,
+      ],
+    });
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [
+            {
+              text: "Canvas awnings hang over the market lanes.",
+              evidenceRefs: ["e6"],
+              backendFactRefs: ["e6.f1"],
+              claimKinds: ["scene_texture"],
+            },
+            {
+              text: "You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.",
+              evidenceRefs: ["e1", "e2", "e3", "e4"],
+              backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4"],
+              claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
+            },
+          ]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("Direct-scene repair contract");
+        expect(request.prompt).toContain("Use presence and visibility shapes");
+        expect(request.prompt).toContain("Replace actor posture");
+        expect(request.prompt).toContain("Replace item handling");
+        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
+        expect(request.prompt).toContain("e6.f1: Canvas awnings hang over the market lanes.");
+        expect(request.prompt).toContain("For direct-scene snapshot narration, use e6.f1 as the scene_texture sentence.text exactly");
+        expect(request.prompt).toContain("Set scene_texture sentence.text exactly to one listed text");
+        expect(request.prompt).toContain("Preserve these exact labels when cited");
+        expect(request.prompt).toContain("Courier satchel");
+        return acceptedCandidate(view, [
+          {
+            text: "Canvas awnings hang over the market lanes.",
+            evidenceRefs: ["e6"],
+            backendFactRefs: ["e6.f1"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible.",
+            evidenceRefs: ["e1", "e2", "e3", "e4"],
+            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5"],
+            claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
+          },
+          {
+            text: "North Hall is the one-minute route choice here.",
+            evidenceRefs: ["e5"],
+            backendFactRefs: ["e5.f1"],
+            claimKinds: ["movement_option"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible. North Hall is the one-minute route choice here.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -1448,19 +1526,25 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("uses model-authored literary narration for direct scene targets and exits", async () => {
-    const view = sceneFrameSnapshotView();
+    const view = sceneFrameSnapshotWithTextureView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Market opens around you with the Courier satchel at hand and the Notice Board set where it can be read.",
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "At Market, Courier satchel is with you and Notice Board is visible.",
           evidenceRefs: ["e1", "e2", "e3"],
           backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
           claimKinds: ["current_scene", "inventory_status", "visible_target"],
         },
         {
-          text: "North Hall is the visible way out from here, close enough to reach in a minute.",
+          text: "North Hall is the one-minute route choice here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f1"],
           claimKinds: ["movement_option"],
@@ -1469,8 +1553,46 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Market opens around you with the Courier satchel at hand and the Notice Board set where it can be read. North Hall is the visible way out from here, close enough to reach in a minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Courier satchel is with you and Notice Board is visible. North Hall is the one-minute route choice here.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
+
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "At Market, Courier satchel is with you and Notice Board is visible. North Hall is the one-minute route choice here.",
+        evidenceRefs: ["e1", "e2", "e3", "e4"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1"],
+        claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("one exact scene_texture")
+    )).toBe(true);
+
+    const nonVerbatimLabel = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "At Market, a courier satchel is with you and Notice Board is visible.",
+          evidenceRefs: ["e1", "e2", "e3"],
+          backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
+          claimKinds: ["current_scene", "inventory_status", "visible_target"],
+        },
+      ]),
+    });
+    expect(nonVerbatimLabel.status).toBe("rejected");
+    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
+    expect(nonVerbatimLabel.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("verbatim")
+    )).toBe(true);
   });
 
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
@@ -1490,7 +1612,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "Guide waits in Market while the Courier satchel rides at your side; Brass Tube and Notice Board are the useful things in reach, and North Hall is the one-minute way out.",
+        text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible. North Hall is the one-minute route choice here.",
         evidenceRefs: ["e1", "e2", "e3", "e4", "e5"],
         backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5", "e5.f1"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
@@ -1498,12 +1620,42 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toContain("Guide waits in Market");
+    expect(result.text).toContain("Guide is here");
     expect(result.text).not.toContain("Guide, Courier satchel");
     expect(result.text).not.toContain("Guide, Brass Tube");
     expect(result.text).not.toContain("Courier satchel is visible");
     expect(result.text).not.toContain("North Hall is visible");
     expect(result.text.match(/\bGuide\b/gu)).toHaveLength(1);
+
+    const actorAction = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Guide waits in Market while Brass Tube is visible.",
+        evidenceRefs: ["e1", "e2", "e4"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e4.f4"],
+        claimKinds: ["current_scene", "visible_actor", "visible_target"],
+      }]),
+    });
+    expect(actorAction.status).toBe("rejected");
+    if (actorAction.status !== "rejected") throw new Error("expected rejected");
+    expect(actorAction.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("presence only")
+    )).toBe(true);
+
+    const itemHandling = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "At Market, Guide is here while the Courier satchel rides at your side.",
+        evidenceRefs: ["e1", "e2", "e3"],
+        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
+        claimKinds: ["current_scene", "visible_actor", "inventory_status"],
+      }]),
+    });
+    expect(itemHandling.status).toBe("rejected");
+    if (itemHandling.status !== "rejected") throw new Error("expected rejected");
+    expect(itemHandling.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("labels only")
+    )).toBe(true);
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {

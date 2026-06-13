@@ -143,6 +143,28 @@ P198 textured route-options prose shape:
   - [x] DB proof `output/clean-runtime-p198-route-shape-qa-20260613-131839/db-proof.json`: two clean turn records, accepted `route_options` and `local_observation` receipts, both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, authority traces 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.equip_state=carried`, repeated exact sentences 0.
   - [x] Prose audit passed: `output/clean-runtime-p198-route-shape-qa-20260613-131839/prose-audit.json`; 2 narratives, zero one-token output, zero receipt/debug/enum/old-formula/surface/list/digest/stock-route hits, no repeated exact sentence starts.
 
+P199 direct-scene texture and implied-action contract:
+- Goal:
+  - Make broad direct-scene observation read as a scene beat using accepted `scene_texture` and static accepted scene-frame facts.
+  - Preserve direct-scene truth boundaries: visible actor labels prove presence, inventory/target labels prove visible/carrying labels, route option facts prove labels/costs.
+  - Reject actor posture/action, item handling/readiness, player search/grip/movement, discovery, absence, and no-change unless a dedicated accepted backend fact proves that claim.
+- Plan:
+  - [x] Add direct-scene Stage 6 prompt wording for exact texture plus static scene-frame facts.
+  - [x] Add validation rejecting missing accepted texture when direct-scene texture exists.
+  - [x] Add validation rejecting implied actor action and item handling from direct-scene labels.
+  - [x] Extend prose audit for direct-scene implied-action shapes.
+  - [x] Run focused narration tests, typecheck, focused clean-runtime suite, live broad-look proof, and prose audit.
+- Results:
+  - [x] Focused narration test passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 48 tests.
+  - [x] Typecheck passed: `npm --prefix backend run typecheck`.
+  - [x] Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 315 tests.
+  - [x] Fresh live proof clone `p199-direct-scene-qa-r5-20260613-165058` from source `p69-item-transfer-045651`, clean runtime flags on, GLM 5.2 provider active.
+  - [x] Live action `I look around Lowwater Bazaar.` reached SSE `narrative` + `done` through `runtime=gameplay-cycle-runtime`.
+  - [x] Player-facing text: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Guide is here, and Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.`
+  - [x] DB proof `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/db-proof.json`: one clean direct-scene turn record, no Stage4 receipts, mutationApplied false, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, authority traces 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`, exact scene texture and cited labels preserved.
+  - [x] Prose audit `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/prose-audit.json`: one narrative, one-token 0, `youOpening` 0, list-like starts 0, direct-scene digest 0, implied-action 0, stock-route/options/debug/enum/surface hits all 0.
+  - [ ] Run GitNexus detect, commit/push/analyze.
+
 P189 clean runtime prose quality pass:
 - Objective:
   - Improve player-facing clean-runtime prose while preserving the primitive-owned truth path: backend receipts own gameplay truth, settled evidence owns claim boundaries, Stage 6 owns readable phrasing.

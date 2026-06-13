@@ -2405,7 +2405,7 @@ export const cleanNarratorPromptInputSchema = z.object({
 export const cleanNarrationSentenceSchema = z.object({
   kind: z.enum(["accepted_evidence", "audit_notice"]),
   text: z.string().trim().min(1).max(500),
-  evidenceRefs: z.array(shortText).max(6),
+  evidenceRefs: z.array(shortText).max(12),
   backendFactRefs: z.array(shortText).max(12),
   claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
   auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),
