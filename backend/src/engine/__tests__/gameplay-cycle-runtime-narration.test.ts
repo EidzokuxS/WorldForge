@@ -3928,9 +3928,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(rawReceiptSummary.status).toBe("rejected");
-    if (rawReceiptSummary.status !== "rejected") throw new Error("expected rejected");
-    expect(rawReceiptSummary.issues.some((issue) => issue.code === "prose_quality")).toBe(true);
+    expect(rawReceiptSummary.status).toBe("accepted");
 
     const playerActionDrift = validateCleanNarrationCandidate({
       view,
@@ -4215,11 +4213,10 @@ describe("clean Stage 6 narration contracts", () => {
     ]));
   });
 
-  it("rejects one-token, mixed-script, and receipt-shaped structural prose issues", () => {
+  it("rejects one-token and mixed-script structural prose issues", () => {
     for (const text of [
       "Done.",
       "Вы идете.",
-      "Operation: give_to_visible_actor. Target: Guide.",
     ]) {
       const result = validateCleanNarrationCandidate({
         view: movementView(),
@@ -4233,6 +4230,21 @@ describe("clean Stage 6 narration contracts", () => {
         text,
       ).toBe(true);
     }
+  });
+
+  it("accepts receipt-shaped wording according to structured refs rather than marker scanning", () => {
+    const view = itemStateView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Operation: give_to_visible_actor. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        claimKinds: ["item_state"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
   });
 
   it("does not reject accepted narration only for old donor prose shapes", () => {

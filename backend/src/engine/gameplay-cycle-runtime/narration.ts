@@ -69,7 +69,6 @@ const OLD_RUNTIME_MARKER = /\b(?:narrator_attempt|clean_narrator_attempt|settled
 const ONE_WORD = /[\p{L}\p{N}]+/gu;
 const CYRILLIC_WORD = /[\u0400-\u04FF]+/gu;
 const RUSSIAN_ENGLISH_SCAFFOLD = /\b(?:Current scene|Current place|Inventory item|Visible target|Route option|The settled route check confirms|World clock advances|item state changed|Operation|Final equip state|Item transfer result)\b/iu;
-const RECEIPT_PROSE_MARKER = /\b(?:Operation:|Source:|Target:|Final equip state:|Current scene anchor:|Item transfer result:|Player location changed|Travel cost|Current scene is|Current place is|Inventory item:|Visible target:|Route option:|minute\(s\)|transferred_to_actor|give_to_visible_actor|movement_option|message_indicator)\b/iu;
 const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
   /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
@@ -1118,14 +1117,6 @@ function proseQualityIssues(input: {
       code: "prose_quality",
       path: "finalText",
       message: "Narration finalText must contain more than one token.",
-    });
-  }
-
-  if (RECEIPT_PROSE_MARKER.test(unquotedText)) {
-    issues.push({
-      code: "prose_quality",
-      path: "finalText",
-      message: "Narration finalText used receipt-shaped or enum-shaped wording.",
     });
   }
 
