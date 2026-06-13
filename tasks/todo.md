@@ -6116,3 +6116,25 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 339 tests.
     - [x] GitNexus focused impacts for changed Stage 6 narration helpers were LOW; direct scope stays within `runCleanNarration`, `selectPromptAcceptedEvidence`, `validateCleanNarrationCandidate`, or `renderCleanAuthorityProjection`.
     - [x] GitNexus staged `detect_changes` reported HIGH central process scope for Stage 6 narration, with changed process steps limited to `runCleanNarration` prompt/validation selection and `renderCleanAuthorityProjection`.
+
+- P204 Stage 6 positive local-observation no-texture literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow model-authored prose for positive `local_observation` without `scene_texture`.
+    - [x] Keep bounded negative local observations and route-summary observations on deterministic authority projection.
+    - [x] Add tests proving accepted positive observation prose, deterministic guarded cases, and rejection of posture/search/unsupported scene-detail drift.
+    - [x] Run focused narration tests, typecheck, clean-runtime suite, live proof, and prose audit.
+    - [x] Run GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts for `needsDeterministicAuthorityProjection`, `proseQualityIssues`, and `buildCleanNarrationSystemPrompt` were LOW; direct caller scope stays inside `runCleanNarration` / `validateCleanNarrationCandidate`.
+    - [x] Positive no-texture `local_observation` now enters model-authored narration when the evidence has a positive visible claim and positive visible fact.
+    - [x] Bounded negative `local_observation` and `Current route options include:` route-summary observations still use deterministic authority projection without calling the model.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 73 tests.
+    - [x] Live clone `p204-local-observation-positive-20260613-190048` from source `30e161da-db4b-4d8c-ab93-154fab7aa03f`, backend `http://127.0.0.1:31718`, clean runtime flags on.
+    - [x] Turn 001 action `I stay where I am and visually confirm the Sealed lacquer message tube in my current view, without touching it or moving.` accepted one positive `local_observation` receipt for `Sealed lacquer message tube`, `mutationApplied=false`, no authority trace, no clock ledger, old stores 0, and final clock `0/0/0`.
+    - [x] Player-facing prose used model-authored local-observation wording plus accepted scene texture: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Among your carried items, the Sealed lacquer message tube is in view.`
+    - [x] DB proof `output/clean-runtime-p204-local-observation-positive-20260613-190048/db-proof.json`: pass true; local observation resultKind `positive_match`; no movement, item mutation, absence/no-change, or old runtime stores.
+    - [x] Prose audit `output/clean-runtime-p204-local-observation-positive-20260613-190048/prose-audit.json`: 1 narrative, 29 words, zero one-token/debug/enum/flat-shape/slop hits.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 340 tests.
+    - [x] GitNexus staged `detect_changes` reported MEDIUM central narration scope, with changed steps limited to `runCleanNarration` literary selection and `renderCleanAuthorityProjection` deterministic projection.

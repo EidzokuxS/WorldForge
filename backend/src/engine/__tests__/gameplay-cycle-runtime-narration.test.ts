@@ -2745,19 +2745,22 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("deterministically projects positive local_observation without copying request details", async () => {
+  it("uses model-authored positive local_observation prose without texture", async () => {
     const view = positiveLocalObservationView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("local_observation should use deterministic accepted-evidence projection");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "The central telegraph desk is in view here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.source).toBe("model");
     expect(result.text).toBe(
-      "central telegraph desk is in view here.",
+      "The central telegraph desk is in view here.",
     );
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
 
@@ -2790,6 +2793,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(surfaceTextureDrift.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
     )).toBe(true);
+  });
+
+  it("keeps bounded negative local_observation on deterministic projection without texture", async () => {
+    const view = localObservationView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("bounded negative local_observation should use deterministic accepted-evidence projection");
+      },
+    });
+
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
+    expect(result.text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
   });
 
   it("uses model-authored local_observation prose when accepted scene_texture is available", async () => {

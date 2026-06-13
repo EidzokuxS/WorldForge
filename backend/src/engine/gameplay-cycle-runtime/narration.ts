@@ -233,6 +233,25 @@ function hasAcceptedSceneTextureEvidence(view: CleanNarratorView): boolean {
   );
 }
 
+function localObservationRequiresDeterministicProjection(
+  evidence: AcceptedNarrationEvidence,
+  hasSceneTexture: boolean,
+): boolean {
+  if (!evidence.claimKinds.includes("local_observation") || hasSceneTexture) return false;
+  if (evidence.claimKinds.includes("bounded_visibility_negative")) return true;
+  if (evidence.backendFacts.some((entry) => entry.text.startsWith("Current route options include:"))) return true;
+  const hasPositiveVisibleClaim = evidence.claimKinds.some((claimKind) =>
+    claimKind === "visible_actor"
+    || claimKind === "visible_fact"
+    || claimKind === "visible_target"
+  );
+  const hasPositiveVisibleFact = evidence.backendFacts.some((entry) =>
+    entry.text.startsWith("Current visible match:")
+    || /^Observed (?!route option\b)/u.test(entry.text)
+  );
+  return !(hasPositiveVisibleClaim && hasPositiveVisibleFact);
+}
+
 function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
   if (
     hasClaimKind(view, "item_state")
@@ -1900,7 +1919,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || (evidence.claimKinds.includes("minor_poi_handle") && !hasSceneTexture)
-    || (evidence.claimKinds.includes("local_observation") && !hasSceneTexture)
+    || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
     || (evidence.claimKinds.includes("player_local_condition") && !hasSceneTexture)
     || (evidence.claimKinds.includes("support_actor_materialization") && !hasSceneTexture)
     || (evidence.authority === "route_options_receipt" && !hasSceneTexture)
