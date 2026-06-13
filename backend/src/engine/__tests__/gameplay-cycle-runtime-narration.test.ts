@@ -2331,11 +2331,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(stockRouteListShape.status).toBe("rejected");
-    if (stockRouteListShape.status !== "rejected") throw new Error("expected rejected");
-    expect(stockRouteListShape.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("stock route-list wording")
-    )).toBe(true);
+    expect(stockRouteListShape.status).toBe("accepted");
 
     const unsupportedRouteTexture = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
@@ -2396,11 +2392,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(stockRouteListShape.status).toBe("rejected");
-    if (stockRouteListShape.status !== "rejected") throw new Error("expected rejected");
-    expect(stockRouteListShape.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("stock route-list wording")
-    )).toBe(true);
+    expect(stockRouteListShape.status).toBe("accepted");
 
     const laterTextureRepeatedByRoute = validateCleanNarrationCandidate({
       view,

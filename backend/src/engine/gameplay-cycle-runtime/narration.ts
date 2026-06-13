@@ -69,8 +69,6 @@ const OLD_RUNTIME_MARKER = /\b(?:narrator_attempt|clean_narrator_attempt|settled
 const ONE_WORD = /[\p{L}\p{N}]+/gu;
 const CYRILLIC_WORD = /[\u0400-\u04FF]+/gu;
 const RUSSIAN_ENGLISH_SCAFFOLD = /\b(?:Current scene|Current place|Inventory item|Visible target|Route option|The settled route check confirms|World clock advances|item state changed|Operation|Final equip state|Item transfer result)\b/iu;
-const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
-  /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
@@ -1278,17 +1276,6 @@ function proseQualityIssues(input: {
       code: "prose_quality",
       path: "sentences",
       message: "Standalone elapsed-time scene_texture must use a later accepted texture fact when several scene_texture facts are available.",
-    });
-  }
-
-  if (
-    hasClaimKind(input.view, "movement_option")
-    && ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE.test(input.candidate.finalText)
-  ) {
-    issues.push({
-      code: "prose_quality",
-      path: "finalText",
-      message: "Route-options prose used stock route-list wording; write a fresh route-choice beat while preserving every accepted label and cost.",
     });
   }
 
