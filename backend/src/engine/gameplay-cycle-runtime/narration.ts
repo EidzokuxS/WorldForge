@@ -1903,6 +1903,22 @@ function factText(evidence: AcceptedNarrationEvidence, predicate: (text: string)
   return evidence.backendFacts.find((entry) => predicate(entry.text))?.text ?? null;
 }
 
+function requireFactValue(evidence: AcceptedNarrationEvidence, prefix: string, message: string): string {
+  const value = factValue(evidence, prefix);
+  if (value === null || value.length === 0) throw new Error(message);
+  return value;
+}
+
+function requireFactText(
+  evidence: AcceptedNarrationEvidence,
+  predicate: (text: string) => boolean,
+  message: string,
+): string {
+  const text = factText(evidence, predicate);
+  if (text === null || text.length === 0) throw new Error(message);
+  return text;
+}
+
 function englishList(values: readonly string[]): string {
   const labels = uniqueStrings(values);
   if (labels.length === 0) return "";
@@ -2074,62 +2090,68 @@ function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): 
 }
 
 function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidence): string {
-  const operation = evidence.backendFacts[0]?.text ?? evidence.text;
-  return operation;
+  return requireFactText(
+    evidence,
+    (text) => text.startsWith("Player is "),
+    "Player-local-condition projection requires accepted Player condition evidence.",
+  );
 }
 
 function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string {
-  const settledCustody = factValue(evidence, "Settled custody: ");
-  if (settledCustody) return `${settledCustody}.`;
-  const itemLabel = factValue(evidence, "Item label: ");
-  const operation = factValue(evidence, "Operation: ");
-  const target = factValue(evidence, "Target: ");
-  const result = factValue(evidence, "Item transfer result: ");
-  const firstFact = evidence.backendFacts[0]?.text ?? evidence.text;
-  if (!itemLabel || !operation) return firstFact;
-  if (result === "already_satisfied") return `${itemLabel} is already in that state.`;
-  switch (operation) {
-    case "give_to_visible_actor":
-      return target ? `${itemLabel} is now with ${target}.` : firstFact;
-    case "drop_in_current_scene":
-      return target ? `${itemLabel} is now at ${target}.` : firstFact;
-    case "pickup_from_current_scene":
-      return `You now carry ${itemLabel}.`;
-    case "equip_inventory_item":
-      return `You equip ${itemLabel}.`;
-    case "unequip_inventory_item":
-      return `You now carry ${itemLabel}.`;
-    default:
-      return firstFact;
-  }
+  const settledCustody = requireFactValue(
+    evidence,
+    "Settled custody: ",
+    "Item-state projection requires accepted Settled custody evidence.",
+  );
+  return `${settledCustody}.`;
 }
 
 function renderDialogueProjection(evidence: AcceptedNarrationEvidence): string {
-  const quoteFact = evidence.backendFacts.find((entry) =>
-    entry.text.includes(" says: ") || entry.text.includes("dialogue response")
+  return requireFactText(
+    evidence,
+    (text) => text.includes(" says: ") || text.includes("dialogue response"),
+    "Dialogue projection requires accepted dialogue quote evidence.",
   );
-  return quoteFact?.text ?? evidence.text;
 }
 
 function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
-  const label = factValue(evidence, "Place handle label: ");
-  const kind = factValue(evidence, "Place handle kind: ");
-  const result = factValue(evidence, "Handle result: ");
-  if (!label) return evidence.backendFacts[0]?.text ?? evidence.text;
-  const noun = kind ? `${kind} handle` : "place handle";
-  return result === "reused"
-    ? `${label} remains available here as a visible ${kind ?? "place"} handle.`
-    : `${label} is now available here as a visible ${noun}.`;
+  const label = requireFactValue(
+    evidence,
+    "Place handle label: ",
+    "Minor-POI projection requires accepted Place handle label evidence.",
+  );
+  const kind = requireFactValue(
+    evidence,
+    "Place handle kind: ",
+    "Minor-POI projection requires accepted Place handle kind evidence.",
+  );
+  const result = requireFactValue(
+    evidence,
+    "Handle result: ",
+    "Minor-POI projection requires accepted Handle result evidence.",
+  );
+  if (result === "reused") return `${label} remains available here as a visible ${kind} handle.`;
+  if (result === "created") return `${label} is now available here as a visible ${kind} handle.`;
+  throw new Error("Minor-POI projection requires accepted Handle result evidence.");
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
-  const actor = factValue(evidence, "Visible support actor: ");
-  const role = factValue(evidence, "Support role: ");
-  const scene = factValue(evidence, "Anchor scene: ");
-  if (!actor) return evidence.backendFacts[0]?.text ?? evidence.text;
-  if (role && scene) return `${actor} is present in ${scene} as a ${role}.`;
-  if (role) return `${actor} is present as a ${role}.`;
-  return `${actor} is present.`;
+  const actor = requireFactValue(
+    evidence,
+    "Visible support actor: ",
+    "Support-actor projection requires accepted Visible support actor evidence.",
+  );
+  const role = requireFactValue(
+    evidence,
+    "Support role: ",
+    "Support-actor projection requires accepted Support role evidence.",
+  );
+  const scene = requireFactValue(
+    evidence,
+    "Anchor scene: ",
+    "Support-actor projection requires accepted Anchor scene evidence.",
+  );
+  return `${actor} is present in ${scene} as a ${role}.`;
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
@@ -2146,10 +2168,11 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("clarification_request")
   );
   if (clarification) {
-    const question = (clarification.backendFacts[0]?.text ?? clarification.text)
-      .replace(/^Clarification request:\s*/u, "")
-      .replace(/^Clarification needed:\s*/u, "")
-      .trim();
+    const question = requireFactValue(
+      clarification,
+      "Clarification request: ",
+      "Clarification projection requires accepted Clarification request evidence.",
+    );
     return language === "ru"
       ? `Уточните: ${question}`
       : `Please clarify: ${question}`;
@@ -2167,7 +2190,11 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("oracle_outcome")
   );
   if (oracle) {
-    return oracle.backendFacts[0]?.text ?? oracle.text;
+    return requireFactText(
+      oracle,
+      (text) => text.length > 0,
+      "Oracle projection requires accepted visible outcome evidence.",
+    );
   }
 
   const route = view.acceptedEvidence.find((evidence) =>
@@ -2282,7 +2309,12 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("scene_beat")
   );
   if (sceneBeat) {
-    return sceneBeat.backendFacts[0]?.text ?? sceneBeat.text;
+    const beat = requireFactValue(
+      sceneBeat,
+      "Scene beat: ",
+      "Scene-beat projection requires accepted Scene beat evidence.",
+    );
+    return `${beat}.`;
   }
 
   const failed = view.stepAuditForGrounding[0];
@@ -2292,11 +2324,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
       : `This action is not confirmed by the settled evidence: ${failed.publicReason}`;
   }
 
-  const firstFact = view.acceptedEvidence[0]?.backendFacts[0]?.text;
-  if (firstFact) return firstFact;
-  return language === "ru"
-    ? "Ход зафиксирован, но итоговые данные не дают отдельного видимого факта для описания."
-    : "The turn is settled, but there is no separate accepted visible fact to narrate.";
+  throw new Error("Clean authority projection requires accepted evidence supported by a projection contract.");
 }
 
 async function generateCleanNarrationCandidate(input: {

@@ -929,7 +929,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: beat.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, beat.summary),
+          fact(evidenceId, 1, `Scene beat: ${beat.summary}`),
           ...beat.targetLabels.slice(0, 4).map((label, index) =>
             fact(evidenceId, index + 2, `Visible target: ${label}.`)
           ),

@@ -1643,6 +1643,99 @@ describe("clean Stage 6 narration contracts", () => {
     expect(() => renderCleanAuthorityProjection(view)).toThrow("Elapsed-time projection requires accepted Time beat evidence.");
   });
 
+  it("fails terminal authority projections when their accepted story facts are missing", () => {
+    const clarification = clarificationWithSceneFrameSnapshotView();
+    clarification.acceptedEvidence[0] = {
+      ...clarification.acceptedEvidence[0]!,
+      backendFacts: [],
+    };
+    expect(() => renderCleanAuthorityProjection(clarification))
+      .toThrow("Clarification projection requires accepted Clarification request evidence.");
+
+    const item = itemStateView();
+    item.acceptedEvidence[0] = {
+      ...item.acceptedEvidence[0]!,
+      backendFacts: item.acceptedEvidence[0]!.backendFacts.filter((fact) =>
+        !fact.text.startsWith("Settled custody: ")
+      ),
+    };
+    expect(() => renderCleanAuthorityProjection(item))
+      .toThrow("Item-state projection requires accepted Settled custody evidence.");
+
+    const dialogue = dialogueView();
+    dialogue.acceptedEvidence[0] = {
+      ...dialogue.acceptedEvidence[0]!,
+      backendFacts: dialogue.acceptedEvidence[0]!.backendFacts.filter((fact) =>
+        !fact.text.includes(" says: ")
+      ),
+    };
+    expect(() => renderCleanAuthorityProjection(dialogue))
+      .toThrow("Dialogue projection requires accepted dialogue quote evidence.");
+
+    const supportActor = supportActorView();
+    supportActor.acceptedEvidence[0] = {
+      ...supportActor.acceptedEvidence[0]!,
+      backendFacts: supportActor.acceptedEvidence[0]!.backendFacts.filter((fact) =>
+        !fact.text.startsWith("Visible support actor: ")
+      ),
+    };
+    expect(() => renderCleanAuthorityProjection(supportActor))
+      .toThrow("Support-actor projection requires accepted Visible support actor evidence.");
+
+    const condition = playerLocalConditionView();
+    condition.acceptedEvidence[0] = {
+      ...condition.acceptedEvidence[0]!,
+      backendFacts: condition.acceptedEvidence[0]!.backendFacts.filter((fact) =>
+        !fact.text.startsWith("Player is ")
+      ),
+    };
+    expect(() => renderCleanAuthorityProjection(condition))
+      .toThrow("Player-local-condition projection requires accepted Player condition evidence.");
+
+    const minorPoi = minorPoiHandleView();
+    minorPoi.acceptedEvidence[0] = {
+      ...minorPoi.acceptedEvidence[0]!,
+      backendFacts: minorPoi.acceptedEvidence[0]!.backendFacts.filter((fact) =>
+        !fact.text.startsWith("Place handle kind: ")
+      ),
+    };
+    expect(() => renderCleanAuthorityProjection(minorPoi))
+      .toThrow("Minor-POI projection requires accepted Place handle kind evidence.");
+
+    const oracle = oracleOutcomeView();
+    oracle.acceptedEvidence[0] = {
+      ...oracle.acceptedEvidence[0]!,
+      backendFacts: [],
+    };
+    expect(() => renderCleanAuthorityProjection(oracle))
+      .toThrow("Oracle projection requires accepted visible outcome evidence.");
+
+    const sceneBeat = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: "The market answers with a visible stir.",
+        backendFacts: [{ factRef: "e1.f1", text: "The market answers with a visible stir.", exact: true }],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: ["movement", "item state", "dialogue content"],
+        },
+      }],
+    });
+    expect(() => renderCleanAuthorityProjection(sceneBeat))
+      .toThrow("Scene-beat projection requires accepted Scene beat evidence.");
+
+    const sceneBeatWithStoryFact = movementView({
+      acceptedEvidence: [{
+        ...sceneBeat.acceptedEvidence[0]!,
+        backendFacts: [{ factRef: "e1.f1", text: "Scene beat: The market answers with a visible stir.", exact: true }],
+      }],
+    });
+    expect(renderCleanAuthorityProjection(sceneBeatWithStoryFact))
+      .toBe("The market answers with a visible stir.");
+  });
+
   it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Oracle-outcome surface:");
     const view = oracleOutcomeView();

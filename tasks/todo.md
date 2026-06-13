@@ -6489,9 +6489,23 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Make Stage 6 projection for `scene_observation_receipt` reuse the direct-scene projection path instead of joining backend facts.
     - [x] Update direct-scene label guards to read aggregate actor/inventory/route labels without decoding raw fact labels.
     - [x] Add tests proving broad scene observation keeps scene/actor/inventory/route labels and rejects old raw scene-observation facts as projection input.
-    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
   - Review:
     - [x] `scene_observation_receipt` now emits `Scene placement`, `Scene label`, `Place label`, aggregate visible actor/inventory/fact labels, and route choice beat/labels from typed `visibleObservation`.
     - [x] Stage 6 prompt/projection rejects old raw scene-observation facts before rendering instead of joining backend facts.
     - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 87 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus staged `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` and `renderCleanAuthorityProjection`.
+
+- P224 Stage 6 terminal projection no-fallback boundary:
+  - Plan:
+    - [x] Inspect remaining deterministic projection paths that return `firstFact`, `backendFacts[0]`, or `evidence.text` when typed story facts are missing.
+    - [x] Run GitNexus impact before editing terminal projection symbols.
+    - [x] Make clarification, oracle, item-state, dialogue, support-actor, player-condition, minor-POI, and scene-beat projections require their accepted story facts.
+    - [x] Add focused tests proving missing story facts fail the projection contract instead of surfacing adjacent text.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] Terminal deterministic projections now require accepted story facts: `Clarification request`, visible oracle outcome, `Settled custody`, dialogue quote, `Visible support actor`/role/scene, `Player is ...`, place-handle label/kind/result, and `Scene beat`.
+    - [x] The catch-all authority projection now throws when no projection contract owns the accepted evidence instead of returning the first backend fact or a generic settled-turn sentence.
+    - [x] Stage 5 scene-beat evidence now emits `Scene beat: ...` so scene-beat projection has its own positive story fact.
+    - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 88 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because changed hunks mapped to the public `runCleanNarration` entry flow; context review traced the edited runtime boundary to `renderCleanAuthorityProjection`, covered by the focused checks above.
