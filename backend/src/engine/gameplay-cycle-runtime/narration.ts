@@ -186,6 +186,7 @@ function uniqueCyrillicWords(value: string): string[] {
 type CleanNarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
 type AcceptedNarrationEvidence = CleanNarratorView["acceptedEvidence"][number];
 type AcceptedNarrationBackendFact = AcceptedNarrationEvidence["backendFacts"][number];
+type AcceptedNarrationBackendFactRole = NonNullable<AcceptedNarrationBackendFact["role"]>;
 
 const MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 6;
 const MAX_ROUTE_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 16;
@@ -303,119 +304,131 @@ function uniqueFactsByRef(facts: readonly AcceptedNarrationBackendFact[]): Accep
   return selected;
 }
 
+function preferredPromptFactsByRole(
+  evidence: AcceptedNarrationEvidence,
+  roles: readonly AcceptedNarrationBackendFactRole[],
+): AcceptedNarrationBackendFact[] {
+  const missingRoleFact = evidence.backendFacts.find((fact) => fact.role === undefined);
+  if (missingRoleFact) {
+    throw new Error(`Prompt fact selection for ${evidence.authority} requires typed backend fact roles.`);
+  }
+  const roleSet = new Set<AcceptedNarrationBackendFactRole>(roles);
+  const preferred = evidence.backendFacts.filter((fact) =>
+    fact.role !== undefined && roleSet.has(fact.role)
+  );
+  if (preferred.length === 0) {
+    throw new Error(`Prompt fact selection for ${evidence.authority} requires at least one preferred backend fact role.`);
+  }
+  return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+}
+
 function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
   if (evidence.claimKinds.includes("item_state")) {
-    const playerFacing = evidence.backendFacts.filter((fact) =>
-      fact.text.startsWith("Custody change: ") || fact.text.startsWith("Settled custody: ")
-    );
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Item label|Source|Target|Final equip state|Current scene anchor|Item transfer result):/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...playerFacing, ...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "custody_change",
+      "settled_custody",
+      "item_label",
+      "source_label",
+      "target_label",
+      "final_equip_state",
+      "current_scene_anchor",
+      "item_transfer_result",
+    ]);
   }
   if (evidence.claimKinds.includes("dialogue_response")) {
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Speaker:|.+ says:|Dialogue summary:)/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "speaker_label",
+      "dialogue_quote",
+      "dialogue_summary",
+    ]);
   }
   if (evidence.claimKinds.includes("route_status")) {
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /\bis (?:not )?reachable from\b/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "route_beat",
+      "route_label",
+      "route_status",
+    ]);
   }
   if (evidence.claimKinds.includes("movement_option")) {
-    const routeOptionsReceiptPrefixes = [
-      "Route choices beat: ",
-      "Route origin: ",
-      "Route choice labels: ",
-      "Open route labels: ",
-      "Closed route labels: ",
-      "Route choice travel costs: ",
-    ];
-    const preferred = evidence.backendFacts.filter((fact) =>
-      routeOptionsReceiptPrefixes.some((prefix) => fact.text.startsWith(prefix))
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "route_choices_beat",
+      "route_origin",
+      "route_choice_labels",
+      "open_route_labels",
+      "closed_route_labels",
+      "route_choice_travel_costs",
+    ]);
   }
   if (evidence.claimKinds.includes("local_observation")) {
-    const localObservationPrefixes = [
-      "Local observation beat: ",
-      "Searched visible surfaces: ",
-      "Observation query: ",
-      "Observed entry labels: ",
-      "Observed entry surfaces: ",
-      "Anchor scene: ",
-      "Anchor location: ",
-    ];
-    const preferred = evidence.backendFacts.filter((fact) =>
-      localObservationPrefixes.some((prefix) => fact.text.startsWith(prefix))
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "local_observation_beat",
+      "searched_visible_surfaces",
+      "observation_query",
+      "observed_entry_labels",
+      "observed_entry_surfaces",
+      "anchor_scene",
+      "anchor_location",
+    ]);
   }
   if (evidence.claimKinds.includes("support_actor_materialization")) {
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Visible support actor|Support role|Anchor scene|Materialization result):/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "visible_support_actor",
+      "support_role",
+      "anchor_scene",
+      "materialization_result",
+    ]);
   }
   if (evidence.claimKinds.includes("player_local_condition")) {
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Player is|Condition key|Current scene anchor|Condition result|Condition target):/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "player_condition_operation",
+      "condition_key",
+      "current_scene_anchor",
+      "condition_result",
+      "condition_target",
+    ]);
   }
   if (evidence.claimKinds.includes("minor_poi_handle")) {
-    const preferred = evidence.backendFacts.filter((fact) =>
-      /^(?:Visible current-scene place handle|Place handle label|Place handle kind|Current scene anchor|Handle result|This is a visible current-scene target handle)/u.test(fact.text)
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "minor_poi_operation",
+      "place_handle_label",
+      "place_handle_kind",
+      "current_scene_anchor",
+      "handle_result",
+      "place_handle_scope",
+    ]);
   }
   if (evidence.claimKinds.includes("device_surface_observation")) {
-    const deviceSurfacePrefixes = [
-      "Device surface beat: ",
-      "Device label: ",
-      "Requested surface facets: ",
-      "Observed device facets: ",
-      "Unavailable surface facets: ",
-      "Anchor scene: ",
-      "Anchor location: ",
-    ];
-    const preferred = evidence.backendFacts.filter((fact) =>
-      deviceSurfacePrefixes.some((prefix) => fact.text.startsWith(prefix))
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "device_surface_beat",
+      "device_label",
+      "requested_surface_facets",
+      "observed_device_facets",
+      "unavailable_surface_facets",
+      "anchor_scene",
+      "anchor_location",
+    ]);
   }
   if (evidence.claimKinds.includes("scene_beat")) {
-    const sceneBeatPrefixes = [
-      "Scene beat: ",
-      "Scene beat target labels: ",
-    ];
-    const preferred = evidence.backendFacts.filter((fact) =>
-      sceneBeatPrefixes.some((prefix) => fact.text.startsWith(prefix))
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "scene_beat",
+      "scene_beat_target_labels",
+    ]);
   }
   if (evidence.authority === "scene_frame_snapshot") {
-    const sceneFrameSnapshotPrefixes = [
-      "Scene placement: ",
-      "Scene label: ",
-      "Place label: ",
-      "Scene texture: ",
-      "Visible scene facts: ",
-      "Visible actor labels: ",
-      "Inventory labels: ",
-      "Visible target labels: ",
-      "Visible actor target labels: ",
-      "Visible item target labels: ",
-      "Visible place-handle target labels: ",
-      "Visible location target labels: ",
-    ];
-    const preferred = evidence.backendFacts.filter((fact) =>
-      sceneFrameSnapshotPrefixes.some((prefix) => fact.text.startsWith(prefix))
-    );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return preferredPromptFactsByRole(evidence, [
+      "scene_placement",
+      "scene_label",
+      "place_label",
+      "scene_texture",
+      "visible_scene_facts",
+      "visible_actor_labels",
+      "inventory_labels",
+      "visible_target_labels",
+      "visible_actor_target_labels",
+      "visible_item_target_labels",
+      "visible_place_handle_target_labels",
+      "visible_location_target_labels",
+    ]);
   }
   return evidence.backendFacts;
 }

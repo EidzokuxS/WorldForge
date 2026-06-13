@@ -443,9 +443,12 @@ function nextEvidenceId(evidence: readonly CleanSettledEvidence[]): string {
   return `e${evidence.length + 1}`;
 }
 
-function fact(evidenceId: string, index: number, text: string) {
+type CleanSettledBackendFactRole = NonNullable<CleanSettledEvidence["backendFacts"][number]["role"]>;
+
+function fact(evidenceId: string, index: number, role: CleanSettledBackendFactRole, text: string) {
   return {
     factRef: `${evidenceId}.f${index}`,
+    role,
     text,
     exact: true,
   };
@@ -552,9 +555,9 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
         frame.scene.currentLocation.ref,
       ]),
       backendFacts: [
-        fact(evidenceId, 1, `Scene placement: ${scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label)}`),
-        fact(evidenceId, 2, `Scene label: ${frame.scene.currentScene.label}.`),
-        fact(evidenceId, 3, `Place label: ${frame.scene.currentLocation.label}.`),
+        fact(evidenceId, 1, "scene_placement", `Scene placement: ${scenePlacementText(frame.scene.currentScene.label, frame.scene.currentLocation.label)}`),
+        fact(evidenceId, 2, "scene_label", `Scene label: ${frame.scene.currentScene.label}.`),
+        fact(evidenceId, 3, "place_label", `Place label: ${frame.scene.currentLocation.label}.`),
       ],
     limits: {
       proves: ["current scene label", "current location label"],
@@ -579,7 +582,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
         frame.scene.currentLocation.ref,
       ]),
       backendFacts: textures.map((texture, index) =>
-        fact(textureEvidenceId, index + 1, `Scene texture: ${texture}.`)
+        fact(textureEvidenceId, index + 1, "scene_texture", `Scene texture: ${texture}.`)
       ),
       limits: {
         proves: ["public current-scene description texture"],
@@ -598,7 +601,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_fact"],
       text: visible.summary,
       visibleRefs: [visible.source],
-      backendFacts: [fact(visibleEvidenceId, 1, `Visible scene facts: ${trimTrailingSentencePunctuation(visible.summary)}.`)],
+      backendFacts: [fact(visibleEvidenceId, 1, "visible_scene_facts", `Visible scene facts: ${trimTrailingSentencePunctuation(visible.summary)}.`)],
       limits: {
         proves: ["current visible scene fact"],
         doesNotProve: SCENE_DOES_NOT_PROVE,
@@ -616,7 +619,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_actor"],
       text: `${actor.label} is in view here.`,
       visibleRefs: [actor.ref],
-      backendFacts: [fact(actorEvidenceId, 1, `Visible actor labels: ${actor.label}.`)],
+      backendFacts: [fact(actorEvidenceId, 1, "visible_actor_labels", `Visible actor labels: ${actor.label}.`)],
       limits: {
         proves: ["actor visible in the current scene"],
         doesNotProve: ["actor private knowledge", "actor intent", "absence of other actors", "future actor action"],
@@ -634,7 +637,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["inventory_status"],
       text: `${item.label} is in your inventory.`,
       visibleRefs: [item.ref],
-      backendFacts: [fact(itemEvidenceId, 1, `Inventory labels: ${item.label}.`)],
+      backendFacts: [fact(itemEvidenceId, 1, "inventory_labels", `Inventory labels: ${item.label}.`)],
       limits: {
         proves: ["inventory item label in the current inventory view"],
         doesNotProve: ["item state change", "item transfer", "absence of other items"],
@@ -661,21 +664,21 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
     const locationTargetLabels = visibleTargets
       .filter((target) => target.kind === "location")
       .map((target) => target.label);
-    const targetFactTexts = [
-      `Visible target labels: ${evidenceSemicolonList(visibleTargetLabels)}.`,
-      actorTargetLabels.length > 0
-        ? `Visible actor target labels: ${evidenceSemicolonList(actorTargetLabels)}.`
-        : null,
-      itemTargetLabels.length > 0
-        ? `Visible item target labels: ${evidenceSemicolonList(itemTargetLabels)}.`
-        : null,
-      placeHandleTargetLabels.length > 0
-        ? `Visible place-handle target labels: ${evidenceSemicolonList(placeHandleTargetLabels)}.`
-        : null,
-      locationTargetLabels.length > 0
-        ? `Visible location target labels: ${evidenceSemicolonList(locationTargetLabels)}.`
-        : null,
-    ].filter((text): text is string => text !== null);
+    const targetFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
+      { role: "visible_target_labels", text: `Visible target labels: ${evidenceSemicolonList(visibleTargetLabels)}.` },
+      ...(actorTargetLabels.length > 0
+        ? [{ role: "visible_actor_target_labels" as const, text: `Visible actor target labels: ${evidenceSemicolonList(actorTargetLabels)}.` }]
+        : []),
+      ...(itemTargetLabels.length > 0
+        ? [{ role: "visible_item_target_labels" as const, text: `Visible item target labels: ${evidenceSemicolonList(itemTargetLabels)}.` }]
+        : []),
+      ...(placeHandleTargetLabels.length > 0
+        ? [{ role: "visible_place_handle_target_labels" as const, text: `Visible place-handle target labels: ${evidenceSemicolonList(placeHandleTargetLabels)}.` }]
+        : []),
+      ...(locationTargetLabels.length > 0
+        ? [{ role: "visible_location_target_labels" as const, text: `Visible location target labels: ${evidenceSemicolonList(locationTargetLabels)}.` }]
+        : []),
+    ];
     evidence.push({
       evidenceId: targetEvidenceId,
       sourceKind: "scene_frame",
@@ -684,8 +687,8 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       claimKinds: ["visible_target"],
       text: `Targets in view here include ${visibleTargetLabels.join(", ")}.`,
       visibleRefs: visibleTargets.map((target) => target.ref),
-      backendFacts: boundedBackendFacts(targetFactTexts.map((text, index) =>
-        fact(targetEvidenceId, index + 1, text)
+      backendFacts: boundedBackendFacts(targetFactTexts.map((entry, index) =>
+        fact(targetEvidenceId, index + 1, entry.role, entry.text)
       )),
       limits: {
         proves: ["visible current-scene target labels"],
@@ -717,12 +720,12 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       text: routeBeat,
       visibleRefs: routeOptions.map((option) => option.ref),
       backendFacts: boundedBackendFacts([
-        fact(routeEvidenceId, 1, `Route choices beat: ${routeBeat}`),
-        fact(routeEvidenceId, 2, `Route origin: ${frame.scene.currentScene.label}.`),
-        fact(routeEvidenceId, 3, `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 4, `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 5, `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
-        fact(routeEvidenceId, 6, `Route choice travel costs: ${routeCostSummary}.`),
+        fact(routeEvidenceId, 1, "route_choices_beat", `Route choices beat: ${routeBeat}`),
+        fact(routeEvidenceId, 2, "route_origin", `Route origin: ${frame.scene.currentScene.label}.`),
+        fact(routeEvidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
+        fact(routeEvidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`),
       ]),
       limits: {
         proves: ["route option labels visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
@@ -771,7 +774,7 @@ function clarificationEvidence(input: {
       ...(input.gmRead?.evidenceRefs ?? input.judgment?.evidenceRefs ?? []),
     ]).slice(0, 16),
     backendFacts: [
-      fact(evidenceId, 1, `Clarification request: ${question}`),
+      fact(evidenceId, 1, "clarification_request", `Clarification request: ${question}`),
     ],
     limits: {
       proves: ["player clarification is required before resolving this action", "clarification question text"],
@@ -801,10 +804,10 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: travelBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Travel beat: ${travelBeat}`),
-          fact(evidenceId, 2, `Destination label: ${location}.`),
-          fact(evidenceId, 3, `Elapsed travel time: ${travelDuration}.`),
-          fact(evidenceId, 4, `Current place after movement: ${location}.`),
+          fact(evidenceId, 1, "travel_beat", `Travel beat: ${travelBeat}`),
+          fact(evidenceId, 2, "destination_label", `Destination label: ${location}.`),
+          fact(evidenceId, 3, "elapsed_travel_time", `Elapsed travel time: ${travelDuration}.`),
+          fact(evidenceId, 4, "current_place_after_movement", `Current place after movement: ${location}.`),
         ],
         limits: {
           proves: ["player location change", "elapsed travel time", "movement result phrasing for the player"],
@@ -833,9 +836,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: routeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Route beat: ${routeBeat}`),
-          fact(evidenceId, 2, `Route label: ${routeLabel}.`),
-          fact(evidenceId, 3, `Route status: ${routeStatus}.`),
+          fact(evidenceId, 1, "route_beat", `Route beat: ${routeBeat}`),
+          fact(evidenceId, 2, "route_label", `Route label: ${routeLabel}.`),
+          fact(evidenceId, 3, "route_status", `Route status: ${routeStatus}.`),
         ],
         limits: {
           proves: ["route status only", "route status phrasing for the player"],
@@ -854,26 +857,26 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       if (observation.visibleFacts.length > 0) claimKinds.push("visible_fact");
       if (observation.inventory.length > 0) claimKinds.push("inventory_status");
       if (observation.movementOptions.length > 0) claimKinds.push("movement_option");
-      const backendFactTexts = [
-        `Scene placement: ${scenePlacement}`,
-        `Scene label: ${observation.currentScene}.`,
-        `Place label: ${observation.currentLocation}.`,
-        observation.visibleActors.length > 0
-          ? `Visible actor labels: ${evidenceSemicolonList(observation.visibleActors)}.`
-          : null,
-        observation.visibleFacts.length > 0
-          ? `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.`
-          : null,
-        observation.inventory.length > 0
-          ? `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.`
-          : null,
-        observation.movementOptions.length > 0
-          ? `Route choices beat: ${routeBeat}`
-          : null,
-        observation.movementOptions.length > 0
-          ? `Route choice labels: ${evidenceSemicolonList(observation.movementOptions)}.`
-          : null,
-      ].filter((text): text is string => text !== null);
+      const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
+        { role: "scene_placement", text: `Scene placement: ${scenePlacement}` },
+        { role: "scene_label", text: `Scene label: ${observation.currentScene}.` },
+        { role: "place_label", text: `Place label: ${observation.currentLocation}.` },
+        ...(observation.visibleActors.length > 0
+          ? [{ role: "visible_actor_labels" as const, text: `Visible actor labels: ${evidenceSemicolonList(observation.visibleActors)}.` }]
+          : []),
+        ...(observation.visibleFacts.length > 0
+          ? [{ role: "visible_scene_facts" as const, text: `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.` }]
+          : []),
+        ...(observation.inventory.length > 0
+          ? [{ role: "inventory_labels" as const, text: `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.` }]
+          : []),
+        ...(observation.movementOptions.length > 0
+          ? [{ role: "route_choices_beat" as const, text: `Route choices beat: ${routeBeat}` }]
+          : []),
+        ...(observation.movementOptions.length > 0
+          ? [{ role: "route_choice_labels" as const, text: `Route choice labels: ${evidenceSemicolonList(observation.movementOptions)}.` }]
+          : []),
+      ];
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -882,8 +885,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds,
         text: scenePlacement,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
-          fact(evidenceId, index + 1, text)
+        backendFacts: boundedBackendFacts(backendFactTexts.map((entry, index) =>
+          fact(evidenceId, index + 1, entry.role, entry.text)
         )),
         limits: {
           proves: ["current visible scene entries", "scene observation phrasing for the player"],
@@ -905,19 +908,19 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         : observation.resultKind === "positive_list"
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
-      const backendFactTexts = [
-        `Local observation beat: ${localBeat}`,
-        `Searched visible surfaces: ${surfaceGroup}.`,
-        `Observation query: ${observation.queryText}.`,
-        observedLabels.length > 0
-          ? `Observed entry labels: ${evidenceSemicolonList(observedLabels)}.`
-          : null,
-        observedSurfaceLabels.length > 0
-          ? `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.`
-          : null,
-        `Anchor scene: ${observation.anchorSceneLabel}.`,
-        `Anchor location: ${observation.anchorLocationLabel}.`,
-      ].filter((text): text is string => text !== null);
+      const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
+        { role: "local_observation_beat", text: `Local observation beat: ${localBeat}` },
+        { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.` },
+        { role: "observation_query", text: `Observation query: ${observation.queryText}.` },
+        ...(observedLabels.length > 0
+          ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${evidenceSemicolonList(observedLabels)}.` }]
+          : []),
+        ...(observedSurfaceLabels.length > 0
+          ? [{ role: "observed_entry_surfaces" as const, text: `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.` }]
+          : []),
+        { role: "anchor_scene", text: `Anchor scene: ${observation.anchorSceneLabel}.` },
+        { role: "anchor_location", text: `Anchor location: ${observation.anchorLocationLabel}.` },
+      ];
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -926,8 +929,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds,
         text: localBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
-          fact(evidenceId, index + 1, text)
+        backendFacts: boundedBackendFacts(backendFactTexts.map((entry, index) =>
+          fact(evidenceId, index + 1, entry.role, entry.text)
         )),
         limits: {
           proves: boundedNegative
@@ -950,19 +953,19 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const unavailableFacetText = deviceFacetKindListLabel(observation.unavailableFacetKinds);
       const observedFacetFacts = observation.observedFacets.slice(0, 5)
         .map((facet) => `${trimTrailingSentencePunctuation(facet.displayLabel)}: ${trimTrailingSentencePunctuation(facet.valueText)}`);
-      const backendFactTexts = [
-        `Device surface beat: ${deviceBeat}`,
-        `Device label: ${observation.deviceLabel}.`,
-        `Requested surface facets: ${requestedFacetText}.`,
-        observedFacetFacts.length > 0
-          ? `Observed device facets: ${evidenceSemicolonList(observedFacetFacts)}.`
-          : null,
-        observation.unavailableFacetKinds.length > 0
-          ? `Unavailable surface facets: ${unavailableFacetText}.`
-          : null,
-        `Anchor scene: ${observation.anchorSceneLabel}.`,
-        `Anchor location: ${observation.anchorLocationLabel}.`,
-      ].filter((text): text is string => text !== null);
+      const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
+        { role: "device_surface_beat", text: `Device surface beat: ${deviceBeat}` },
+        { role: "device_label", text: `Device label: ${observation.deviceLabel}.` },
+        { role: "requested_surface_facets", text: `Requested surface facets: ${requestedFacetText}.` },
+        ...(observedFacetFacts.length > 0
+          ? [{ role: "observed_device_facets" as const, text: `Observed device facets: ${evidenceSemicolonList(observedFacetFacts)}.` }]
+          : []),
+        ...(observation.unavailableFacetKinds.length > 0
+          ? [{ role: "unavailable_surface_facets" as const, text: `Unavailable surface facets: ${unavailableFacetText}.` }]
+          : []),
+        { role: "anchor_scene", text: `Anchor scene: ${observation.anchorSceneLabel}.` },
+        { role: "anchor_location", text: `Anchor location: ${observation.anchorLocationLabel}.` },
+      ];
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -971,8 +974,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds,
         text: deviceBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
-          fact(evidenceId, index + 1, text)
+        backendFacts: boundedBackendFacts(backendFactTexts.map((entry, index) =>
+          fact(evidenceId, index + 1, entry.role, entry.text)
         )),
         limits: {
           proves: noSurface
@@ -1007,12 +1010,12 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: routeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: boundedBackendFacts([
-          fact(evidenceId, 1, `Route choices beat: ${routeBeat}`),
-          fact(evidenceId, 2, `Route origin: ${routeOptions.fromLabel}.`),
-          fact(evidenceId, 3, `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 4, `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 5, `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
-          fact(evidenceId, 6, `Route choice travel costs: ${routeCostSummary}.`),
+          fact(evidenceId, 1, "route_choices_beat", `Route choices beat: ${routeBeat}`),
+          fact(evidenceId, 2, "route_origin", `Route origin: ${routeOptions.fromLabel}.`),
+          fact(evidenceId, 3, "route_choice_labels", `Route choice labels: ${routeLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 4, "open_route_labels", `Open route labels: ${openRouteLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 5, "closed_route_labels", `Closed route labels: ${closedRouteLabels.join("; ") || "none"}.`),
+          fact(evidenceId, 6, "route_choice_travel_costs", `Route choice travel costs: ${routeCostSummary}.`),
         ]),
         limits: {
           proves: ["route options visible from the current scene", "route choice phrasing for the player", "route label status and cost list"],
@@ -1025,12 +1028,12 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const evidenceId = nextEvidenceId(evidence);
       const beat = receipt.publicResult.sceneBeat;
       const targetLabels = beat.targetLabels.slice(0, 4);
-      const backendFactTexts = [
-        `Scene beat: ${beat.summary}`,
-        targetLabels.length > 0
-          ? `Scene beat target labels: ${evidenceSemicolonList(targetLabels)}.`
-          : null,
-      ].filter((text): text is string => text !== null);
+      const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string }> = [
+        { role: "scene_beat", text: `Scene beat: ${beat.summary}` },
+        ...(targetLabels.length > 0
+          ? [{ role: "scene_beat_target_labels" as const, text: `Scene beat target labels: ${evidenceSemicolonList(targetLabels)}.` }]
+          : []),
+      ];
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -1039,8 +1042,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds: ["scene_beat"],
         text: beat.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: backendFactTexts.map((text, index) =>
-          fact(evidenceId, index + 1, text)
+        backendFacts: backendFactTexts.map((entry, index) =>
+          fact(evidenceId, index + 1, entry.role, entry.text)
         ),
         limits: {
           proves: ["local visible scene beat acknowledgement"],
@@ -1062,9 +1065,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: quoteFact,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Speaker: ${dialogue.speakerLabel}.`),
-          fact(evidenceId, 2, quoteFact),
-          fact(evidenceId, 3, `Dialogue summary: ${dialogue.summary}`),
+          fact(evidenceId, 1, "speaker_label", `Speaker: ${dialogue.speakerLabel}.`),
+          fact(evidenceId, 2, "dialogue_quote", quoteFact),
+          fact(evidenceId, 3, "dialogue_summary", `Dialogue summary: ${dialogue.summary}`),
         ],
         limits: {
           proves: [
@@ -1089,10 +1092,10 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${supportActor.actorLabel} is visible as a ${supportActor.roleLabel} in ${supportActor.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Visible support actor: ${supportActor.actorLabel}.`),
-          fact(evidenceId, 2, `Support role: ${supportActor.roleLabel}.`),
-          fact(evidenceId, 3, `Anchor scene: ${supportActor.anchorSceneLabel}.`),
-          fact(evidenceId, 4, `Materialization result: ${supportActor.resultKind}.`),
+          fact(evidenceId, 1, "visible_support_actor", `Visible support actor: ${supportActor.actorLabel}.`),
+          fact(evidenceId, 2, "support_role", `Support role: ${supportActor.roleLabel}.`),
+          fact(evidenceId, 3, "anchor_scene", `Anchor scene: ${supportActor.anchorSceneLabel}.`),
+          fact(evidenceId, 4, "materialization_result", `Materialization result: ${supportActor.resultKind}.`),
         ],
         limits: {
           proves: [
@@ -1124,12 +1127,12 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${operationText} Current scene anchor: ${condition.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, operationText),
-          fact(evidenceId, 2, `Condition key: ${condition.conditionKey}.`),
-          fact(evidenceId, 3, `Current scene anchor: ${condition.anchorSceneLabel}.`),
-          fact(evidenceId, 4, `Condition result: ${condition.resultKind}.`),
+          fact(evidenceId, 1, "player_condition_operation", operationText),
+          fact(evidenceId, 2, "condition_key", `Condition key: ${condition.conditionKey}.`),
+          fact(evidenceId, 3, "current_scene_anchor", `Current scene anchor: ${condition.anchorSceneLabel}.`),
+          fact(evidenceId, 4, "condition_result", `Condition result: ${condition.resultKind}.`),
           ...(condition.targetLabel
-            ? [fact(evidenceId, 5, `Condition target: ${condition.targetLabel}.`)]
+            ? [fact(evidenceId, 5, "condition_target", `Condition target: ${condition.targetLabel}.`)]
             : []),
         ],
         limits: {
@@ -1157,14 +1160,14 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${custodyChangeText} ${settledCustodyText}`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Custody change: ${custodyChangeText}`),
-          fact(evidenceId, 2, `Settled custody: ${settledCustodyText}`),
-          fact(evidenceId, 3, `Item label: ${itemTransfer.itemLabel}.`),
-          fact(evidenceId, 4, `Source: ${itemTransfer.sourceLabel}.`),
-          fact(evidenceId, 5, `Target: ${itemTransfer.targetLabel}.`),
-          fact(evidenceId, 6, `Final equip state: ${itemTransfer.finalEquipState}.`),
-          fact(evidenceId, 7, `Current scene anchor: ${itemTransfer.anchorSceneLabel}.`),
-          fact(evidenceId, 8, `Item transfer result: ${itemTransfer.resultKind}.`),
+          fact(evidenceId, 1, "custody_change", `Custody change: ${custodyChangeText}`),
+          fact(evidenceId, 2, "settled_custody", `Settled custody: ${settledCustodyText}`),
+          fact(evidenceId, 3, "item_label", `Item label: ${itemTransfer.itemLabel}.`),
+          fact(evidenceId, 4, "source_label", `Source: ${itemTransfer.sourceLabel}.`),
+          fact(evidenceId, 5, "target_label", `Target: ${itemTransfer.targetLabel}.`),
+          fact(evidenceId, 6, "final_equip_state", `Final equip state: ${itemTransfer.finalEquipState}.`),
+          fact(evidenceId, 7, "current_scene_anchor", `Current scene anchor: ${itemTransfer.anchorSceneLabel}.`),
+          fact(evidenceId, 8, "item_transfer_result", `Item transfer result: ${itemTransfer.resultKind}.`),
         ],
         limits: {
           proves: [
@@ -1194,12 +1197,12 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: `${operationText} Current scene anchor: ${minorPoi.anchorSceneLabel}.`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, operationText),
-          fact(evidenceId, 2, `Place handle label: ${minorPoi.poiLabel}.`),
-          fact(evidenceId, 3, `Place handle kind: ${minorPoi.poiKind}.`),
-          fact(evidenceId, 4, `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
-          fact(evidenceId, 5, `Handle result: ${minorPoi.resultKind}.`),
-          fact(evidenceId, 6, "This is a visible current-scene target handle only, not a movement destination."),
+          fact(evidenceId, 1, "minor_poi_operation", operationText),
+          fact(evidenceId, 2, "place_handle_label", `Place handle label: ${minorPoi.poiLabel}.`),
+          fact(evidenceId, 3, "place_handle_kind", `Place handle kind: ${minorPoi.poiKind}.`),
+          fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
+          fact(evidenceId, 5, "handle_result", `Handle result: ${minorPoi.resultKind}.`),
+          fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene target handle only, not a movement destination."),
         ],
         limits: {
           proves: [
@@ -1229,8 +1232,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         text: timeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Time beat: ${timeBeat}`),
-          fact(evidenceId, 2, `Elapsed time: ${elapsedDuration}.`),
+          fact(evidenceId, 1, "time_beat", `Time beat: ${timeBeat}`),
+          fact(evidenceId, 2, "elapsed_time", `Elapsed time: ${elapsedDuration}.`),
         ],
         limits: {
           proves: ["elapsed world clock time", "time passage phrasing for the player"],
@@ -1251,7 +1254,7 @@ function oracleEvidence(settlement: OracleSettlement, evidence: CleanSettledEvid
     claimKinds: ["oracle_outcome"],
     text: settlement.visibleOutcome.selectedMeaning,
     visibleRefs: settlement.authority.evidenceRefs,
-    backendFacts: [fact(evidenceId, 1, settlement.visibleOutcome.selectedMeaning)],
+    backendFacts: [fact(evidenceId, 1, "oracle_selected_meaning", settlement.visibleOutcome.selectedMeaning)],
     limits: {
       proves: ["selected visible uncertainty outcome"],
       doesNotProve: settlement.authority.forbiddenClaimKinds,

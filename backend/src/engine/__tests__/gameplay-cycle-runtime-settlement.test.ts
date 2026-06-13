@@ -741,6 +741,12 @@ describe("clean Stage 5 settlement contracts", () => {
       "Elapsed travel time: 1 minute.",
       "Current place after movement: North Hall.",
     ]);
+    expect(movement?.backendFacts.map((entry) => entry.role)).toEqual([
+      "travel_beat",
+      "destination_label",
+      "elapsed_travel_time",
+      "current_place_after_movement",
+    ]);
     expect(movement?.limits.proves).toContain("movement result phrasing for the player");
     expect(JSON.stringify(view)).not.toContain("player-1");
     expect(JSON.stringify(view)).not.toContain("edge-market-north");

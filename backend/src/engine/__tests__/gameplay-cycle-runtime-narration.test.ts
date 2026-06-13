@@ -720,14 +720,14 @@ function itemStateView(): CleanNarratorView {
       claimKinds: ["item_state"],
       text: "Brass Tube passes from Player to Guide at Market. Brass Tube is carried by Guide at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
-        { factRef: "e1.f2", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
-        { factRef: "e1.f3", text: "Item label: Brass Tube.", exact: true },
-        { factRef: "e1.f4", text: "Source: Player.", exact: true },
-        { factRef: "e1.f5", text: "Target: Guide.", exact: true },
-        { factRef: "e1.f6", text: "Final equip state: carried.", exact: true },
-        { factRef: "e1.f7", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f8", text: "Item transfer result: transferred_to_actor.", exact: true },
+        { factRef: "e1.f1", role: "custody_change", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
+        { factRef: "e1.f2", role: "settled_custody", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
+        { factRef: "e1.f3", role: "item_label", text: "Item label: Brass Tube.", exact: true },
+        { factRef: "e1.f4", role: "source_label", text: "Source: Player.", exact: true },
+        { factRef: "e1.f5", role: "target_label", text: "Target: Guide.", exact: true },
+        { factRef: "e1.f6", role: "final_equip_state", text: "Final equip state: carried.", exact: true },
+        { factRef: "e1.f7", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f8", role: "item_transfer_result", text: "Item transfer result: transferred_to_actor.", exact: true },
       ],
       limits: {
         proves: [
@@ -1396,6 +1396,54 @@ describe("clean Stage 6 narration contracts", () => {
       "Target: Guide.",
       "Final equip state: carried.",
     ]);
+  });
+
+  it("uses backend fact roles instead of fact text shape for prompt shortlists", () => {
+    const base = itemStateView();
+    const evidence = base.acceptedEvidence[0]!;
+    const roleOwnedView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map((fact, index) => ({
+          ...fact,
+          text: `Opaque accepted fact ${index + 1}.`,
+        })),
+      }],
+    });
+
+    const promptInput = buildCleanNarratorPromptInput(roleOwnedView);
+    const facts = promptInput.acceptedEvidence[0]?.backendFacts ?? [];
+
+    expect(facts.map((fact) => fact.factRef)).toEqual([
+      "e1.f1",
+      "e1.f2",
+      "e1.f3",
+      "e1.f4",
+      "e1.f5",
+      "e1.f6",
+    ]);
+    expect(facts.map((fact) => fact.text)).toEqual([
+      "Opaque accepted fact 1.",
+      "Opaque accepted fact 2.",
+      "Opaque accepted fact 3.",
+      "Opaque accepted fact 4.",
+      "Opaque accepted fact 5.",
+      "Opaque accepted fact 6.",
+    ]);
+  });
+
+  it("rejects prompt shortlisting when typed backend fact roles are missing", () => {
+    const base = itemStateView();
+    const evidence = base.acceptedEvidence[0]!;
+    const legacyShapedView = movementView({
+      acceptedEvidence: [{
+        ...evidence,
+        backendFacts: evidence.backendFacts.map(({ role: _role, ...fact }) => fact),
+      }],
+    });
+
+    expect(() => buildCleanNarratorPromptInput(legacyShapedView))
+      .toThrow("Prompt fact selection for item_transfer_receipt requires typed backend fact roles.");
   });
 
   it("keeps direct scene snapshot evidence available to the literary scene prompt", () => {
