@@ -677,6 +677,51 @@ function itemStateWithDialogueView(): CleanNarratorView {
   });
 }
 
+function itemStateWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...itemStateView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
+function dialogueWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...dialogueView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
+function itemStateWithDialogueAndSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...itemStateView().acceptedEvidence,
+      sceneTextureEvidence("e3"),
+      currentSceneAnchorEvidence("e4"),
+      {
+        ref: "e2",
+        authority: "terminal_dialogue_receipt",
+        claimKinds: ["dialogue_response"],
+        text: 'Guide says: "The north stairs flooded before dawn."',
+        backendFacts: [
+          { factRef: "e2.f1", text: "Speaker: Guide.", exact: true },
+          { factRef: "e2.f2", text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f3", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+        ],
+        limits: {
+          proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+          doesNotProve: ["truth of speaker claim", "durable world fact", "NPC consent or reaction"],
+        },
+      },
+    ],
+  });
+}
+
 function minorPoiHandleView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -1130,6 +1175,19 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts[0]?.text)
       .toBe("Scene texture: Canvas awnings hang over the market lanes.");
+  });
+
+  it("includes scene_texture beside terminal item and dialogue evidence when literary prose can cite texture", () => {
+    const promptInput = buildCleanNarratorPromptInput(itemStateWithDialogueAndSceneTextureView());
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1")?.claimKinds).toEqual(["item_state"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["dialogue_response"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds).toEqual(["scene_texture"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.backendFacts.map((fact) => fact.text)).toEqual([
+      "Scene texture: Canvas awnings hang over the market lanes.",
+      "Scene texture: Rain taps the brass gutters.",
+    ]);
   });
 
   it("accepts model narration from accepted movement evidence", () => {
@@ -1603,6 +1661,97 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
   });
 
+  it("repairs missing scene_texture for item_state inside Stage 6 before player-facing narration", async () => {
+    const view = itemStateWithSceneTextureView();
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [{
+            text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+            evidenceRefs: ["e1", "e3"],
+            backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+            claimKinds: ["item_state", "current_scene"],
+          }]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("Item-state and dialogue-response narration with accepted scene_texture");
+        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
+        expect(request.prompt).toContain("For item_state, use e2.f1 for the scene_texture sentence.");
+        return acceptedCandidate(view, [
+          {
+            text: "Canvas awnings hang over the market lanes.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f1"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+            evidenceRefs: ["e1", "e3"],
+            backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+            claimKinds: ["item_state", "current_scene"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. The Brass Tube passes from Player to Guide and is carried at Market.");
+  });
+
+  it("repairs first scene_texture reuse for dialogue_response inside Stage 6 before player-facing narration", async () => {
+    const view = dialogueWithSceneTextureView();
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return acceptedCandidate(view, [
+            {
+              text: "Canvas awnings hang over the market lanes.",
+              evidenceRefs: ["e2"],
+              backendFactRefs: ["e2.f1"],
+              claimKinds: ["scene_texture"],
+            },
+            {
+              text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
+              evidenceRefs: ["e1", "e3"],
+              backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
+              claimKinds: ["dialogue_response", "current_scene"],
+            },
+          ]);
+        }
+        expect(request.prompt).toContain("Stage 6 validation feedback");
+        expect(request.prompt).toContain("Dialogue-response scene_texture");
+        expect(request.prompt).toContain("For dialogue_response, use e2.f2 for the scene_texture sentence.");
+        return acceptedCandidate(view, [
+          {
+            text: "Rain taps the brass gutters.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f2"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
+            evidenceRefs: ["e1", "e3"],
+            backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
+            claimKinds: ["dialogue_response", "current_scene"],
+          },
+        ]);
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
+  });
+
   it("repairs direct-scene implied action inside Stage 6 before player-facing narration", async () => {
     const view = movementView({
       acceptedEvidence: [
@@ -1879,6 +2028,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(route|arrive|travel|durable world fact|true|confirmed by the world)\b/iu);
   });
 
+  it("uses later accepted scene_texture for dialogue_response prose when texture is available", async () => {
+    const view = dialogueWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
+          claimKinds: ["dialogue_response", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).not.toMatch(/\b(Route option|receipt|durable world fact|confirmed by the world|either|or)\b/iu);
+  });
+
+  it("rejects dialogue_response prose that omits texture or repeats the first texture fact when later texture exists", () => {
+    const view = dialogueWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
+        evidenceRefs: ["e1", "e3"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
+        claimKinds: ["dialogue_response", "current_scene"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
+    )).toBe(true);
+
+    const firstTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
+          claimKinds: ["dialogue_response", "current_scene"],
+        },
+      ]),
+    });
+    expect(firstTexture.status).toBe("rejected");
+    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("later accepted texture fact")
+    )).toBe(true);
+  });
+
   it("renders support actor materialization without inventing dialogue or services", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
     const text = renderCleanAuthorityProjection(supportActorView());
@@ -2000,6 +2216,78 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
+  it("uses accepted scene_texture for item_state prose when texture is available", async () => {
+    const view = itemStateWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+          claimKinds: ["item_state", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. The Brass Tube passes from Player to Guide and is carried at Market.");
+    expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
+  });
+
+  it("rejects item_state prose that omits accepted scene_texture when texture is available", () => {
+    const view = itemStateWithSceneTextureView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+        evidenceRefs: ["e1", "e3"],
+        backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+        claimKinds: ["item_state", "current_scene"],
+      }]),
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
+    )).toBe(true);
+  });
+
+  it("rejects standalone item_state prose that uses a later scene_texture when several texture facts exist", () => {
+    const view = itemStateWithSceneTextureView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+          claimKinds: ["item_state", "current_scene"],
+        },
+      ]),
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Standalone item-state scene_texture")
+    )).toBe(true);
+  });
+
   it("uses model-authored literary narration for composed item_state plus dialogue_response", async () => {
     const view = itemStateWithDialogueView();
     const result = await runCleanNarration({
@@ -2025,6 +2313,38 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toContain("The Brass Tube passes from you to Guide");
     expect(result.text).toContain('"The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
+  });
+
+  it("uses accepted scene_texture for composed item_state plus dialogue_response without expanding the quote into truth", async () => {
+    const view = itemStateWithDialogueAndSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e3"],
+          backendFactRefs: ["e3.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+          evidenceRefs: ["e1", "e4"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e4.f1"],
+          claimKinds: ["item_state", "current_scene"],
+        },
+        {
+          text: 'Guide answers: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1", "e2.f2"],
+          claimKinds: ["dialogue_response"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Rain taps the brass gutters. The Brass Tube passes from Player to Guide and is carried at Market. Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).not.toMatch(/\b(durable world fact|confirmed by the world|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
   it("renders minor_poi_handle evidence without route, location, service, sign-text, or no-change claims", () => {

@@ -661,6 +661,63 @@ function routeOptionsUsesLaterSceneTextureFact(
   return false;
 }
 
+function itemOrDialogueNeedsSceneTexture(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  return hasAcceptedSceneTextureEvidence(view)
+    && (hasClaimKind(view, "item_state") || hasClaimKind(view, "dialogue_response"))
+    && !candidateCitesClaimKind(candidate, "scene_texture");
+}
+
+function dialogueResponseUsesFirstSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "dialogue_response")) return false;
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length <= 1) return false;
+  const [firstTextureFact, ...laterTextureFacts] = textureFacts;
+  if (!firstTextureFact) return false;
+  const laterFactRefs = new Set(laterTextureFacts.map((fact) => fact.factRef));
+  const firstTextureText = firstTextureFact.text.toLowerCase();
+  for (const sentence of candidate.sentences) {
+    if (!sentence.claimKinds.includes("scene_texture")) continue;
+    const sentenceText = normalizeText(sentence.text)
+      .replace(/\.$/u, "")
+      .toLowerCase();
+    const citesLaterTexture = sentence.backendFactRefs.some((factRef) => laterFactRefs.has(factRef));
+    const usesFirstTexture = sentence.backendFactRefs.includes(firstTextureFact.factRef)
+      || firstTextureText.includes(sentenceText);
+    if (usesFirstTexture && !citesLaterTexture) return true;
+  }
+  return false;
+}
+
+function standaloneItemStateUsesLaterSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "item_state") || hasClaimKind(view, "dialogue_response")) return false;
+  const textureFacts = sceneTextureBackendFactTexts(view);
+  if (textureFacts.length <= 1) return false;
+  const [firstTextureFact, ...laterTextureFacts] = textureFacts;
+  if (!firstTextureFact) return false;
+  const laterFactRefs = new Set(laterTextureFacts.map((fact) => fact.factRef));
+  const firstTextureText = firstTextureFact.text.toLowerCase();
+  for (const sentence of candidate.sentences) {
+    if (!sentence.claimKinds.includes("scene_texture")) continue;
+    const sentenceText = normalizeText(sentence.text)
+      .replace(/\.$/u, "")
+      .toLowerCase();
+    const citesFirstTexture = sentence.backendFactRefs.includes(firstTextureFact.factRef)
+      || firstTextureText.includes(sentenceText);
+    const citesLaterTexture = sentence.backendFactRefs.some((factRef) => laterFactRefs.has(factRef));
+    if (citesLaterTexture && !citesFirstTexture) return true;
+  }
+  return false;
+}
+
 function patternMatches(pattern: RegExp, text: string): string[] {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return [...text.matchAll(new RegExp(pattern.source, flags))]
@@ -913,6 +970,30 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (itemOrDialogueNeedsSceneTexture(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Item-state and dialogue-response narration with accepted scene_texture must include one exact scene_texture sentence object.",
+    });
+  }
+
+  if (dialogueResponseUsesFirstSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Dialogue-response scene_texture must use a later accepted texture fact when several scene_texture facts are available.",
+    });
+  }
+
+  if (standaloneItemStateUsesLaterSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Standalone item-state scene_texture must use the first accepted texture fact when several scene_texture facts are available.",
+    });
+  }
+
   const routeOptionLabels = candidateCitesClaimKind(input.candidate, "movement_option")
     ? acceptedRouteOptionLabels(input.view)
     : [];
@@ -1031,9 +1112,9 @@ export function buildCleanNarrationSystemPrompt(
     "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different sentence shapes across nearby turns.",
     "Shape pass: replace word-as-object phrasing, novelty tags, crowd-foil contrasts, bottled atmosphere, negation-as-description, either/or verdict menus, and cosmic abstractions with the accepted concrete fact.",
-    "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth.",
+    "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. With scene_texture evidence, put one exact scene_texture sentence beside the utterance; when several texture facts exist, dialogue_response uses a later texture fact than the first.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
-    "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
+    "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. With scene_texture evidence, put one exact scene_texture sentence beside the custody/state beat; standalone item_state uses the first accepted texture fact when several texture facts exist, and composed item_state plus dialogue_response follows the dialogue_response texture selection. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. With scene_texture evidence, put one exact scene_texture sentence first, then one concise elapsed-time beat such as '<time> pass at <scene>.' When several scene_texture backendFacts exist, choose a later texture fact than the first. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
@@ -1042,7 +1123,7 @@ export function buildCleanNarrationSystemPrompt(
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. With scene_texture evidence, start from the visible result and attach at most one short scene-texture clause as its own sentence object. When several scene_texture backendFacts exist, choose a later texture fact than the first; texture may also be omitted. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Direct-scene surface: for scene_frame_snapshot-only direct scene observation, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, or local observation; use 2 objects when item_state, dialogue_response, movement, elapsed_time, or route_options cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -1246,6 +1327,17 @@ function narrationValidationRepairLines(
     }
     if (hasDirectSceneIssue && textureFacts[0]) {
       lines.push(`For direct-scene snapshot narration, use ${textureFacts[0].factRef} as the scene_texture sentence.text exactly: "${textureFacts[0].text}."`);
+    }
+    if (hasClaimKind(view, "item_state") && !hasClaimKind(view, "dialogue_response") && textureFacts[0]) {
+      lines.push(`For item_state, use ${textureFacts[0].factRef} for the scene_texture sentence.`);
+    }
+    if (hasClaimKind(view, "dialogue_response")) {
+      const dialogueTextureRefs = textureFacts.length > 1
+        ? textureFacts.slice(1).map((fact) => fact.factRef)
+        : textureFacts.slice(0, 1).map((fact) => fact.factRef);
+      if (dialogueTextureRefs.length > 0) {
+        lines.push(`For dialogue_response, use ${dialogueTextureRefs.join(" or ")} for the scene_texture sentence.`);
+      }
     }
     lines.push("Set scene_texture sentence.text exactly to one listed text and cite only its matching backendFactRef in that sentence.");
     lines.push("Put scene_texture in its own accepted_evidence sentence object.");

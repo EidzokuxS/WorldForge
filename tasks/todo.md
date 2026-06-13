@@ -163,7 +163,8 @@ P199 direct-scene texture and implied-action contract:
   - [x] Player-facing text: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Guide is here, and Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the available one-minute route choices here.`
   - [x] DB proof `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/db-proof.json`: one clean direct-scene turn record, no Stage4 receipts, mutationApplied false, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, authority traces 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`, exact scene texture and cited labels preserved.
   - [x] Prose audit `output/clean-runtime-p199-direct-scene-qa-r5-20260613-165058/prose-audit.json`: one narrative, one-token 0, `youOpening` 0, list-like starts 0, direct-scene digest 0, implied-action 0, stock-route/options/debug/enum/surface hits all 0.
-  - [x] Run GitNexus detect, commit/push/analyze.
+  - [x] Run GitNexus detect before commit.
+  - [x] Commit/push/analyze.
 
 P200 post-movement and elapsed-time texture prose:
 - Goal:
@@ -187,6 +188,32 @@ P200 post-movement and elapsed-time texture prose:
   - [x] `npm --prefix backend run typecheck`.
   - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 51 passed.
   - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 318 passed.
+  - [x] Run GitNexus detect, commit/push/analyze.
+
+P201 item/dialogue scene-texture prose:
+- Goal:
+  - Make item transfer and dialogue turns read as grounded adventure scene beats when accepted `scene_texture` exists.
+  - Preserve truth ownership: item custody/equip/location comes only from `item_transfer_receipt`; dialogue wording comes only from `terminal_dialogue_receipt`; texture comes only from exact `scene_texture` backend facts.
+  - Keep adjacent same-scene texture fresh by assigning standalone `item_state` the first accepted texture fact and `dialogue_response` a later accepted texture fact when available.
+- Plan:
+  - [x] Extend Stage 6 prompt for `item_state` and `dialogue_response` with exact scene-texture sentence requirements.
+  - [x] Add validation that item/dialogue literary candidates with accepted `scene_texture` include one exact `scene_texture` sentence object.
+  - [x] Add validation that standalone item-state uses the first texture fact and dialogue-response uses a later texture fact when several texture facts exist.
+  - [x] Add Stage 6 repair guidance that lists copyable allowed `scene_texture` sentence texts and the required fact refs for item/dialogue.
+  - [x] Add contract tests for prompt input, missing texture, first/later texture selection, composed item+dialogue, and repair.
+  - [x] Run focused tests, typecheck, live item/dialogue proof, DB proof, and prose audit.
+- Evidence:
+  - [x] Diagnostic live clone `p201-item-dialogue-texture-20260613-174116` exposed adjacent texture repetition: both item transfer and dialogue used the later Lowwater Bazaar dockworkers texture sentence. That clone is diagnostic-only.
+  - [x] Final fresh zero-turn clone `p201-item-dialogue-texture-final-20260613-174545` from source `p69-item-transfer-045651`, backend `http://localhost:31715`, clean runtime flags on.
+  - [x] Turn 001 action `I hand the Brass Tube to Guide.` accepted one `item_transfer` receipt; player-facing prose used exact first Lowwater Bazaar texture plus settled custody/equip state: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. The Brass Tube passes from Mira Voss to the Guide, now carried at Lowwater Bazaar.`
+  - [x] Turn 002 action `I ask Guide, "Do you have the Brass Tube now?"` accepted one `dialogue_record` receipt; player-facing prose used exact later Lowwater Bazaar texture plus exact accepted Guide quote: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Guide says: "Yes, I have the Brass Tube right here. It's been in my keeping since we arranged it."`
+  - [x] DB proof `output/clean-runtime-p201-item-dialogue-texture-final-20260613-174545/db-proof.json`: 16 assertions pass, 2 clean turn records, one accepted `item_transfer`, one accepted `dialogue_record`, `Brass Tube.owner=Guide`, `worldVersion=1/worldTimeMinutes=0/currentTick=0`, clock ledger 0, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old v2/saga/narrator/oracle/simulation stores all 0.
+  - [x] Prose audit `output/clean-runtime-p201-item-dialogue-texture-final-20260613-174545/prose-audit.json`: 2 narratives, average 35 words, one-token 0, `youOpening` 0, list-like starts 0, repeated exact sentences 0, and all leak/slop/stock summary counters 0.
+- Verification:
+  - [x] GitNexus impact before edits: `proseQualityIssues`, `buildCleanNarrationSystemPrompt`, and `narrationValidationRepairLines` all LOW risk; direct affected flow `runCleanNarration`.
+  - [x] `npm --prefix backend run typecheck`.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 60 passed.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 327 passed.
   - [x] Run GitNexus detect, commit/push/analyze.
 
 P189 clean runtime prose quality pass:
