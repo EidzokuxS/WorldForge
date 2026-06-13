@@ -961,16 +961,19 @@ function sceneObservationReceiptView(): CleanNarratorView {
       {
         ref: "e5",
         authority: "scene_observation_receipt",
-        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
-        text: "Current visible place is Market. Visible actors include Guide. Visible routes include North Hall. Inventory includes Courier satchel.",
+        claimKinds: ["current_scene", "current_location", "visible_actor", "inventory_status", "movement_option"],
+        text: "You are at Market.",
         backendFacts: [
-          { factRef: "e5.f1", text: "Current scene is Market.", exact: true },
-          { factRef: "e5.f2", text: "Visible actor: Guide.", exact: true },
-          { factRef: "e5.f3", text: "Inventory item: Courier satchel.", exact: true },
-          { factRef: "e5.f4", text: "Movement option: North Hall.", exact: true },
+          { factRef: "e5.f1", text: "Scene placement: You are at Market.", exact: true },
+          { factRef: "e5.f2", text: "Scene label: Market.", exact: true },
+          { factRef: "e5.f3", text: "Place label: Market.", exact: true },
+          { factRef: "e5.f4", text: "Visible actor labels: Guide.", exact: true },
+          { factRef: "e5.f5", text: "Inventory labels: Courier satchel.", exact: true },
+          { factRef: "e5.f6", text: "Route choices beat: From Market, visible route choices are North Hall.", exact: true },
+          { factRef: "e5.f7", text: "Route choice labels: North Hall.", exact: true },
         ],
         limits: {
-          proves: ["accepted current visible scene observation result"],
+          proves: ["accepted current visible scene observation result", "scene observation phrasing for the player"],
           doesNotProve: ["hidden discovery", "movement", "item state", "dialogue content"],
         },
       },
@@ -1578,6 +1581,28 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Scene-frame route prompt input requires accepted Route choices beat evidence.");
     expect(() => renderCleanAuthorityProjection(oldFactView))
       .toThrow("Route-options projection requires accepted Route choices beat evidence.");
+  });
+
+  it("fails scene_observation receipt handling when accepted story evidence is missing", () => {
+    const oldFactView = sceneObservationReceiptView();
+    const receiptIndex = oldFactView.acceptedEvidence.findIndex((entry) =>
+      entry.authority === "scene_observation_receipt"
+    );
+    oldFactView.acceptedEvidence[receiptIndex] = {
+      ...oldFactView.acceptedEvidence[receiptIndex]!,
+      text: "Current visible place is Market. Visible actors include Guide. Visible routes include North Hall. Inventory includes Courier satchel.",
+      backendFacts: [
+        { factRef: "e5.f1", text: "Current scene is Market.", exact: true },
+        { factRef: "e5.f2", text: "Visible actor: Guide.", exact: true },
+        { factRef: "e5.f3", text: "Inventory item: Courier satchel.", exact: true },
+        { factRef: "e5.f4", text: "Movement option: North Hall.", exact: true },
+      ],
+    };
+
+    expect(() => buildCleanNarratorPromptInput(oldFactView))
+      .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
+    expect(() => renderCleanAuthorityProjection(oldFactView))
+      .toThrow("Scene-observation prompt input requires accepted Scene placement evidence.");
   });
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
@@ -3349,7 +3374,7 @@ describe("clean Stage 6 narration contracts", () => {
         return acceptedCandidate(view, [{
           text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
           evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+          backendFactRefs: ["e5.f2", "e5.f3", "e5.f4", "e5.f5", "e5.f6", "e5.f7"],
           claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
         }]);
       },
@@ -3365,7 +3390,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Current scene is Market. Visible actor: Guide. Inventory item: Courier satchel. Movement option: North Hall.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
@@ -3378,7 +3403,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "You look across Market and spot Guide beside Courier satchel and North Hall.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
@@ -3393,7 +3418,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Guide stands in Market while Courier satchel and North Hall stay visible.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
@@ -3408,7 +3433,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Market keeps the guide visible beside Courier satchel and North Hall.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
@@ -3424,7 +3449,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(texturedView, [{
         text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+        backendFactRefs: ["e5.f2", "e5.f3", "e5.f4", "e5.f5", "e5.f6", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
@@ -3447,7 +3472,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is a visible route choice.",
           evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f1", "e5.f2", "e5.f3", "e5.f4"],
+          backendFactRefs: ["e5.f2", "e5.f3", "e5.f4", "e5.f5", "e5.f6", "e5.f7"],
           claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
         },
       ]),

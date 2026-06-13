@@ -382,6 +382,7 @@ function maxPromptBackendFactsForEvidence(evidence: AcceptedNarrationEvidence): 
 function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
   assertRouteOptionsReceiptStoryEvidence(evidence);
   assertSceneFrameRouteStoryEvidence(evidence);
+  assertSceneObservationStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
@@ -672,14 +673,16 @@ function directSceneActorLabels(view: CleanNarratorView): string[] {
       isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("visible_actor") || evidence.claimKinds.includes("visible_target"))
     )
-    .flatMap((evidence) => evidence.backendFacts)
-    .map((fact) => {
+    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) => {
+      if (fact.text.startsWith("Visible actor labels: ")) {
+        return splitEvidenceLabels(fact.text.slice("Visible actor labels: ".length));
+      }
       if (fact.text.startsWith("Visible actor: ")) {
-        return trimSentencePeriod(fact.text.replace(/^Visible actor:\s*/u, ""));
+        return [trimSentencePeriod(fact.text.slice("Visible actor: ".length))];
       }
       const target = parseVisibleTargetFact(fact.text);
-      return target?.kind === "actor" ? target.label : "";
-    })
+      return target?.kind === "actor" ? [target.label] : [];
+    }))
     .filter((label) => label.length > 0));
 }
 
@@ -689,14 +692,16 @@ function directSceneObjectLabels(view: CleanNarratorView): string[] {
       isDirectSceneEvidence(evidence)
       && (evidence.claimKinds.includes("inventory_status") || evidence.claimKinds.includes("visible_target"))
     )
-    .flatMap((evidence) => evidence.backendFacts)
-    .map((fact) => {
+    .flatMap((evidence) => evidence.backendFacts.flatMap((fact) => {
+      if (fact.text.startsWith("Inventory labels: ")) {
+        return splitEvidenceLabels(fact.text.slice("Inventory labels: ".length));
+      }
       if (fact.text.startsWith("Inventory item: ")) {
-        return trimSentencePeriod(fact.text.replace(/^Inventory item:\s*/u, ""));
+        return [trimSentencePeriod(fact.text.slice("Inventory item: ".length))];
       }
       const target = parseVisibleTargetFact(fact.text);
-      return target?.kind === "item" || target?.kind === "place_handle" ? target.label : "";
-    })
+      return target?.kind === "item" || target?.kind === "place_handle" ? [target.label] : [];
+    }))
     .filter((label) => label.length > 0));
 }
 
@@ -725,26 +730,35 @@ function directSceneUsesUnsupportedItemHandling(view: CleanNarratorView, text: s
 }
 
 function directSceneFactLabels(text: string): string[] {
-  if (text.startsWith("Current scene is ")) {
-    return [trimSentencePeriod(text.replace(/^Current scene is\s*/u, ""))];
+  if (text.startsWith("Scene label: ")) {
+    return [trimSentencePeriod(text.slice("Scene label: ".length))];
   }
-  if (text.startsWith("Current place is ")) {
-    return [trimSentencePeriod(text.replace(/^Current place is\s*/u, ""))];
+  if (text.startsWith("Place label: ")) {
+    return [trimSentencePeriod(text.slice("Place label: ".length))];
   }
-  if (text.startsWith("Visible actor: ")) {
-    return [trimSentencePeriod(text.replace(/^Visible actor:\s*/u, ""))];
+  if (text.startsWith("Visible actor labels: ")) {
+    return splitEvidenceLabels(text.slice("Visible actor labels: ".length));
   }
-  if (text.startsWith("Inventory item: ")) {
-    return [trimSentencePeriod(text.replace(/^Inventory item:\s*/u, ""))];
+  if (text.startsWith("Inventory labels: ")) {
+    return splitEvidenceLabels(text.slice("Inventory labels: ".length));
   }
-  const visibleTarget = parseVisibleTargetFact(text);
-  if (visibleTarget) return [visibleTarget.label];
   if (text.startsWith("Route choice labels: ")) {
     return splitRouteChoiceLabels(text.slice("Route choice labels: ".length));
   }
-  if (text.startsWith("Movement option: ")) {
-    return [trimSentencePeriod(text.replace(/^Movement option:\s*/u, ""))];
+  if (text.startsWith("Current scene is ")) {
+    return [trimSentencePeriod(text.slice("Current scene is ".length))];
   }
+  if (text.startsWith("Current place is ")) {
+    return [trimSentencePeriod(text.slice("Current place is ".length))];
+  }
+  if (text.startsWith("Visible actor: ")) {
+    return [trimSentencePeriod(text.slice("Visible actor: ".length))];
+  }
+  if (text.startsWith("Inventory item: ")) {
+    return [trimSentencePeriod(text.slice("Inventory item: ".length))];
+  }
+  const visibleTarget = parseVisibleTargetFact(text);
+  if (visibleTarget) return [visibleTarget.label];
   return [];
 }
 
@@ -1839,13 +1853,17 @@ function factValue(evidence: AcceptedNarrationEvidence, prefix: string): string 
   return trimSentencePeriod(fact.text.slice(prefix.length));
 }
 
-function splitRouteChoiceLabels(value: string): string[] {
+function splitEvidenceLabels(value: string): string[] {
   const compact = trimSentencePeriod(value).trim();
   if (compact.length === 0 || compact === "none") return [];
   return uniqueStrings(compact
     .split(";")
     .map((label) => label.trim())
     .filter((label) => label.length > 0 && label !== "none"));
+}
+
+function splitRouteChoiceLabels(value: string): string[] {
+  return splitEvidenceLabels(value);
 }
 
 function assertRouteOptionsReceiptStoryEvidence(evidence: AcceptedNarrationEvidence): void {
@@ -1868,6 +1886,16 @@ function assertSceneFrameRouteStoryEvidence(evidence: AcceptedNarrationEvidence)
   }
   if (factValue(evidence, "Route choice labels: ") === null) {
     throw new Error("Scene-frame route prompt input requires accepted Route choice labels evidence.");
+  }
+}
+
+function assertSceneObservationStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "scene_observation_receipt") return;
+  if (!factValue(evidence, "Scene placement: ")) {
+    throw new Error("Scene-observation prompt input requires accepted Scene placement evidence.");
+  }
+  if (factValue(evidence, "Scene label: ") === null) {
+    throw new Error("Scene-observation prompt input requires accepted Scene label evidence.");
   }
 }
 
@@ -1921,31 +1949,47 @@ function renderRouteStatusProjection(
 
 function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | null {
   const sceneFacts = view.acceptedEvidence
-    .filter((evidence) => evidence.authority === "scene_frame_snapshot");
+    .filter(isDirectSceneEvidence)
+    .sort((left, right) =>
+      Number(right.authority === "scene_observation_receipt") - Number(left.authority === "scene_observation_receipt")
+    );
   if (sceneFacts.length === 0) return null;
 
-  const currentScene = sceneFacts
-    .flatMap((evidence) => evidence.backendFacts)
-    .find((entry) => entry.text.startsWith("Current scene is "))
-    ?.text.replace(/^Current scene is /u, "").replace(/\.$/u, "");
-  const currentPlace = sceneFacts
-    .flatMap((evidence) => evidence.backendFacts)
-    .find((entry) => entry.text.startsWith("Current place is "))
-    ?.text.replace(/^Current place is /u, "").replace(/\.$/u, "");
-  const actors = sceneFacts
-    .flatMap((evidence) => evidence.backendFacts)
-    .filter((entry) => entry.text.startsWith("Visible actor: "))
-    .map((entry) => trimSentencePeriod(entry.text.replace(/^Visible actor:\s*/u, "")));
-  const inventory = sceneFacts
-    .flatMap((evidence) => evidence.backendFacts)
-    .filter((entry) => entry.text.startsWith("Inventory item: "))
-    .map((entry) => trimSentencePeriod(entry.text.replace(/^Inventory item:\s*/u, "")));
-  const routeOptionLabels = sceneFacts
+  const firstFactValue = (prefix: string): string | null => {
+    for (const evidence of sceneFacts) {
+      const value = factValue(evidence, prefix);
+      if (value !== null) return value;
+    }
+    return null;
+  };
+  const labelsFromFacts = (prefix: string): string[] => sceneFacts.flatMap((evidence) => {
+    const labels = factValue(evidence, prefix);
+    return labels === null ? [] : splitEvidenceLabels(labels);
+  });
+
+  const currentScene = firstFactValue("Scene label: ") ?? firstFactValue("Current scene is ");
+  const currentPlace = firstFactValue("Place label: ") ?? firstFactValue("Current place is ");
+  const actors = uniqueStrings([
+    ...labelsFromFacts("Visible actor labels: "),
+    ...sceneFacts
+      .flatMap((evidence) => evidence.backendFacts)
+      .filter((entry) => entry.text.startsWith("Visible actor: "))
+      .map((entry) => trimSentencePeriod(entry.text.slice("Visible actor: ".length))),
+  ]);
+  const inventory = uniqueStrings([
+    ...labelsFromFacts("Inventory labels: "),
+    ...sceneFacts
+      .flatMap((evidence) => evidence.backendFacts)
+      .filter((entry) => entry.text.startsWith("Inventory item: "))
+      .map((entry) => trimSentencePeriod(entry.text.slice("Inventory item: ".length))),
+  ]);
+  const visibleSceneFacts = labelsFromFacts("Visible scene facts: ");
+  const routeOptionLabels = uniqueStrings(sceneFacts
     .filter((evidence) => evidence.claimKinds.includes("movement_option"))
     .flatMap((evidence) => {
       const labels = factValue(evidence, "Route choice labels: ");
       return labels === null ? [] : splitRouteChoiceLabels(labels);
-    });
+    }));
   const alreadyNamed = new Set([
     ...actors,
     ...inventory,
@@ -1957,11 +2001,12 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     .filter((target): target is NonNullable<typeof target> => target !== null)
     .map((target) => target.label)
     .filter((label) => !alreadyNamed.has(label.toLocaleLowerCase("en-US")));
+  const routeFacts = sceneFacts
+    .filter((evidence) => evidence.claimKinds.includes("movement_option"))
+    .flatMap((evidence) => evidence.backendFacts);
   const routeEvidence: AcceptedNarrationEvidence = {
     ...sceneFacts[0]!,
-    backendFacts: sceneFacts
-      .filter((evidence) => evidence.claimKinds.includes("movement_option"))
-      .flatMap((evidence) => evidence.backendFacts),
+    backendFacts: routeFacts,
   };
   const sentences: string[] = [];
   if (currentScene && currentPlace && currentScene !== currentPlace) {
@@ -1971,10 +2016,13 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
   } else if (currentPlace) {
     sentences.push(`You are at ${currentPlace}.`);
   }
+  for (const visibleFact of visibleSceneFacts) {
+    sentences.push(`${visibleFact}.`);
+  }
   if (actors.length > 0) sentences.push(`${englishList(actors)} ${actors.length === 1 ? "is" : "are"} here.`);
   if (inventory.length > 0) sentences.push(`You have ${englishList(inventory)}.`);
   if (targets.length > 0) sentences.push(`${englishList(targets)} ${targets.length === 1 ? "is" : "are"} visible.`);
-  if (routeEvidence.backendFacts.length > 0) sentences.push(renderRouteOptionsProjection(routeEvidence));
+  if (routeFacts.length > 0) sentences.push(renderRouteOptionsProjection(routeEvidence));
   return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
@@ -2177,7 +2225,10 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.authority === "scene_observation_receipt"
   );
   if (observation) {
-    return observation.backendFacts.map((entry) => entry.text).join(" ");
+    assertSceneObservationStoryEvidence(observation);
+    const rendered = renderSceneFrameSnapshotProjection(view);
+    if (rendered) return rendered;
+    throw new Error("Scene-observation projection requires accepted direct-scene evidence.");
   }
 
   const elapsed = view.acceptedEvidence.find((evidence) =>

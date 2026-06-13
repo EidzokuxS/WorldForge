@@ -6473,7 +6473,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update Stage 6 direct-scene projection and direct-scene label validation to read `Route choice labels` / `Route choices beat` without parsing route prose.
     - [x] Remove `parseRouteOptionFact` once no route path depends on it.
     - [x] Add focused tests proving direct-scene snapshot routes preserve exact labels/costs and old string-shaped snapshot route facts no longer drive route projection.
-    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+    - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
   - Results:
     - [x] GitNexus impacts before edits: `stage4Evidence` LOW, `routeChoicesBeat` LOW, `renderSceneFrameSnapshotProjection` LOW, `parseRouteOptionFact` LOW, `renderRouteOptionsProjection` LOW, `preferredPromptFacts` LOW, `directSceneFactLabel` LOW, `directSceneVerbatimLabels` LOW, and `proseQualityIssues` LOW.
     - [x] Direct `scene_frame_snapshot` movement-option evidence now emits `Route choices beat`, `Route origin`, `Route choice labels`, `Open route labels`, `Closed route labels`, and `Route choice travel costs` from typed `AuthoritativeSceneFrame.movementOptions`.
@@ -6481,3 +6481,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `parseRouteOptionFact` was removed from Stage 6; old `Route option: ...` survives only as a receipt leak marker and negative test fixture.
     - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 86 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` and `renderCleanAuthorityProjection`.
+
+- P223 Stage 6 scene-observation receipt story evidence:
+  - Plan:
+    - [x] Run GitNexus impact before editing scene-observation settlement/projection/direct-scene guard symbols.
+    - [x] Replace `scene_observation_receipt` raw backend facts (`Current scene is`, `Visible actor:`, `Inventory item:`, `Movement option:`) with aggregate story facts derived from typed `publicResult.visibleObservation`.
+    - [x] Make Stage 6 projection for `scene_observation_receipt` reuse the direct-scene projection path instead of joining backend facts.
+    - [x] Update direct-scene label guards to read aggregate actor/inventory/route labels without decoding raw fact labels.
+    - [x] Add tests proving broad scene observation keeps scene/actor/inventory/route labels and rejects old raw scene-observation facts as projection input.
+    - [ ] Run focused narration, settlement, contracts, Stage 4, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] `scene_observation_receipt` now emits `Scene placement`, `Scene label`, `Place label`, aggregate visible actor/inventory/fact labels, and route choice beat/labels from typed `visibleObservation`.
+    - [x] Stage 6 prompt/projection rejects old raw scene-observation facts before rendering instead of joining backend facts.
+    - [x] Focused clean-runtime checks passed: `gameplay-cycle-runtime-narration` -> 87 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus staged `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` and `renderCleanAuthorityProjection`.

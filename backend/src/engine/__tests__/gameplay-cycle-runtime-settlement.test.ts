@@ -1773,7 +1773,18 @@ describe("clean Stage 5 settlement contracts", () => {
       "movement_option",
     ]);
     expect(observation?.backendFacts).toHaveLength(8);
-    expect(observation?.backendFacts.at(-1)?.text).toBe("Visible actor: Courier.");
+    expect(observation?.text).toBe("You are at Market.");
+    expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Scene placement: You are at Market.",
+      "Scene label: Market.",
+      "Place label: Market.",
+      "Visible actor labels: Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier.",
+      "Visible scene facts: Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge.",
+      "Inventory labels: Brass Tube; Field Notebook; Pocket Lens; Token Pouch.",
+      "Route choices beat: From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
+      "Route choice labels: North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door.",
+    ]);
+    expect(observation?.limits.proves).toContain("scene observation phrasing for the player");
     const routes = packet.acceptedEvidence.find((entry) => entry.authority === "route_options_receipt");
     expect(routes?.text).toBe("From Market, visible route choices are North Hall (1 minute), South Arcade (2 minutes), East Gate (2 minutes), West Stairs (3 minutes), Canal Walk (4 minutes), Archive Door (closed), Clock Yard (5 minutes), Glasshouse (6 minutes).");
     expect(routes?.backendFacts.map((entry) => entry.text)).toEqual([

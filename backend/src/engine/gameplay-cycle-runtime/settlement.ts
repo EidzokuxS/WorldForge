@@ -402,6 +402,24 @@ function evidenceLabelList(labels: readonly string[]): string {
   return uniqueStrings(labels).join(", ");
 }
 
+function trimTrailingSentencePunctuation(value: string): string {
+  let compact = value.trim();
+  while (compact.endsWith(".") || compact.endsWith("!") || compact.endsWith("?")) {
+    compact = compact.slice(0, -1).trimEnd();
+  }
+  return compact;
+}
+
+function evidenceSemicolonList(labels: readonly string[]): string {
+  return uniqueStrings(labels.map(trimTrailingSentencePunctuation).filter((label) => label.length > 0)).join("; ");
+}
+
+function scenePlacementText(currentScene: string, currentLocation: string): string {
+  return currentScene === currentLocation
+    ? `You are at ${currentScene}.`
+    : `You are at ${currentScene}, inside ${currentLocation}.`;
+}
+
 function routeTravelCostPhrase(travelCost: number | null): string {
   if (travelCost === null) return "travel time unlisted";
   const unit = travelCost === 1 ? "minute" : "minutes";
@@ -421,6 +439,14 @@ function routeChoicesBeat(originLabel: string, boundedOptions: readonly CleanRou
     return `No visible route choices are listed from ${originLabel}.`;
   }
   return `From ${originLabel}, visible route choices are ${evidenceLabelList(boundedOptions.map(routeChoiceDisplay))}.`;
+}
+
+function routeChoiceLabelsBeat(originLabel: string, labels: readonly string[]): string {
+  const routeLabels = uniqueStrings(labels);
+  if (routeLabels.length === 0) {
+    return `No visible route choices are listed from ${originLabel}.`;
+  }
+  return `From ${originLabel}, visible route choices are ${evidenceLabelList(routeLabels)}.`;
 }
 
 function compactSceneTexture(value: string | null | undefined): string | null {
@@ -735,33 +761,46 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "scene_observation_receipt" && receipt.publicResult.visibleObservation) {
       const evidenceId = nextEvidenceId(evidence);
       const observation = receipt.publicResult.visibleObservation;
-      const backendFacts = [
-        fact(evidenceId, 1, `Current scene is ${observation.currentScene}.`),
-        fact(evidenceId, 2, `Current place is ${observation.currentLocation}.`),
-        ...observation.visibleActors.slice(0, 6).map((label, index) =>
-          fact(evidenceId, index + 3, `Visible actor: ${label}.`)
-        ),
-        ...observation.visibleFacts.slice(0, 4).map((summary, index) =>
-          fact(evidenceId, index + 9, summary)
-        ),
-        ...observation.inventory.slice(0, 4).map((label, index) =>
-          fact(evidenceId, index + 13, `Inventory item: ${label}.`)
-        ),
-        ...observation.movementOptions.slice(0, 6).map((label, index) =>
-          fact(evidenceId, index + 17, `Movement option: ${label}.`)
-        ),
-      ];
+      const scenePlacement = scenePlacementText(observation.currentScene, observation.currentLocation);
+      const routeBeat = routeChoiceLabelsBeat(observation.currentScene, observation.movementOptions);
+      const claimKinds: CleanSettledEvidence["claimKinds"] = ["current_scene", "current_location"];
+      if (observation.visibleActors.length > 0) claimKinds.push("visible_actor");
+      if (observation.visibleFacts.length > 0) claimKinds.push("visible_fact");
+      if (observation.inventory.length > 0) claimKinds.push("inventory_status");
+      if (observation.movementOptions.length > 0) claimKinds.push("movement_option");
+      const backendFactTexts = [
+        `Scene placement: ${scenePlacement}`,
+        `Scene label: ${observation.currentScene}.`,
+        `Place label: ${observation.currentLocation}.`,
+        observation.visibleActors.length > 0
+          ? `Visible actor labels: ${evidenceSemicolonList(observation.visibleActors)}.`
+          : null,
+        observation.visibleFacts.length > 0
+          ? `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.`
+          : null,
+        observation.inventory.length > 0
+          ? `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.`
+          : null,
+        observation.movementOptions.length > 0
+          ? `Route choices beat: ${routeBeat}`
+          : null,
+        observation.movementOptions.length > 0
+          ? `Route choice labels: ${evidenceSemicolonList(observation.movementOptions)}.`
+          : null,
+      ].filter((text): text is string => text !== null);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "scene_observation_receipt",
-        claimKinds: ["current_scene", "current_location", "visible_actor", "visible_fact", "inventory_status", "movement_option"],
-        text: receipt.publicResult.summary,
+        claimKinds,
+        text: scenePlacement,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: boundedBackendFacts(backendFacts),
+        backendFacts: boundedBackendFacts(backendFactTexts.map((text, index) =>
+          fact(evidenceId, index + 1, text)
+        )),
         limits: {
-          proves: ["current visible scene entries"],
+          proves: ["current visible scene entries", "scene observation phrasing for the player"],
           doesNotProve: SCENE_DOES_NOT_PROVE,
         },
       });
