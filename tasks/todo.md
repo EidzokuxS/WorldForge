@@ -6257,3 +6257,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 344 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk: indexed changed symbol `buildCleanNarrationSystemPrompt`, no affected processes.
+
+- P211 Stage 6 structured story frame prompt input:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 prompt-input symbols.
+    - [x] Add a `storyFrame` to `CleanNarratorPromptInput` derived only from selected accepted evidence.
+    - [x] Split `storyFrame` into compressed `currentContext` entries and authoritative `turnEvents` entries using structured evidence authority/claim kinds.
+    - [x] Teach the Stage 6 system prompt to write from `storyFrame` while keeping accepted evidence refs/backend fact refs as the proof contract.
+    - [x] Add tests proving movement/dialogue/oracle prompt inputs expose event summary plus context without adding authority.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts before edits: `buildCleanNarratorPromptInput` LOW -> `runCleanNarration`, `buildCleanNarrationPrompt` LOW -> `runCleanNarration`, `assertCleanNarratorPromptInput` LOW with no upstream expansion; schema symbol is not separately indexed.
+    - [x] `CleanNarratorPromptInput` now carries `storyFrame` with `currentContext` and `turnEvents`, derived only from the selected prompt `acceptedEvidence`.
+    - [x] `storyFrame.currentContext` uses `scene_frame_snapshot` entries; `storyFrame.turnEvents` uses receipt/outcome evidence. Entries preserve evidence ref, authority, claim kinds, summary, backend fact refs, and evidence limits.
+    - [x] Stage 6 system prompt now treats `storyFrame` as compressed current context plus authoritative turn-event summary for sentence flow, while acceptedEvidence refs/backend fact refs remain the proof contract.
+    - [x] Tests cover movement, dialogue-with-scene-anchor, and oracle-outcome story frames without adding new authority beyond accepted evidence.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 80 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 347 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk; hunk attribution listed four touched narration symbols and no affected process expansion.

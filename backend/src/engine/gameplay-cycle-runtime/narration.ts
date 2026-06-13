@@ -399,6 +399,37 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
   return selected;
 }
 
+function cleanNarratorStoryFrameEntry(
+  evidence: AcceptedNarrationEvidence,
+): CleanNarratorPromptInput["storyFrame"]["turnEvents"][number] {
+  return {
+    ref: evidence.ref,
+    authority: evidence.authority,
+    claimKinds: evidence.claimKinds,
+    summary: evidence.text,
+    backendFactRefs: evidence.backendFacts.map((fact) => fact.factRef),
+    limits: evidence.limits,
+  };
+}
+
+function buildCleanNarratorStoryFrame(
+  acceptedEvidence: AcceptedNarrationEvidence[],
+): CleanNarratorPromptInput["storyFrame"] {
+  const currentContext = acceptedEvidence
+    .filter((evidence) => evidence.authority === "scene_frame_snapshot")
+    .map(cleanNarratorStoryFrameEntry);
+  const turnEvents = acceptedEvidence
+    .filter((evidence) => evidence.authority !== "scene_frame_snapshot")
+    .map(cleanNarratorStoryFrameEntry);
+
+  return {
+    version: "gameplay-runtime.clean-narrator-story-frame.v1",
+    source: "derived_from_prompt_accepted_evidence",
+    currentContext,
+    turnEvents,
+  };
+}
+
 function acceptedEvidenceText(view: CleanNarratorView): string {
   return view.acceptedEvidence
     .flatMap((evidence) => [
@@ -1299,6 +1330,7 @@ function proseQualityIssues(input: {
 }
 
 export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNarratorPromptInput {
+  const acceptedEvidence = selectPromptAcceptedEvidence(view);
   return assertCleanNarratorPromptInput({
     version: "gameplay-runtime.clean-narrator-prompt-input.v1",
     packetId: view.packetId,
@@ -1307,7 +1339,8 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     language: view.language,
     languageSource: view.languageSource,
     preserveLabelsVerbatim: view.preserveLabelsVerbatim,
-    acceptedEvidence: selectPromptAcceptedEvidence(view),
+    acceptedEvidence,
+    storyFrame: buildCleanNarratorStoryFrame(acceptedEvidence),
     stepAuditForGrounding: view.stepAuditForGrounding,
     guard: view.guard,
   });
@@ -1335,6 +1368,8 @@ export function buildCleanNarrationSystemPrompt(
     "World-truth source: promptInput.acceptedEvidence[].backendFacts and promptInput.acceptedEvidence[].text.",
     "raw player action is intentionally omitted; write the settled result described by accepted evidence.",
     "Stage authority: narration phrases accepted evidence into player-facing prose.",
+    "Story frame: promptInput.storyFrame.currentContext is compressed current playable context; promptInput.storyFrame.turnEvents is the authoritative summary of what happened this turn. storyFrame derives from promptInput.acceptedEvidence and adds no separate world truth.",
+    "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Style role: write playable text-RPG adventure prose from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
     "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",

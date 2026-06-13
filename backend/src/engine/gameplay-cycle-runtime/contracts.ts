@@ -2342,6 +2342,22 @@ const cleanNarratorAcceptedEvidenceSchema = z.object({
   limits: cleanEvidenceLimitSchema,
 }).strict();
 
+const cleanNarratorStoryFrameEntrySchema = z.object({
+  ref: shortText,
+  authority: cleanSettledEvidenceAuthoritySchema,
+  claimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+  summary: shortText,
+  backendFactRefs: z.array(shortText).min(1).max(8),
+  limits: cleanEvidenceLimitSchema,
+}).strict();
+
+const cleanNarratorStoryFrameSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-story-frame.v1"),
+  source: z.literal("derived_from_prompt_accepted_evidence"),
+  currentContext: z.array(cleanNarratorStoryFrameEntrySchema).max(24),
+  turnEvents: z.array(cleanNarratorStoryFrameEntrySchema).max(24),
+}).strict();
+
 const cleanNarratorAuditNoticeSchema = z.object({
   stepId: gmActionChecklistStepIdSchema,
   status: z.enum(["failed", "skipped"]),
@@ -2398,6 +2414,7 @@ export const cleanNarratorPromptInputSchema = z.object({
   languageSource: z.literal("derived_from_player_action_without_prompting_raw_action"),
   preserveLabelsVerbatim: z.literal(true),
   acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
+  storyFrame: cleanNarratorStoryFrameSchema,
   stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
   guard: cleanNarratorGuardSchema,
 }).strict();

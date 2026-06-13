@@ -9,6 +9,7 @@ import {
   type JudgeUncertainty,
 } from "../gameplay-cycle-runtime/contracts.js";
 import {
+  buildCleanNarrationPrompt,
   buildCleanNarrationSystemPrompt,
   buildCleanNarratorPromptInput,
   CleanNarrationGenerationError,
@@ -1176,6 +1177,69 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.language).toBe("en");
     expect(promptInput.languageSource).toBe("derived_from_player_action_without_prompting_raw_action");
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
+    expect(promptInput.storyFrame.version).toBe("gameplay-runtime.clean-narrator-story-frame.v1");
+    expect(promptInput.storyFrame.source).toBe("derived_from_prompt_accepted_evidence");
+  });
+
+  it("builds a structured story frame from prompt accepted evidence", () => {
+    const promptInput = buildCleanNarratorPromptInput(dialogueWithSceneFrameSnapshotView());
+    const prompt = buildCleanNarrationPrompt(promptInput);
+
+    expect(prompt).toContain('"storyFrame"');
+    expect(promptInput.storyFrame.turnEvents.map((entry) => entry.ref)).toEqual(["e5"]);
+    expect(promptInput.storyFrame.turnEvents[0]).toEqual({
+      ref: "e5",
+      authority: "terminal_dialogue_receipt",
+      claimKinds: ["dialogue_response"],
+      summary: 'Guide says: "The north stairs flooded before dawn."',
+      backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+      limits: {
+        proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+        doesNotProve: ["truth of speaker claim", "durable world fact", "movement", "arrival"],
+      },
+    });
+    expect(promptInput.storyFrame.currentContext.map((entry) => entry.ref)).toEqual(["e1"]);
+    expect(promptInput.storyFrame.currentContext[0]?.claimKinds).toEqual(["current_scene", "current_location"]);
+    expect(promptInput.storyFrame.currentContext[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+  });
+
+  it("keeps movement receipts as authoritative turn events", () => {
+    const promptInput = buildCleanNarratorPromptInput(movementView());
+
+    expect(promptInput.storyFrame.currentContext).toEqual([]);
+    expect(promptInput.storyFrame.turnEvents.map((entry) => entry.ref)).toEqual(["e1"]);
+    expect(promptInput.storyFrame.turnEvents[0]?.claimKinds).toEqual(["player_location_change", "elapsed_time"]);
+    expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("Player location changed to North Hall.");
+    expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+  });
+
+  it("keeps oracle outcomes as turn events without inventing context", () => {
+    const promptInput = buildCleanNarratorPromptInput(oracleOutcomeView());
+
+    expect(promptInput.storyFrame.currentContext).toEqual([]);
+    expect(promptInput.storyFrame.turnEvents).toEqual([{
+      ref: "e1",
+      authority: "oracle_visible_outcome",
+      claimKinds: ["oracle_outcome"],
+      summary: "The loose grate holds under your weight.",
+      backendFactRefs: ["e1.f1"],
+      limits: {
+        proves: ["selected visible uncertainty outcome"],
+        doesNotProve: [
+          "movement",
+          "arrival",
+          "route_state",
+          "discovery",
+          "location_reveal",
+          "item_state",
+          "npc_private_knowledge",
+          "actor_creation",
+          "world_fact",
+          "absence_or_no_change",
+          "condition_or_hp_change",
+        ],
+      },
+    }]);
   });
 
   it("narrows literary receipt prompt input to terminal evidence and scene anchors", () => {
