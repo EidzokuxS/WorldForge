@@ -6685,3 +6685,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no changed indexed symbols or affected flows.
     - [x] Pushed commit `77771e64`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
+
+- P237 Stage 6 stylistic prompt banlist removal:
+  - Plan:
+    - [x] Run GitNexus impact before editing `buildCleanNarrationSystemPrompt`.
+    - [x] Remove the `Shape pass` donor-style banlist from the clean narration system prompt.
+    - [x] Keep positive prompt obligations for accepted evidence, typed facts, evidence limits, citation shape, and concrete player-facing prose.
+    - [x] Update focused prompt tests so they no longer require the stylistic banlist line.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] Removed the `Shape pass` donor-style instruction from `buildCleanNarrationSystemPrompt`.
+    - [x] Prompt keeps positive obligations for accepted evidence, citation shape, evidence limits, concrete prose foundation, echo firewall, texture scope, and door rotation.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no changed indexed symbols or affected flows.
+    - [x] Pushed commit `8909b91f`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
