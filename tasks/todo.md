@@ -5412,3 +5412,43 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Manual-chosen action after preflight inspection: `I hand the Brass Tube to Guide.`.
     - [x] SSE `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; world time/current tick stayed `0/0`; turn input base matched the authoritative preflight clock row; no turn clock ledger; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; settlement includes `item_transfer_receipt` accepted evidence with claim kind `item_state`; old stores all 0; narration is multi-token.
     - [x] DB verification artifact: `output/clean-runtime-p171-authoritative-clock-proof-20260613/db-verification.json` with all checks passing.
+
+- P172 clean gameplay runtime post-P171 Acceptance-Candidate Lane A / fresh clone 0 -> 20:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p172-post-p171-acceptance-a-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative `world_clocks` row `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carried `Brass Tube`, clean runtime stores zero, old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Run stable backend with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true`, `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`, port `31702`.
+    - [x] Execute turns 001-020 one action at a time from inspected post-turn state; actions were chosen manually by Codex after reading current DB/world state.
+    - [x] Persist per-turn artifacts under `output/clean-runtime-p172-post-p171-acceptance-a-20260613/turn-001/` through `turn-020/`.
+  - Review / evidence:
+    - [x] Artifact root: `output/clean-runtime-p172-post-p171-acceptance-a-20260613/`.
+    - [x] Turn 001 broad look at `Lowwater Bazaar` passed: direct scene snapshot, no Stage4 receipt, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 002 asked `Guide` for first route advice: accepted `dialogue_record`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 003 handed `Brass Tube` to `Guide`: accepted `item_transfer`, `Brass Tube.owner=Guide`, `worldVersion 0 -> 1`, world time/current tick stayed `0/0`, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores zero.
+    - [x] Turn 004 asked `Guide` whether they had `Brass Tube`: accepted `dialogue_record`, DB custody remained `Guide`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 005 moved to `Slip Twelve Berth`: accepted `movement`, authority trace `gameplay-cycle-runtime.player.move.v1`, one travel ledger row, clock `1/0/0 -> 2/1/1`, current-scene actors refreshed to `Litha Corsen` and `Sigil Boss Torvin Kask`, old stores zero.
+    - [x] Turn 006 route-check to `The Copper Tap`: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 007 broad look at `Slip Twelve Berth` passed: bounded scene projection, no Stage4 receipt, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 008 dialogue with `Litha Corsen` passed: accepted `dialogue_record`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 009 kept hands visible: accepted `condition_set`, authority trace `gameplay-cycle-runtime.player.condition_set.v1`, `worldVersion 2 -> 3`, world time/current tick stayed `1/1`, old stores zero.
+    - [x] Turn 010 dialogue with `Sigil Boss Torvin Kask` passed: accepted `dialogue_record`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 011 moved to `The Copper Tap`: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, travel ledger row, clock `3/1/1 -> 4/2/2`, current-scene actors refreshed to `Old Route Hand Sessik` and `Tap-Keeper Brost`, old stores zero.
+    - [x] Turn 012 broad look at `The Copper Tap` passed: direct scene snapshot, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 013 listed routes from `The Copper Tap`: accepted `route_options` for `Lowwater Bazaar`, `Silt Warrens`, and `Slip Twelve Berth`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 014 dialogue with `Tap-Keeper Brost` passed: accepted `dialogue_record`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 015 dialogue with `Old Route Hand Sessik` passed: accepted `dialogue_record`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 016 moved to `Silt Warrens`: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, travel ledger row, clock `4/2/2 -> 5/3/3`, exact-scene actor list empty, old stores zero.
+    - [x] Turn 017 broad look at `Silt Warrens` passed: direct scene snapshot, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 018 route-check to `Transmission Basement`: accepted `route_check`, `routeStatus=connected`, no mutation/clock/ledger/trace, old stores zero.
+    - [x] Turn 019 moved to `Transmission Basement`: accepted `movement`, trace `gameplay-cycle-runtime.player.move.v1`, travel ledger row, clock `5/3/3 -> 6/4/4`, current-scene actors refreshed to `Relay-Tech Dorin` and `Venn the Borrowed`, old stores zero.
+    - [x] Turn 020 broad look at `Transmission Basement` passed: bounded scene projection, no Stage4 receipt, no mutation/clock/ledger/trace, old stores zero.
+  - Verification executed:
+    - [x] `git status --short --branch` at start showed `codex/rebuild-gm-turn-cycle` synced with origin.
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] Per-turn verifier checks passed for turns 001-020: `done.runtime=gameplay-cycle-runtime`, one new clean turn record, one chat exchange, accepted-only new receipts, multi-token narration, zero restore ledger, zero old v2/saga/narrator/oracle/simulation store rows, and no public internal runtime tokens.
+    - [x] Final DB state after turn 020: 20 clean turn records, 15 Stage4 receipts, 6 authority traces, 4 travel clock ledger rows, world clock `worldVersion=6`, `worldTimeMinutes=4`, `currentTick=4`, player at `Transmission Basement`, `Brass Tube.owner=Guide`, old stores zero.
+  - Status impact:
+    - P172 is clean through 20/60 on a fresh post-P171 zero-turn clone. It is acceptance-candidate evidence only; final acceptance remains 0% until several different fresh post-repair zero-turn campaigns/clones each reach about 60 clean manual turns with zero failed, replayed, restored, or invalid player-facing turns.
+  - Next scoped work:
+    - [ ] Continue P172 from turn 021 to turn 060 by choosing each action from inspected current state.
+    - [ ] Run focused clean-runtime tests after the 60-turn lane segment or sooner if any runtime fallout appears.
