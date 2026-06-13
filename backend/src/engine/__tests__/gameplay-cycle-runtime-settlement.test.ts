@@ -728,7 +728,15 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(movement).toMatchObject({
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
+      text: "After 1 minute, you reach North Hall.",
     });
+    expect(movement?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Travel beat: After 1 minute, you reach North Hall.",
+      "Destination label: North Hall.",
+      "Elapsed travel time: 1 minute.",
+      "Current place after movement: North Hall.",
+    ]);
+    expect(movement?.limits.proves).toContain("movement result phrasing for the player");
     expect(JSON.stringify(view)).not.toContain("player-1");
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
     expect(JSON.stringify(view)).not.toContain("privateResult");

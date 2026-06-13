@@ -639,20 +639,28 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "terminal_mutation_receipt" && receipt.publicResult.locationChange) {
       const evidenceId = nextEvidenceId(evidence);
       const location = receipt.publicResult.locationChange.locationName;
+      const travelCost = receipt.publicResult.locationChange.travelCost;
+      const travelUnit = travelCost === 1 ? "minute" : "minutes";
+      const travelDuration = `${travelCost} ${travelUnit}`;
+      const travelBeat = travelCost > 0
+        ? `After ${travelDuration}, you reach ${location}.`
+        : `You reach ${location}.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "terminal_mutation_receipt",
         claimKinds: ["player_location_change", "elapsed_time"],
-        text: `Player location changed to ${location}.`,
+        text: travelBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, `Player location changed to ${location}.`),
-          fact(evidenceId, 2, `Travel cost: ${receipt.publicResult.locationChange.travelCost} minute(s).`),
+          fact(evidenceId, 1, `Travel beat: ${travelBeat}`),
+          fact(evidenceId, 2, `Destination label: ${location}.`),
+          fact(evidenceId, 3, `Elapsed travel time: ${travelDuration}.`),
+          fact(evidenceId, 4, `Current place after movement: ${location}.`),
         ],
         limits: {
-          proves: ["player location change", "elapsed travel time"],
+          proves: ["player location change", "elapsed travel time", "movement result phrasing for the player"],
           doesNotProve: MOVEMENT_DOES_NOT_PROVE,
         },
       });

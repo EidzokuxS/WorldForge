@@ -6367,3 +6367,27 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Prose audit `prose-audit.json`: 1 narrative, 34 words, zero one-token/debug/enum/summary/digest/slop hits.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+
+- P217 Stage 6 movement story evidence:
+  - Plan:
+    - [x] Start a stable clean-runtime backend from the current worktree.
+    - [x] Create a fresh zero-turn clone, inspect the current route options, and choose one legal movement action from the actual current state.
+    - [x] Capture the live movement narration and DB/receipt proof before editing.
+    - [x] If movement evidence still exposes changelog-shaped facts, add player-facing accepted movement facts derived from the movement receipt.
+    - [x] Keep normal movement on its primary receipt -> storyFrame -> Stage 6 narration path; renderer or model failures remain typed failures, not substitute gameplay UX.
+    - [x] Verify focused tests, typecheck, fixed live proof, prose audit, GitNexus detect, commit/push, and index refresh.
+  - Results:
+    - [x] Baseline proof `output/clean-runtime-p217-movement-story-before-20260613-214601/` showed good player-facing movement prose but raw movement evidence text/facts: `Player location changed...` and `Travel cost...`.
+    - [x] Stage 5 movement settlement now emits narrative-ready accepted evidence: `Travel beat`, `Destination label`, `Elapsed travel time`, and `Current place after movement`; the event summary is `After <time>, you reach <destination>.`
+    - [x] Stage 6 prompt/examples now teach movement from the accepted `Travel beat` contract instead of raw location-change wording.
+    - [x] User no-fallback correction recorded in `tasks/lessons.md`: gameplay primitives have one contract-owned primary result path, and failed stages surface typed failures before commit/response rather than substituting another mechanic or downgraded UX.
+    - [x] Focused settlement test passed: `gameplay-cycle-runtime-settlement.test.ts` -> 20 tests.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 82 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+    - [x] Fresh fixed live proof `output/clean-runtime-p217-movement-story-fixed-20260613-190110/`, clone `p217-movement-story-fixed-20260613-190110`, action `I go to Anchor Chain Pylon.`
+    - [x] Fixed live narration: `A forty-foot iron pylon rises from a cracked granite block in the center of the broken dam, its frame lashed with braided steel cables stretching across the rapids. After one minute, Anchor Chain Pylon takes your weight underfoot.`
+    - [x] DB proof `p217-fixed-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `movement` receipt, one authority trace `gameplay-cycle-runtime.player.move.v1`, `worldVersion/worldTime/currentTick +1/+1/+1`, old v2/saga/narrator/oracle/simulation stores all 0.
+    - [x] Fixed movement evidence no longer contains `Player location changed...` or `Travel cost...`; backend facts are `Travel beat`, `Destination label`, `Elapsed travel time`, and `Current place after movement`.
+    - [x] Prose audit `prose-audit.json`: 1 narrative, 38 words, zero one-token/debug/enum/summary/digest/slop hits.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope: changed indexed symbols `stage4Evidence` and `buildCleanNarrationSystemPrompt`, with no affected process expansion.

@@ -45,13 +45,15 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
-      text: "Player location changed to North Hall.",
+      text: "After 1 minute, you reach North Hall.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Player location changed to North Hall.", exact: true },
-        { factRef: "e1.f2", text: "Travel cost: 1 minute(s).", exact: true },
+        { factRef: "e1.f1", text: "Travel beat: After 1 minute, you reach North Hall.", exact: true },
+        { factRef: "e1.f2", text: "Destination label: North Hall.", exact: true },
+        { factRef: "e1.f3", text: "Elapsed travel time: 1 minute.", exact: true },
+        { factRef: "e1.f4", text: "Current place after movement: North Hall.", exact: true },
       ],
       limits: {
-        proves: ["player location change", "elapsed travel time"],
+        proves: ["player location change", "elapsed travel time", "movement result phrasing for the player"],
         doesNotProve: ["discovery", "absence", "no-change"],
       },
     }],
@@ -80,7 +82,7 @@ function movementCandidate(text = "After one minute, you reach North Hall."): Cl
       kind: "accepted_evidence",
       text,
       evidenceRefs: ["e1"],
-      backendFactRefs: ["e1.f1", "e1.f2"],
+      backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
       claimKinds: ["player_location_change", "elapsed_time"],
       auditStepIds: [],
     }],
@@ -1222,8 +1224,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.turnEvents[0]?.claimKinds).toEqual(["player_location_change", "elapsed_time"]);
     expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("movement_result");
     expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("event_beat");
-    expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("Player location changed to North Hall.");
-    expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+    expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("After 1 minute, you reach North Hall.");
+    expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f3", "e1.f4"]);
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "narrate_turn_event", entryRefs: ["e1"] },
     ]);
@@ -1451,7 +1453,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "After one minute, you reach North Hall.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f2"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
           claimKinds: ["player_location_change", "elapsed_time"],
         },
       ]),
@@ -3848,6 +3850,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Travel beat: After 1 minute, you reach North Hall.");
     expect(buildCleanNarrationSystemPrompt()).toContain("After one minute, North Hall takes your weight underfoot.");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example dialogue with texture:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Rain taps the brass gutters.");
@@ -3858,6 +3861,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Travel beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
