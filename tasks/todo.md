@@ -6757,3 +6757,18 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
     - Executed: code commit `070988c5` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P242 Stage 6 route-options stock-shape regex removal:
+  - Plan:
+    - [x] Inspect `ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE` usage and run GitNexus impact before editing `proseQualityIssues`.
+    - [x] Remove route-options stock prose-shape regex gate from narration acceptance.
+    - [x] Preserve route-options grounding through accepted route labels, costs, refs, claim kinds, and prompt route contracts.
+    - [x] Update focused narration tests so stock-shaped route prose is judged by structured route evidence instead of text shape.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: `ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE` only fed `proseQualityIssues`; GitNexus impact for `proseQualityIssues` reported LOW scope with direct caller `validateCleanNarrationCandidate`.
+    - Executed: removed the route-options stock prose-shape regex and its `prose_quality` issue.
+    - Executed: updated route-options tests so `From here...` route prose with accepted refs/labels/costs is accepted, while movement drift, missing route labels, unsupported texture, and scene_texture ordering guards remain covered.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
+    - Executed: code commit `332dd37f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
