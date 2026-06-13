@@ -6699,3 +6699,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no changed indexed symbols or affected flows.
     - [x] Pushed commit `8909b91f`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
+
+- P238 Stage 6 prompt-safe backend fact values:
+  - Plan:
+    - [x] Run GitNexus impact before editing `buildCleanNarratorPromptInput` and `limitPromptEvidenceFacts`.
+    - [x] Project prompt-facing `backendFacts[].text` from typed `value` when present, preserving `factRef`, `role`, `value`, and `exact`.
+    - [x] Keep settled evidence and narrator-view audit text unchanged; only model prompt input receives player-facing fact wording.
+    - [x] Update focused tests proving prompt input no longer exposes technical receipt labels for value-owned facts.
+    - [x] Run focused narration/settlement/contracts/stage4 tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] `buildCleanNarratorPromptInput` now projects prompt-facing backend facts through `promptSafeBackendFact`: typed `value` becomes model-visible `text`, while `factRef`, `role`, `value`, and `exact` remain intact.
+    - [x] Settled evidence and narrator-view audit facts keep their labeled backend `text`; only prompt input receives value-owned prose material.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests, `settlement` -> 21 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported HIGH because the central `runCleanNarration` prompt-selection path maps through `selectPromptAcceptedEvidence` and `limitPromptEvidenceFacts`; context review found no additional callers beyond `buildCleanNarratorPromptInput` and the covered Stage 6 flow.
+    - [x] Pushed commit `f48763a7`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
