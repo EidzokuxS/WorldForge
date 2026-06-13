@@ -5553,5 +5553,36 @@ Session: `gm-v1-consequenc-slice`.
   - Acceptance status:
     - P177 is a second 60-turn clean-runtime candidate lane by runtime/DB/player-facing gates. Final gameplay-cycle acceptance remains pending because the bar requires several different fresh post-repair zero-turn campaigns/clones at about 60 clean manual turns each.
   - Next scoped work:
-    - [ ] Run GitNexus detect, commit/push the route-list canonicalization repair and evidence docs, then `npx gitnexus analyze --embeddings`.
-    - [ ] Start another fresh post-repair zero-turn clone for the next ~60-turn manual lane.
+    - [x] GitNexus detect, commit/push the route-list canonicalization repair and evidence docs, then `npx gitnexus analyze --embeddings`.
+    - [x] Start another fresh post-repair zero-turn clone for the next ~60-turn lane.
+
+- P178/P179/P180 diagnostics after P177:
+  - P178 fresh clone `p178-post-route-list-canonicalization-acceptance-b-20260613` reached turn 058 clean, then turn 059 action `I check whether the route to Lowwater Bazaar is open, without moving.` settled as `clarification` from `Ground-Floor Barricade`.
+  - P178 route graph evidence showed the current direct edge from `Ground-Floor Barricade` points back to `Resonance Tower`; `Lowwater Bazaar` is one hop beyond `Resonance Tower`. The clone is diagnostic because `db-verification.pass=false` on turn 059.
+  - P179 fresh clone `p179-post-route-list-canonicalization-acceptance-c-20260613` turn 001 gameplay was clean, but the harness expected `Brass Tube.owner=Guide` before the handoff. The correct pre-transfer owner is `Mira Voss`, so the clone is diagnostic.
+  - P180 fresh clone `p180-post-route-list-canonicalization-acceptance-d-20260613` reached turn 028 clean, then turn 029 movement `Upper Dam Ruins -> Lowwater Bazaar` emitted an SSE `error` during GM Read and restored the pre-turn state.
+  - P180 exposed a rollback write-scope leak: no turn record/chat/receipt/trace was committed, the world clock stayed `6/5/5`, but `turn_clock_ledger` gained a `reason_kind='replay_restore'` row for `restore:6:5:5`.
+
+- P181 restore-ledger repair and clean 60-turn candidate lane:
+  - Repair:
+    - [x] Added `auditClockRestore` to restore bundle journals, defaulting to `true` for checkpoint/replay restore audit.
+    - [x] `restoreSnapshot` now passes `auditClockRestore: false` for failed-turn turn-boundary restore, so a failed player turn can restore snapshot state without adding a `replay_restore` clock-ledger marker.
+    - [x] Pending restore journals created before this field remain readable; missing `auditClockRestore` is interpreted as `true`.
+  - Verification:
+    - [x] `npm --prefix backend run typecheck`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/state-snapshot.test.ts src/engine/__tests__/living-world-authority.test.ts` -> 15 passed.
+    - [x] `npm --prefix backend run test -- --run src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/checkpoints.test.ts src/campaign/__tests__/manager.test.ts` -> 74 passed.
+    - [x] Focused clean-runtime suite -> 290 passed.
+  - Live evidence:
+    - [x] Fresh zero-turn clone `p181-post-restore-ledger-repair-acceptance-a-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB: chat history 0, clock `0/0/0`, player at `Lowwater Bazaar`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores zero, old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Backend restarted on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false` after the restore-ledger repair.
+    - [x] Artifact root: `output/clean-runtime-p181-post-restore-ledger-repair-acceptance-a-20260613/`; final audit: `final-lane-summary.json`.
+    - [x] 60/60 per-turn verifier artifacts passed with `done.runtime=gameplay-cycle-runtime`, one new clean turn record per turn, one chat exchange per turn, accepted-only receipts when applicable, multi-token narration, no SSE `error`, and old stores all 0.
+    - [x] The previous P180 failure point succeeded in P181: turn 029 `Upper Dam Ruins -> Lowwater Bazaar` accepted `movement`, moved the player to `Lowwater Bazaar`, and advanced clock to `7/6/6`.
+    - [x] Final DB: 60 clean turn records, 49 accepted Stage4 receipts, 14 authority traces, 13 travel clock-ledger rows, `replayRestoreLedgerRows=0`, restore ledger 0, old stores all 0.
+    - [x] Receipt mix: item_transfer 1, dialogue_record 14, route_check 13, movement 13, route_options 8.
+    - [x] Final clock: `worldVersion=14`, `worldTimeMinutes=13`, `currentTick=13`; final player scene `Resonance Tower`; `Brass Tube.owner=Guide`, `equipState=carried`.
+  - Acceptance status:
+    - P181 is a clean 60-turn runtime/DB/player-facing candidate lane after the restore-ledger repair.
+    - Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.

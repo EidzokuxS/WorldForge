@@ -82,6 +82,7 @@ import {
   clearPendingCommittedEvents,
   rebuildEpisodicEventsFromLocationRecentEvents,
 } from "../../vectors/episodic-events.js";
+import { invalidateAuthorityAfterRestore } from "../living-world-authority.js";
 import fs from "node:fs";
 
 const CAMPAIGN_ID = "test-campaign-123";
@@ -239,6 +240,7 @@ describe("state snapshot rollback bundle", () => {
     );
     expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
     expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(invalidateAuthorityAfterRestore).not.toHaveBeenCalled();
   });
 
   it("D-04/D-05 invalidates stale runtime state before later gameplay reads by closing and reloading the campaign", async () => {

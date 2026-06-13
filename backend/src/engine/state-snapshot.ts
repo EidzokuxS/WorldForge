@@ -46,6 +46,7 @@ export async function restoreSnapshot(
   await restoreCampaignBundle(campaignId, snapshot.bundleDir, {
     includeVectors: false,
     restoreReason: "turn snapshot restored",
+    auditClockRestore: false,
   });
   await loadCampaign(campaignId);
   await finalizePendingCampaignRestoreAfterLoad(campaignId);

@@ -30,6 +30,7 @@ type BundleOptions = {
   includeVectors: boolean;
   purpose?: CampaignStoreBundlePurpose;
   restoreReason?: string;
+  auditClockRestore?: boolean;
 };
 
 const RESTORE_STAGING_DIRNAME = ".restore-staging";
@@ -55,6 +56,7 @@ type RestoreJournal = {
   includeVectors: boolean;
   stagedDir: string;
   restoreReason: string;
+  auditClockRestore: boolean;
   requiresEpisodicRebuild: boolean;
   phase: RestoreJournalPhase;
   createdAt: number;
@@ -116,23 +118,31 @@ function readRestoreJournal(campaignDir: string): RestoreJournal | null {
     );
   }
 
+  const candidate = parsed as RestoreJournal & { auditClockRestore?: unknown };
   if (
     !parsed ||
     typeof parsed !== "object" ||
-    (parsed as RestoreJournal).schemaVersion !== 1 ||
-    typeof (parsed as RestoreJournal).campaignId !== "string" ||
-    typeof (parsed as RestoreJournal).bundleDir !== "string" ||
-    typeof (parsed as RestoreJournal).sourceManifestDigest !== "string" ||
-    typeof (parsed as RestoreJournal).stagedDir !== "string" ||
-    typeof (parsed as RestoreJournal).includeVectors !== "boolean" ||
-    typeof (parsed as RestoreJournal).requiresEpisodicRebuild !== "boolean" ||
-    typeof (parsed as RestoreJournal).restoreReason !== "string" ||
-    typeof (parsed as RestoreJournal).phase !== "string"
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.campaignId !== "string" ||
+    typeof candidate.bundleDir !== "string" ||
+    typeof candidate.sourceManifestDigest !== "string" ||
+    typeof candidate.stagedDir !== "string" ||
+    typeof candidate.includeVectors !== "boolean" ||
+    typeof candidate.requiresEpisodicRebuild !== "boolean" ||
+    typeof candidate.restoreReason !== "string" ||
+    (
+      candidate.auditClockRestore !== undefined &&
+      typeof candidate.auditClockRestore !== "boolean"
+    ) ||
+    typeof candidate.phase !== "string"
   ) {
     throw new Error(`Pending restore journal at ${journalPath} is invalid.`);
   }
 
-  return parsed as RestoreJournal;
+  return {
+    ...candidate,
+    auditClockRestore: candidate.auditClockRestore ?? true,
+  } as RestoreJournal;
 }
 
 function requireJournalForCampaign(campaignDir: string, campaignId: string): RestoreJournal | null {
@@ -341,14 +351,16 @@ export async function finalizePendingCampaignRestoreAfterLoad(
 
   journal = updateRestoreJournalPhase(campaignDir, journal, "finalizing");
   clearPendingCommittedEvents(campaignId);
-  const restoredClock = readWorldClock(campaignId);
-  invalidateAuthorityAfterRestore({
-    campaignId,
-    restoredWorldVersion: restoredClock.worldVersion,
-    restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
-    restoredCurrentTick: restoredClock.currentTick,
-    reason: journal.restoreReason,
-  });
+  if (journal.auditClockRestore) {
+    const restoredClock = readWorldClock(campaignId);
+    invalidateAuthorityAfterRestore({
+      campaignId,
+      restoredWorldVersion: restoredClock.worldVersion,
+      restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+      restoredCurrentTick: restoredClock.currentTick,
+      reason: journal.restoreReason,
+    });
+  }
   if (journal.requiresEpisodicRebuild) {
     await rebuildEpisodicEventsFromLocationRecentEvents(campaignId);
   }
@@ -432,6 +444,7 @@ export async function restoreCampaignBundle(
     restoreReason:
       options.restoreReason ??
       (options.includeVectors ? "checkpoint restored" : "turn snapshot restored"),
+    auditClockRestore: options.auditClockRestore ?? true,
     requiresEpisodicRebuild: !options.includeVectors,
     phase: "prepared",
     createdAt: Date.now(),
