@@ -6331,3 +6331,21 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk: changed symbol `buildCleanNarrationSystemPrompt`, no affected process expansion.
+
+- P215 Stage 6 contract-safe literary transformation examples:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 prompt examples.
+    - [x] Add concise original transformation examples that show how accepted facts/pagePlan become adventure prose.
+    - [x] Keep examples truth-bounded: every example sentence cites evidence refs, backend fact refs, and claim kinds from its stated accepted facts.
+    - [x] Cover movement, dialogue with texture, and route-options next-action context without introducing gameplay facts beyond the example evidence.
+    - [x] Add focused prompt tests proving examples are present and framed as patterns rather than extra authority.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts before edits: `buildCleanNarrationSystemPrompt` LOW -> `runCleanNarration`; `cleanNarrationStyleLines` LOW -> `buildCleanNarrationSystemPrompt` -> `runCleanNarration`.
+    - [x] Added original reference transformation examples for movement, dialogue with scene texture, and route-options next-action context.
+    - [x] Examples are framed as patterns, not authority, and each example names evidence refs/backend fact refs/claim kinds or route-option evidence scope.
+    - [x] Focused prompt test now proves the transformation examples are present and truth-bounded.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 82 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk: changed symbol `buildCleanNarrationSystemPrompt`, no affected process expansion.

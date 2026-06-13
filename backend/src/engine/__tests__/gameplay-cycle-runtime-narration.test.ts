@@ -3837,6 +3837,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("After one minute, North Hall takes your weight underfoot.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Example dialogue with texture:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Rain taps the brass gutters.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
