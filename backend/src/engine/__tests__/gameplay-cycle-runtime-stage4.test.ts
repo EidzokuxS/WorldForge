@@ -277,6 +277,8 @@ function checklistForKind(
           ? "Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=vendor; requested role text: local vendor."
           : kind === "condition_set"
             ? "Stage 4 must apply one backend-owned Player local condition in the current scene."
+          : kind === "dialogue_record"
+            ? "Stage 4 must request one dialogue_record for Guide's direct response to Player. The accepted receipt proves visible response content only."
           : base.steps[0].intended.summary,
         ...(kind === "condition_set"
           ? {
@@ -301,6 +303,19 @@ function checklistForKind(
               anchorRef: "Market",
               intendedUse: "presence_only" as const,
               reusePolicy: "reuse_matching_temporary_current_scene_or_create" as const,
+            },
+          }
+          : {}),
+        ...(kind === "dialogue_record"
+          ? {
+            dialoguePlan: {
+              actorRef: "Player" as const,
+              speakerSource: "existing_visible_actor" as const,
+              speakerRef: "Guide",
+              materializedSpeakerBindingId: null,
+              addresseeRef: "Player" as const,
+              playerIntent: "Ask Guide for a visible response",
+              responseScope: "visible_speaker_response_only" as const,
             },
           }
           : {}),
@@ -393,6 +408,15 @@ function supportThenDialogueChecklist(inputFrame = frame()): GmActionChecklist {
           stateOrEvidence: "terminal_player_visible",
           requiredCapabilityId: "dialogue_record",
           summary: "Stage 4 may record dialogue only from the freshly materialized support actor after a post-dependency authoritative SceneFrame contains that actor.",
+          dialoguePlan: {
+            actorRef: "Player",
+            speakerSource: "materialized_support_actor",
+            speakerRef: null,
+            materializedSpeakerBindingId: "materialized_speaker",
+            addresseeRef: "Player",
+            playerIntent: "Ask a local vendor what changed today",
+            responseScope: "visible_speaker_response_only",
+          },
         },
         dependsOnStepIds: ["step-1"],
         dependencyBindings: [{
@@ -690,6 +714,15 @@ function minorPoiThenDialogueChecklist(inputFrame = minorPoiFrame()): GmActionCh
           stateOrEvidence: "terminal_player_visible",
           requiredCapabilityId: "dialogue_record",
           summary: "Stage 4 may record Guide dialogue only after the accepted minor POI handle is reflected in a refreshed SceneFrame.",
+          dialoguePlan: {
+            actorRef: "Player",
+            speakerSource: "existing_visible_actor",
+            speakerRef: "Guide",
+            materializedSpeakerBindingId: null,
+            addresseeRef: "Player",
+            playerIntent: "Ask Guide to watch Tea Stall",
+            responseScope: "visible_speaker_response_only",
+          },
         },
         dependsOnStepIds: ["step-1"],
         dependencyBindings: [{
@@ -820,6 +853,15 @@ function itemTransferThenDialogueChecklist(inputFrame = itemTransferFrame()): Gm
           stateOrEvidence: "terminal_player_visible",
           requiredCapabilityId: "dialogue_record",
           summary: "Stage 4 may record Guide dialogue only after the accepted item transfer is reflected in a refreshed SceneFrame.",
+          dialoguePlan: {
+            actorRef: "Player",
+            speakerSource: "existing_visible_actor",
+            speakerRef: "Guide",
+            materializedSpeakerBindingId: null,
+            addresseeRef: "Player",
+            playerIntent: "Ask Guide what the Brass Tube is",
+            responseScope: "visible_speaker_response_only",
+          },
         },
         dependsOnStepIds: ["step-1"],
         dependencyBindings: [{
@@ -1957,19 +1999,28 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
 
+    const promptFrame = {
+      ...inputFrame,
+      playerAction: "RAW_STAGE4_DIALOGUE_MARKER_NEVER_PROMPT",
+    };
     const dialogueStep = {
-      ...checklistForKind("dialogue_record", inputFrame).steps[0]!,
+      ...checklistForKind("dialogue_record", promptFrame).steps[0]!,
       targetRefs: ["Guide"],
       evidenceRefs: ["Player", "Guide", "Brass Tube", "Market"],
     };
     const prompt = buildStage4DialogueRequestPrompt({
-      frame: inputFrame,
+      frame: promptFrame,
       step: dialogueStep,
     });
     const systemPrompt = buildStage4DialogueRequestSystemPrompt();
     expect(systemPrompt).toContain("Dialogue task card as the job contract");
+    expect(systemPrompt).toContain("dialoguePlan");
     expect(systemPrompt).toContain("currentItemHolders is the complete evidence basis");
     expect(prompt).toContain("Dialogue task card:");
+    expect(prompt).toContain('"dialoguePlan"');
+    expect(prompt).toContain('"playerIntent": "Ask Guide for a visible response"');
+    expect(prompt).not.toContain("RAW_STAGE4_DIALOGUE_MARKER_NEVER_PROMPT");
+    expect(prompt).not.toContain('"playerRequest"');
     expect(prompt).toContain('"currentItemHolders"');
     expect(prompt).toContain('"label": "Brass Tube"');
     expect(prompt).toContain('"currentHolderKind": "visible_actor"');
@@ -3707,6 +3758,15 @@ describe("clean Stage 4 executor DB contracts", () => {
             stateOrEvidence: "terminal_player_visible",
             requiredCapabilityId: "dialogue_record",
             summary: "Stage 4 may record dialogue only after a post-condition authoritative SceneFrame reflects the Player local condition.",
+            dialoguePlan: {
+              actorRef: "Player",
+              speakerSource: "existing_visible_actor",
+              speakerRef: "Guide",
+              materializedSpeakerBindingId: null,
+              addresseeRef: "Player",
+              playerIntent: "Ask Guide for visible guidance",
+              responseScope: "visible_speaker_response_only",
+            },
           },
           dependsOnStepIds: ["step-1"],
           dependencyBindings: [{

@@ -809,6 +809,15 @@ export const gmActionChecklistStepSchema = z.object({
       ]),
       reusePolicy: z.literal("reuse_matching_temporary_current_scene_or_create"),
     }).strict().nullable().optional(),
+    dialoguePlan: z.object({
+      actorRef: z.literal("Player"),
+      speakerSource: z.enum(["existing_visible_actor", "materialized_support_actor"]),
+      speakerRef: modelSafeRef.nullable(),
+      materializedSpeakerBindingId: z.literal("materialized_speaker").nullable(),
+      addresseeRef: z.literal("Player"),
+      playerIntent: shortText,
+      responseScope: z.literal("visible_speaker_response_only"),
+    }).strict().nullable().optional(),
     timeAdvancePlan: z.object({
       actorRef: z.literal("Player"),
       sceneRef: modelSafeRef,
@@ -873,6 +882,52 @@ export const gmActionChecklistStepSchema = z.object({
       path: ["intended", "supportActorPlan"],
       message: "supportActorPlan is allowed only for support_actor_create checklist steps.",
     });
+  }
+  if (step.intended.kind === "dialogue_record" && !step.intended.dialoguePlan) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "dialoguePlan"],
+      message: "dialogue_record checklist steps require a typed dialoguePlan.",
+    });
+  }
+  if (step.intended.kind !== "dialogue_record" && step.intended.dialoguePlan != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["intended", "dialoguePlan"],
+      message: "dialoguePlan is allowed only for dialogue_record checklist steps.",
+    });
+  }
+  if (step.intended.dialoguePlan?.speakerSource === "existing_visible_actor") {
+    if (!step.intended.dialoguePlan.speakerRef) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", "dialoguePlan", "speakerRef"],
+        message: "existing visible dialogue plans require speakerRef.",
+      });
+    }
+    if (step.intended.dialoguePlan.materializedSpeakerBindingId != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", "dialoguePlan", "materializedSpeakerBindingId"],
+        message: "existing visible dialogue plans use speakerRef as the speaker source.",
+      });
+    }
+  }
+  if (step.intended.dialoguePlan?.speakerSource === "materialized_support_actor") {
+    if (step.intended.dialoguePlan.speakerRef != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", "dialoguePlan", "speakerRef"],
+        message: "materialized support actor dialogue plans resolve speakerRef from dependency binding.",
+      });
+    }
+    if (step.intended.dialoguePlan.materializedSpeakerBindingId !== "materialized_speaker") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", "dialoguePlan", "materializedSpeakerBindingId"],
+        message: "materialized support actor dialogue plans require materialized_speaker binding.",
+      });
+    }
   }
 });
 

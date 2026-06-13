@@ -301,6 +301,12 @@ function refIssues(input: {
     ...(step.intended.supportActorPlan
       ? [step.intended.supportActorPlan.anchorRef]
       : []),
+    ...(step.intended.dialoguePlan
+      ? [
+          step.intended.dialoguePlan.addresseeRef,
+          ...(step.intended.dialoguePlan.speakerRef ? [step.intended.dialoguePlan.speakerRef] : []),
+        ]
+      : []),
     ...(step.intended.localObservationPlan
       ? [
           ...(step.intended.localObservationPlan.targetRef ? [step.intended.localObservationPlan.targetRef] : []),
@@ -501,6 +507,43 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         code: "step_invalid",
         path: `steps.${index}.intended.supportActorPlan`,
         message: "supportActorPlan is allowed only on support_actor_create steps.",
+      });
+    }
+    if (step.intended.kind === "dialogue_record") {
+      if (!step.intended.dialoguePlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.dialoguePlan`,
+          message: "dialogue_record steps require a typed dialoguePlan.",
+        });
+      }
+      const plan = step.intended.dialoguePlan;
+      if (plan?.speakerSource === "existing_visible_actor") {
+        const speakerRef = plan.speakerRef;
+        const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
+        if (!speakerRef || !stepRefs.includes(speakerRef.toLowerCase())) {
+          issues.push({
+            code: "step_invalid",
+            path: `steps.${index}.intended.dialoguePlan.speakerRef`,
+            message: "existing visible dialoguePlan.speakerRef must be included in step target/evidence refs.",
+          });
+        }
+      }
+      if (plan?.speakerSource === "materialized_support_actor") {
+        const hasBinding = (step.dependencyBindings ?? []).some((binding) => binding.bindingId === plan.materializedSpeakerBindingId);
+        if (!hasBinding) {
+          issues.push({
+            code: "step_invalid",
+            path: `steps.${index}.intended.dialoguePlan.materializedSpeakerBindingId`,
+            message: "materialized support actor dialoguePlan must bind to materialized_speaker.",
+          });
+        }
+      }
+    } else if (step.intended.dialoguePlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.dialoguePlan`,
+        message: "dialoguePlan is allowed only on dialogue_record steps.",
       });
     }
     if (step.intended.kind === "local_observation") {
@@ -842,6 +885,7 @@ function stepFor(input: {
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   minorPoiPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["minorPoiPlan"]>;
   supportActorPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["supportActorPlan"]>;
+  dialoguePlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["dialoguePlan"]>;
   timeAdvancePlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["timeAdvancePlan"]>;
   localObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localObservationPlan"]>;
   deviceObservationPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["deviceObservationPlan"]>;
@@ -877,6 +921,9 @@ function stepFor(input: {
   }
   if (input.supportActorPlan) {
     intended.supportActorPlan = input.supportActorPlan;
+  }
+  if (input.dialoguePlan) {
+    intended.dialoguePlan = input.dialoguePlan;
   }
   if (input.timeAdvancePlan) {
     intended.timeAdvancePlan = input.timeAdvancePlan;
@@ -1237,6 +1284,15 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: [dialogueSpeaker.ref],
       evidenceRefs: uniqueStrings([actorRef, dialogueSpeaker.ref, sceneRef ?? input.frame.scene.currentScene.ref, ...evidenceRefs]),
+      dialoguePlan: {
+        actorRef: "Player",
+        speakerSource: "existing_visible_actor",
+        speakerRef: dialogueSpeaker.ref,
+        materializedSpeakerBindingId: null,
+        addresseeRef: "Player",
+        playerIntent: dialoguePlayerIntent,
+        responseScope: "visible_speaker_response_only",
+      },
       purpose: `Record ${dialogueSpeaker.ref}'s direct visible response to Player intent: ${dialoguePlayerIntent}.`,
       intendedSummary: `Stage 4 must request one dialogue_record for ${dialogueSpeaker.ref}'s direct response to Player. The accepted receipt proves visible response content only.`,
       expectedVisibleSummary: `If accepted, only ${dialogueSpeaker.ref}'s visible response content may become player-facing dialogue evidence.`,
@@ -1330,6 +1386,15 @@ export function buildDeterministicGmActionChecklist(input: {
           resolveIn: "post_dependency_scene_frame",
           requiredFramePresence: "actors_and_citableRefs",
         }],
+        dialoguePlan: {
+          actorRef: "Player",
+          speakerSource: "materialized_support_actor",
+          speakerRef: null,
+          materializedSpeakerBindingId: "materialized_speaker",
+          addresseeRef: "Player",
+          playerIntent: dialoguePlayerIntent,
+          responseScope: "visible_speaker_response_only",
+        },
         purpose: `Record one visible response only after the ${supportActorNeed.roleKind} is materialized and the SceneFrame is refreshed.`,
         intendedSummary: "Stage 4 may record dialogue only from the freshly materialized support actor after a post-dependency authoritative SceneFrame contains that actor.",
         expectedVisibleSummary: "If support materialization is accepted and refreshed into SceneFrame actors/citableRefs, one visible support actor response may be recorded; the response does not prove world facts.",

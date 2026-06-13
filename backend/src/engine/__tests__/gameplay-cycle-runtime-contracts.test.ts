@@ -3814,6 +3814,15 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "dialogue_record",
         requiredCapabilityId: "dialogue_record",
         stateOrEvidence: "terminal_player_visible",
+        dialoguePlan: {
+          actorRef: "Player",
+          speakerSource: "existing_visible_actor",
+          speakerRef: "Guide",
+          materializedSpeakerBindingId: null,
+          addresseeRef: "Player",
+          playerIntent: "Ask Guide what happened",
+          responseScope: "visible_speaker_response_only",
+        },
       },
       disposition: {
         kind: "stage4_backend_resolution_required",
@@ -3993,6 +4002,12 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         requiredCapabilityId: "dialogue_record",
         stateOrEvidence: "terminal_player_visible",
         summary: "Stage 4 must request one dialogue_record for Guide's direct response after the post-dependency authoritative SceneFrame reflects accepted Player local condition, item state, or minor place-handle requirements. The accepted receipt proves visible response content only.",
+        dialoguePlan: {
+          speakerSource: "existing_visible_actor",
+          speakerRef: "Guide",
+          playerIntent: "Hand Brass Tube to Guide, then ask what it is",
+          responseScope: "visible_speaker_response_only",
+        },
       },
     });
     expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
@@ -4261,6 +4276,13 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "dialogue_record",
         requiredCapabilityId: "dialogue_record",
         stateOrEvidence: "terminal_player_visible",
+        dialoguePlan: {
+          speakerSource: "materialized_support_actor",
+          speakerRef: null,
+          materializedSpeakerBindingId: "materialized_speaker",
+          playerIntent: "Ask a local vendor what changed today",
+          responseScope: "visible_speaker_response_only",
+        },
       },
     });
     expect(result.checklist.steps[1]?.targetRefs).not.toContain("Local Vendor");
@@ -4444,6 +4466,12 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "dialogue_record",
         requiredCapabilityId: "dialogue_record",
         stateOrEvidence: "terminal_player_visible",
+        dialoguePlan: {
+          speakerSource: "existing_visible_actor",
+          speakerRef: "Guide",
+          playerIntent: "Kneel and ask Guide what they see",
+          responseScope: "visible_speaker_response_only",
+        },
       },
     });
     expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
@@ -4992,6 +5020,7 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
 
   it("accepts non-mutating terminal dialogue receipts with quote-only authority", () => {
     const frame = actionPlanFrame({
+      playerAction: "RAW_CONTRACT_DIALOGUE_MARKER_NEVER_PROMPT",
       actors: [{
         ref: "Guide",
         label: "Guide",
@@ -5011,6 +5040,15 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
           kind: "dialogue_record" as const,
           requiredCapabilityId: "dialogue_record" as const,
           stateOrEvidence: "terminal_player_visible" as const,
+          dialoguePlan: {
+            actorRef: "Player" as const,
+            speakerSource: "existing_visible_actor" as const,
+            speakerRef: "Guide",
+            materializedSpeakerBindingId: null,
+            addresseeRef: "Player" as const,
+            playerIntent: "Ask Guide about the Courier satchel",
+            responseScope: "visible_speaker_response_only" as const,
+          },
         },
       }],
     };
@@ -5124,6 +5162,15 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
           kind: "dialogue_record" as const,
           requiredCapabilityId: "dialogue_record" as const,
           stateOrEvidence: "terminal_player_visible" as const,
+          dialoguePlan: {
+            actorRef: "Player" as const,
+            speakerSource: "existing_visible_actor" as const,
+            speakerRef: "Guide",
+            materializedSpeakerBindingId: null,
+            addresseeRef: "Player" as const,
+            playerIntent: "Ask Guide about the Courier satchel",
+            responseScope: "visible_speaker_response_only" as const,
+          },
         },
       }],
     };
@@ -5135,6 +5182,10 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     const system = buildStage4DialogueRequestSystemPrompt();
 
     expect(prompt).toContain("Dialogue task card:");
+    expect(prompt).toContain('"dialoguePlan"');
+    expect(prompt).toContain('"playerIntent": "Ask Guide about the Courier satchel"');
+    expect(prompt).not.toContain("RAW_CONTRACT_DIALOGUE_MARKER_NEVER_PROMPT");
+    expect(prompt).not.toContain('"playerRequest"');
     expect(prompt).toContain('"currentItemHolders"');
     expect(prompt).toContain('"currentHolderKind": "visible_actor"');
     expect(prompt).toContain('"currentHolderLabel": "Guide"');
@@ -5143,6 +5194,7 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(prompt).not.toContain("Guards log contents before releasing courier gear.");
     expect(prompt).not.toContain("A guard seized a satchel here earlier.");
     expect(system).toContain("Dialogue task card as the job contract");
+    expect(system).toContain("dialoguePlan");
     expect(system).toContain("currentItemHolders is the complete evidence basis");
     expect(system).toContain("dialogue stores visible response content");
   });

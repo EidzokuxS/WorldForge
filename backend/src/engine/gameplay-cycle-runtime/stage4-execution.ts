@@ -1677,6 +1677,42 @@ export function validateDialogueRequestEffectCandidate(input: {
       message: "Dependent support-actor dialogue must use the actorRef resolved from the post-dependency SceneFrame.",
     });
   }
+  const dialoguePlan = input.step.intended.dialoguePlan ?? null;
+  if (!dialoguePlan) {
+    issues.push({
+      code: "speaker_invalid",
+      path: "dialoguePlan",
+      message: "Dialogue request requires the accepted checklist dialoguePlan.",
+    });
+  } else {
+    if (
+      dialoguePlan.speakerSource === "existing_visible_actor"
+      && (!dialoguePlan.speakerRef || normalizedRef(effect.speakerRef) !== normalizedRef(dialoguePlan.speakerRef))
+    ) {
+      issues.push({
+        code: "speaker_invalid",
+        path: "speakerRef",
+        message: "Dialogue request speakerRef must match dialoguePlan.speakerRef.",
+      });
+    }
+    if (dialoguePlan.speakerSource === "materialized_support_actor") {
+      const resolvedSpeakerRef = input.dependencyResolution?.materializedSpeaker?.actorRef ?? null;
+      if (!resolvedSpeakerRef || normalizedRef(effect.speakerRef) !== normalizedRef(resolvedSpeakerRef)) {
+        issues.push({
+          code: "speaker_invalid",
+          path: "speakerRef",
+          message: "Dialogue request speakerRef must match the materialized support actor from dependency resolution.",
+        });
+      }
+    }
+    if (!effect.addresseeRefs.some((ref) => normalizedRef(ref) === normalizedRef(dialoguePlan.addresseeRef))) {
+      issues.push({
+        code: "speaker_invalid",
+        path: "addresseeRefs",
+        message: "Dialogue request addresseeRefs must include dialoguePlan.addresseeRef.",
+      });
+    }
+  }
   if (!effect.addresseeRefs.some((ref) => normalizedRef(ref) === normalizedRef(input.frame.player.ref))) {
     issues.push({
       code: "speaker_invalid",
@@ -1727,11 +1763,21 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
 function dialogueTaskCard(input: {
   frame: AuthoritativeSceneFrame;
   step: Step;
+  dependencyResolution?: Stage4DialogueDependencyResolution | null;
 }): unknown {
-  const speaker = input.frame.actors.find((actor) =>
-    actor.role !== "player"
-    && input.step.targetRefs.some((ref) => normalizedRef(ref) === normalizedRef(actor.ref))
-  ) ?? null;
+  const dialoguePlan = input.step.intended.dialoguePlan ?? null;
+  const resolvedSpeakerRef = input.dependencyResolution?.materializedSpeaker?.actorRef
+    ?? dialoguePlan?.speakerRef
+    ?? null;
+  const speaker = resolvedSpeakerRef
+    ? input.frame.actors.find((actor) =>
+        actor.role !== "player"
+        && normalizedRef(actor.ref) === normalizedRef(resolvedSpeakerRef)
+      ) ?? null
+    : input.frame.actors.find((actor) =>
+        actor.role !== "player"
+        && input.step.targetRefs.some((ref) => normalizedRef(ref) === normalizedRef(actor.ref))
+      ) ?? null;
   const stepRefs = new Set([
     ...input.step.targetRefs,
     ...input.step.evidenceRefs,
@@ -1752,7 +1798,12 @@ function dialogueTaskCard(input: {
   return {
     job: "record_one_visible_speaker_response",
     capabilityId: "dialogue_record",
-    playerRequest: input.frame.playerAction,
+    dialoguePlan: dialoguePlan
+      ? {
+        ...dialoguePlan,
+        resolvedSpeakerRef,
+      }
+      : null,
     checklistPurpose: input.step.purpose,
     checklistTask: input.step.intended.summary,
     expectedVisibleEffect: input.step.expectedVisibleEffect,
@@ -1786,7 +1837,7 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
     "You are WorldForge clean Stage 4 Dialogue Request.",
     "Return only JSON matching the dialogue_record effect schema.",
     "Create exactly one visible speaker-response payload for backend validation.",
-    "Use Dialogue task card as the job contract: speaker, addressee, player request, checklist task, allowed evidence refs, and response authority.",
+    "Use Dialogue task card as the job contract: dialoguePlan, speaker, addressee, checklist task, allowed evidence refs, and response authority.",
     "The speaker field must name one already-visible non-player actor from SceneFrame.actors, and addresseeRefs must include Player.",
     "For non-silence outcomes, response.kind must be speech and quotedSpeech is required.",
     "For silence outcomes, response.kind must be silence and quotedSpeech must be null.",
@@ -1794,7 +1845,7 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
     "stateEffects.appliesState is false for this clean dialogue task.",
     "World-state, relationship, item, condition, location, movement, memory, and durable-event authority belongs to backend receipts; dialogue stores visible response content.",
     "For current item holder/custody answers, Dialogue task card currentItemHolders is the complete evidence basis for quotedSpeech and summary.",
-    "Response-language directives in playerRequest are UI preferences; in-world language barriers require citable scene evidence.",
+    "Use dialoguePlan.playerIntent for the player's visible request; in-world language barriers require citable scene evidence.",
     "Use refs from allowedEvidenceRefs and SceneFrame.citableRefs.",
   ].join("\n");
 }
