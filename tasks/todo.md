@@ -56,6 +56,33 @@ P190 clean runtime prose continuation / Realism NSFW opt-in + elapsed-time prose
 - Remaining ship steps:
   - [x] GitNexus `detect_changes(scope=all)` reported medium scope: 9 changed indexed symbols, 1 affected process (`renderCleanAuthorityProjection -> normalizeText`), no HIGH/CRITICAL risk.
 
+P191 clean runtime prose QA / multi-agent preset adaptation correction:
+- Objective:
+  - Treat Zetta/Freaky preset content as single-model source material, then adapt only the useful mechanisms into WorldForge's multi-agent ownership path.
+  - Keep monolithic persona/jailbreak scaffolding out of shared runtime prompts; place mechanisms by owner: Stage 6 style, deterministic projection, audit checks, or future explicit options.
+  - Improve live player-facing prose where the first QA lane exposed machine surface wording and over-broad scene dumps.
+- Diagnostic live lane:
+  - [x] Fresh clone `p191-prose-qa-20260613-123149` from source `p69-item-transfer-045651`; backend clean flags on, old runtime stores 0.
+  - [x] Manual Codex-chosen turns 1-9 covered `item_transfer`, `dialogue_record`, `route_options`, `movement`, `local_observation`, `time_advance`, `route_check`, second `movement`, and second `dialogue_record`.
+  - [x] Runtime/DB checks passed for all 9 turns: clean `done`, one turn record per turn, accepted receipts only, restore ledger 0, old stores all 0, `Brass Tube.owner=Guide`, final clock `worldVersion=4`, `worldTimeMinutes=7`, `currentTick=7`.
+  - [x] Manual prose review found two real quality failures: turn 5 copied local-observation surface wording (`Current visible actors include... visible actor...`), and turn 9 let dialogue narration expand into a broad scene/route dump.
+- Repair:
+  - [x] `dialogue_response` now uses deterministic authority projection even with scene snapshot context, so accepted dialogue quotes stay compact and receipt-owned.
+  - [x] Positive `local_observation` now strips surface-kind labels before player-facing text, e.g. `Visible here: Guide.`
+  - [x] Route-option local observation keeps the full accepted route list while phrasing the match as `Visible route match: ...`
+  - [x] `scripts/audit-clean-runtime-prose.mjs` now flags `surfaceSummaryLeak`, `surfaceKindLeak`, and `dialogueSceneDump`.
+- Executed verification:
+  - [x] GitNexus impact before edits: LOW for `renderLocalObservationProjection`, `needsDeterministicAuthorityProjection`, and `renderCleanAuthorityProjection`; direct path stays `runCleanNarration`.
+  - [x] `npm --prefix backend run typecheck` passed.
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 297 tests.
+  - [x] Restarted live backend on port `31707` after patch, then continued the same clone with turns 10-11.
+  - [x] Turn 10 action `I look for visible people here without moving.` accepted `local_observation`, deltas `0/0/0`, narration `Visible here: Guide.`
+  - [x] Turn 11 action `I ask Guide, "Is the Brass Tube still with you?"` accepted `dialogue_record`, deltas `0/0/0`, narration `Guide says: "Yes, I still have the Brass Tube."`
+  - [x] Patched-turn prose audit passed: `output/clean-runtime-p191-prose-qa-20260613-123149/prose-audit-turns-10-11.json`, 2/2 narratives, zero hits.
+  - [x] Full diagnostic audit intentionally records pre-patch failures in turns 5 and 9: `output/clean-runtime-p191-prose-qa-20260613-123149/prose-audit-full-diagnostic.json`.
+- Acceptance status:
+  - [x] P191 is a prose QA and repair proof, not a final 60-turn acceptance lane.
+
 P155 primitive-owned clean runtime architecture pass:
 - Objective:
   - Finish the clean gameplay-cycle runtime as a primitive-owned architecture. Every player turn flows through explicit ownership: player intent -> typed admission -> primitive checklist/request -> backend-owned receipt -> settlement evidence -> bounded narration projection.

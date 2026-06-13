@@ -85,24 +85,6 @@ function movementCandidate(text = "You move to North Hall."): CleanNarrationCand
   };
 }
 
-function dialogueCandidate(): CleanNarrationCandidate {
-  return {
-    version: "gameplay-runtime.clean-narration-candidate.v1",
-    packetId: "cgpacket_test",
-    turnId: "clean-turn-1",
-    language: "en",
-    sentences: [{
-      kind: "accepted_evidence",
-      text: 'Guide says: "The north stairs flooded before dawn."',
-      evidenceRefs: ["e5"],
-      backendFactRefs: ["e5.f2"],
-      claimKinds: ["dialogue_response"],
-      auditStepIds: [],
-    }],
-    finalText: 'Guide says: "The north stairs flooded before dawn."',
-  };
-}
-
 function routeView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -316,6 +298,24 @@ function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
         },
       },
     ],
+  });
+}
+
+function modelNarrationView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "scene_frame_snapshot",
+      claimKinds: ["visible_fact"],
+      text: "Guide stands nearby.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Guide stands nearby.", exact: true },
+      ],
+      limits: {
+        proves: ["accepted visible fact"],
+        doesNotProve: ["movement", "item state", "dialogue content"],
+      },
+    }],
   });
 }
 
@@ -957,27 +957,16 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("keeps scene snapshot route and target evidence from overriding dialogue receipts", async () => {
-    let called = false;
     const result = await runCleanNarration({
       narratorView: dialogueWithSceneFrameSnapshotView(),
       provider,
       generateCandidate: async () => {
-        called = true;
-        return dialogueCandidate();
+        throw new Error("dialogue_response should not call the model");
       },
     });
 
-    expect(called).toBe(true);
-    expect(result.source).toBe("model");
+    expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe('Guide says: "The north stairs flooded before dawn."');
-
-    await expect(runCleanNarration({
-      narratorView: dialogueWithSceneFrameSnapshotView(),
-      provider,
-      generateCandidate: async () => {
-        throw new Error("model offline");
-      },
-    })).rejects.toThrow(CleanNarrationGenerationError);
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {
@@ -1193,9 +1182,9 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe(
-      "The visible target central telegraph desk is visible here.",
+      "Visible here: central telegraph desk.",
     );
-    expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible marks|moving parts|touch|move/iu);
+    expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
   });
 
   it("deterministically projects local_observation movement options without hidden placeholders", async () => {
@@ -1225,7 +1214,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Visible routes here include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. The route option North Hall is visible here.");
+    expect(result.text).toBe("Visible routes here include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. Visible route match: North Hall.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
@@ -1369,7 +1358,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("keeps Realism NSFW mode as an explicit opt-in narrator style layer", async () => {
     const result = await runCleanNarration({
-      narratorView: dialogueView(),
+      narratorView: modelNarrationView(),
       provider,
       styleMode: "realism_nsfw",
       generateCandidate: async (request) => {
@@ -1385,13 +1374,13 @@ describe("clean Stage 6 narration contracts", () => {
           language: "en",
           sentences: [{
             kind: "accepted_evidence",
-            text: 'Guide says: "The north stairs flooded before dawn."',
+            text: "Guide stands nearby.",
             evidenceRefs: ["e1"],
-            backendFactRefs: ["e1.f2"],
-            claimKinds: ["dialogue_response"],
+            backendFactRefs: ["e1.f1"],
+            claimKinds: ["visible_fact"],
             auditStepIds: [],
           }],
-          finalText: 'Guide says: "The north stairs flooded before dawn."',
+          finalText: "Guide stands nearby.",
         };
       },
     });
@@ -1402,7 +1391,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("rejects generation failure before player-facing narration", async () => {
     await expect(runCleanNarration({
-      narratorView: dialogueWithSceneFrameSnapshotView(),
+      narratorView: modelNarrationView(),
       provider,
       generateCandidate: async () => {
         throw new Error("model offline");
@@ -1410,7 +1399,7 @@ describe("clean Stage 6 narration contracts", () => {
     })).rejects.toThrow(CleanNarrationGenerationError);
 
     await expect(runCleanNarration({
-      narratorView: dialogueWithSceneFrameSnapshotView(),
+      narratorView: modelNarrationView(),
       provider,
       generateCandidate: async () => {
         throw new Error("model offline");

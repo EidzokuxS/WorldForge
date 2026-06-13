@@ -663,17 +663,21 @@ function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): 
   if (evidence.claimKinds.includes("bounded_visibility_negative")) {
     return summary.replace(/^Current visible /u, "The visible ");
   }
+  const routeSummary = summary.startsWith("Current route options include:")
+    ? trimSentencePeriod(summary.replace(/^Current route options include:\s*/u, ""))
+    : null;
   const observed = evidence.backendFacts
     .filter((entry) => entry.text.startsWith("Observed "))
-    .map((entry) => trimSentencePeriod(entry.text.replace(/^Observed\s+/u, "")));
-  const visibleSummary = summary
-    .replace(/^Current route options include:/u, "Visible routes here include:")
-    .replace(/^Current visible match:/u, "Visible match:");
+    .map((entry) =>
+      trimSentencePeriod(entry.text.replace(/^Observed\s+/u, ""))
+        .replace(/^visible\s+(actor|target|item|route|device)\s+/u, "")
+        .replace(/^route option\s+/u, "")
+    );
   if (observed.length > 0) {
-    const observedSentence = `The ${englishList(observed)} ${observed.length === 1 ? "is" : "are"} visible here.`;
-    return /include:/u.test(visibleSummary)
-      ? `${visibleSummary} ${observedSentence}`
-      : observedSentence;
+    if (routeSummary) {
+      return `Visible routes here include: ${routeSummary}. Visible route match: ${englishList(observed)}.`;
+    }
+    return `Visible here: ${englishList(observed)}.`;
   }
   return summary;
 }
@@ -707,6 +711,13 @@ function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string 
   }
 }
 
+function renderDialogueProjection(evidence: AcceptedNarrationEvidence): string {
+  const quoteFact = evidence.backendFacts.find((entry) =>
+    entry.text.includes(" says: ") || entry.text.includes("dialogue response")
+  );
+  return quoteFact?.text ?? evidence.text;
+}
+
 function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
   const label = factValue(evidence, "Place handle label: ");
   const kind = factValue(evidence, "Place handle kind: ");
@@ -737,6 +748,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("player_location_change")
     || evidence.claimKinds.includes("item_state")
+    || evidence.claimKinds.includes("dialogue_response")
     || evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
@@ -864,10 +876,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
   );
   if (itemState && dialogue) {
     const itemStateText = renderItemStateProjection(itemState);
-    const quoteFact = dialogue.backendFacts.find((entry) =>
-      entry.text.includes(" says: ") || entry.text.includes("dialogue response")
-    );
-    const dialogueText = quoteFact?.text ?? dialogue.text;
+    const dialogueText = renderDialogueProjection(dialogue);
     return [itemStateText, dialogueText].filter((text) => normalizeText(text).length > 0).join(" ");
   }
   if (itemState) {
@@ -882,10 +891,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
   }
 
   if (dialogue) {
-    const quoteFact = dialogue.backendFacts.find((entry) =>
-      entry.text.includes(" says: ") || entry.text.includes("dialogue response")
-    );
-    return quoteFact?.text ?? dialogue.text;
+    return renderDialogueProjection(dialogue);
   }
 
   const supportActor = view.acceptedEvidence.find((evidence) =>
