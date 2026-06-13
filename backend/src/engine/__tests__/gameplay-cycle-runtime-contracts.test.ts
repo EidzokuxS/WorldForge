@@ -1239,6 +1239,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(gmReadSchema.safeParse(candidate).success).toBe(false);
   });
 
+  it("requires GM Read candidates to choose an explicit primitive interaction kind", () => {
+    const candidate = {
+      ...validGmRead(),
+      actionInterpretation: {
+        ...validGmRead().actionInterpretation,
+      },
+    };
+    delete (candidate.actionInterpretation as Partial<typeof candidate.actionInterpretation>).interactionKind;
+
+    const parsed = gmReadSchema.safeParse(candidate);
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) =>
+        issue.path.join(".") === "actionInterpretation.interactionKind"
+      )).toBe(true);
+    }
+  });
+
   it("requires visible_actor_dialogue to target exactly one visible non-player actor", () => {
     const frame = minimalFrame({
       actors: [{

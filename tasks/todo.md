@@ -111,6 +111,17 @@ P155 primitive-owned clean runtime architecture pass:
   - [x] Fresh zero-turn clone `p167-checklist-plan-schema-proof-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
   - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
   - [x] Live result: SSE stages included `gm-action-checklist` and `stage4-execution`; `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; settled evidence includes `item_state`; player-facing narrative is multi-token.
+- P168 GM Read explicit primitive admission boundary:
+  - [x] Gap found in `backend/src/engine/gameplay-cycle-runtime/contracts.ts`: `gmReadActionInterpretationSchema.interactionKind` used `.default("unsupported_or_unclear")`, so a missing primitive admission field could become a semantic branch at schema parse time.
+  - [x] GitNexus impact before edits was LOW for `validateGmReadCandidate` and `assertGmRead`; direct runtime consumer stays `runCleanGmRead`.
+  - [x] `interactionKind` is now required. `unsupported_or_unclear` remains available only as an explicit candidate value.
+  - [x] Contract test proves GM Read candidates without `actionInterpretation.interactionKind` fail at the admission boundary.
+  - [x] Executed verification: `npm --prefix backend run typecheck`; focused suite `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 283 passed.
+  - [x] Diagnostic-invalid launch artifacts: `output/clean-runtime-p168-gmread-explicit-kind-proof-20260613/`, `output/clean-runtime-p168-gmread-explicit-kind-proof-r2-20260613/`, and `output/clean-runtime-p168-gmread-explicit-kind-proof-r3-20260613/` reached legacy-style SSE without `done.runtime=gameplay-cycle-runtime`, so those clones are excluded from proof evidence.
+  - [x] Live proof artifact `output/clean-runtime-p168-gmread-explicit-kind-proof-r4-20260613/`.
+  - [x] Fresh zero-turn clone `p168-gmread-explicit-kind-proof-r4-20260613` from `p69-item-transfer-045651`: chat history 0, clock `0/0/0`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores 0, old v2/saga/narrator/oracle/simulation stores 0.
+  - [x] Manual-chosen action: `I hand the Brass Tube to Guide.`
+  - [x] Live result: SSE terminal `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; receipt authority `item_transfer_receipt` / `item_custody_location_equip_state` / `may_claim_item_state_change`; `Brass Tube.owner=Guide`; worldVersion `0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no turn clock ledger row; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; old stores all 0; settled evidence includes `item_state`; player-facing narrative is multi-token deterministic item-state projection.
 - Acceptance constraints:
   - Old `gameplay-cycle-v2` stays forensic-only.
   - Runtime generation/validation/adapter failures reach typed invariant or route error boundaries before settled packet/chat commit.

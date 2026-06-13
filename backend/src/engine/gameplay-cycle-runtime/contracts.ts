@@ -395,7 +395,7 @@ export const gmReadActionInterpretationSchema = z.object({
     "item_transfer",
     "minor_poi_create",
     "unsupported_or_unclear",
-  ]).default("unsupported_or_unclear"),
+  ]),
   supportActorNeed: z.object({
     roleKind: cleanSupportActorRoleKindSchema,
     requestedRoleText: shortText,
