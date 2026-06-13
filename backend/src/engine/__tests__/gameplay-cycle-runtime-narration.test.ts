@@ -168,6 +168,36 @@ function timeView(): CleanNarratorView {
   });
 }
 
+function oracleOutcomeView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "oracle_visible_outcome",
+      claimKinds: ["oracle_outcome"],
+      text: "The loose grate holds under your weight.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "The loose grate holds under your weight.", exact: true },
+      ],
+      limits: {
+        proves: ["selected visible uncertainty outcome"],
+        doesNotProve: [
+          "movement",
+          "arrival",
+          "route_state",
+          "discovery",
+          "location_reveal",
+          "item_state",
+          "npc_private_knowledge",
+          "actor_creation",
+          "world_fact",
+          "absence_or_no_change",
+          "condition_or_hp_change",
+        ],
+      },
+    }],
+  });
+}
+
 function timeWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
@@ -1343,6 +1373,57 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(text).toBe("5 minutes pass.");
     expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
+  });
+
+  it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("Oracle-outcome surface:");
+    const view = oracleOutcomeView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "The loose grate holds firm beneath your weight.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["oracle_outcome"],
+      }]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("The loose grate holds firm beneath your weight.");
+    expect(result.text).not.toMatch(/\b(oracle|roll|chance|strong hit|weak hit|miss|route|inventory|damage|nothing changed|no change|world fact|hidden)\b/iu);
+  });
+
+  it("rejects oracle_outcome prose that exposes roll mechanics or unsupported state drift", () => {
+    const mechanics = validateCleanNarrationCandidate({
+      view: oracleOutcomeView(),
+      candidate: acceptedCandidate(oracleOutcomeView(), [{
+        text: "The Oracle roll lands as a strong hit, so the loose grate holds.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["oracle_outcome"],
+      }]),
+    });
+    expect(mechanics.status).toBe("rejected");
+    if (mechanics.status !== "rejected") throw new Error("expected rejected");
+    expect(mechanics.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("roll, chance, Oracle")
+    )).toBe(true);
+
+    const stateDrift = validateCleanNarrationCandidate({
+      view: oracleOutcomeView(),
+      candidate: acceptedCandidate(oracleOutcomeView(), [{
+        text: "The loose grate holds, and you discover a hidden route with a key in your inventory.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["oracle_outcome"],
+      }]),
+    });
+    expect(stateDrift.status).toBe("rejected");
+    if (stateDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(stateDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("movement, route state, item state")
+    )).toBe(true);
   });
 
   it("uses model-authored literary narration for standalone elapsed-time turns with snapshot context", async () => {

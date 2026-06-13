@@ -6220,3 +6220,21 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 342 tests.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM via hunk attribution to neighboring `uniqueStrings` / `RenderCleanAuthorityProjection -> UniqueStrings`; changed files were limited to Stage 6 narration, narration tests, and `tasks/todo.md`.
+
+- P209 Stage 6 oracle-outcome literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow accepted `oracle_outcome` evidence to use model-authored literary narration instead of raw selected-meaning projection.
+    - [x] Preserve Oracle truth boundary: visible outcome meaning only; roll/chance/strong-hit/miss mechanics, hidden cause, movement/arrival, route state, item state, NPC action/dialogue, discovery/location reveal, condition/HP, world fact, absence, and no-change remain rejected without accepted evidence.
+    - [x] Add prompt and validation coverage for oracle outcome prose.
+    - [x] Add focused tests for accepted oracle prose plus rejection of roll-mechanics and unsupported state/world-fact drift.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, and GitNexus detect.
+    - [x] Commit/push and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts for `isLiteraryNarrationCandidateExpected`, `minimumLiteraryWordCount`, `proseQualityIssues`, and `buildCleanNarrationSystemPrompt` were LOW; direct runtime scope stays inside `runCleanNarration`.
+    - [x] Accepted `oracle_outcome` evidence now enters model-authored Stage 6 narration.
+    - [x] Oracle-outcome validation rejects roll/chance/Oracle/adaptor mechanics and unsupported movement, route state, item state, NPC dialogue, discovery, condition/HP, world truth, absence, hidden/private, and no-change drift.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 77 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 344 tests.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM central Stage 6 narration scope, with affected processes under `runCleanNarration`; no HIGH/CRITICAL risk was reported.

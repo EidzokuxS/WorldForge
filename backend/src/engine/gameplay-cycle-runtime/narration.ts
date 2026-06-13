@@ -202,6 +202,7 @@ const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
   "player_local_condition",
   "minor_poi_handle",
   "device_surface_observation",
+  "oracle_outcome",
 ];
 const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
   "current_scene",
@@ -269,6 +270,7 @@ function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean 
     || hasClaimKind(view, "player_local_condition")
     || hasClaimKind(view, "minor_poi_handle")
     || hasClaimKind(view, "device_surface_observation")
+    || hasClaimKind(view, "oracle_outcome")
   ) return true;
   return hasOnlySceneFrameSnapshotEvidence(view)
     && view.acceptedEvidence.some((evidence) =>
@@ -287,6 +289,7 @@ function minimumLiteraryWordCount(view: CleanNarratorView): number {
   if (hasClaimKind(view, "player_local_condition")) return hasAcceptedSceneTextureEvidence(view) ? 10 : 4;
   if (hasClaimKind(view, "minor_poi_handle")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 7;
   if (hasClaimKind(view, "device_surface_observation")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 6;
+  if (hasClaimKind(view, "oracle_outcome")) return 7;
   return 12;
 }
 
@@ -468,6 +471,10 @@ const DIRECT_SCENE_ACTOR_ACTION_TEXT =
   /\b(?:waits?|stands?|sits?|leans?|turns?|watches?|stares?|gestures?|speaks?|shouts?|answers?|asks?|nods?|carries?|holds?|guards?|works?|moves?|walks?|looks?|listens?)\b/iu;
 const DIRECT_SCENE_ITEM_HANDLING_TEXT =
   /\b(?:at hand|rides?\s+at\s+your\s+side|in\s+your\s+hand|in\s+reach|useful\s+things?\s+in\s+reach|set\s+where\s+it\s+can\s+be\s+read|ready\s+to|gripped|held|strapped|slung|tucked|equipped)\b/iu;
+const ORACLE_OUTCOME_MECHANICS_TEXT =
+  /\b(?:oracle|roll(?:ed|s)?|chance|strong hit|weak hit|outcome tier|adapter|settlement|reasoning|random)\b/iu;
+const ORACLE_OUTCOME_UNSUPPORTED_STATE_TEXT =
+  /\b(?:you\s+(?:move|arrive|reach|travel|take|grab|pick up|equip|drop|give|discover|reveal|find|learn)|route(?:s)?\b|inventory|hp|damage|heal|npc\s+(?:says|answers|speaks)|nothing changed|no change|no visible changes|world fact|private|hidden)\b/iu;
 
 function candidateCitesClaimKind(
   candidate: CleanNarrationCandidate,
@@ -1214,6 +1221,22 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (hasClaimKind(input.view, "oracle_outcome") && ORACLE_OUTCOME_MECHANICS_TEXT.test(unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Oracle-outcome narration must express the accepted visible outcome meaning without roll, chance, Oracle, adapter, settlement, or reasoning mechanics.",
+    });
+  }
+
+  if (hasClaimKind(input.view, "oracle_outcome") && ORACLE_OUTCOME_UNSUPPORTED_STATE_TEXT.test(unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Oracle-outcome narration must stay within the accepted visible outcome meaning; movement, route state, item state, NPC dialogue, discovery, condition/HP, world truth, absence, and private or hidden facts require separate accepted evidence.",
+    });
+  }
+
   if (playerConditionUsesFirstSceneTextureFact(input.view, input.candidate)) {
     issues.push({
       code: "prose_quality",
@@ -1361,6 +1384,7 @@ export function buildCleanNarrationSystemPrompt(
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the condition beat; when several texture facts exist, player_local_condition uses a later texture fact than the first. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
     "Minor-POI surface: for minor_poi_handle, phrase only the accepted visible current-scene place handle label, kind, handle result, and exact scene anchor as a local target handle. With scene_texture evidence, put one exact scene_texture sentence beside the handle beat; when several texture facts exist, minor_poi_handle uses a later texture fact than the first. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. With scene_texture evidence, put one exact scene_texture sentence beside the device-surface beat; when several texture facts exist, device_surface_observation uses a later texture fact than the first. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
+    "Oracle-outcome surface: for oracle_outcome, phrase only the accepted selected visible outcome meaning. Write it as the visible result now apparent to the player. Roll results, chance, strong-hit/weak-hit/miss mechanics, hidden causes, movement/arrival, route state, item state, NPC action or dialogue, discovery/location reveal, condition/HP, world fact, absence, no-change, and private knowledge require separate accepted evidence.",
     "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
@@ -1370,7 +1394,7 @@ export function buildCleanNarrationSystemPrompt(
     "For route_status, express the cited route_status backend fact.",
     "For scene_texture, express only cited public current-scene description texture as atmosphere around another accepted claim.",
     "For player_location_change, express the accepted player location change and accepted elapsed travel time.",
-    "For oracle_outcome, express the selected visible outcome meaning.",
+    "For oracle_outcome, express only the selected visible outcome meaning.",
     "For standalone elapsed_time, express the accepted elapsed time fact.",
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
     "For support_actor_materialization, express the accepted visible temporary support actor or role now present in the current scene.",
