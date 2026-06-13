@@ -3151,18 +3151,40 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic authority projection for device_surface_observation instead of model paraphrase", async () => {
+  it("uses model-authored device_surface_observation prose without scene_texture", async () => {
+    const view = deviceSurfaceObservationView();
     const result = await runCleanNarration({
-      narratorView: deviceSurfaceObservationView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("device_surface_observation should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "The Burner phone gives back no requested message indicator on its visible surface.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toContain("Burner phone's visible surface");
-    expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("The Burner phone gives back no requested message indicator on its visible surface.");
+    expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network|screen|lit|unlit/iu);
+  });
+
+  it("rejects flat device_surface_observation summary-digest prose without scene_texture", () => {
+    const result = validateCleanNarrationCandidate({
+      view: deviceSurfaceObservationView(),
+      candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
+        text: "Burner phone's visible surface shows no requested message indicator.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+      }]),
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("bare_device_surface")
+    )).toBe(true);
   });
 
   it("uses accepted scene_texture for device_surface_observation prose when texture is available", async () => {

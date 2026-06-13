@@ -6201,3 +6201,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 341 tests.
     - [x] Exact P207 no-texture proof is unit-level through `runCleanNarration`; live clean-runtime traffic normally carries accepted `scene_texture`, so a live turn would exercise the already-covered textured sibling path rather than this new gate removal.
     - [x] GitNexus all-scope `detect_changes` reported LOW scope: 3 changed files, no expanded affected processes.
+
+- P208 Stage 6 no-texture device-surface literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Allow no-texture `device_surface_observation` receipts to use model-authored literary narration.
+    - [x] Preserve bounded device truth: private messages, sender/caller identity, hidden instructions, signal/network truth, screen/lit status, no-messages/no-calls, device activation, route/location truth, world facts, absence, and no-change remain rejected without accepted evidence.
+    - [x] Promote the old flat deterministic device-surface formula into Stage 6 summary-digest rejection for model output.
+    - [x] Add tests proving no-texture model acceptance, flat formula rejection, screen/signal/message drift rejection, and textured sibling behavior.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, and GitNexus detect.
+    - [x] Commit/push and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts for `needsDeterministicAuthorityProjection` and `validateCleanNarrationCandidate` were LOW; direct caller scope stays inside `runCleanNarration`.
+    - [x] No-texture `device_surface_observation` no longer forces deterministic authority projection.
+    - [x] The flat `Burner phone's visible surface shows no requested message indicator.` projection shape is now rejected as `bare_device_surface` summary-digest prose.
+    - [x] Device no-surface truth guards still reject screen/lit state, signal/network truth, no-messages/no-calls, private instructions, backend markers, and no-change wording without accepted evidence.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 75 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 342 tests.
+    - [x] GitNexus all-scope `detect_changes` reported MEDIUM via hunk attribution to neighboring `uniqueStrings` / `RenderCleanAuthorityProjection -> UniqueStrings`; changed files were limited to Stage 6 narration, narration tests, and `tasks/todo.md`.

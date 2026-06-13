@@ -153,6 +153,10 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     name: "bare_minor_poi_handle",
     pattern: /^[\p{L}\p{N}' -]+ (?:is now available|remains available) here as a visible [\p{L}\p{N}' -]+(?: handle)?\.$/iu,
   },
+  {
+    name: "bare_device_surface",
+    pattern: /^[\p{L}\p{N}' -]+(?:'s)? visible surface shows no requested [^.]+\.$/iu,
+  },
 ];
 const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
   /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
@@ -1934,7 +1938,6 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
-    || (evidence.claimKinds.includes("device_surface_observation") && !hasSceneTexture)
   );
 }
 
