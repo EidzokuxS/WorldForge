@@ -6742,3 +6742,18 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: `gameplay-cycle-runtime-narration` passed 98 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` both reported LOW scope for `buildCleanNarrationSystemPrompt`, affected processes 0.
     - Executed: code commit `7fbe7b37` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P241 Stage 6 receipt-marker regex removal:
+  - Plan:
+    - [x] Inspect receipt-marker validation flow and identify the symbol-level blast radius with GitNexus before editing.
+    - [x] Remove regex-based receipt marker detection from narration acceptance.
+    - [x] Preserve grounding contracts through structured evidence refs, claim kinds, prompt-safe values, and existing deterministic projection requirements.
+    - [x] Update focused narration tests so old receipt-like prose is accepted or rejected only by structured evidence/claim contracts, not marker text scanning.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: `RECEIPT_PROSE_MARKER` fed `proseQualityIssues`, which feeds `validateCleanNarrationCandidate`; GitNexus impact for `proseQualityIssues` reported LOW scope with direct caller `validateCleanNarrationCandidate`.
+    - Executed: removed `RECEIPT_PROSE_MARKER` and its `prose_quality` issue, leaving accepted evidence refs, backend fact refs, claim kinds, prompt-safe values, and deterministic projection contracts as the grounding boundary.
+    - Executed: updated marker-dependent tests so receipt-shaped text with valid structured refs is accepted, while one-token, mixed-script, private/backend leak, and claim-specific direct-scene guard tests keep their contracts.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
+    - Executed: code commit `070988c5` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
