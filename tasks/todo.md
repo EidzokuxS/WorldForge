@@ -5664,5 +5664,26 @@ Session: `gm-v1-consequenc-slice`.
   - Acceptance status:
     - P184 is diagnostic only because original turn 014 produced a player-facing error/restore boundary.
   - Next scoped work:
-    - [ ] Commit/push the GM Read uncertainty and Checklist evidence-bound repairs after GitNexus detect.
-    - [ ] Start a fresh post-repair zero-turn clone for the next 0 -> about 60 manual acceptance lane.
+    - [x] Commit/push the GM Read uncertainty and Checklist evidence-bound repairs after GitNexus detect.
+    - [x] Start a fresh post-repair zero-turn clone for the next 0 -> about 60 manual acceptance lane.
+
+- P185 clean gameplay runtime post-checklist-evidence-bound Acceptance-Candidate Lane E / fresh clone 0 -> 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p185-post-checklist-evidence-bound-acceptance-e-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative clock `0/0/0`, player at `Lowwater Bazaar`, visible `Guide`, Player carried `Brass Tube`, clean runtime stores zero, old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Reuse clean backend on port `31703` after the GM Read uncertainty and Checklist evidence-bound repairs.
+    - [x] Execute turns 001-060 one action at a time from inspected post-turn state; actions were chosen manually by Codex.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p185-post-checklist-evidence-bound-acceptance-e-20260613/`; final audit: `final-lane-summary.json`.
+    - [x] All 60 per-turn verifier artifacts passed with `done.runtime=gameplay-cycle-runtime`, one new clean turn record, one chat exchange, accepted-only receipts when applicable, multi-token narration, zero restore ledger rows, zero old v2/saga/narrator/oracle/simulation stores, and no SSE `error` event.
+    - [x] Repair proof in fresh lane: turn 003 route-advice dialogue accepted `dialogue_record`; turn 014 `Upper Dam Ruins -> Lowwater Bazaar` accepted `movement`.
+    - [x] Final DB: 60 clean turn records, 56 accepted Stage4 receipts, 17 authority traces, 16 travel clock ledger rows, restore ledger 0, old stores all 0.
+    - [x] Receipt mix: item_transfer 1, dialogue_record 9, route_options 14, route_check 16, movement 16.
+    - [x] Final clock: `worldVersion=17`, `worldTimeMinutes=16`, `currentTick=16`; final player scene `Anchor Chain Pylon`; `Brass Tube.owner=Guide`, `equipState=carried`.
+    - [x] Artifact scan found no failed verifications, no SSE errors, no one-token narration, no public internal tokens, and no suspicious CJK/mixed-script tokens.
+  - Acceptance status:
+    - P185 is a clean 60-turn runtime/DB/player-facing candidate lane after the GM Read uncertainty and Checklist evidence-bound repairs.
+    - Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.
+  - Next scoped work:
+    - [ ] Commit/push the P185 evidence docs after GitNexus detect.
+    - [ ] Start the next fresh post-repair zero-turn clone/campaign for another about-60-turn lane.
