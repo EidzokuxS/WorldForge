@@ -3830,6 +3830,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write playable text-RPG adventure prose from accepted facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Default successful turns use one to three short fiction beats");
     expect(buildCleanNarrationSystemPrompt()).toContain("Adventure prose floor:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Default literary profile:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Micro 1.1.3");
+    expect(buildCleanNarrationSystemPrompt()).toContain("FF5 Micro");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");

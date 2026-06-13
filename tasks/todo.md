@@ -6314,3 +6314,20 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk with no affected process expansion.
+
+- P214 Stage 6 default literary reference profile:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 prompt text.
+    - [x] Add explicit default literary reference guidance for Zetta Micro 1.1.3 and FF5 Micro to the Stage 6 system prompt.
+    - [x] Keep the guidance positive: page rhythm, concrete accepted details, player-facing handle, and cadence choices rather than string bans.
+    - [x] Add focused prompt tests proving the default profile is present and tied to `storyFrame.pagePlan`.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts before edits: `buildCleanNarrationSystemPrompt` LOW -> `runCleanNarration`; `cleanNarrationStyleLines` LOW -> `buildCleanNarrationSystemPrompt` -> `runCleanNarration`.
+    - [x] Stage 6 default prompt now names Zetta Micro 1.1.3 as primary prose reference and FF5 Micro as secondary reference.
+    - [x] Added positive micro-page guidance for compact adventure-page writing, storyFrame/pagePlan rhythm, playable final handle, and truthful flourish as phrasing over cited evidence.
+    - [x] Focused prompt test now proves the reference profile, micro-page rhythm, storyFrame.pagePlan linkage, and truthful-flourish boundary are present.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 82 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk: changed symbol `buildCleanNarrationSystemPrompt`, no affected process expansion.
