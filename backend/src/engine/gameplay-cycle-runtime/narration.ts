@@ -22,6 +22,7 @@ export interface CleanNarrationValidationIssue {
     | "linkage_mismatch"
     | "old_runtime_marker"
     | "private_term"
+    | "prose_quality"
     | "schema_invalid"
     | "text_mismatch";
   path: string;
@@ -32,10 +33,13 @@ export interface CleanNarrationCandidateRequest {
   system: string;
   prompt: string;
   promptInput: CleanNarratorPromptInput;
+  styleMode: CleanNarrationStyleMode;
 }
 
 export type CleanNarrationCandidateGenerator =
   (request: CleanNarrationCandidateRequest) => Promise<unknown>;
+
+export type CleanNarrationStyleMode = "grounded_clean" | "realism_nsfw";
 
 export type CleanNarrationRunResult = CleanNarrationResult & {
   validationIssues: CleanNarrationValidationIssue[];
@@ -62,6 +66,40 @@ const UUID_LIKE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const BACKEND_REF = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player):[^\s",.]+/i;
 const BACKEND_DASH_ID = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player|stage4-receipt)-[a-z0-9][a-z0-9-]*\b/i;
 const OLD_RUNTIME_MARKER = /\b(?:narrator_attempt|clean_narrator_attempt|settled_turn_packet|receipt_ledger|gameplay_cycle_v2|turn_saga|tool_payload|privateResult|chance|roll|reasoning)\b/i;
+const ONE_WORD = /[\p{L}\p{N}]+/gu;
+const CYRILLIC_WORD = /[\u0400-\u04FF]+/gu;
+const RUSSIAN_ENGLISH_SCAFFOLD = /\b(?:Current scene|Current place|Inventory item|Visible target|Route option|The settled route check confirms|World clock advances|item state changed|Operation|Final equip state|Item transfer result)\b/iu;
+const RECEIPT_PROSE_MARKER = /\b(?:Operation:|Source:|Target:|Final equip state:|Current scene anchor:|Item transfer result:|Player location changed|Travel cost|Current scene is|Current place is|Inventory item:|Visible target:|Route option:|minute\(s\)|transferred_to_actor|give_to_visible_actor|movement_option|message_indicator)\b/iu;
+const PROSE_SHAPE_MARKERS: Array<{ name: string; pattern: RegExp }> = [
+  {
+    name: "word_as_object",
+    pattern: /\b(?:taste[sd]?|weigh(?:ed|s)?|roll(?:ed|s)?|repeat(?:ed|s)?|testing|working through)\b[\s\S]{0,80}\b(?:name|word|phrase|syllable)s?\b/iu,
+  },
+  {
+    name: "novelty_tag",
+    pattern: /\b(?:interesting|intriguing|full of surprises|that's new|we'll see)\b/iu,
+  },
+  {
+    name: "crowd_foil",
+    pattern: /\b(?:most people|everyone else|people usually|most would)\b/iu,
+  },
+  {
+    name: "bottled_atmosphere",
+    pattern: /\b(?:velvet|velvety|silk(?:en)?|husky|charged air|thick air|stretched silence|pregnant pause|barely above a whisper|ozone)\b/iu,
+  },
+  {
+    name: "negation_as_description",
+    pattern: /\b(?:not quite|not anymore|not yet|not\s+\w+(?:\s+\w+){0,3}\s*,?\s+but)\b/iu,
+  },
+  {
+    name: "option_menu_verdict",
+    pattern: /\beither\b[\s\S]{0,90}\bor\b|\b[A-Z][\w-]+\. Or [A-Z][\w-]+\b/u,
+  },
+  {
+    name: "cosmic_fluff",
+    pattern: /\b(?:world (?:narrowed|tilted|fell away)|something (?:dark|ancient|feral)|[\p{L}\p{N}_-]+ was a [\p{L}\p{N}_-]+ thing)\b/iu,
+  },
+];
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
@@ -69,6 +107,29 @@ function uniqueStrings(values: readonly string[]): string[] {
 
 function normalizeText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function stripQuotedSegments(value: string): string {
+  return value
+    .replace(/"[^"]*"/gu, " ")
+    .replace(/'[^']*'/gu, " ");
+}
+
+function wordsIn(value: string): string[] {
+  return value.match(ONE_WORD) ?? [];
+}
+
+function uniqueCyrillicWords(value: string): string[] {
+  return uniqueStrings(value.match(CYRILLIC_WORD) ?? []).map((word) => word.toLowerCase());
+}
+
+function acceptedEvidenceText(view: CleanNarratorView): string {
+  return view.acceptedEvidence
+    .flatMap((evidence) => [
+      evidence.text,
+      ...evidence.backendFacts.map((fact) => fact.text),
+    ])
+    .join("\n");
 }
 
 function zodIssue(issue: { path: PropertyKey[]; message: string }): CleanNarrationValidationIssue {
@@ -121,6 +182,66 @@ function leakageIssues(input: {
   return issues;
 }
 
+function proseQualityIssues(input: {
+  view: CleanNarratorView;
+  candidate: CleanNarrationCandidate;
+}): CleanNarrationValidationIssue[] {
+  const text = normalizeText(input.candidate.finalText);
+  const unquotedText = stripQuotedSegments(text);
+  const issues: CleanNarrationValidationIssue[] = [];
+
+  if (wordsIn(text).length <= 1) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Narration finalText must contain more than one token.",
+    });
+  }
+
+  if (RECEIPT_PROSE_MARKER.test(unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Narration finalText used receipt-shaped or enum-shaped wording.",
+    });
+  }
+
+  if (input.view.language === "en") {
+    const acceptedText = acceptedEvidenceText(input.view).toLowerCase();
+    const leakedWords = uniqueCyrillicWords(text)
+      .filter((word) => !acceptedText.includes(word));
+    if (leakedWords.length > 0) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: "English narration finalText introduced unrelated Cyrillic text.",
+      });
+    }
+  }
+
+  if ((input.view.language === "ru" || input.view.language === "mixed")
+    && RUSSIAN_ENGLISH_SCAFFOLD.test(unquotedText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Russian narration finalText used English scaffold or receipt phrasing.",
+    });
+  }
+
+  for (const marker of PROSE_SHAPE_MARKERS) {
+    if (marker.pattern.test(unquotedText)) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: `Narration finalText used tired prose shape: ${marker.name}.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNarratorPromptInput {
   return assertCleanNarratorPromptInput({
     version: "gameplay-runtime.clean-narrator-prompt-input.v1",
@@ -136,7 +257,22 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
   });
 }
 
-export function buildCleanNarrationSystemPrompt(): string {
+function cleanNarrationStyleLines(styleMode: CleanNarrationStyleMode): string[] {
+  if (styleMode === "realism_nsfw") {
+    return [
+      "Adult realism mode: active only when the caller explicitly passes styleMode=realism_nsfw and accepted evidence places the turn in adult-rated intimacy, violence, injury, desire, or bodily vulnerability.",
+      "Adult realism role: use slow-burn pacing, frank physical diction, body-specific detail, sensory pressure, and character motive from accepted evidence.",
+      "Adult realism NPC agency: portray visible goals, pursuit, hesitation, appetite, fear, pain, tenderness, cruelty, and speech through accepted actions and utterances.",
+      "Adult realism pacing: let attraction, threat, revulsion, injury, pleasure, or tenderness build through concrete beats; preserve the scene's motive and consequence path.",
+      "Adult realism boundary: adult-rated detail requires adult characters, campaign rating support, accepted evidence refs, and the same clean narration grounding contract as every other turn.",
+    ];
+  }
+  return [];
+}
+
+export function buildCleanNarrationSystemPrompt(
+  styleMode: CleanNarrationStyleMode = "grounded_clean",
+): string {
   return [
     "You are WorldForge Stage 6 Narration.",
     "Return only JSON matching gameplay-runtime.clean-narration-candidate.v1.",
@@ -144,8 +280,14 @@ export function buildCleanNarrationSystemPrompt(): string {
     "raw player action is intentionally omitted; write the settled result described by accepted evidence.",
     "Stage authority: narration phrases accepted evidence into player-facing prose.",
     "Style role: write compact, concrete fiction from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
+    "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",
+    ...cleanNarrationStyleLines(styleMode),
     "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
+    "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
+    "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
+    "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
+    "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different sentence shapes across nearby turns.",
     "Shape pass: replace word-as-object phrasing, novelty tags, crowd-foil contrasts, bottled atmosphere, negation-as-description, either/or verdict menus, and cosmic abstractions with the accepted concrete fact.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from acceptedEvidence.",
@@ -304,6 +446,7 @@ export function validateCleanNarrationCandidate(input: {
     });
   }
   issues.push(...leakageIssues({ view: input.view, candidate }));
+  issues.push(...proseQualityIssues({ view: input.view, candidate }));
 
   if (issues.length > 0) {
     return { status: "rejected", issues };
@@ -342,6 +485,15 @@ function englishList(values: readonly string[]): string {
 function formatMinutes(value: string | null): string | null {
   if (!value) return null;
   return `${value} minute${value === "1" ? "" : "s"}`;
+}
+
+function renderElapsedTimeProjection(view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
+  const fact = evidence.backendFacts[0]?.text ?? evidence.text;
+  const minutes = fact.match(/^World clock advances by (\d+) minute\(s\)\.$/u)?.[1] ?? null;
+  if (!minutes) return fact;
+  return projectionLanguage(view) === "ru"
+    ? `Проходит ${minutes} мин.`
+    : `${formatMinutes(minutes)!} pass.`;
 }
 
 function stableVariant(seed: string, count: number): number {
@@ -701,7 +853,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("elapsed_time")
   );
   if (elapsed) {
-    return elapsed.backendFacts[0]?.text ?? elapsed.text;
+    return renderElapsedTimeProjection(view, elapsed);
   }
 
   const itemState = view.acceptedEvidence.find((evidence) =>
@@ -794,10 +946,12 @@ async function generateCleanNarrationCandidate(input: {
 export async function runCleanNarration(input: {
   narratorView: CleanNarratorView;
   provider: ProviderConfig;
+  styleMode?: CleanNarrationStyleMode;
   generateCandidate?: CleanNarrationCandidateGenerator;
 }): Promise<CleanNarrationRunResult> {
   const promptInput = buildCleanNarratorPromptInput(input.narratorView);
-  const system = buildCleanNarrationSystemPrompt();
+  const styleMode = input.styleMode ?? "grounded_clean";
+  const system = buildCleanNarrationSystemPrompt(styleMode);
   const prompt = buildCleanNarrationPrompt(promptInput);
   if (needsDeterministicAuthorityProjection(input.narratorView)) {
     return {
@@ -820,7 +974,7 @@ export async function runCleanNarration(input: {
 
   let candidate: unknown;
   try {
-    candidate = await generateCandidate({ system, prompt, promptInput });
+    candidate = await generateCandidate({ system, prompt, promptInput, styleMode });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new CleanNarrationGenerationError(

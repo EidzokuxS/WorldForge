@@ -31,6 +31,30 @@ P189 clean runtime prose quality pass:
   - [x] Live proof clone `p189-prose-item-transfer-20260613-090607` from source `p69-item-transfer-045651`; action `I hand the Brass Tube to Guide.` through `/api/chat/action` on clean runtime.
   - [x] Live DB proof: one accepted `item_transfer` receipt with `item_transfer_receipt` authority and `may_claim_item_state_change` visible result authority; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; `worldTimeMinutes/currentTick 0/0`; no `turn_clock_ledger`; one authority trace `gameplay-cycle-runtime.item_transfer.v1`; old v2/saga/narrator/oracle/simulation stores all 0.
   - [x] Player-facing proof text: `Brass Tube is now with Guide.`
+  - [ ] Follow-up option: port/adapt `Freaky Mode` as a separate explicit narrator/style option later; keep it out of the default clean runtime prose contract.
+
+P190 clean runtime prose continuation / Realism NSFW opt-in + elapsed-time prose:
+- Objective:
+  - Correct the donor interpretation: `realism` in this preset request refers to exact Template block `🔞Realism NSFW Mode ❤️💋` (`33132bfd-8f1b-401f-8a8e-7f857d717aac`) from `Zetta Micro v1.1.3` / `Freaky Frankenstein Micro FF5`.
+  - Adapt useful donor mechanics into WorldForge as an explicit Stage 6 style option, while keeping default clean runtime narration grounded, receipt-owned, and non-adult by default.
+- Changes:
+  - [x] Added Stage 6 `styleMode` with default `grounded_clean` and opt-in `realism_nsfw`.
+  - [x] Added `realism_nsfw` system prompt lines for adult realism mechanics: slow-burn pacing, frank physical diction, body-specific detail, sensory pressure, NPC agency, and accepted-evidence grounding.
+  - [x] Kept jailbreak/unsafe donor phrasing out of runtime prompt text; tests assert the opt-in prompt does not carry those donor bypass strings.
+  - [x] Added narration `prose_quality` validation for one-token outputs, unrelated mixed script, receipt/enum-shaped text, and donor-banned stale prose shapes.
+  - [x] Replaced standalone `elapsed_time` deterministic projection `World clock advances by N minute(s).` with player-facing `N minutes pass.`
+  - [x] Added reusable prose audit script `scripts/audit-clean-runtime-prose.mjs`.
+- Executed verification:
+  - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 34 tests.
+  - [x] `npm --prefix backend run typecheck` passed.
+  - [x] Focused clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 297 tests.
+  - [x] Fresh zero-turn live artifact: `output/clean-runtime-p190-prose-style-live-20260613-122547/`.
+  - [x] Live clone `p190-prose-style-live-20260613-122547` from source `p69-item-transfer-045651`, clean runtime flags on, old runtime stores 0 at start.
+  - [x] Turn 1 manual action `I hand the Brass Tube to Guide.`: one accepted `item_transfer`, owner `Mira Voss -> Guide`, `worldVersion 0 -> 1`, `worldTimeMinutes/currentTick 0/0`, no clock ledger, authority trace `gameplay-cycle-runtime.item_transfer.v1`, old stores stayed 0, narration `Brass Tube is now with Guide.`
+  - [x] Turn 2 manual action `I wait quietly in Lowwater Bazaar for 5 minutes, without moving or touching anything.`: one accepted `time_advance`, clock `worldVersion 1 -> 2`, `worldTimeMinutes/currentTick 0 -> 5`, one clock ledger row, authority trace `gameplay-cycle-runtime.clock.advance.v1`, old stores stayed 0, narration `5 minutes pass.`
+  - [x] `node scripts/audit-clean-runtime-prose.mjs --fail-on-hits --out output/clean-runtime-p190-prose-style-live-20260613-122547/prose-audit.json output/clean-runtime-p190-prose-style-live-20260613-122547` passed with 2/2 narratives and zero hits.
+- Remaining ship steps:
+  - [x] GitNexus `detect_changes(scope=all)` reported medium scope: 9 changed indexed symbols, 1 affected process (`renderCleanAuthorityProjection -> normalizeText`), no HIGH/CRITICAL risk.
 
 P155 primitive-owned clean runtime architecture pass:
 - Objective:

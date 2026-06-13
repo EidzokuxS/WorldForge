@@ -860,8 +860,8 @@ describe("clean Stage 6 narration contracts", () => {
   it("projects P64 elapsed-time evidence without no-change claims", () => {
     const text = renderCleanAuthorityProjection(timeView());
 
-    expect(text).toBe("World clock advances by 5 minute(s).");
-    expect(text).not.toMatch(/nothing changed|nothing happened|no visible changes|everything stayed/iu);
+    expect(text).toBe("5 minutes pass.");
+    expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
   });
 
   it("uses deterministic authority projection for standalone elapsed-time turns with snapshot context", async () => {
@@ -874,8 +874,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("World clock advances by 5 minute(s).");
-    expect(result.text).not.toMatch(/\b(remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
+    expect(result.text).toBe("5 minutes pass.");
+    expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
   it("renders route-options evidence without converting options into movement", () => {
@@ -1318,6 +1318,88 @@ describe("clean Stage 6 narration contracts", () => {
     ]));
   });
 
+  it("rejects one-token, mixed-script, receipt-shaped, and donor-banned prose shapes", () => {
+    for (const text of [
+      "Done.",
+      "Вы идете.",
+      "Operation: give_to_visible_actor. Target: Guide.",
+      "She weighed the name like a coin.",
+      "Interesting. Or dangerous.",
+      "Most people would miss it.",
+      "The air turns thick with ozone.",
+      "The world narrowed around the signal.",
+      "Not quite a smile.",
+    ]) {
+      const result = validateCleanNarrationCandidate({
+        view: movementView(),
+        candidate: movementCandidate(text),
+      });
+
+      expect(result.status, text).toBe("rejected");
+      if (result.status !== "rejected") throw new Error("expected rejected");
+      expect(
+        result.issues.some((issue) => issue.code === "prose_quality"),
+        text,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects Russian narration that falls back to English scaffold wording", () => {
+    const result = validateCleanNarrationCandidate({
+      view: movementView({ language: "ru" }),
+      candidate: {
+        ...movementCandidate("Current scene is Market."),
+        language: "ru",
+        sentences: [{
+          kind: "accepted_evidence",
+          text: "Current scene is Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["player_location_change"],
+          auditStepIds: [],
+        }],
+        finalText: "Current scene is Market.",
+      },
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) => issue.code === "prose_quality")).toBe(true);
+  });
+
+  it("keeps Realism NSFW mode as an explicit opt-in narrator style layer", async () => {
+    const result = await runCleanNarration({
+      narratorView: dialogueView(),
+      provider,
+      styleMode: "realism_nsfw",
+      generateCandidate: async (request) => {
+        expect(request.styleMode).toBe("realism_nsfw");
+        expect(request.system).toContain("Adult realism mode:");
+        expect(request.system).toContain("slow-burn pacing");
+        expect(request.system).toContain("accepted evidence refs");
+        expect(request.system).not.toMatch(/\b(jailbreak|assault|never ask permission)\b/iu);
+        return {
+          version: "gameplay-runtime.clean-narration-candidate.v1",
+          packetId: "cgpacket_test",
+          turnId: "clean-turn-1",
+          language: "en",
+          sentences: [{
+            kind: "accepted_evidence",
+            text: 'Guide says: "The north stairs flooded before dawn."',
+            evidenceRefs: ["e1"],
+            backendFactRefs: ["e1.f2"],
+            claimKinds: ["dialogue_response"],
+            auditStepIds: [],
+          }],
+          finalText: 'Guide says: "The north stairs flooded before dawn."',
+        };
+      },
+    });
+
+    expect(result.source).toBe("model");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Adult realism mode:");
+  });
+
   it("rejects generation failure before player-facing narration", async () => {
     await expect(runCleanNarration({
       narratorView: dialogueWithSceneFrameSnapshotView(),
@@ -1354,7 +1436,11 @@ describe("clean Stage 6 narration contracts", () => {
   it("documents that raw player action is intentionally omitted from the system prompt", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("raw player action is intentionally omitted");
     expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write compact, concrete fiction from accepted facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Shape pass:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Echo firewall:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Texture scope:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Door rotation:");
   });
 
   it("composes runtime through Stage 6 with only CleanNarratorView input", async () => {
