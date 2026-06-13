@@ -343,6 +343,124 @@ export const cleanItemTransferTargetKindSchema = z.enum([
   "player_equipment",
 ]);
 
+type CleanItemTransferOperation = z.infer<typeof cleanItemTransferOperationSchema>;
+type CleanItemTransferSourceKind = z.infer<typeof cleanItemTransferSourceKindSchema>;
+type CleanItemTransferTargetKind = z.infer<typeof cleanItemTransferTargetKindSchema>;
+
+const itemTransferOperationContracts: Record<CleanItemTransferOperation, {
+  sourceKind: CleanItemTransferSourceKind;
+  targetKind: CleanItemTransferTargetKind;
+  targetEquipState: "carried" | "equipped";
+  targetEquippedSlot: "equipped" | null;
+  requiredOwner: "Player" | "none";
+  requiredLocation: "current_scene" | "none";
+  requiredEquipState: "equipped" | null;
+}> = {
+  give_to_visible_actor: {
+    sourceKind: "player_inventory",
+    targetKind: "visible_actor",
+    targetEquipState: "carried",
+    targetEquippedSlot: null,
+    requiredOwner: "Player",
+    requiredLocation: "none",
+    requiredEquipState: null,
+  },
+  drop_in_current_scene: {
+    sourceKind: "player_inventory",
+    targetKind: "current_scene",
+    targetEquipState: "carried",
+    targetEquippedSlot: null,
+    requiredOwner: "Player",
+    requiredLocation: "none",
+    requiredEquipState: null,
+  },
+  pickup_from_current_scene: {
+    sourceKind: "current_scene_item",
+    targetKind: "player_inventory",
+    targetEquipState: "carried",
+    targetEquippedSlot: null,
+    requiredOwner: "none",
+    requiredLocation: "current_scene",
+    requiredEquipState: null,
+  },
+  equip_inventory_item: {
+    sourceKind: "player_inventory",
+    targetKind: "player_equipment",
+    targetEquipState: "equipped",
+    targetEquippedSlot: "equipped",
+    requiredOwner: "Player",
+    requiredLocation: "none",
+    requiredEquipState: null,
+  },
+  unequip_inventory_item: {
+    sourceKind: "player_inventory",
+    targetKind: "player_inventory",
+    targetEquipState: "carried",
+    targetEquippedSlot: null,
+    requiredOwner: "Player",
+    requiredLocation: "none",
+    requiredEquipState: "equipped",
+  },
+};
+
+function addItemTransferContractIssue(
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+  message: string,
+): void {
+  ctx.addIssue({
+    code: "custom",
+    path,
+    message,
+  });
+}
+
+function validateItemTransferOperationContract(
+  input: {
+    operation: CleanItemTransferOperation;
+    sourceKind: CleanItemTransferSourceKind;
+    targetKind: CleanItemTransferTargetKind;
+    targetEquipState: "carried" | "equipped";
+    targetEquippedSlot: "equipped" | null;
+    requiredOwner?: "Player" | "none";
+    requiredLocation?: "current_scene" | "none";
+    requiredEquipState?: "carried" | "equipped" | null;
+  },
+  ctx: z.RefinementCtx,
+  basePath: Array<string | number>,
+): void {
+  const expected = itemTransferOperationContracts[input.operation];
+  if (input.sourceKind !== expected.sourceKind) {
+    addItemTransferContractIssue(ctx, [...basePath, "sourceKind"], `${input.operation} requires sourceKind=${expected.sourceKind}.`);
+  }
+  if (input.targetKind !== expected.targetKind) {
+    addItemTransferContractIssue(ctx, [...basePath, "targetKind"], `${input.operation} requires targetKind=${expected.targetKind}.`);
+  }
+  if (input.targetEquipState !== expected.targetEquipState) {
+    addItemTransferContractIssue(ctx, [...basePath, "targetEquipState"], `${input.operation} requires targetEquipState=${expected.targetEquipState}.`);
+  }
+  if (input.targetEquippedSlot !== expected.targetEquippedSlot) {
+    addItemTransferContractIssue(
+      ctx,
+      [...basePath, "targetEquippedSlot"],
+      `${input.operation} requires targetEquippedSlot=${expected.targetEquippedSlot ?? "null"}.`,
+    );
+  }
+  if (input.requiredOwner !== undefined && input.requiredOwner !== expected.requiredOwner) {
+    addItemTransferContractIssue(ctx, [...basePath, "requiredOwner"], `${input.operation} requires requiredOwner=${expected.requiredOwner}.`);
+  }
+  if (input.requiredLocation !== undefined && input.requiredLocation !== expected.requiredLocation) {
+    addItemTransferContractIssue(ctx, [...basePath, "requiredLocation"], `${input.operation} requires requiredLocation=${expected.requiredLocation}.`);
+  }
+  if (input.requiredEquipState !== undefined && input.requiredEquipState !== expected.requiredEquipState) {
+    addItemTransferContractIssue(
+      ctx,
+      [...basePath, "requiredEquipState"],
+      `${input.operation} requires requiredEquipState=${expected.requiredEquipState ?? "null"}.`,
+    );
+  }
+}
+
 export const cleanLocalObservationSurfaceKindSchema = z.enum([
   "current_scene",
   "current_location",
@@ -883,6 +1001,16 @@ export const gmActionChecklistStepSchema = z.object({
       });
     }
   }
+  if (step.intended.itemTransferPlan) {
+    const plan = step.intended.itemTransferPlan;
+    validateItemTransferOperationContract({
+      operation: plan.operation,
+      sourceKind: plan.sourceKind,
+      targetKind: plan.targetKind,
+      targetEquipState: plan.targetEquipState,
+      targetEquippedSlot: plan.targetEquippedSlot,
+    }, ctx, ["intended", "itemTransferPlan"]);
+  }
   if (step.intended.dialoguePlan?.speakerSource === "existing_visible_actor") {
     if (!step.intended.dialoguePlan.speakerRef) {
       ctx.addIssue({
@@ -1169,7 +1297,18 @@ export const cleanStage4ItemTransferEffectSchema = z.object({
     privateKnowledge: z.literal(false),
     absenceOrNoChange: z.literal(false),
   }).strict(),
-}).strict();
+}).strict().superRefine((effect, ctx) => {
+  validateItemTransferOperationContract({
+    operation: effect.operation,
+    sourceKind: effect.source.sourceKind,
+    targetKind: effect.target.targetKind,
+    targetEquipState: effect.target.targetEquipState,
+    targetEquippedSlot: effect.target.targetEquippedSlot,
+    requiredOwner: effect.source.requiredOwner,
+    requiredLocation: effect.source.requiredLocation,
+    requiredEquipState: effect.source.requiredEquipState,
+  }, ctx, []);
+});
 
 export const cleanStage4ItemTransferResultSchema = z.object({
   type: z.literal("item_transfer"),

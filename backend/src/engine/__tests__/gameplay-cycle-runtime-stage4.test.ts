@@ -1811,6 +1811,29 @@ describe("clean Stage 4 executor DB contracts", () => {
       };
     };
 
+    const invalidEquipFrame = buildFrame(0, "carried");
+    await expect(runCleanStage4Execution({
+      frame: invalidEquipFrame,
+      checklist: buildChecklist(invalidEquipFrame, "equip_inventory_item", "equipped", null),
+    })).rejects.toThrow(/targetEquippedSlot=equipped/);
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube")).toEqual({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+    expect(getSqliteConnection()
+      .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+    expect(getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM clean_gameplay_stage4_receipts WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ count: 0 });
+    expect(getSqliteConnection()
+      .prepare("SELECT COUNT(*) AS count FROM authority_traces WHERE campaign_id = ?")
+      .get(CAMPAIGN_ID)).toEqual({ count: 0 });
+
     const equipFrame = buildFrame(0, "carried");
     const equipResult = await runCleanStage4Execution({
       frame: equipFrame,

@@ -1377,7 +1377,7 @@ function itemTransferTargetForEffect(input: {
     nextOwnerId: input.player.id,
     nextLocationId: null,
     nextEquipState: "equipped",
-    nextEquippedSlot: target.targetEquippedSlot ?? "equipped",
+    nextEquippedSlot: target.targetEquippedSlot,
     finalOwnerKind: "player",
     finalLocationKind: "none",
   };

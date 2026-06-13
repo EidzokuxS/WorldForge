@@ -5377,3 +5377,21 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (`267 passed`).
   - Remaining edge live proofs:
     - [ ] Rejected/revised or failed/skipped Stage4 branch through live `/api/chat/action`.
+
+- P170 clean gameplay runtime item-transfer effect self-validation:
+  - Plan:
+    - [x] Re-establish branch and typecheck baseline before work.
+    - [x] Audit remaining clean-runtime fallback/default surfaces for gameplay meaning leaks.
+    - [x] Run GitNexus impact for the item-transfer Stage4 contract/executor path; current blast radius is LOW (`assertCleanStage4Request`, `itemTransferTargetForEffect`, `runCleanStage4Execution`).
+    - [x] Move equip-slot ownership into the typed item_transfer request schema and remove the local Stage4 equip-slot default.
+    - [x] Add focused contracts proving equip requests require explicit `targetEquippedSlot="equipped"` and non-equip transfers require `targetEquippedSlot=null`.
+    - [x] Add a Stage4 test proving a malformed equip request fails the Stage4 request invariant before mutation/receipt insertion instead of accepting a backend-invented equip slot.
+    - [x] Run typecheck and focused clean-runtime tests (`284 passed`).
+    - [x] Run one fresh live `/api/chat/action` proof for the original Brass Tube handoff path.
+    - [ ] Run GitNexus detect, commit, push, and `npx gitnexus analyze --embeddings`.
+  - Live proof:
+    - [x] Artifact root: `output/clean-runtime-p170-item-transfer-effect-contract-proof-20260613/`.
+    - [x] Fresh zero-turn clone `p170-item-transfer-effect-contract-proof-20260613` from `p69-item-transfer-045651`; preflight had chat history 0, clock `0/0/0`, Player carrying `Brass Tube`, visible exact-scene `Guide`, clean runtime stores 0, and old v2/saga/narrator/oracle/simulation stores 0.
+    - [x] Manual-chosen action after preflight inspection: `I hand the Brass Tube to Guide.`.
+    - [x] SSE `done.runtime=gameplay-cycle-runtime`; one accepted `item_transfer` receipt; `Brass Tube.owner=Guide`; `worldVersion 0 -> 1`; world time/current tick stayed `0/0`; no turn clock ledger; one item-scoped authority trace `gameplay-cycle-runtime.item_transfer.v1`; settlement includes `item_transfer_receipt` accepted evidence with claim kind `item_state`; old stores all 0; narration is multi-token.
+    - [x] DB verification artifact: `output/clean-runtime-p170-item-transfer-effect-contract-proof-20260613/db-verification.json` with all checks passing.

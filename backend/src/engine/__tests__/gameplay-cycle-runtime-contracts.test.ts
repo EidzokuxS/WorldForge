@@ -4310,6 +4310,80 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("requires item_transfer checklist plans to carry operation-owned equip fields", async () => {
+    const frame = itemTransferActionPlanFrame();
+    const gmRead = itemTransferGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Item transfer needs a clean item_transfer receipt before narration.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-transfer-operation-fields",
+    });
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    const step = result.checklist.steps[0]!;
+    const plan = step.intended.itemTransferPlan!;
+
+    expect(gmActionChecklistSchema.safeParse({
+      ...result.checklist,
+      steps: [{
+        ...step,
+        intended: {
+          ...step.intended,
+          itemTransferPlan: {
+            ...plan,
+            targetEquippedSlot: "equipped",
+          },
+        },
+      }],
+    }).success).toBe(false);
+
+    const equipPlan = {
+      ...plan,
+      operation: "equip_inventory_item" as const,
+      targetKind: "player_equipment" as const,
+      targetRef: "Player",
+      targetEquipState: "equipped" as const,
+      targetEquippedSlot: "equipped" as const,
+    };
+    expect(gmActionChecklistSchema.safeParse({
+      ...result.checklist,
+      steps: [{
+        ...step,
+        targetRefs: ["Player", "Brass Tube", "Market"],
+        intended: {
+          ...step.intended,
+          itemTransferPlan: equipPlan,
+        },
+      }],
+    }).success).toBe(true);
+    expect(gmActionChecklistSchema.safeParse({
+      ...result.checklist,
+      steps: [{
+        ...step,
+        targetRefs: ["Player", "Brass Tube", "Market"],
+        intended: {
+          ...step.intended,
+          itemTransferPlan: {
+            ...equipPlan,
+            targetEquippedSlot: null,
+          },
+        },
+      }],
+    }).success).toBe(false);
+  });
+
   it("uses the current SceneFrame scene as item_transfer anchor even when GM Read omits the scene ref", async () => {
     const frame = itemTransferActionPlanFrame();
     const gmRead: GmRead = {
@@ -5291,6 +5365,30 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
     expect(cleanStage4ItemTransferEffectSchema.safeParse({
       ...base,
       target: { ...base.target, targetEquippedSlot: "backpack" },
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...base,
+      target: { ...base.target, targetEquippedSlot: "equipped" },
+    }).success).toBe(false);
+    const equipBase = {
+      ...base,
+      operation: "equip_inventory_item" as const,
+      target: {
+        ...base.target,
+        targetKind: "player_equipment" as const,
+        targetRef: "Player",
+        targetEquipState: "equipped" as const,
+        targetEquippedSlot: "equipped" as const,
+      },
+    };
+    expect(cleanStage4ItemTransferEffectSchema.safeParse(equipBase).success).toBe(true);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...equipBase,
+      target: { ...equipBase.target, targetEquippedSlot: null },
+    }).success).toBe(false);
+    expect(cleanStage4ItemTransferEffectSchema.safeParse({
+      ...equipBase,
+      target: { ...equipBase.target, targetEquipState: "carried" },
     }).success).toBe(false);
   });
 
