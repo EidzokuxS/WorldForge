@@ -5623,7 +5623,10 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Turn 002 `I ask Guide, "Are you carrying the Brass Tube now?"` passed with accepted `dialogue_record`, item owner remained `Guide`, clock deltas `0/0/0`, old stores zero.
     - [x] Turn 003 `I list the routes I can take from Lowwater Bazaar now.` passed with accepted `route_options`, item owner remained `Guide`, clock deltas `0/0/0`, old stores zero.
     - [x] Audit after turn 003: 3 clean turn records, 3 accepted Stage4 receipts, 1 authority trace, turn clock ledger 0, restore ledger 0, old stores all 0, clock `worldVersion=1`, `worldTimeMinutes=0`, `currentTick=0`, chat history 6.
+    - [x] Turns 004-020 passed one action at a time from inspected state with route_check, movement, dialogue_record, route_options, and direct_scene coverage. Each verifier recorded clean-runtime `done`, one new clean turn record, one chat exchange, accepted-only receipts when applicable, multi-token narration, restore ledger 0, old stores 0, and `Brass Tube.owner=Guide`.
+    - [x] Route-list repair continued to hold after movement: turns 007, 011, 015, and 019 accepted `route_options` for anchored `now` route-list wording from `Slip Twelve Berth`, `Silt Warrens`, `Transmission Basement`, and `Resonance Tower`.
+    - [x] Audit after turn 020: 20 clean turn records, 18 accepted Stage4 receipts, 5 authority traces, 4 travel clock ledger rows, restore ledger 0, old stores all 0, clock `worldVersion=5`, `worldTimeMinutes=4`, `currentTick=4`, chat history 40, current scene `Resonance Tower`, `Brass Tube.owner=Guide`.
   - Acceptance status:
-    - P183 is clean through 3/60 on a fresh post-repair zero-turn clone. It remains an acceptance-candidate lane in progress.
+    - P183 is clean through 20/60 on a fresh post-repair zero-turn clone. It remains an acceptance-candidate lane in progress.
   - Next scoped work:
-    - [ ] Continue P183 from turn 004 toward 60 by choosing each action from inspected state.
+    - [ ] Continue P183 from turn 021 toward 60 by choosing each action from inspected state. Current scene: `Resonance Tower`; visible actors: none; routes: `Ground-Floor Barricade`, `Lowwater Bazaar`, `Silt Warrens`, `Transmission Basement`.
