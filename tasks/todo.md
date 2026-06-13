@@ -6628,3 +6628,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported LOW with no affected execution processes.
     - [x] Pushed commit `5b6a2102`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P233 Stage 6 local-observation literary path:
+  - Plan:
+    - [x] Run GitNexus impact before editing local-observation settlement facts, deterministic projection routing, and prose validation.
+    - [x] Emit typed `value` for local-observation `observed_entry_labels` so label preservation is a positive contract.
+    - [x] Remove local_observation from deterministic authority projection routing while keeping clarification deterministic.
+    - [x] Reject local_observation candidates that omit accepted observed labels without parsing fact text.
+    - [x] Update focused tests for bounded negative and route-list local observations to use model-authored prose without broad absence, route truth, or hidden placeholders.
+    - [x] Run focused narration/settlement/contracts/stage4 tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] GitNexus impact was LOW for `stage4Evidence`, `needsDeterministicAuthorityProjection`, `proseQualityIssues`, and `assertLocalObservationStoryEvidence`; expected runtime touchpoint is `runCleanNarration`.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported LOW with no affected execution processes.
+    - [x] Pushed commit `66fa33e4`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
