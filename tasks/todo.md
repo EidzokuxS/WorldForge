@@ -6772,3 +6772,19 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
     - Executed: code commit `332dd37f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P243 Stage 6 route semantic text-scan removal:
+  - Plan:
+    - [x] Inspect route movement/unsupported-texture text scans and run GitNexus impact before editing `proseQualityIssues`.
+    - [x] Remove route narration regex gates that infer movement or unsupported scene texture from free prose text.
+    - [x] Preserve route truth through accepted route labels/costs, backendFactRefs, evidenceRefs, claimKinds, and scene_texture refs when texture is actually cited.
+    - [x] Update focused route-options tests so unsupported route movement/texture claims fail through structured claim/ref contracts rather than prose text scanning.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: route semantic text scans lived in `proseQualityIssues`; GitNexus impact for `proseQualityIssues` and stale helper `hasTerminalRouteEvidence` reported LOW scope.
+    - Executed: removed `ROUTE_AS_MOVEMENT_TEXT`, `ROUTE_UNSUPPORTED_TEXTURE_TEXT`, the route text-scan `prose_quality` issues, and now-unused `hasTerminalRouteEvidence`.
+    - Executed: route-options tests now accept route prose by structured route refs and reject unsupported movement/scene_texture only when candidate `claimKinds` declare unsupported structured claims.
+    - Executed: removed route repair expectation for uncited texture wording; exact cited scene_texture clauses and first-texture route selection remain covered through refs/accepted values.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with changed indexed symbols 0 and affected processes 0.
+    - Executed: code commit `ba4259aa` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
