@@ -2269,7 +2269,7 @@ describe("clean Stage 6 narration contracts", () => {
       issue.code === "prose_quality" && issue.message.includes("missing The Copper Tap, Upper Dam Ruins")
     )).toBe(true);
 
-    const availableRouteDigest = validateCleanNarrationCandidate({
+    const availableRouteStatus = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
         text: "1 visible route is available from here: North Hall. It takes 1 minute.",
@@ -2278,11 +2278,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(availableRouteDigest.status).toBe("rejected");
-    if (availableRouteDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(availableRouteDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
+    expect(availableRouteStatus.status).toBe("accepted");
 
     const stockRouteListShape = validateCleanNarrationCandidate({
       view,
@@ -3992,7 +3988,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network|screen|lit|unlit/iu);
   });
 
-  it("rejects flat device_surface_observation summary-digest prose without scene_texture", () => {
+  it("rejects copied deterministic device_surface_observation projection text", () => {
     const result = validateCleanNarrationCandidate({
       view: deviceSurfaceObservationView(),
       candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
@@ -4006,7 +4002,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("bare_device_surface")
+      issue.code === "prose_quality" && issue.message.includes("deterministic authority projection")
     )).toBe(true);
   });
 
@@ -4173,73 +4169,41 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("rejects summary-digest prose on literary narration claim shapes", () => {
-    const itemDigest = validateCleanNarrationCandidate({
-      view: itemStateView(),
-      candidate: acceptedCandidate(itemStateView(), [{
-        text: "Brass Tube is now with Guide.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f5"],
-        claimKinds: ["item_state"],
-      }]),
-    });
-    expect(itemDigest.status).toBe("rejected");
-    if (itemDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(itemDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
+  it("rejects copied deterministic authority projection text on literary narration claim shapes", () => {
+    const deterministicCandidate = (view: CleanNarratorView): CleanNarrationCandidate => acceptedCandidate(view, [{
+      text: renderCleanAuthorityProjection(view),
+      evidenceRefs: view.acceptedEvidence.map((evidence) => evidence.ref).slice(0, 12),
+      backendFactRefs: view.acceptedEvidence.flatMap((evidence) =>
+        evidence.backendFacts.map((fact) => fact.factRef)
+      ).slice(0, 12),
+      claimKinds: [...new Set(view.acceptedEvidence.flatMap((evidence) => evidence.claimKinds))],
+    }]);
+    const views = [
+      itemStateView(),
+      dialogueView(),
+      sceneFrameSnapshotView(),
+      movementView(),
+      routeWithSceneFrameSnapshotView(),
+      routeOptionsView(),
+      positiveLocalObservationView(),
+      supportActorView(),
+      playerLocalConditionView(),
+      minorPoiHandleView(),
+      deviceSurfaceObservationView(),
+    ];
 
-    const dialogueDigest = validateCleanNarrationCandidate({
-      view: dialogueView(),
-      candidate: acceptedCandidate(dialogueView(), [{
-        text: 'Guide says: "The north stairs flooded before dawn."',
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2"],
-        claimKinds: ["dialogue_response"],
-      }]),
-    });
-    expect(dialogueDigest.status).toBe("rejected");
-    if (dialogueDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(dialogueDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const sceneDigest = validateCleanNarrationCandidate({
-      view: sceneFrameSnapshotView(),
-      candidate: acceptedCandidate(sceneFrameSnapshotView(), [{
-        text: "You are at Market. You have Courier satchel. Notice Board is visible. A visible route leads to North Hall; it takes 1 minute.",
-        evidenceRefs: ["e1", "e2", "e3", "e4"],
-        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f1", "e4.f3", "e4.f6"],
-        claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
-      }]),
-    });
-    expect(sceneDigest.status).toBe("rejected");
-    if (sceneDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(sceneDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const movementDigest = validateCleanNarrationCandidate({
-      view: movementView(),
-      candidate: movementCandidate("You arrive at North Hall after one minute."),
-    });
-    expect(movementDigest.status).toBe("rejected");
-    if (movementDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(movementDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const movementTravelBrings = validateCleanNarrationCandidate({
-      view: movementView(),
-      candidate: movementCandidate("One minute of travel brings you to North Hall."),
-    });
-    expect(movementTravelBrings.status).toBe("rejected");
-
-    const movementCurrentPlace = validateCleanNarrationCandidate({
-      view: movementView(),
-      candidate: movementCandidate("After one minute, North Hall becomes your current place."),
-    });
-    expect(movementCurrentPlace.status).toBe("rejected");
+    for (const view of views) {
+      const label = view.acceptedEvidence.map((evidence) => evidence.authority).join(",");
+      const result = validateCleanNarrationCandidate({
+        view,
+        candidate: deterministicCandidate(view),
+      });
+      expect(result.status, label).toBe("rejected");
+      if (result.status !== "rejected") throw new Error("expected rejected");
+      expect(result.issues.some((issue) =>
+        issue.code === "prose_quality" && issue.message.includes("deterministic authority projection")
+      ), `${label}: ${result.issues.map((issue) => issue.message).join(" | ")}`).toBe(true);
+    }
 
     const movementWithoutTexture = validateCleanNarrationCandidate({
       view: movementWithSceneTextureView(),
@@ -4262,95 +4226,6 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(elapsedDigest.status).toBe("rejected");
 
-    const routeStatusDigest = validateCleanNarrationCandidate({
-      view: routeWithSceneFrameSnapshotView(),
-      candidate: acceptedCandidate(routeWithSceneFrameSnapshotView(), [{
-        text: "Transmission Basement is reachable from here.",
-        evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1"],
-        claimKinds: ["route_status"],
-      }]),
-    });
-    expect(routeStatusDigest.status).toBe("rejected");
-    if (routeStatusDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(routeStatusDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const routeOptionsDigest = validateCleanNarrationCandidate({
-      view: routeOptionsView(),
-      candidate: acceptedCandidate(routeOptionsView(), [{
-        text: "A visible route leads to North Hall; it takes 1 minute.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1"],
-        claimKinds: ["movement_option"],
-      }]),
-    });
-    expect(routeOptionsDigest.status).toBe("rejected");
-    if (routeOptionsDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(routeOptionsDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const localObservationDigest = validateCleanNarrationCandidate({
-      view: positiveLocalObservationView(),
-      candidate: acceptedCandidate(positiveLocalObservationView(), [{
-        text: "central telegraph desk is visible here.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
-        claimKinds: ["local_observation", "visible_target"],
-      }]),
-    });
-    expect(localObservationDigest.status).toBe("rejected");
-    if (localObservationDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(localObservationDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const supportActorDigest = validateCleanNarrationCandidate({
-      view: supportActorView(),
-      candidate: acceptedCandidate(supportActorView(), [{
-        text: "Local Vendor is present in Market as a vendor.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
-        claimKinds: ["visible_actor", "support_actor_materialization"],
-      }]),
-    });
-    expect(supportActorDigest.status).toBe("rejected");
-    if (supportActorDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(supportActorDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const playerConditionDigest = validateCleanNarrationCandidate({
-      view: playerLocalConditionView(),
-      candidate: acceptedCandidate(playerLocalConditionView(), [{
-        text: "Player is kneeling.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1"],
-        claimKinds: ["player_local_condition"],
-      }]),
-    });
-    expect(playerConditionDigest.status).toBe("rejected");
-    if (playerConditionDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(playerConditionDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
-
-    const minorPoiDigest = validateCleanNarrationCandidate({
-      view: minorPoiHandleView(),
-      candidate: acceptedCandidate(minorPoiHandleView(), [{
-        text: "Tea Stall is now available here as a visible stall handle.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f3"],
-        claimKinds: ["minor_poi_handle", "visible_target"],
-      }]),
-    });
-    expect(minorPoiDigest.status).toBe("rejected");
-    if (minorPoiDigest.status !== "rejected") throw new Error("expected rejected");
-    expect(minorPoiDigest.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("summary-digest")
-    )).toBe(true);
   });
 
   it("rejects Russian narration that falls back to English scaffold wording", () => {

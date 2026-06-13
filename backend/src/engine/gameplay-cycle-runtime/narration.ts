@@ -100,64 +100,6 @@ const PROSE_SHAPE_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     pattern: /\b(?:world (?:narrowed|tilted|fell away)|something (?:dark|ancient|feral)|[\p{L}\p{N}_-]+ was a [\p{L}\p{N}_-]+ thing)\b/iu,
   },
 ];
-const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
-  {
-    name: "bare_item_transfer",
-    pattern: /^[\p{L}\p{N}' -]+ is now with [\p{L}\p{N}' -]+\.$/iu,
-  },
-  {
-    name: "bare_dialogue_quote",
-    pattern: /^[\p{L}\p{N}' -]+ says:\s*"[^"]+[.!?]?"\.?$/iu,
-  },
-  {
-    name: "direct_scene_list",
-    pattern: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
-  },
-  {
-    name: "old_arrival_formula",
-    pattern: /^You arrive at\b/iu,
-  },
-  {
-    name: "bare_movement_travel_brings",
-    pattern: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? of travel brings you to [^.]+\.$/iu,
-  },
-  {
-    name: "bare_movement_current_place",
-    pattern: /^(?:(?:after|in) (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?, [^.]+ becomes (?:your|the) current place|[^.]+ becomes (?:your|the) current place after (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?)\.$/iu,
-  },
-  {
-    name: "bare_elapsed_time",
-    pattern: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? pass(?: at| in)?(?: [^.]+)?\.$/iu,
-  },
-  {
-    name: "bare_route_status",
-    pattern: /^[^.]+ is reachable from here\.$/iu,
-  },
-  {
-    name: "bare_route_options",
-    pattern: /^(?:(?:A|\d+) visible routes? (?:leads? to|is available from here|are available from here)|Visible routes lead to|Closed visible routes:)\b/iu,
-  },
-  {
-    name: "bare_local_observation",
-    pattern: /^(?:Visible (?:here|routes here include|route match)\b|[^.]+ is visible here\.$)/iu,
-  },
-  {
-    name: "bare_support_actor_materialization",
-    pattern: /^[\p{L}\p{N}' -]+ is present(?: in [\p{L}\p{N}' -]+)?(?: as a [\p{L}\p{N}' -]+)?\.$/iu,
-  },
-  {
-    name: "bare_player_local_condition",
-    pattern: /^Player is [^.]+\.$/iu,
-  },
-  {
-    name: "bare_minor_poi_handle",
-    pattern: /^[\p{L}\p{N}' -]+ (?:is now available|remains available) here as a visible [\p{L}\p{N}' -]+(?: handle)?\.$/iu,
-  },
-  {
-    name: "bare_device_surface",
-    pattern: /^[\p{L}\p{N}' -]+(?:'s)? visible surface shows no requested [^.]+\.$/iu,
-  },
-];
 const ROUTE_OPTIONS_STOCK_PROJECTION_SHAPE =
   /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu;
 
@@ -1196,6 +1138,10 @@ function hasTerminalRouteEvidence(view: CleanNarratorView): boolean {
   );
 }
 
+function deterministicAuthorityProjectionText(view: CleanNarratorView): string {
+  return normalizeText(renderCleanAuthorityProjection(view));
+}
+
 function proseQualityIssues(input: {
   view: CleanNarratorView;
   candidate: CleanNarrationCandidate;
@@ -1270,14 +1216,12 @@ function proseQualityIssues(input: {
         message: `Literary narration must be more developed than a compact status digest; expected at least ${minimumWords} words.`,
       });
     }
-    for (const marker of SUMMARY_DIGEST_MARKERS) {
-      if (marker.pattern.test(text)) {
-        issues.push({
-          code: "prose_quality",
-          path: "finalText",
-          message: `Literary narration used summary-digest shape: ${marker.name}.`,
-        });
-      }
+    if (text === deterministicAuthorityProjectionText(input.view)) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: "Literary narration copied deterministic authority projection text; transform accepted evidence into a developed story beat.",
+      });
     }
   }
 

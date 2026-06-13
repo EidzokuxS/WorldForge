@@ -6613,3 +6613,17 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with the affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`; context review found the only caller is `runCleanNarration`.
     - [x] Pushed commit `bef7768f`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
+
+- P232 Stage 6 summary-digest regex removal:
+  - Plan:
+    - [x] Run GitNexus impact before editing `proseQualityIssues` and any projection comparison boundary.
+    - [x] Remove the `SUMMARY_DIGEST_MARKERS` regex banlist from clean narration validation.
+    - [x] Reject copied deterministic authority projection text through structured comparison against `renderCleanAuthorityProjection`.
+    - [x] Rewrite focused tests around deterministic projection copies and existing positive literary constraints instead of summary-digest marker names.
+    - [ ] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] GitNexus impacts before edits: `proseQualityIssues` LOW and `renderCleanAuthorityProjection` LOW.
+    - [x] Removed the summary-digest regex marker table and marker-name tests from clean narration.
+    - [x] Literary validation now rejects exact deterministic authority projection copies through `renderCleanAuthorityProjection` comparison.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope `detect_changes` reported LOW with no affected execution processes.
