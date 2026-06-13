@@ -1179,6 +1179,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
     expect(promptInput.storyFrame.version).toBe("gameplay-runtime.clean-narrator-story-frame.v1");
     expect(promptInput.storyFrame.source).toBe("derived_from_prompt_accepted_evidence");
+    expect(promptInput.storyFrame.pagePlan.version).toBe("gameplay-runtime.clean-narrator-page-plan.v1");
+    expect(promptInput.storyFrame.pagePlan.source).toBe("derived_from_story_frame_composition_slots");
   });
 
   it("builds a structured story frame from prompt accepted evidence", () => {
@@ -1205,6 +1207,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.currentContext[0]?.proseCue).toBe("current_scene_anchor");
     expect(promptInput.storyFrame.currentContext[0]?.compositionSlot).toBe("opening_context");
     expect(promptInput.storyFrame.currentContext[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "open_with_context", entryRefs: ["e1"] },
+      { step: "narrate_turn_event", entryRefs: ["e5"] },
+    ]);
   });
 
   it("keeps movement receipts as authoritative turn events", () => {
@@ -1217,6 +1223,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("event_beat");
     expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("Player location changed to North Hall.");
     expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "narrate_turn_event", entryRefs: ["e1"] },
+    ]);
   });
 
   it("keeps oracle outcomes as turn events without inventing context", () => {
@@ -1248,6 +1257,9 @@ describe("clean Stage 6 narration contracts", () => {
         ],
       },
     }]);
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "narrate_turn_event", entryRefs: ["e1"] },
+    ]);
   });
 
   it("derives route-option texture and next-action composition cues from structured evidence", () => {
@@ -1266,6 +1278,21 @@ describe("clean Stage 6 narration contracts", () => {
       ["e2", "scene_texture", "texture_context"],
       ["e3", "current_scene_anchor", "opening_context"],
     ]);
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "open_with_context", entryRefs: ["e2", "e3"] },
+      { step: "close_with_next_action_context", entryRefs: ["e1"] },
+    ]);
+  });
+
+  it("uses clarification page plans without promoting scene context to a world event", () => {
+    const promptInput = buildCleanNarratorPromptInput(clarificationWithSceneFrameSnapshotView());
+
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "ask_clarification", entryRefs: ["e1"] },
+    ]);
+    expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("clarification_request");
+    expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("clarification");
+    expect(promptInput.storyFrame.currentContext.map((entry) => entry.ref)).toEqual(["e2"]);
   });
 
   it("narrows literary receipt prompt input to terminal evidence and scene anchors", () => {

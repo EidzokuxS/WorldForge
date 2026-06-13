@@ -6295,3 +6295,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 348 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk with no affected process expansion.
+
+- P213 Stage 6 structured story page plan:
+  - Plan:
+    - [x] Run GitNexus impact before editing story-frame/page-plan builder, prompt, and prompt-input contract touchpoints.
+    - [x] Add a derived `pagePlan` to `storyFrame` without reading or regex-matching prose text.
+    - [x] Build ordered page-plan steps from structured `compositionSlot`s: opening context, settled turn event, next-action context, and clarification.
+    - [x] Teach the Stage 6 prompt to use `pagePlan` as the sentence/page order guide while accepted evidence refs/backend fact refs remain the proof path.
+    - [x] Add tests for movement, dialogue-with-context, route-options-with-texture, oracle, and clarification page-plan shapes.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] GitNexus impacts before edits: `buildCleanNarratorStoryFrame` LOW -> `buildCleanNarratorPromptInput` -> `runCleanNarration`; `cleanNarratorStoryFrameEntry` LOW; `buildCleanNarrationSystemPrompt` LOW -> `runCleanNarration`; `assertCleanNarratorPromptInput` LOW with no upstream expansion.
+    - [x] `storyFrame.pagePlan` now carries ordered page steps derived from existing `compositionSlot`s, with `source=derived_from_story_frame_composition_slots`.
+    - [x] Page-plan steps cover `open_with_context`, `narrate_turn_event`, `close_with_next_action_context`, and `ask_clarification`.
+    - [x] Stage 6 prompt now treats `pagePlan` as the page-order guide while acceptedEvidence refs/backend fact refs remain the proof path.
+    - [x] Tests cover movement, dialogue with context, route options with texture, oracle outcome, and clarification page plans.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 82 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk with no affected process expansion.

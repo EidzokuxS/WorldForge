@@ -402,6 +402,7 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
 type CleanNarratorStoryFrameEntry = CleanNarratorPromptInput["storyFrame"]["turnEvents"][number];
 type CleanNarratorProseCue = CleanNarratorStoryFrameEntry["proseCue"];
 type CleanNarratorCompositionSlot = CleanNarratorStoryFrameEntry["compositionSlot"];
+type CleanNarratorPagePlanStep = CleanNarratorPromptInput["storyFrame"]["pagePlan"]["steps"][number];
 
 function evidenceIncludesClaimKind(
   evidence: AcceptedNarrationEvidence,
@@ -466,6 +467,65 @@ function cleanNarratorStoryFrameEntry(
   };
 }
 
+function storyFrameEntryRefsForSlots(
+  entries: CleanNarratorStoryFrameEntry[],
+  slots: CleanNarratorCompositionSlot[],
+): string[] {
+  const slotSet = new Set(slots);
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!slotSet.has(entry.compositionSlot) || seen.has(entry.ref)) continue;
+    seen.add(entry.ref);
+    refs.push(entry.ref);
+  }
+  return refs;
+}
+
+function buildCleanNarratorPagePlan(
+  currentContext: CleanNarratorStoryFrameEntry[],
+  turnEvents: CleanNarratorStoryFrameEntry[],
+): CleanNarratorPromptInput["storyFrame"]["pagePlan"] {
+  const allEntries = [...currentContext, ...turnEvents];
+  const steps: CleanNarratorPagePlanStep[] = [];
+  const clarificationRefs = storyFrameEntryRefsForSlots(allEntries, ["clarification"]);
+  if (clarificationRefs.length > 0) {
+    return {
+      version: "gameplay-runtime.clean-narrator-page-plan.v1",
+      source: "derived_from_story_frame_composition_slots",
+      steps: [{ step: "ask_clarification", entryRefs: clarificationRefs }],
+    };
+  }
+
+  const openingRefs = storyFrameEntryRefsForSlots(currentContext, ["texture_context", "opening_context"]);
+  if (openingRefs.length > 0) {
+    steps.push({ step: "open_with_context", entryRefs: openingRefs });
+  }
+
+  const eventRefs = storyFrameEntryRefsForSlots(turnEvents, ["event_beat"]);
+  if (eventRefs.length > 0) {
+    steps.push({ step: "narrate_turn_event", entryRefs: eventRefs });
+  }
+
+  const nextActionRefs = storyFrameEntryRefsForSlots(allEntries, ["next_action_context"]);
+  if (nextActionRefs.length > 0) {
+    steps.push({ step: "close_with_next_action_context", entryRefs: nextActionRefs });
+  }
+
+  if (steps.length === 0 && allEntries.length > 0) {
+    steps.push({
+      step: "narrate_turn_event",
+      entryRefs: allEntries.map((entry) => entry.ref),
+    });
+  }
+
+  return {
+    version: "gameplay-runtime.clean-narrator-page-plan.v1",
+    source: "derived_from_story_frame_composition_slots",
+    steps,
+  };
+}
+
 function buildCleanNarratorStoryFrame(
   acceptedEvidence: AcceptedNarrationEvidence[],
 ): CleanNarratorPromptInput["storyFrame"] {
@@ -481,6 +541,7 @@ function buildCleanNarratorStoryFrame(
     source: "derived_from_prompt_accepted_evidence",
     currentContext,
     turnEvents,
+    pagePlan: buildCleanNarratorPagePlan(currentContext, turnEvents),
   };
 }
 
@@ -1425,6 +1486,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story frame: promptInput.storyFrame.currentContext is compressed current playable context; promptInput.storyFrame.turnEvents is the authoritative summary of what happened this turn. storyFrame derives from promptInput.acceptedEvidence and adds no separate world truth.",
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
+    "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Style role: write playable text-RPG adventure prose from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
     "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",

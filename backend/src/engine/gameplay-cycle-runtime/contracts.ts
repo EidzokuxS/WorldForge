@@ -2383,11 +2383,28 @@ const cleanNarratorStoryFrameEntrySchema = z.object({
   limits: cleanEvidenceLimitSchema,
 }).strict();
 
+const cleanNarratorPagePlanStepSchema = z.object({
+  step: z.enum([
+    "ask_clarification",
+    "open_with_context",
+    "narrate_turn_event",
+    "close_with_next_action_context",
+  ]),
+  entryRefs: z.array(shortText).min(1).max(24),
+}).strict();
+
+const cleanNarratorPagePlanSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-page-plan.v1"),
+  source: z.literal("derived_from_story_frame_composition_slots"),
+  steps: z.array(cleanNarratorPagePlanStepSchema).max(4),
+}).strict();
+
 const cleanNarratorStoryFrameSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-story-frame.v1"),
   source: z.literal("derived_from_prompt_accepted_evidence"),
   currentContext: z.array(cleanNarratorStoryFrameEntrySchema).max(24),
   turnEvents: z.array(cleanNarratorStoryFrameEntrySchema).max(24),
+  pagePlan: cleanNarratorPagePlanSchema,
 }).strict();
 
 const cleanNarratorAuditNoticeSchema = z.object({
