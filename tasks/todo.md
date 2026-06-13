@@ -5708,3 +5708,24 @@ Session: `gm-v1-consequenc-slice`.
   - Acceptance status:
     - [x] P186 is a clean 60-turn runtime/DB/player-facing candidate lane after P185.
     - [ ] Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.
+
+- P187 clean gameplay runtime post-P186 Acceptance-Candidate Lane G / fresh clone 0 -> about 60:
+  - Plan:
+    - [x] Start fresh zero-turn clone `p187-post-p186-acceptance-g-20260613` from source `p69-item-transfer-045651`.
+    - [x] Preflight DB state: chat history 0, authoritative clock `0/0/0`, player at `Lowwater Bazaar`, visible exact-scene `Guide`, Player carries `Brass Tube`, clean runtime stores zero, and old v2/saga/narrator/oracle/simulation stores zero.
+    - [x] Use stable clean backend on port `31703` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Execute live turns one at a time from inspected post-turn state; Codex chooses each action manually after DB/frame evidence.
+    - [x] Stop at the first player-facing runtime error, restore, replay, invalid narration, one-token transcript/narration, old-store write, or verifier contract failure; mark that lane diagnostic and repair the root contract before a new acceptance clone.
+  - Evidence:
+    - [x] Artifact root: `output/clean-runtime-p187-post-p186-acceptance-g-20260613/`; final audit: `final-lane-summary.json`.
+    - [x] Preflight artifact: `preflight.json`, pass true.
+    - [x] All 60 per-turn verifier artifacts passed with `done.runtime=gameplay-cycle-runtime`, one new clean turn record, one chat exchange, accepted-only receipts when applicable, multi-token narration, zero restore ledger rows, zero old v2/saga/narrator/oracle/simulation stores, and zero SSE `error` events.
+    - [x] Item-transfer coverage in this lane included give-to-visible-actor, unequip, equip, drop-in-current-scene, and pickup-from-current-scene. Each item mutation advanced `worldVersion` by 1 and kept `worldTimeMinutes/currentTick` stable.
+    - [x] Final DB: 60 clean turn records, 57 accepted Stage4 receipts, 21 authority traces, 16 turn clock ledger rows, restore ledger 0, old stores all 0.
+    - [x] Receipt mix: item_transfer 5, dialogue_record 8, route_options 13, route_check 15, movement 15, time_advance 1.
+    - [x] Trace mix: `gameplay-cycle-runtime.item_transfer.v1` 5, `gameplay-cycle-runtime.player.move.v1` 15, `gameplay-cycle-runtime.clock.advance.v1` 1.
+    - [x] Final clock: `worldVersion=21`, `worldTimeMinutes=17`, `currentTick=17`; final player scene `The Copper Tap`; `Brass Tube.owner=Guide`; `Courier satchel.owner=Mira Voss` and carried; `Sealed lacquer message tube.owner=Mira Voss` and equipped.
+    - [x] Artifact scan found zero failed verifications, zero SSE errors, zero one-token narration, zero public internal tokens, and zero suspicious CJK/mixed-script tokens.
+  - Acceptance status:
+    - [x] P187 is a clean 60-turn runtime/DB/player-facing candidate lane after P186.
+    - [ ] Final gameplay-cycle acceptance remains pending until several different fresh post-repair zero-turn clones/campaigns each reach about 60 clean manually selected turns with zero failed, replayed, restored, or invalid player-facing turns.
