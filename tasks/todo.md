@@ -6670,3 +6670,18 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 21 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope and staged `detect_changes` reported MEDIUM with affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`.
     - [x] Pushed commit `b7856001`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
+
+- P236 Stage 6 stylistic regex banlist removal:
+  - Plan:
+    - [x] Run GitNexus impact before editing `proseQualityIssues`.
+    - [x] Remove the `PROSE_SHAPE_MARKERS` stylistic regex banlist.
+    - [x] Keep structural truth-contract validation for evidence refs, claim kinds, typed backend facts, and leak boundaries.
+    - [x] Update focused narration tests so one-token/mixed-script/receipt-shaped structural checks remain, while donor-banned prose-shape cases are no longer validation policy.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - [x] Removed `PROSE_SHAPE_MARKERS` and the `Narration finalText used tired prose shape` rejection path from Stage 6 validation.
+    - [x] Structural checks still reject one-token output, unrelated mixed script, receipt-shaped text, unsupported refs/claims, and private/backend/runtime leaks.
+    - [x] Added a positive narration test proving an old donor-shape phrase is accepted when refs, claim kinds, and backend fact citations are valid.
+    - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 98 tests and `npm --prefix backend run typecheck`.
+    - [x] GitNexus all-scope and staged `detect_changes` reported LOW with no changed indexed symbols or affected flows.
+    - [x] Pushed commit `77771e64`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved after transient `.gitnexus/lbug` lock warnings.
