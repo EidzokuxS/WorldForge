@@ -1378,6 +1378,16 @@ describe("clean Stage 6 narration contracts", () => {
   it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Oracle-outcome surface:");
     const view = oracleOutcomeView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+
+    expect(promptInput.acceptedEvidence).toHaveLength(1);
+    expect(promptInput.acceptedEvidence[0]?.claimKinds).toEqual(["oracle_outcome"]);
+    expect(promptInput.acceptedEvidence[0]?.backendFacts).toEqual([{
+      factRef: "e1.f1",
+      text: "The loose grate holds under your weight.",
+      exact: true,
+    }]);
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,
@@ -1391,39 +1401,37 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("model");
     expect(result.text).toBe("The loose grate holds firm beneath your weight.");
-    expect(result.text).not.toMatch(/\b(oracle|roll|chance|strong hit|weak hit|miss|route|inventory|damage|nothing changed|no change|world fact|hidden)\b/iu);
   });
 
-  it("rejects oracle_outcome prose that exposes roll mechanics or unsupported state drift", () => {
-    const mechanics = validateCleanNarrationCandidate({
-      view: oracleOutcomeView(),
-      candidate: acceptedCandidate(oracleOutcomeView(), [{
-        text: "The Oracle roll lands as a strong hit, so the loose grate holds.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1"],
-        claimKinds: ["oracle_outcome"],
-      }]),
-    });
-    expect(mechanics.status).toBe("rejected");
-    if (mechanics.status !== "rejected") throw new Error("expected rejected");
-    expect(mechanics.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("roll, chance, Oracle")
-    )).toBe(true);
+  it("rejects oracle_outcome candidates that declare unsupported structured claims", () => {
+    const unsupportedClaimKinds: NarrationClaimKind[] = [
+      "player_location_change",
+      "item_state",
+      "dialogue_response",
+    ];
 
-    const stateDrift = validateCleanNarrationCandidate({
-      view: oracleOutcomeView(),
-      candidate: acceptedCandidate(oracleOutcomeView(), [{
-        text: "The loose grate holds, and you discover a hidden route with a key in your inventory.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1"],
-        claimKinds: ["oracle_outcome"],
-      }]),
-    });
-    expect(stateDrift.status).toBe("rejected");
-    if (stateDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(stateDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("movement, route state, item state")
-    )).toBe(true);
+    for (const unsupportedClaimKind of unsupportedClaimKinds) {
+      const view = oracleOutcomeView();
+      const result = validateCleanNarrationCandidate({
+        view,
+        candidate: acceptedCandidate(view, [{
+          text: "The loose grate holds firm beneath your weight.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["oracle_outcome", unsupportedClaimKind],
+        }]),
+      });
+
+      expect(result.status).toBe("rejected");
+      if (result.status !== "rejected") throw new Error("expected rejected");
+      expect(result.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "claim_not_supported",
+          path: "sentences.0.claimKinds",
+          message: `Narration sentence declared unsupported claim kind ${unsupportedClaimKind}.`,
+        }),
+      ]));
+    }
   });
 
   it("uses model-authored literary narration for standalone elapsed-time turns with snapshot context", async () => {

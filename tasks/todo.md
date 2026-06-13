@@ -6238,3 +6238,22 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 344 tests.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM central Stage 6 narration scope, with affected processes under `runCleanNarration`; no HIGH/CRITICAL risk was reported.
+
+- P210 Stage 6 no-regex oracle-outcome cleanup:
+  - Plan:
+    - [x] Record the user correction as a lesson: narrative semantic leaks require task/data contract repair, not regex banlists.
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Remove the P209 oracle-outcome semantic regex guardrails from runtime validation.
+    - [x] Keep oracle-outcome literary narration owned by structured evidence refs, backend fact refs, and `oracle_outcome` claim kind.
+    - [x] Replace oracle regex tests with structured unsupported-claim tests that fail through `claim_not_supported`.
+    - [x] Run focused narration tests, typecheck, focused clean-runtime suite, GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] User correction recorded in `tasks/lessons.md`: clean narration leaks are task/data contract failures, and Stage 6 should receive compressed current context plus authoritative turn event summary.
+    - [x] GitNexus impact before edits: `proseQualityIssues` LOW (`validateCleanNarrationCandidate` -> `runCleanNarration`), `buildCleanNarrationSystemPrompt` LOW (`runCleanNarration`).
+    - [x] Removed the fresh P209 `ORACLE_OUTCOME_*_TEXT` regex guards and their `prose_quality` rejections from runtime validation.
+    - [x] Reframed the oracle-outcome prompt card around cited selected visible outcome meaning, `oracle_outcome` backend fact, and evidence limits.
+    - [x] Replaced the oracle regex rejection test with structured unsupported-claim coverage for `player_location_change`, `item_state`, and `dialogue_response`, all failing through `claim_not_supported`.
+    - [x] `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed: 77 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 344 tests.
+    - [x] GitNexus all-scope `detect_changes` reported LOW risk: indexed changed symbol `buildCleanNarrationSystemPrompt`, no affected processes.
