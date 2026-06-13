@@ -6548,8 +6548,9 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Make prompt input fail when a scene-beat receipt lacks accepted `Scene beat` evidence.
     - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, and diff whitespace checks.
     - [x] Run GitNexus detect.
-    - [ ] Commit/push and refresh index.
+    - [x] Commit/push and refresh index.
   - Review:
     - [x] Scene-beat accepted evidence now carries `Scene beat` plus optional aggregate `Scene beat target labels`; raw `Visible target:` no longer appears in settlement/narration runtime source except leak detectors.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 91 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with affected flows limited to `runCleanNarration` prompt evidence selection.
+    - [x] Pushed commit `30dfd51b`; index refresh completed with embeddings preserved.
