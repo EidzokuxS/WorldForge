@@ -664,11 +664,11 @@ function itemStateView(): CleanNarratorView {
       ref: "e1",
       authority: "item_transfer_receipt",
       claimKinds: ["item_state"],
-      text: "Brass Tube item state changed: transferred_to_actor. Current scene anchor: Market.",
+      text: "Brass Tube passes from Player to Guide at Market. Brass Tube is carried by Guide at Market.",
       backendFacts: [
-        { factRef: "e1.f1", text: "Brass Tube item state changed: transferred_to_actor.", exact: true },
-        { factRef: "e1.f2", text: "Item label: Brass Tube.", exact: true },
-        { factRef: "e1.f3", text: "Operation: give_to_visible_actor.", exact: true },
+        { factRef: "e1.f1", text: "Custody change: Brass Tube passes from Player to Guide at Market.", exact: true },
+        { factRef: "e1.f2", text: "Settled custody: Brass Tube is carried by Guide at Market.", exact: true },
+        { factRef: "e1.f3", text: "Item label: Brass Tube.", exact: true },
         { factRef: "e1.f4", text: "Source: Player.", exact: true },
         { factRef: "e1.f5", text: "Target: Guide.", exact: true },
         { factRef: "e1.f6", text: "Final equip state: carried.", exact: true },
@@ -681,6 +681,7 @@ function itemStateView(): CleanNarratorView {
           "accepted item label",
           "accepted source and target labels",
           "current scene item state anchor",
+          "settled custody phrasing for the player",
         ],
         doesNotProve: [
           "item creation",
@@ -1313,14 +1314,22 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1"]);
     expect(facts.map((fact) => fact.factRef)).toEqual([
+      "e1.f1",
       "e1.f2",
+      "e1.f3",
       "e1.f4",
       "e1.f5",
       "e1.f6",
-      "e1.f7",
-      "e1.f8",
     ]);
     expect(facts).toHaveLength(6);
+    expect(facts.map((fact) => fact.text)).toEqual([
+      "Custody change: Brass Tube passes from Player to Guide at Market.",
+      "Settled custody: Brass Tube is carried by Guide at Market.",
+      "Item label: Brass Tube.",
+      "Source: Player.",
+      "Target: Guide.",
+      "Final equip state: carried.",
+    ]);
   });
 
   it("keeps direct scene snapshot evidence available to the literary scene prompt", () => {
@@ -2685,7 +2694,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For item_state");
     const text = renderCleanAuthorityProjection(itemStateView());
 
-    expect(text).toBe("Brass Tube is now with Guide.");
+    expect(text).toBe("Brass Tube is carried by Guide at Market.");
     expect(text).not.toMatch(/\b(item state|Item label|Operation|Source|Target|Final equip state|Current scene anchor|Item transfer result|says|discovers?|uses?|activates?|consents?|reacts?|nothing changed|no change)\b/iu);
 
     for (const unsupportedClaim of [
@@ -3845,6 +3854,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Prefer backendFacts named Custody change and Settled custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");

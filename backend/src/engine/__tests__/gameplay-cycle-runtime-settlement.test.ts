@@ -1097,10 +1097,13 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const itemState = packet.acceptedEvidence.find((entry) => entry.authority === "item_transfer_receipt");
     expect(itemState?.claimKinds).toEqual(["item_state"]);
+    expect(itemState?.text).toBe(
+      "Brass Tube passes from Player to Guide at Market. Brass Tube is carried by Guide at Market.",
+    );
     expect(itemState?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Brass Tube item state changed: transferred_to_actor.",
+      "Custody change: Brass Tube passes from Player to Guide at Market.",
+      "Settled custody: Brass Tube is carried by Guide at Market.",
       "Item label: Brass Tube.",
-      "Operation: give_to_visible_actor.",
       "Source: Player.",
       "Target: Guide.",
       "Final equip state: carried.",
@@ -1115,6 +1118,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "dialogue content",
       "absence or no-change beyond the accepted item state",
     ]));
+    expect(itemState?.limits.proves).toContain("settled custody phrasing for the player");
     expect(JSON.stringify(view)).not.toContain("item-brass-tube");
     expect(JSON.stringify(view)).not.toContain("npc-guide");
     expect(JSON.stringify(view)).not.toContain("stage4-authority-item-transfer");

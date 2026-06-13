@@ -6349,3 +6349,21 @@ Session: `gm-v1-consequenc-slice`.
     - [x] `npm --prefix backend run typecheck` passed.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
     - [x] GitNexus all-scope `detect_changes` reported LOW risk: changed symbol `buildCleanNarrationSystemPrompt`, no affected process expansion.
+
+- P216 Stage 6 live story-page proof:
+  - Plan:
+    - [x] Start a stable clean-runtime backend from the current worktree with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`.
+    - [x] Create a fresh zero-turn clone and inspect its current world/scene before choosing the action.
+    - [x] Send one manually chosen `/api/chat/action` turn that should exercise accepted `storyFrame` narration rather than deterministic fallback.
+    - [x] Verify SSE `done.runtime`, accepted receipts, clock/world deltas, old-store counts, and player-facing narration against accepted evidence.
+    - [x] Run prose audit on the proof root and record artifacts/results here.
+  - Results:
+    - [x] Diagnostic first proof `output/clean-runtime-p216-live-story-page-20260613-212807/` exposed the root prose problem: gameplay truth was clean, but item-transfer narration ended with status-like `now carried`.
+    - [x] Stage 5 item-transfer evidence now includes player-facing accepted facts `Custody change` and `Settled custody`, derived from `publicResult.itemTransfer`; raw operation/result facts remain proof details.
+    - [x] Stage 6 prompt input now prefers the custody facts for `item_state`; deterministic item-state projection also uses `Settled custody` when present.
+    - [x] Fresh fixed live proof `output/clean-runtime-p216-live-story-page-fixed-20260613-213820/`, clone `p216-live-story-page-fixed-20260613-213820`, action `I hand the Brass Tube to Guide.`
+    - [x] Fixed live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Brass Tube passes from Mira Voss to Guide, and Guide carries it at Lowwater Bazaar.`
+    - [x] DB proof `p216-live-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `item_transfer` receipt, one authority trace `gameplay-cycle-runtime.item_transfer.v1`, `worldVersion +1`, `worldTime/currentTick +0`, `Brass Tube.owner=Guide`, old v2/saga/narrator/oracle/simulation stores all 0.
+    - [x] Prose audit `prose-audit.json`: 1 narrative, 34 words, zero one-token/debug/enum/summary/digest/slop hits.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.

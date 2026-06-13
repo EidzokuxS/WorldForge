@@ -159,6 +159,47 @@ const ITEM_TRANSFER_DOES_NOT_PROVE = [
   "absence or no-change beyond the accepted item state",
 ];
 
+type CleanItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTransfer"]>;
+
+function itemTransferHolderPhrase(itemTransfer: CleanItemTransferResult): string {
+  if (itemTransfer.finalOwnerKind === "visible_actor") {
+    return itemTransfer.finalEquipState === "equipped"
+      ? `equipped by ${itemTransfer.targetLabel}`
+      : `carried by ${itemTransfer.targetLabel}`;
+  }
+  if (itemTransfer.finalOwnerKind === "player") {
+    return itemTransfer.finalEquipState === "equipped"
+      ? `equipped by ${itemTransfer.actorLabel}`
+      : `carried by ${itemTransfer.actorLabel}`;
+  }
+  if (itemTransfer.finalLocationKind === "current_scene") {
+    return `at ${itemTransfer.anchorSceneLabel}`;
+  }
+  return `with ${itemTransfer.targetLabel}`;
+}
+
+function itemTransferSettledCustodyText(itemTransfer: CleanItemTransferResult): string {
+  const holderPhrase = itemTransferHolderPhrase(itemTransfer);
+  if (holderPhrase.startsWith("at ")) {
+    return `${itemTransfer.itemLabel} is ${holderPhrase}.`;
+  }
+  return `${itemTransfer.itemLabel} is ${holderPhrase} at ${itemTransfer.anchorSceneLabel}.`;
+}
+
+function itemTransferCustodyChangeText(itemTransfer: CleanItemTransferResult): string {
+  const settledText = itemTransferSettledCustodyText(itemTransfer);
+  if (itemTransfer.resultKind === "already_satisfied") {
+    const holderPhrase = itemTransferHolderPhrase(itemTransfer);
+    return holderPhrase.startsWith("at ")
+      ? `${itemTransfer.itemLabel} is already ${holderPhrase}.`
+      : `${itemTransfer.itemLabel} is already ${holderPhrase} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  if (itemTransfer.sourceLabel && itemTransfer.targetLabel && itemTransfer.sourceLabel !== itemTransfer.targetLabel) {
+    return `${itemTransfer.itemLabel} passes from ${itemTransfer.sourceLabel} to ${itemTransfer.targetLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  return settledText;
+}
+
 const MINOR_POI_DOES_NOT_PROVE = [
   "actor presence",
   "services or inventory",
@@ -889,21 +930,20 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "item_transfer_receipt" && receipt.publicResult.itemTransfer) {
       const evidenceId = nextEvidenceId(evidence);
       const itemTransfer = receipt.publicResult.itemTransfer;
-      const operationText = itemTransfer.resultKind === "already_satisfied"
-        ? `${itemTransfer.itemLabel} was already in the requested item state.`
-        : `${itemTransfer.itemLabel} item state changed: ${itemTransfer.resultKind}.`;
+      const custodyChangeText = itemTransferCustodyChangeText(itemTransfer);
+      const settledCustodyText = itemTransferSettledCustodyText(itemTransfer);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "item_transfer_receipt",
         claimKinds: ["item_state"],
-        text: `${operationText} Current scene anchor: ${itemTransfer.anchorSceneLabel}.`,
+        text: `${custodyChangeText} ${settledCustodyText}`,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, operationText),
-          fact(evidenceId, 2, `Item label: ${itemTransfer.itemLabel}.`),
-          fact(evidenceId, 3, `Operation: ${itemTransfer.operation}.`),
+          fact(evidenceId, 1, `Custody change: ${custodyChangeText}`),
+          fact(evidenceId, 2, `Settled custody: ${settledCustodyText}`),
+          fact(evidenceId, 3, `Item label: ${itemTransfer.itemLabel}.`),
           fact(evidenceId, 4, `Source: ${itemTransfer.sourceLabel}.`),
           fact(evidenceId, 5, `Target: ${itemTransfer.targetLabel}.`),
           fact(evidenceId, 6, `Final equip state: ${itemTransfer.finalEquipState}.`),
@@ -916,6 +956,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
             "accepted item label",
             "accepted source and target labels",
             "current scene item state anchor",
+            "settled custody phrasing for the player",
           ],
           doesNotProve: ITEM_TRANSFER_DOES_NOT_PROVE,
         },

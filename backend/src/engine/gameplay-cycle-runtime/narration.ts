@@ -306,10 +306,13 @@ function uniqueFactsByRef(facts: readonly AcceptedNarrationBackendFact[]): Accep
 
 function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
   if (evidence.claimKinds.includes("item_state")) {
+    const playerFacing = evidence.backendFacts.filter((fact) =>
+      fact.text.startsWith("Custody change: ") || fact.text.startsWith("Settled custody: ")
+    );
     const preferred = evidence.backendFacts.filter((fact) =>
       /^(?:Item label|Source|Target|Final equip state|Current scene anchor|Item transfer result):/u.test(fact.text)
     );
-    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+    return uniqueFactsByRef([...playerFacing, ...preferred, ...evidence.backendFacts]);
   }
   if (evidence.claimKinds.includes("dialogue_response")) {
     const preferred = evidence.backendFacts.filter((fact) =>
@@ -1511,7 +1514,7 @@ export function buildCleanNarrationSystemPrompt(
     "Shape pass: replace word-as-object phrasing, novelty tags, crowd-foil contrasts, bottled atmosphere, negation-as-description, either/or verdict menus, and cosmic abstractions with the accepted concrete fact.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. With scene_texture evidence, put one exact scene_texture sentence beside the utterance; when several texture facts exist, dialogue_response uses a later texture fact than the first.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
-    "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. With scene_texture evidence, put one exact scene_texture sentence beside the custody/state beat; standalone item_state uses the first accepted texture fact when several texture facts exist, and composed item_state plus dialogue_response follows the dialogue_response texture selection. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
+    "Item-state surface: for item_state, phrase only the accepted custody/location/equip-state operation, source label, item label, target label, final equip state, and exact scene-anchor label. Prefer backendFacts named Custody change and Settled custody as the prose beat; use raw result details such as Item transfer result as proof details, not visible wording. With scene_texture evidence, put one exact scene_texture sentence beside the custody/state beat; standalone item_state uses the first accepted texture fact when several texture facts exist, and composed item_state plus dialogue_response follows the dialogue_response texture selection. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. With scene_texture evidence, put one exact scene_texture sentence first, then one concise elapsed-time beat such as '<time> pass at <scene>.' When several scene_texture backendFacts exist, choose a later texture fact than the first. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
@@ -2044,6 +2047,8 @@ function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidenc
 }
 
 function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string {
+  const settledCustody = factValue(evidence, "Settled custody: ");
+  if (settledCustody) return `${settledCustody}.`;
   const itemLabel = factValue(evidence, "Item label: ");
   const operation = factValue(evidence, "Operation: ");
   const target = factValue(evidence, "Target: ");
