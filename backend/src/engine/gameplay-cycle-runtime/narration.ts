@@ -117,6 +117,18 @@ const SUMMARY_DIGEST_MARKERS: Array<{ name: string; pattern: RegExp }> = [
     name: "old_arrival_formula",
     pattern: /^You arrive at\b/iu,
   },
+  {
+    name: "bare_route_status",
+    pattern: /^[^.]+ is reachable from here\.$/iu,
+  },
+  {
+    name: "bare_route_options",
+    pattern: /^(?:(?:A|\d+) visible routes? (?:leads? to|is available from here|are available from here)|Visible routes lead to|Closed visible routes:)\b/iu,
+  },
+  {
+    name: "bare_local_observation",
+    pattern: /^(?:Visible (?:here|routes here include|route match)\b|[^.]+ is visible here\.$)/iu,
+  },
 ];
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -146,11 +158,16 @@ type AcceptedNarrationEvidence = CleanNarratorView["acceptedEvidence"][number];
 type AcceptedNarrationBackendFact = AcceptedNarrationEvidence["backendFacts"][number];
 
 const MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 6;
+const MAX_ROUTE_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 16;
+const MAX_LOCAL_OBSERVATION_PROMPT_BACKEND_FACTS_PER_EVIDENCE = 12;
 const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
   "item_state",
   "dialogue_response",
   "player_location_change",
   "elapsed_time",
+  "route_status",
+  "movement_option",
+  "local_observation",
 ];
 const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
   "current_scene",
@@ -168,6 +185,11 @@ function evidenceHasAnyClaimKind(
   return claimKinds.some((claimKind) => evidence.claimKinds.includes(claimKind));
 }
 
+function isLiteraryTerminalEvidence(evidence: AcceptedNarrationEvidence): boolean {
+  return evidence.authority !== "scene_frame_snapshot"
+    && evidenceHasAnyClaimKind(evidence, LITERARY_TERMINAL_CLAIMS);
+}
+
 function hasOnlySceneFrameSnapshotEvidence(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.length > 0
     && view.acceptedEvidence.every((evidence) => evidence.authority === "scene_frame_snapshot");
@@ -179,6 +201,9 @@ function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean 
     || hasClaimKind(view, "dialogue_response")
     || hasClaimKind(view, "player_location_change")
     || hasClaimKind(view, "elapsed_time")
+    || hasClaimKind(view, "route_status")
+    || hasClaimKind(view, "movement_option")
+    || hasClaimKind(view, "local_observation")
   ) return true;
   return hasOnlySceneFrameSnapshotEvidence(view)
     && view.acceptedEvidence.some((evidence) =>
@@ -190,6 +215,9 @@ function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean 
 function minimumLiteraryWordCount(view: CleanNarratorView): number {
   if (hasClaimKind(view, "player_location_change")) return 6;
   if (hasClaimKind(view, "elapsed_time")) return 4;
+  if (hasClaimKind(view, "route_status")) return 6;
+  if (hasClaimKind(view, "movement_option")) return 8;
+  if (hasClaimKind(view, "local_observation")) return 5;
   return 12;
 }
 
@@ -217,14 +245,39 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
+  if (evidence.claimKinds.includes("route_status")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /\bis (?:not )?reachable from\b/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
+  if (evidence.claimKinds.includes("movement_option")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /^Route option:/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
+  if (evidence.claimKinds.includes("local_observation")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /^(?:Current visible match:|Current route options include:|Observed |Current visible .+ show no match)/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
   return evidence.backendFacts;
 }
 
+function maxPromptBackendFactsForEvidence(evidence: AcceptedNarrationEvidence): number {
+  if (evidence.claimKinds.includes("movement_option")) return MAX_ROUTE_PROMPT_BACKEND_FACTS_PER_EVIDENCE;
+  if (evidence.claimKinds.includes("local_observation")) return MAX_LOCAL_OBSERVATION_PROMPT_BACKEND_FACTS_PER_EVIDENCE;
+  return MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE;
+}
+
 function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
-  if (evidence.backendFacts.length <= MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE) return evidence;
+  const maxFacts = maxPromptBackendFactsForEvidence(evidence);
+  if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
     ...evidence,
-    backendFacts: preferredPromptFacts(evidence).slice(0, MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE),
+    backendFacts: preferredPromptFacts(evidence).slice(0, maxFacts),
   };
 }
 
@@ -233,9 +286,7 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
     return view.acceptedEvidence.map(limitPromptEvidenceFacts);
   }
 
-  const terminalEvidence = view.acceptedEvidence.filter((evidence) =>
-    evidenceHasAnyClaimKind(evidence, LITERARY_TERMINAL_CLAIMS)
-  );
+  const terminalEvidence = view.acceptedEvidence.filter(isLiteraryTerminalEvidence);
   if (terminalEvidence.length === 0) return view.acceptedEvidence.map(limitPromptEvidenceFacts);
 
   const sceneAnchors = view.acceptedEvidence.filter((evidence) =>
@@ -309,6 +360,30 @@ function leakageIssues(input: {
   }
 
   return issues;
+}
+
+const ROUTE_AS_MOVEMENT_TEXT = /\b(?:you\s+(?:go|move|walk|head|travel|arrive|reach)\b|arrive[sd]?\s+at\b|brings you to\b|becomes your current place\b|location changed\b|walk(?:ing|'s)?\b)/iu;
+const ROUTE_UNSUPPORTED_TEXTURE_TEXT = /\b(?:stalls?|walkways?|foot traffic|surrounds?\s+you|in every direction)\b/iu;
+const LOCAL_OBSERVATION_DISCOVERY_TEXT = /\b(?:discover(?:s|ed)?|reveal(?:s|ed)?|hidden|concealed|nothing changed|no change|no visible changes)\b/iu;
+const LOCAL_OBSERVATION_ABSENCE_TEXT = /\b(?:absent|does not exist|nowhere|missing|not present|not visible|not here)\b/iu;
+const LOCAL_OBSERVATION_PLAYER_ACTION_TEXT = /\byou\s+(?:stand|sit|crouch|step|move|scan|look|watch|search|listen|hold|grip)\b/iu;
+const LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT = /\b(?:stretches?\s+around\s+you|surrounds?\s+you|stalls?|walkways?|foot traffic|current scene and place)\b/iu;
+const LOCAL_OBSERVATION_SURFACE_KIND_TEXT = /\bvisible\s+(?:actors?|targets?|items?|routes?|devices?)\b/iu;
+const LOCAL_OBSERVATION_ACTOR_POSTURE_TEXT = /\bstands?\b/iu;
+
+function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) => evidence.authority === "route_options_receipt")
+    .flatMap((evidence) => evidence.backendFacts)
+    .map((fact) => parseRouteOptionFact(fact.text)?.label ?? "")
+    .filter((label) => label.length > 0));
+}
+
+function hasTerminalRouteEvidence(view: CleanNarratorView): boolean {
+  return view.acceptedEvidence.some((evidence) =>
+    evidence.authority === "route_options_receipt"
+    || (evidence.authority !== "scene_frame_snapshot" && evidence.claimKinds.includes("route_status"))
+  );
 }
 
 function proseQualityIssues(input: {
@@ -396,6 +471,83 @@ function proseQualityIssues(input: {
     }
   }
 
+  if (
+    hasTerminalRouteEvidence(input.view)
+    && ROUTE_AS_MOVEMENT_TEXT.test(unquotedText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Route narration must phrase accepted route availability or visible options without claiming movement, arrival, or current-scene change.",
+    });
+  }
+
+  if (
+    hasTerminalRouteEvidence(input.view)
+    && ROUTE_UNSUPPORTED_TEXTURE_TEXT.test(unquotedText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Route narration must use accepted route labels and costs without unsupported scene texture or travel-mode detail.",
+    });
+  }
+
+  const routeOptionLabels = acceptedRouteOptionLabels(input.view);
+  if (routeOptionLabels.length > 0) {
+    const missingLabels = routeOptionLabels.filter((label) => !text.includes(label));
+    if (missingLabels.length > 0) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: `Route-options narration must include every accepted visible route label; missing ${missingLabels.join(", ")}.`,
+      });
+    }
+  }
+
+  if (hasClaimKind(input.view, "local_observation") && LOCAL_OBSERVATION_DISCOVERY_TEXT.test(unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Local-observation narration must phrase accepted current visible results without discovery, hidden-area, or no-change claims.",
+    });
+  }
+
+  if (hasClaimKind(input.view, "local_observation") && LOCAL_OBSERVATION_PLAYER_ACTION_TEXT.test(unquotedText)) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Local-observation narration must phrase accepted visible results without adding player posture, motion, grip, or search-action claims.",
+    });
+  }
+
+  if (
+    hasClaimKind(input.view, "local_observation")
+    && (
+      LOCAL_OBSERVATION_UNSUPPORTED_TEXTURE_TEXT.test(unquotedText)
+      || LOCAL_OBSERVATION_SURFACE_KIND_TEXT.test(unquotedText)
+      || LOCAL_OBSERVATION_ACTOR_POSTURE_TEXT.test(unquotedText)
+    )
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Local-observation narration must use accepted visible labels without unsupported scene texture, surface-kind wording, or actor posture.",
+    });
+  }
+
+  if (
+    hasClaimKind(input.view, "local_observation")
+    && hasClaimKind(input.view, "bounded_visibility_negative")
+    && LOCAL_OBSERVATION_ABSENCE_TEXT.test(unquotedText)
+  ) {
+    issues.push({
+      code: "prose_quality",
+      path: "finalText",
+      message: "Bounded local-observation narration must describe the checked visible entries without broad absence claims.",
+    });
+  }
+
   return issues;
 }
 
@@ -440,7 +592,7 @@ export function buildCleanNarrationSystemPrompt(
     "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence.",
     "Cinematic realism: render what can be seen, heard, handled, smelled, or felt through accepted evidence; use ordinary concrete words and fluid complete sentences.",
-    "Adventure prose floor: item transfers, dialogue responses, and direct scene observations should read as scene beats, not status lines or inventory lists.",
+    "Adventure prose floor: item transfers, dialogue responses, route checks, route options, local observations, and direct scene observations should read as scene beats, not status lines or inventory lists.",
     ...cleanNarrationStyleLines(styleMode),
     "Render receipt fact labels into prose. Internal labels such as Operation, Source, Target, Final equip state, Current scene anchor, Item transfer result, Route option, connected, minute(s), backend, evidence, receipt, and authority stay out of finalText.",
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
@@ -456,8 +608,11 @@ export function buildCleanNarrationSystemPrompt(
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
     "Movement surface: for player_location_change, phrase only the accepted destination/current-place label and accepted elapsed travel time. Use travel-time or current-place result phrasing such as '<time> travel brings you to <destination>' or '<destination> becomes the current place after <time>'. Route safety, arrival discoveries, scenery, and encounter details require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, phrase the accepted time passage and exact scene anchor if present. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
+    "Route-status surface: for route_status, phrase only accepted reachability or blockage for the exact route label from the current scene. Use player-facing route wording such as 'From here, the path to <label> is open.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
+    "Route-options surface: for movement_option and route_options_receipt, phrase only accepted visible route labels and accepted travel costs. Use player-facing route wording such as 'From here, the visible ways lead to <label list>. Each takes <time>.' Include every accepted route label; do not add scene atmosphere, travel mode, street/market nouns, or player motion.",
+    "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. Use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' Scene labels are placement tokens only; player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, or time passage, 1-2 for dialogue, and 2-3 for direct scene observation.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a simple item transfer, movement, time passage, route status, or local observation, 1-2 for route options or dialogue, and 2-3 for direct scene observation.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -736,16 +891,19 @@ function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): stri
     if (connected.length === 1) {
       const minutes = formatMinutes(connected[0]!.travelCost);
       sentences.push(minutes
-        ? `A visible route leads to ${routeLabels}; it takes ${minutes}.`
-        : `A visible route leads to ${routeLabels}.`);
+        ? `From here, the visible way leads to ${routeLabels}. It takes ${minutes}.`
+        : `From here, the visible way leads to ${routeLabels}.`);
     } else if (costs.length === 1 && costs[0]) {
-      sentences.push(`Visible routes lead to ${routeLabels}; each takes ${formatMinutes(costs[0]!)!}.`);
+      sentences.push(`From here, the visible ways lead to ${routeLabels}. Each takes ${formatMinutes(costs[0]!)!}.`);
     } else {
-      sentences.push(`Visible routes lead to ${routeLabels}.`);
+      sentences.push(`From here, the visible ways lead to ${routeLabels}.`);
     }
   }
   if (blocked.length > 0) {
-    sentences.push(`Closed visible routes: ${englishList(blocked.map((option) => option.label))}.`);
+    const blockedLabels = englishList(blocked.map((option) => option.label));
+    sentences.push(blocked.length === 1
+      ? `Here, the closed visible way points toward ${blockedLabels}.`
+      : `Here, the closed visible ways point toward ${blockedLabels}.`);
   }
   return sentences.join(" ");
 }
@@ -760,7 +918,7 @@ function renderRouteStatusProjection(
   if (reachable) {
     return language === "ru"
       ? `Отсюда можно пройти к ${reachable[1]}.`
-      : `${reachable[1]} is reachable from here.`;
+      : `From here, the path to ${reachable[1]} is open.`;
   }
   const blocked = routeText.match(/^(.+?)\s+is not reachable from (?:the current scene|here|.+)\.$/u);
   if (blocked) {
@@ -868,9 +1026,9 @@ function renderLocalObservationProjection(evidence: AcceptedNarrationEvidence): 
     );
   if (observed.length > 0) {
     if (routeSummary) {
-      return `Visible routes here include: ${routeSummary}. Visible route match: ${englishList(observed)}.`;
+      return `The visible ways here lead to ${routeSummary}. ${englishList(observed)} ${observed.length === 1 ? "is" : "are"} in that visible set.`;
     }
-    return `Visible here: ${englishList(observed)}.`;
+    return `${englishList(observed)} ${observed.length === 1 ? "is" : "are"} in view here.`;
   }
   return summary;
 }
@@ -933,13 +1091,11 @@ function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): stri
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
-  const onlySceneFrameSnapshotEvidence = hasOnlySceneFrameSnapshotEvidence(view);
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("minor_poi_handle")
     || evidence.claimKinds.includes("local_observation")
     || evidence.claimKinds.includes("player_local_condition")
-    || evidence.claimKinds.includes("route_status")
     || evidence.authority === "route_options_receipt"
     || evidence.authority === "scene_observation_receipt"
     || evidence.claimKinds.includes("device_surface_observation")

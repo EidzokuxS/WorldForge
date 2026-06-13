@@ -37,6 +37,10 @@ P195 Stage 6 literary adventure narration:
   - [x] Movement and standalone elapsed-time claims now use model-authored Stage 6 prose with claim-aware word floors and digest-shape validation.
   - [x] Receipt-owned elapsed-time prompt input now includes only elapsed-time evidence plus current scene/location anchors; visible actor lists stay in direct-scene observation.
   - [x] Runtime prose validation rejects the old `You arrive at...` movement formula for literary movement claims.
+  - [x] Route-options label-only receipts now project through player-facing adventure diction: `From here, the visible ways lead to ...`, with every accepted route label preserved.
+  - [x] Local-observation label-only receipts now project as visible scene facts such as `Guide is in view here.` instead of machine surface summaries.
+  - [x] Route/local literary validation rejects movement drift, incomplete route-label coverage, unsupported scene texture, player posture/search action, surface-kind wording, broad absence, and old digest shapes.
+  - [x] Route/local model-authored enrichment is scoped to a future accepted scene-texture evidence contract; current label-only receipts keep deterministic accepted-evidence projection.
 - P195 verification:
   - [x] `npm --prefix backend run typecheck` passed on 2026-06-13.
   - [x] Focused clean-runtime suite passed on 2026-06-13: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 307 tests.
@@ -48,10 +52,17 @@ P195 Stage 6 literary adventure narration:
   - [x] r13 player-facing movement/time prose: `One minute of travel brings you to Anchor Chain Pylon.` and `Five minutes pass at Anchor Chain Pylon.`
   - [x] r13 prose audit passed: 3 narratives, zero one-token output, zero route/arrival/status/list/digest/echo hits.
   - [x] Diagnostic r12 exposed old movement formula (`You arrive at Anchor Chain Pylon after a minute's travel.`); runtime validation now rejects that summary shape.
+  - [x] Route/local focused proof after latest patch: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 43 tests.
+  - [x] Route/local focused clean-runtime suite after latest patch: `npm --prefix backend run typecheck`; `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 308 tests.
+  - [x] Fresh zero-turn route/local live proof `p195-route-local-prose-qa-20260613-150233` on backend `http://localhost:31709`: route-options action returned `From here, the visible ways lead to Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins. Each takes 1 minute.`
+  - [x] Same live proof local-observation action returned `Guide is in view here.`
+  - [x] Live DB proof `output/clean-runtime-p195-route-local-prose-qa-20260613-150233/db-proof.json`: two accepted Stage4 receipts (`route_options`, `local_observation`), both mutationApplied 0, `worldVersion/worldTimeMinutes/currentTick` stayed `0/0/0`, clock ledger 0, old v2/saga/narrator/oracle/simulation stores 0, `Brass Tube.owner=Mira Voss`.
+  - [x] Prose audit passed for `output/clean-runtime-p195-route-local-prose-qa-20260613-150233/prose-audit.json`: 2 narratives, zero one-token output, zero summary/list/digest/debug/echo hits.
 - P195 next prose primitives:
   - [x] Tighten item-transfer live prose so scene anchor contributes exact placement only unless observation evidence supplies additional texture.
   - [x] Add literary coverage and live proof for movement arrival and standalone time passage.
-  - [ ] Add literary coverage and live proof for route inquiry/options and local observation.
+  - [x] Add label-only adventure-diction coverage and live proof for route inquiry/options and local observation.
+  - [ ] Add accepted scene-texture evidence so route/local turns can become richer model-authored adventure prose while keeping facts traceable.
   - [ ] Run longer fresh GLM 5.2 manual-turn lanes after the next primitive group, with prose audit plus DB verification after each lane.
 
 P189 clean runtime prose quality pass:

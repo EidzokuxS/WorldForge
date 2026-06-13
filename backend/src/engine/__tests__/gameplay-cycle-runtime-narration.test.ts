@@ -203,6 +203,36 @@ function routeOptionsView(): CleanNarratorView {
   });
 }
 
+function routeOptionsManyView(): CleanNarratorView {
+  const labels = [
+    "Anchor Chain Pylon",
+    "Auditor Spire",
+    "Charter Gallery",
+    "Resonance Tower",
+    "Silt Warrens",
+    "Slip Twelve Berth",
+    "The Copper Tap",
+    "Upper Dam Ruins",
+  ];
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "route_options_receipt",
+      claimKinds: ["movement_option"],
+      text: `Visible route options from Lowwater Bazaar include ${labels.join(", ")}.`,
+      backendFacts: labels.map((label, index) => ({
+        factRef: `e1.f${index + 1}`,
+        text: `Route option: ${label} (connected, 1 minute(s)).`,
+        exact: true,
+      })),
+      limits: {
+        proves: ["route options exposed by current SceneFrame"],
+        doesNotProve: ["hidden routes", "absence of other routes", "movement", "discovery", "no-change"],
+      },
+    }],
+  });
+}
+
 function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -975,6 +1005,23 @@ describe("clean Stage 6 narration contracts", () => {
     expect(claimKinds).not.toContain("movement_option");
   });
 
+  it("keeps all accepted route-option facts in literary prompt input", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsManyView());
+    const routeEvidence = promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1");
+
+    expect(routeEvidence?.backendFacts).toHaveLength(8);
+    expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
+      "Route option: Anchor Chain Pylon (connected, 1 minute(s)).",
+      "Route option: Auditor Spire (connected, 1 minute(s)).",
+      "Route option: Charter Gallery (connected, 1 minute(s)).",
+      "Route option: Resonance Tower (connected, 1 minute(s)).",
+      "Route option: Silt Warrens (connected, 1 minute(s)).",
+      "Route option: Slip Twelve Berth (connected, 1 minute(s)).",
+      "Route option: The Copper Tap (connected, 1 minute(s)).",
+      "Route option: Upper Dam Ruins (connected, 1 minute(s)).",
+    ]);
+  });
+
   it("accepts model narration from accepted movement evidence", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView(),
@@ -1008,17 +1055,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(renderCleanAuthorityProjection(routeView())).not.toMatch(/\b(move|arrive|travel)\b/iu);
   });
 
-  it("uses deterministic authority projection for route_status with snapshot context", async () => {
+  it("uses model-authored literary narration for route_status with snapshot context", async () => {
+    const view = routeWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
-      narratorView: routeWithSceneFrameSnapshotView(),
+      narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("route_status should not call the model");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "From here, Transmission Basement is an available route.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1"],
+        claimKinds: ["route_status"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Transmission Basement is reachable from here.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("From here, Transmission Basement is an available route.");
     expect(result.text).toContain("Transmission Basement");
     expect(result.text).not.toContain("Transmission Basin");
     expect(result.text).not.toMatch(/\b(settled route check|current scene|visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
@@ -1048,11 +1099,79 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
-  it("renders route-options evidence without converting options into movement", () => {
-    const text = renderCleanAuthorityProjection(routeOptionsView());
+  it("deterministically projects route-options evidence without converting options into movement", async () => {
+    const view = routeOptionsView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("route_options should use deterministic accepted-evidence projection");
+      },
+    });
 
-    expect(text).toBe("A visible route leads to North Hall; it takes 1 minute.");
-    expect(text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("From here, the visible way leads to North Hall. It takes 1 minute.");
+    expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
+
+    const movementDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "You go to North Hall along the visible route.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(movementDrift.status).toBe("rejected");
+    if (movementDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(movementDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("without claiming movement")
+    )).toBe(true);
+
+    const missingRouteLabels = validateCleanNarrationCandidate({
+      view: routeOptionsManyView(),
+      candidate: acceptedCandidate(routeOptionsManyView(), [{
+        text: "Passages from here lead toward Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, and Slip Twelve Berth, each about a minute's walk.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(missingRouteLabels.status).toBe("rejected");
+    if (missingRouteLabels.status !== "rejected") throw new Error("expected rejected");
+    expect(missingRouteLabels.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("missing The Copper Tap, Upper Dam Ruins")
+    )).toBe(true);
+
+    const availableRouteDigest = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "1 visible route is available from here: North Hall. It takes 1 minute.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(availableRouteDigest.status).toBe("rejected");
+    if (availableRouteDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(availableRouteDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const unsupportedRouteTexture = validateCleanNarrationCandidate({
+      view: routeOptionsManyView(),
+      candidate: acceptedCandidate(routeOptionsManyView(), [{
+        text: "Lowwater Bazaar surrounds you, its walkways branching outward in every direction. Eight routes fan out from here - Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins - each a minute's walk away.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(unsupportedRouteTexture.status).toBe("rejected");
+    if (unsupportedRouteTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(unsupportedRouteTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -1117,7 +1236,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. A visible route leads to North Hall; it takes 1 minute.");
+    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. From here, the visible way leads to North Hall. It takes 1 minute.");
     expect(text).not.toContain("Guide, Courier satchel");
     expect(text).not.toContain("Guide, Brass Tube");
     expect(text).not.toContain("Courier satchel is visible");
@@ -1404,52 +1523,99 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.status).toBe("rejected");
     if (unsupported.status !== "rejected") throw new Error("expected rejected");
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+
+    const broadAbsence = validateCleanNarrationCandidate({
+      view: localObservationView(),
+      candidate: acceptedCandidate(localObservationView(), [{
+        text: "The Violet Astrolabe is absent from the market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["local_observation", "bounded_visibility_negative"],
+      }]),
+    });
+    expect(broadAbsence.status).toBe("rejected");
+    if (broadAbsence.status !== "rejected") throw new Error("expected rejected");
+    expect(broadAbsence.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("without broad absence claims")
+    )).toBe(true);
   });
 
   it("deterministically projects positive local_observation without copying request details", async () => {
+    const view = positiveLocalObservationView();
     const result = await runCleanNarration({
-      narratorView: positiveLocalObservationView(),
+      narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("local_observation should not call the model");
+        throw new Error("local_observation should use deterministic accepted-evidence projection");
       },
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
     expect(result.text).toBe(
-      "Visible here: central telegraph desk.",
+      "central telegraph desk is in view here.",
     );
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
+
+    const postureDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "You stand in Market and scan the central telegraph desk.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(postureDrift.status).toBe("rejected");
+    if (postureDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(postureDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("without adding player posture")
+    )).toBe(true);
+
+    const surfaceTextureDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The Lowwater Bazaar stretches around you, its current scene and place. Among the visible actors here, a Guide stands present.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(surfaceTextureDrift.status).toBe("rejected");
+    if (surfaceTextureDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(surfaceTextureDrift.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
+    )).toBe(true);
   });
 
   it("deterministically projects local_observation movement options without hidden placeholders", async () => {
     const routeSummary = "Current route options include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
+    const view = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "local_observation_receipt",
+        claimKinds: ["local_observation"],
+        text: routeSummary,
+        backendFacts: [
+          { factRef: "e1.f1", text: routeSummary, exact: true },
+          { factRef: "e1.f2", text: "Checked current route options.", exact: true },
+          { factRef: "e1.f3", text: "Observed route option North Hall.", exact: true },
+        ],
+        limits: {
+          proves: ["matching exposed current SceneFrame observation surface entries"],
+          doesNotProve: ["route truth beyond route option/check receipts", "movement", "no-change"],
+        },
+      }],
+    });
     const result = await runCleanNarration({
-      narratorView: movementView({
-        acceptedEvidence: [{
-          ref: "e1",
-          authority: "local_observation_receipt",
-          claimKinds: ["local_observation"],
-          text: routeSummary,
-          backendFacts: [
-            { factRef: "e1.f1", text: routeSummary, exact: true },
-            { factRef: "e1.f2", text: "Checked current route options.", exact: true },
-            { factRef: "e1.f3", text: "Observed route option North Hall.", exact: true },
-          ],
-          limits: {
-            proves: ["matching exposed current SceneFrame observation surface entries"],
-            doesNotProve: ["route truth beyond route option/check receipts", "movement", "no-change"],
-          },
-        }],
-      }),
+      narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("local_observation should not call the model");
+        throw new Error("local_observation should use deterministic accepted-evidence projection");
       },
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Visible routes here include: North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. Visible route match: North Hall.");
+    expect(result.text).toBe("The visible ways here lead to North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins. North Hall is in that visible set.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
@@ -1636,6 +1802,51 @@ describe("clean Stage 6 narration contracts", () => {
     expect(movementDigest.issues.some((issue) =>
       issue.code === "prose_quality" && issue.message.includes("summary-digest")
     )).toBe(true);
+
+    const routeStatusDigest = validateCleanNarrationCandidate({
+      view: routeWithSceneFrameSnapshotView(),
+      candidate: acceptedCandidate(routeWithSceneFrameSnapshotView(), [{
+        text: "Transmission Basement is reachable from here.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1"],
+        claimKinds: ["route_status"],
+      }]),
+    });
+    expect(routeStatusDigest.status).toBe("rejected");
+    if (routeStatusDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(routeStatusDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const routeOptionsDigest = validateCleanNarrationCandidate({
+      view: routeOptionsView(),
+      candidate: acceptedCandidate(routeOptionsView(), [{
+        text: "A visible route leads to North Hall; it takes 1 minute.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      }]),
+    });
+    expect(routeOptionsDigest.status).toBe("rejected");
+    if (routeOptionsDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(routeOptionsDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
+
+    const localObservationDigest = validateCleanNarrationCandidate({
+      view: positiveLocalObservationView(),
+      candidate: acceptedCandidate(positiveLocalObservationView(), [{
+        text: "central telegraph desk is visible here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(localObservationDigest.status).toBe("rejected");
+    if (localObservationDigest.status !== "rejected") throw new Error("expected rejected");
+    expect(localObservationDigest.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("summary-digest")
+    )).toBe(true);
   });
 
   it("rejects Russian narration that falls back to English scaffold wording", () => {
@@ -1737,6 +1948,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Render target labels as holder or placement phrases");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Use player-facing route wording");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");
+    expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
