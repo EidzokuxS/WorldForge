@@ -333,6 +333,15 @@ function maxPromptBackendFactsForEvidence(evidence: AcceptedNarrationEvidence): 
   return MAX_PROMPT_BACKEND_FACTS_PER_EVIDENCE;
 }
 
+function promptSafeBackendFact(fact: AcceptedNarrationBackendFact): AcceptedNarrationBackendFact {
+  const value = fact.value?.trim();
+  if (!value) return fact;
+  return {
+    ...fact,
+    text: normalizeText(value),
+  };
+}
+
 function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
   assertRouteOptionsReceiptStoryEvidence(evidence);
   assertSceneFrameRouteStoryEvidence(evidence);
@@ -342,10 +351,12 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   assertDeviceSurfaceStoryEvidence(evidence);
   assertSceneBeatStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
-  if (evidence.backendFacts.length <= maxFacts) return evidence;
+  const backendFacts = evidence.backendFacts.length <= maxFacts
+    ? evidence.backendFacts
+    : preferredPromptFacts(evidence).slice(0, maxFacts);
   return {
     ...evidence,
-    backendFacts: preferredPromptFacts(evidence).slice(0, maxFacts),
+    backendFacts: backendFacts.map(promptSafeBackendFact),
   };
 }
 

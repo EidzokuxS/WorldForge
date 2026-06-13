@@ -1389,9 +1389,12 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("uses a bounded item-transfer citation shortlist in literary prompt input", () => {
-    const promptInput = buildCleanNarratorPromptInput(itemStateView());
+    const view = itemStateView();
+    const promptInput = buildCleanNarratorPromptInput(view);
     const facts = promptInput.acceptedEvidence[0]?.backendFacts ?? [];
 
+    expect(view.acceptedEvidence[0]?.backendFacts[0]?.text)
+      .toBe("Custody change: Brass Tube passes from Player to Guide at Market.");
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1"]);
     expect(facts.map((fact) => fact.factRef)).toEqual([
       "e1.f1",
@@ -1403,13 +1406,20 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(facts).toHaveLength(6);
     expect(facts.map((fact) => fact.text)).toEqual([
-      "Custody change: Brass Tube passes from Player to Guide at Market.",
-      "Settled custody: Brass Tube is carried by Guide at Market.",
+      "Brass Tube passes from Player to Guide at Market.",
+      "Brass Tube is carried by Guide at Market.",
       "Item label: Brass Tube.",
       "Source: Player.",
       "Target: Guide.",
       "Final equip state: carried.",
     ]);
+    expect(facts[0]).toMatchObject({
+      factRef: "e1.f1",
+      role: "custody_change",
+      value: "Brass Tube passes from Player to Guide at Market.",
+      text: "Brass Tube passes from Player to Guide at Market.",
+      exact: true,
+    });
   });
 
   it("uses backend fact roles instead of fact text shape for prompt shortlists", () => {
@@ -1437,8 +1447,8 @@ describe("clean Stage 6 narration contracts", () => {
       "e1.f6",
     ]);
     expect(facts.map((fact) => fact.text)).toEqual([
-      "Opaque accepted fact 1.",
-      "Opaque accepted fact 2.",
+      "Brass Tube passes from Player to Guide at Market.",
+      "Brass Tube is carried by Guide at Market.",
       "Opaque accepted fact 3.",
       "Opaque accepted fact 4.",
       "Opaque accepted fact 5.",
@@ -1475,13 +1485,15 @@ describe("clean Stage 6 narration contracts", () => {
       evidence.claimKinds.includes("movement_option")
     )).toBe(true);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Route choices beat: From Market, visible route choices are North Hall (1 minute).",
-      "Route origin: Market.",
-      "Route choice labels: North Hall.",
-      "Open route labels: North Hall.",
-      "Closed route labels: none.",
-      "Route choice travel costs: North Hall: 1 minute.",
+      "From Market, visible route choices are North Hall (1 minute).",
+      "Market",
+      "North Hall",
+      "North Hall",
+      "none",
+      "North Hall: 1 minute",
     ]);
+    expect(routeEvidence?.backendFacts.map((fact) => fact.text).join("\n"))
+      .not.toContain("Route choices beat:");
   });
 
   it("keeps elapsed-time literary prompt input to time evidence and scene label anchors", () => {
@@ -1502,12 +1514,12 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(routeEvidence?.backendFacts).toHaveLength(6);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Route choices beat: From Lowwater Bazaar, visible route choices are Anchor Chain Pylon (1 minute), Auditor Spire (1 minute), Charter Gallery (1 minute), Resonance Tower (1 minute), Silt Warrens (1 minute), Slip Twelve Berth (1 minute), The Copper Tap (1 minute), Upper Dam Ruins (1 minute).",
-      "Route origin: Lowwater Bazaar.",
-      "Route choice labels: Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins.",
-      "Open route labels: Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins.",
-      "Closed route labels: none.",
-      "Route choice travel costs: Anchor Chain Pylon: 1 minute; Auditor Spire: 1 minute; Charter Gallery: 1 minute; Resonance Tower: 1 minute; Silt Warrens: 1 minute; Slip Twelve Berth: 1 minute; The Copper Tap: 1 minute; Upper Dam Ruins: 1 minute.",
+      "From Lowwater Bazaar, visible route choices are Anchor Chain Pylon (1 minute), Auditor Spire (1 minute), Charter Gallery (1 minute), Resonance Tower (1 minute), Silt Warrens (1 minute), Slip Twelve Berth (1 minute), The Copper Tap (1 minute), Upper Dam Ruins (1 minute).",
+      "Lowwater Bazaar",
+      "Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins",
+      "Anchor Chain Pylon; Auditor Spire; Charter Gallery; Resonance Tower; Silt Warrens; Slip Twelve Berth; The Copper Tap; Upper Dam Ruins",
+      "none",
+      "Anchor Chain Pylon: 1 minute; Auditor Spire: 1 minute; Charter Gallery: 1 minute; Resonance Tower: 1 minute; Silt Warrens: 1 minute; Slip Twelve Berth: 1 minute; The Copper Tap: 1 minute; Upper Dam Ruins: 1 minute",
     ]);
   });
 
@@ -1517,7 +1529,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts[0]?.text)
-      .toBe("Scene texture: Canvas awnings hang over the market lanes.");
+      .toBe("Canvas awnings hang over the market lanes");
   });
 
   it("includes scene_texture beside terminal item and dialogue evidence when literary prose can cite texture", () => {
@@ -1528,8 +1540,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["dialogue_response"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Scene texture: Canvas awnings hang over the market lanes.",
-      "Scene texture: Rain taps the brass gutters.",
+      "Canvas awnings hang over the market lanes",
+      "Rain taps the brass gutters",
     ]);
   });
 
@@ -1544,8 +1556,8 @@ describe("clean Stage 6 narration contracts", () => {
       expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
       expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
       expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-        "Scene texture: Canvas awnings hang over the market lanes.",
-        "Scene texture: Rain taps the brass gutters.",
+        "Canvas awnings hang over the market lanes",
+        "Rain taps the brass gutters",
       ]);
     }
   });
@@ -1560,8 +1572,8 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Scene texture: Canvas awnings hang over the market lanes.",
-      "Scene texture: Rain taps the brass gutters.",
+      "Canvas awnings hang over the market lanes",
+      "Rain taps the brass gutters",
     ]);
   });
 
