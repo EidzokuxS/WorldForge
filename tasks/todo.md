@@ -6517,9 +6517,10 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Replace `device_surface_observation` deterministic projection parsing with accepted `Device surface beat` story facts derived from `publicResult.deviceSurfaceObservation`.
     - [x] Make prompt input and deterministic projection fail when accepted local/device story facts are missing.
     - [x] Run focused narration, settlement, contracts, Stage 4, typecheck, and GitNexus detect.
-    - [ ] Commit/push and refresh index.
+    - [x] Commit/push and refresh index.
   - Review:
     - [x] `local_observation_receipt` accepted evidence now emits `Local observation beat`, searched surfaces, query, observed labels/surfaces, and anchor facts; deterministic projection requires the beat.
     - [x] `device_surface_observation_receipt` accepted evidence now emits `Device surface beat`, device label, requested/observed/unavailable facet facts, and anchor facts; deterministic projection requires the beat.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 90 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported HIGH because changed hunks map to `runCleanNarration` / `renderCleanAuthorityProjection`; context review traced the edited boundary to prompt evidence limiting and deterministic projection, covered by the focused checks above.
+    - [x] Pushed commit `acbf79d0`; `npx gitnexus analyze --embeddings` completed successfully after Ladybug lock warnings.
