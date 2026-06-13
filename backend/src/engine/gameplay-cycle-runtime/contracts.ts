@@ -2489,6 +2489,32 @@ const cleanNarratorStoryFrameSchema = z.object({
   pagePlan: cleanNarratorPagePlanSchema,
 }).strict();
 
+const cleanNarratorPageTaskMoveSchema = z.object({
+  step: z.enum([
+    "ask_clarification",
+    "open_with_context",
+    "narrate_turn_event",
+    "close_with_next_action_context",
+  ]),
+  entryRefs: z.array(shortText).min(1).max(24),
+  proseMove: z.enum([
+    "ask_accepted_question",
+    "establish_playable_context",
+    "render_authoritative_turn_event",
+    "leave_playable_next_action_handle",
+  ]),
+  allowedBackendFactRefs: z.array(shortText).min(1).max(192),
+}).strict();
+
+const cleanNarratorPageTaskSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-page-task.v1"),
+  source: z.literal("derived_from_story_frame_page_plan"),
+  referenceProfile: z.literal("zetta_micro_1_1_3_primary_ff5_micro_secondary"),
+  pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
+  truthBoundary: z.literal("accepted_evidence_only"),
+  moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
+}).strict();
+
 const cleanNarratorAuditNoticeSchema = z.object({
   stepId: gmActionChecklistStepIdSchema,
   status: z.enum(["failed", "skipped"]),
@@ -2546,6 +2572,7 @@ export const cleanNarratorPromptInputSchema = z.object({
   preserveLabelsVerbatim: z.literal(true),
   acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
   storyFrame: cleanNarratorStoryFrameSchema,
+  narrativePageTask: cleanNarratorPageTaskSchema,
   stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
   guard: cleanNarratorGuardSchema,
 }).strict();

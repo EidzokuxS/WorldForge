@@ -1268,6 +1268,19 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.source).toBe("derived_from_prompt_accepted_evidence");
     expect(promptInput.storyFrame.pagePlan.version).toBe("gameplay-runtime.clean-narrator-page-plan.v1");
     expect(promptInput.storyFrame.pagePlan.source).toBe("derived_from_story_frame_composition_slots");
+    expect(promptInput.narrativePageTask).toEqual({
+      version: "gameplay-runtime.clean-narrator-page-task.v1",
+      source: "derived_from_story_frame_page_plan",
+      referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
+      pageGoal: "turn_changelog_to_grounded_text_rpg_page",
+      truthBoundary: "accepted_evidence_only",
+      moves: [{
+        step: "narrate_turn_event",
+        entryRefs: ["e1"],
+        proseMove: "render_authoritative_turn_event",
+        allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+      }],
+    });
   });
 
   it("builds a structured story frame from prompt accepted evidence", () => {
@@ -1275,6 +1288,7 @@ describe("clean Stage 6 narration contracts", () => {
     const prompt = buildCleanNarrationPrompt(promptInput);
 
     expect(prompt).toContain('"storyFrame"');
+    expect(prompt).toContain('"narrativePageTask"');
     expect(promptInput.storyFrame.turnEvents.map((entry) => entry.ref)).toEqual(["e5"]);
     expect(promptInput.storyFrame.turnEvents[0]).toEqual({
       ref: "e5",
@@ -1297,6 +1311,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "open_with_context", entryRefs: ["e1"] },
       { step: "narrate_turn_event", entryRefs: ["e5"] },
+    ]);
+    expect(promptInput.narrativePageTask.moves).toEqual([
+      {
+        step: "open_with_context",
+        entryRefs: ["e1"],
+        proseMove: "establish_playable_context",
+        allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+      },
+      {
+        step: "narrate_turn_event",
+        entryRefs: ["e5"],
+        proseMove: "render_authoritative_turn_event",
+        allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+      },
     ]);
   });
 
@@ -1368,6 +1396,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "open_with_context", entryRefs: ["e2", "e3"] },
       { step: "close_with_next_action_context", entryRefs: ["e1"] },
+    ]);
+    expect(promptInput.narrativePageTask.moves).toEqual([
+      {
+        step: "open_with_context",
+        entryRefs: ["e2", "e3"],
+        proseMove: "establish_playable_context",
+        allowedBackendFactRefs: ["e2.f1", "e2.f2", "e3.f1", "e3.f2", "e3.f3"],
+      },
+      {
+        step: "close_with_next_action_context",
+        entryRefs: ["e1"],
+        proseMove: "leave_playable_next_action_handle",
+        allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+      },
     ]);
   });
 
@@ -4404,6 +4446,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("FF5 Micro");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
+    expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");

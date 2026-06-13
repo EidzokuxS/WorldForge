@@ -383,6 +383,7 @@ type CleanNarratorStoryFrameEntry = CleanNarratorPromptInput["storyFrame"]["turn
 type CleanNarratorProseCue = CleanNarratorStoryFrameEntry["proseCue"];
 type CleanNarratorCompositionSlot = CleanNarratorStoryFrameEntry["compositionSlot"];
 type CleanNarratorPagePlanStep = CleanNarratorPromptInput["storyFrame"]["pagePlan"]["steps"][number];
+type CleanNarratorPageTaskMove = CleanNarratorPromptInput["narrativePageTask"]["moves"][number];
 
 function evidenceIncludesClaimKind(
   evidence: AcceptedNarrationEvidence,
@@ -522,6 +523,43 @@ function buildCleanNarratorStoryFrame(
     currentContext,
     turnEvents,
     pagePlan: buildCleanNarratorPagePlan(currentContext, turnEvents),
+  };
+}
+
+function narrativePageProseMove(step: CleanNarratorPagePlanStep["step"]): CleanNarratorPageTaskMove["proseMove"] {
+  switch (step) {
+    case "ask_clarification":
+      return "ask_accepted_question";
+    case "open_with_context":
+      return "establish_playable_context";
+    case "narrate_turn_event":
+      return "render_authoritative_turn_event";
+    case "close_with_next_action_context":
+      return "leave_playable_next_action_handle";
+  }
+}
+
+function buildCleanNarrativePageTask(
+  storyFrame: CleanNarratorPromptInput["storyFrame"],
+): CleanNarratorPromptInput["narrativePageTask"] {
+  const entriesByRef = new Map(
+    [...storyFrame.currentContext, ...storyFrame.turnEvents]
+      .map((entry) => [entry.ref, entry] as const),
+  );
+  return {
+    version: "gameplay-runtime.clean-narrator-page-task.v1",
+    source: "derived_from_story_frame_page_plan",
+    referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
+    pageGoal: "turn_changelog_to_grounded_text_rpg_page",
+    truthBoundary: "accepted_evidence_only",
+    moves: storyFrame.pagePlan.steps.map((step) => ({
+      step: step.step,
+      entryRefs: step.entryRefs,
+      proseMove: narrativePageProseMove(step.step),
+      allowedBackendFactRefs: uniqueStrings(step.entryRefs.flatMap((ref) =>
+        entriesByRef.get(ref)?.backendFactRefs ?? []
+      )),
+    })),
   };
 }
 
@@ -1412,6 +1450,7 @@ function proseQualityIssues(input: {
 
 export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNarratorPromptInput {
   const acceptedEvidence = selectPromptAcceptedEvidence(view);
+  const storyFrame = buildCleanNarratorStoryFrame(acceptedEvidence);
   return assertCleanNarratorPromptInput({
     version: "gameplay-runtime.clean-narrator-prompt-input.v1",
     packetId: view.packetId,
@@ -1421,7 +1460,8 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     languageSource: view.languageSource,
     preserveLabelsVerbatim: view.preserveLabelsVerbatim,
     acceptedEvidence,
-    storyFrame: buildCleanNarratorStoryFrame(acceptedEvidence),
+    storyFrame,
+    narrativePageTask: buildCleanNarrativePageTask(storyFrame),
     stepAuditForGrounding: view.stepAuditForGrounding,
     guard: view.guard,
   });
@@ -1453,6 +1493,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
+    "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material only from its allowedBackendFactRefs plus the cited accepted evidence.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
     "Truthful flourish: spend style budget on cadence, syntax, sensory angle, and sentence rhythm from accepted facts. Every flourish must remain a phrasing choice over cited evidence, not a new event, state, route, item ownership, NPC action, discovery, absence, private fact, or world truth.",
