@@ -161,10 +161,13 @@ function timeView(): CleanNarratorView {
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["elapsed_time"],
-      text: "World clock advances by 5 minute(s).",
-      backendFacts: [{ factRef: "e1.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+      text: "5 minutes pass.",
+      backendFacts: [
+        { factRef: "e1.f1", text: "Time beat: 5 minutes pass.", exact: true },
+        { factRef: "e1.f2", text: "Elapsed time: 5 minutes.", exact: true },
+      ],
       limits: {
-        proves: ["elapsed world clock time"],
+        proves: ["elapsed world clock time", "time passage phrasing for the player"],
         doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
       },
     }],
@@ -209,10 +212,13 @@ function timeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "World clock advances by 5 minute(s).",
-        backendFacts: [{ factRef: "e5.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+        text: "5 minutes pass.",
+        backendFacts: [
+          { factRef: "e5.f1", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
+        ],
         limits: {
-          proves: ["elapsed world clock time"],
+          proves: ["elapsed world clock time", "time passage phrasing for the player"],
           doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
         },
       },
@@ -245,10 +251,13 @@ function timeWithSceneTextureView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "World clock advances by 5 minute(s).",
-        backendFacts: [{ factRef: "e5.f1", text: "World clock advances by 5 minute(s).", exact: true }],
+        text: "5 minutes pass.",
+        backendFacts: [
+          { factRef: "e5.f1", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
+        ],
         limits: {
-          proves: ["elapsed world clock time"],
+          proves: ["elapsed world clock time", "time passage phrasing for the player"],
           doesNotProve: ["no-change", "offscreen events", "NPC action", "world fact"],
         },
       },
@@ -3863,6 +3872,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Travel beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Time beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Use player-facing route wording");

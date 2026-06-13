@@ -1007,18 +1007,25 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "terminal_mutation_receipt" && receipt.publicResult.timeAdvance) {
       const evidenceId = nextEvidenceId(evidence);
       const time = receipt.publicResult.timeAdvance;
-      const elapsedText = `World clock advances by ${time.elapsedMinutes} minute(s).`;
+      const elapsedUnit = time.elapsedMinutes === 1 ? "minute" : "minutes";
+      const elapsedDuration = `${time.elapsedMinutes} ${elapsedUnit}`;
+      const timeBeat = time.elapsedMinutes === 1
+        ? `${elapsedDuration} passes.`
+        : `${elapsedDuration} pass.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: elapsedText,
+        text: timeBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [fact(evidenceId, 1, elapsedText)],
+        backendFacts: [
+          fact(evidenceId, 1, `Time beat: ${timeBeat}`),
+          fact(evidenceId, 2, `Elapsed time: ${elapsedDuration}.`),
+        ],
         limits: {
-          proves: ["elapsed world clock time"],
+          proves: ["elapsed world clock time", "time passage phrasing for the player"],
           doesNotProve: TIME_DOES_NOT_PROVE,
         },
       });

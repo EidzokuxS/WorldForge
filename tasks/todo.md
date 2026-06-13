@@ -6391,3 +6391,24 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Fixed movement evidence no longer contains `Player location changed...` or `Travel cost...`; backend facts are `Travel beat`, `Destination label`, `Elapsed travel time`, and `Current place after movement`.
     - [x] Prose audit `prose-audit.json`: 1 narrative, 38 words, zero one-token/debug/enum/summary/digest/slop hits.
     - [x] GitNexus all-scope and staged `detect_changes` reported LOW scope: changed indexed symbols `stage4Evidence` and `buildCleanNarrationSystemPrompt`, with no affected process expansion.
+
+- P218 Stage 6 elapsed-time story evidence:
+  - Plan:
+    - [x] Identify whether standalone elapsed-time evidence still exposes clock/changelog wording to Stage 6.
+    - [x] Run GitNexus impact before editing Stage 5 settlement / Stage 6 prompt symbols.
+    - [x] Replace `World clock advances...` accepted evidence with receipt-owned player-facing time passage facts.
+    - [x] Keep elapsed-time on its primary `time_advance` receipt -> storyFrame -> Stage 6 narration path; no substitute gameplay UX or fallback semantics.
+    - [x] Verify focused tests, typecheck, fixed live proof, prose audit, GitNexus detect, commit/push, and index refresh.
+  - Results:
+    - [x] Stage 5 `time_advance` settlement now emits `Time beat: <duration> pass(es).` and `Elapsed time: <duration>.` backend facts; accepted evidence text is the time beat, not a world-clock changelog.
+    - [x] Stage 6 prompt now teaches standalone elapsed-time narration from accepted `Time beat` plus `Elapsed time` proof detail.
+    - [x] Deterministic accepted-evidence projection can read `Time beat` directly when explicitly invoked; normal elapsed-time turns still use the primary Stage 6 model narration path.
+    - [x] Focused settlement test passed: `gameplay-cycle-runtime-settlement.test.ts` -> 20 tests.
+    - [x] Focused narration test passed: `gameplay-cycle-runtime-narration.test.ts` -> 82 tests.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 349 tests.
+    - [x] Fresh fixed live proof `output/clean-runtime-p218-elapsed-time-story-20260613-191152/`, clone `p218-elapsed-time-story-20260613-191152`, action `I wait for five minutes.`
+    - [x] Fixed live narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Five minutes pass at Lowwater Bazaar.`
+    - [x] DB proof `p218-fixed-proof.json`: `done.runtime=gameplay-cycle-runtime`, one accepted `time_advance` receipt, one authority trace `gameplay-cycle-runtime.clock.advance.v1`, `worldVersion/worldTime/currentTick +1/+5/+5`, scene unchanged, old v2/saga/narrator/oracle/simulation stores all 0.
+    - [x] Fixed elapsed-time evidence no longer contains `World clock advances...`; backend facts are `Time beat` and `Elapsed time`.
+    - [x] Prose audit `prose-audit.json`: 1 narrative, 23 words, zero one-token/debug/enum/summary/digest/slop hits.
