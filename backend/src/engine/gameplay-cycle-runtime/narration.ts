@@ -387,6 +387,16 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
+  if (evidence.claimKinds.includes("scene_beat")) {
+    const sceneBeatPrefixes = [
+      "Scene beat: ",
+      "Scene beat target labels: ",
+    ];
+    const preferred = evidence.backendFacts.filter((fact) =>
+      sceneBeatPrefixes.some((prefix) => fact.text.startsWith(prefix))
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
   if (evidence.authority === "scene_frame_snapshot") {
     const sceneFrameSnapshotPrefixes = [
       "Scene placement: ",
@@ -423,6 +433,7 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   assertSceneFrameSnapshotStoryEvidence(evidence);
   assertLocalObservationStoryEvidence(evidence);
   assertDeviceSurfaceStoryEvidence(evidence);
+  assertSceneBeatStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   if (evidence.backendFacts.length <= maxFacts) return evidence;
   return {
@@ -1979,6 +1990,13 @@ function assertDeviceSurfaceStoryEvidence(evidence: AcceptedNarrationEvidence): 
   if (evidence.authority !== "device_surface_observation_receipt") return;
   if (!factValue(evidence, "Device surface beat: ")) {
     throw new Error("Device-surface prompt input requires accepted Device surface beat evidence.");
+  }
+}
+
+function assertSceneBeatStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "scene_beat_receipt") return;
+  if (!factValue(evidence, "Scene beat: ")) {
+    throw new Error("Scene-beat prompt input requires accepted Scene beat evidence.");
   }
 }
 

@@ -1024,6 +1024,13 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "scene_beat_receipt" && receipt.publicResult.sceneBeat) {
       const evidenceId = nextEvidenceId(evidence);
       const beat = receipt.publicResult.sceneBeat;
+      const targetLabels = beat.targetLabels.slice(0, 4);
+      const backendFactTexts = [
+        `Scene beat: ${beat.summary}`,
+        targetLabels.length > 0
+          ? `Scene beat target labels: ${evidenceSemicolonList(targetLabels)}.`
+          : null,
+      ].filter((text): text is string => text !== null);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -1032,12 +1039,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds: ["scene_beat"],
         text: beat.summary,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [
-          fact(evidenceId, 1, `Scene beat: ${beat.summary}`),
-          ...beat.targetLabels.slice(0, 4).map((label, index) =>
-            fact(evidenceId, index + 2, `Visible target: ${label}.`)
-          ),
-        ],
+        backendFacts: backendFactTexts.map((text, index) =>
+          fact(evidenceId, index + 1, text)
+        ),
         limits: {
           proves: ["local visible scene beat acknowledgement"],
           doesNotProve: SCENE_BEAT_DOES_NOT_PROVE,

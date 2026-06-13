@@ -1791,6 +1791,8 @@ describe("clean Stage 6 narration contracts", () => {
         },
       }],
     });
+    expect(() => buildCleanNarratorPromptInput(sceneBeat))
+      .toThrow("Scene-beat prompt input requires accepted Scene beat evidence.");
     expect(() => renderCleanAuthorityProjection(sceneBeat))
       .toThrow("Scene-beat projection requires accepted Scene beat evidence.");
 
