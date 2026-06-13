@@ -6093,3 +6093,26 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 335 tests.
     - [x] GitNexus `detect_changes` reported central Stage 6 narration flow scope; focused impacts for `selectPromptAcceptedEvidence`, `validateCleanNarrationCandidate`, `renderCleanAuthorityProjection`, `proseQualityIssues`, `buildCleanNarrationSystemPrompt`, and `preferredPromptFacts` were all LOW.
     - [x] Note: the reused P155 verifier helper sent the turn successfully, then crashed on stale `clean_gameplay_turn_records.id` SQL. P202 proof uses a current-schema verifier over the committed SSE/DB state.
+
+- P203 Stage 6 device-surface literary narration:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 narration symbols.
+    - [x] Add a guarded literary path for `device_surface_observation` only when accepted `scene_texture` exists.
+    - [x] Keep no-texture device-surface turns on deterministic authority projection.
+    - [x] Add validation/repair/prompt coverage requiring exact scene texture and later texture selection when several texture facts exist.
+    - [x] Extend prose audit for flat device-surface summary shapes.
+    - [x] Run focused tests, typecheck, live device-surface proof, and prose audit.
+    - [x] Run GitNexus detect, commit/push, and refresh the GitNexus index.
+  - Results:
+    - [x] Focused narration test passed after adding device-surface texture contracts and no-surface drift guard: `gameplay-cycle-runtime-narration.test.ts` -> 72 tests.
+    - [x] Diagnostic live clone `p203-device-surface-texture-20260613-183906` exposed a prose drift: the model wrote `screen shows ... lit`, turning bounded no-surface evidence into screen/lit-status detail. That clone is diagnostic-only.
+    - [x] Added validation rejecting bounded device no-surface prose that lacks `no requested` wording or claims screen state, lit/unlit status, signal bars, no messages, no calls, network truth, or broad no-change.
+    - [x] Final fresh clone `p203-device-surface-texture-final-20260613-184301` from source `375590ad-acbb-4f7e-8ce6-0cbe1cb96424`, backend `http://127.0.0.1:31717`, clean runtime flags on.
+    - [x] Turn 001 action `I check the Burner phone's visible screen indicators for signal bars, message notifications, and missed-call indicators, without moving.` accepted one `device_surface_observation` receipt with `resultKind=no_requested_surface`, `mutationApplied=false`, no authority trace, no clock ledger, old stores 0, and final clock `0/0/0`.
+    - [x] Player-facing prose used exact later accepted scene texture plus bounded device-surface wording: `Civilians shop and commute through the district in thick crowds, generating concentrated cursed energy that attracts low-grade curses to the building basements and alleyways. The Burner phone's visible surface shows no requested signal indicator, message indicator, or call indicator.`
+    - [x] DB proof `output/clean-runtime-p203-device-surface-texture-final-20260613-184301/db-proof.json`: pass true; Burner phone remained equipped with `Hayashi Ren`; no private messages, no calls, no signal/network truth, no screen/lit status, and no old runtime stores.
+    - [x] Prose audit `output/clean-runtime-p203-device-surface-texture-final-20260613-184301/prose-audit.json`: 1 narrative, 39 words, zero one-token/debug/enum/flat-device/slop hits.
+    - [x] `npm --prefix backend run typecheck` passed.
+    - [x] Focused clean-runtime suite passed: `gameplay-cycle-runtime-contracts`, `stage4`, `settlement`, and `narration` -> 339 tests.
+    - [x] GitNexus focused impacts for changed Stage 6 narration helpers were LOW; direct scope stays within `runCleanNarration`, `selectPromptAcceptedEvidence`, `validateCleanNarrationCandidate`, or `renderCleanAuthorityProjection`.
+    - [x] GitNexus staged `detect_changes` reported HIGH central process scope for Stage 6 narration, with changed process steps limited to `runCleanNarration` prompt/validation selection and `renderCleanAuthorityProjection`.

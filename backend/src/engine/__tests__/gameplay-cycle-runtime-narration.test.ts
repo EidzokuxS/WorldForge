@@ -939,6 +939,16 @@ function deviceSurfaceObservationView(): CleanNarratorView {
   });
 }
 
+function deviceSurfaceObservationWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...deviceSurfaceObservationView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
 function turn(): GameplayRuntimeTurnInput {
   return {
     version: "gameplay-runtime.turn-input.v1",
@@ -1235,6 +1245,21 @@ describe("clean Stage 6 narration contracts", () => {
         "Scene texture: Rain taps the brass gutters.",
       ]);
     }
+  });
+
+  it("includes scene_texture beside device-surface evidence when literary prose can cite texture", () => {
+    const promptInput = buildCleanNarratorPromptInput(deviceSurfaceObservationWithSceneTextureView());
+
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1")?.claimKinds).toEqual([
+      "device_surface_observation",
+      "device_surface_unavailable",
+    ]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
+      "Scene texture: Canvas awnings hang over the market lanes.",
+      "Scene texture: Rain taps the brass gutters.",
+    ]);
   });
 
   it("accepts model narration from accepted movement evidence", () => {
@@ -2948,6 +2973,100 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
   });
 
+  it("uses accepted scene_texture for device_surface_observation prose when texture is available", async () => {
+    const view = deviceSurfaceObservationWithSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Burner phone shows no requested message indicator on its visible surface.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Burner phone shows no requested message indicator on its visible surface.");
+    expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network|sender|caller/iu);
+  });
+
+  it("rejects device_surface_observation prose that omits texture or repeats the first texture fact", () => {
+    const view = deviceSurfaceObservationWithSceneTextureView();
+    const missingTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Burner phone shows no requested message indicator on its visible surface.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+      }]),
+    });
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Device-surface narration")
+    )).toBe(true);
+
+    const firstTexture = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Burner phone shows no requested message indicator on its visible surface.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+        },
+      ]),
+    });
+    expect(firstTexture.status).toBe("rejected");
+    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(firstTexture.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Device-surface scene_texture")
+    )).toBe(true);
+  });
+
+  it("rejects device no-surface prose that turns bounded facets into screen or lit-status claims", () => {
+    const view = deviceSurfaceObservationWithSceneTextureView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The Burner phone screen shows no signal indicator, no message indicator, and no call indicator lit on its current surface.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+        },
+      ]),
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("Bounded device no-surface narration")
+    )).toBe(true);
+  });
+
   it("keeps failed and skipped audit notices from becoming world truth", () => {
     const view = movementView({
       acceptedEvidence: [],
@@ -3309,6 +3428,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("player_local_condition uses a later texture fact");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("minor_poi_handle uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Device-surface surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("device_surface_observation uses a later texture fact");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");

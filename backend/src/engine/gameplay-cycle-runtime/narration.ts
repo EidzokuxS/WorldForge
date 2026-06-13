@@ -197,6 +197,7 @@ const LITERARY_TERMINAL_CLAIMS: CleanNarrationClaimKind[] = [
   "support_actor_materialization",
   "player_local_condition",
   "minor_poi_handle",
+  "device_surface_observation",
 ];
 const LITERARY_SCENE_ANCHOR_CLAIMS: CleanNarrationClaimKind[] = [
   "current_scene",
@@ -244,6 +245,7 @@ function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean 
     || hasClaimKind(view, "support_actor_materialization")
     || hasClaimKind(view, "player_local_condition")
     || hasClaimKind(view, "minor_poi_handle")
+    || hasClaimKind(view, "device_surface_observation")
   ) return true;
   return hasOnlySceneFrameSnapshotEvidence(view)
     && view.acceptedEvidence.some((evidence) =>
@@ -261,6 +263,7 @@ function minimumLiteraryWordCount(view: CleanNarratorView): number {
   if (hasClaimKind(view, "support_actor_materialization")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 6;
   if (hasClaimKind(view, "player_local_condition")) return hasAcceptedSceneTextureEvidence(view) ? 10 : 4;
   if (hasClaimKind(view, "minor_poi_handle")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 7;
+  if (hasClaimKind(view, "device_surface_observation")) return hasAcceptedSceneTextureEvidence(view) ? 12 : 6;
   return 12;
 }
 
@@ -321,6 +324,12 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
   if (evidence.claimKinds.includes("minor_poi_handle")) {
     const preferred = evidence.backendFacts.filter((fact) =>
       /^(?:Visible current-scene place handle|Place handle label|Place handle kind|Current scene anchor|Handle result|This is a visible current-scene target handle)/u.test(fact.text)
+    );
+    return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
+  }
+  if (evidence.claimKinds.includes("device_surface_observation")) {
+    const preferred = evidence.backendFacts.filter((fact) =>
+      /^(?:Device:|Requested surface facets:|Current visible device surface|Modeled public device surface)/u.test(fact.text)
     );
     return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
   }
@@ -770,6 +779,15 @@ function smallSceneResultNeedsSceneTexture(
     && !candidateCitesClaimKind(candidate, "scene_texture");
 }
 
+function deviceSurfaceNeedsSceneTexture(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  return hasAcceptedSceneTextureEvidence(view)
+    && hasClaimKind(view, "device_surface_observation")
+    && !candidateCitesClaimKind(candidate, "scene_texture");
+}
+
 function sceneTextureSelectionViolates(
   view: CleanNarratorView,
   candidate: CleanNarrationCandidate,
@@ -817,6 +835,29 @@ function minorPoiUsesFirstSceneTextureFact(
 ): boolean {
   return hasClaimKind(view, "minor_poi_handle")
     && sceneTextureSelectionViolates(view, candidate, "later");
+}
+
+function deviceSurfaceUsesFirstSceneTextureFact(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  return hasClaimKind(view, "device_surface_observation")
+    && sceneTextureSelectionViolates(view, candidate, "later");
+}
+
+function deviceSurfaceNoSurfaceWordingViolates(
+  view: CleanNarratorView,
+  candidate: CleanNarrationCandidate,
+): boolean {
+  if (!hasClaimKind(view, "device_surface_unavailable")) return false;
+  const deviceSentenceText = candidate.sentences
+    .filter((sentence) => sentence.claimKinds.includes("device_surface_observation"))
+    .map((sentence) => sentence.text)
+    .join(" ");
+  const text = normalizeText(deviceSentenceText || candidate.finalText);
+  if (!/\bno requested\b/iu.test(text)) return true;
+  return /\b(?:screen|lit|unlit|dark|blank|signal bars?|no signal\b|no messages?\b|no calls?\b|current surface)\b/iu.test(text)
+    || /\bnotifications?\b(?!\s+indicator)\b/iu.test(text);
 }
 
 function patternMatches(pattern: RegExp, text: string): string[] {
@@ -1103,11 +1144,35 @@ function proseQualityIssues(input: {
     });
   }
 
+  if (deviceSurfaceNeedsSceneTexture(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Device-surface narration with accepted scene_texture must include one exact scene_texture sentence object.",
+    });
+  }
+
   if (supportActorUsesLaterSceneTextureFact(input.view, input.candidate)) {
     issues.push({
       code: "prose_quality",
       path: "sentences",
       message: "Support-actor scene_texture must use the first accepted texture fact when several scene_texture facts are available.",
+    });
+  }
+
+  if (deviceSurfaceUsesFirstSceneTextureFact(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Device-surface scene_texture must use a later accepted texture fact when several scene_texture facts are available.",
+    });
+  }
+
+  if (deviceSurfaceNoSurfaceWordingViolates(input.view, input.candidate)) {
+    issues.push({
+      code: "prose_quality",
+      path: "sentences",
+      message: "Bounded device no-surface narration must say no requested public indicator is visible on the device surface; screen state, lit/unlit status, signal bars, no messages, no calls, and network truth require separate accepted evidence.",
     });
   }
 
@@ -1257,9 +1322,10 @@ export function buildCleanNarrationSystemPrompt(
     "Support-actor surface: for support_actor_materialization, phrase only the accepted visible support actor label, ordinary support role, materialization result, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the presence beat; when several texture facts exist, support_actor_materialization uses the first accepted texture fact. Dialogue, services, actor actions, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, and no-change require separate accepted evidence.",
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. With scene_texture evidence, put one exact scene_texture sentence beside the condition beat; when several texture facts exist, player_local_condition uses a later texture fact than the first. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
     "Minor-POI surface: for minor_poi_handle, phrase only the accepted visible current-scene place handle label, kind, handle result, and exact scene anchor as a local target handle. With scene_texture evidence, put one exact scene_texture sentence beside the handle beat; when several texture facts exist, minor_poi_handle uses a later texture fact than the first. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
+    "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. With scene_texture evidence, put one exact scene_texture sentence beside the device-surface beat; when several texture facts exist, device_surface_observation uses a later texture fact than the first. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
     "Direct-scene surface: for scene_frame_snapshot-only direct scene observation, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, or local observation; use 2 objects when item_state, dialogue_response, movement, elapsed_time, or route_options cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -1492,6 +1558,14 @@ function narrationValidationRepairLines(
         : textureFacts.slice(0, 1).map((fact) => fact.factRef);
       if (minorPoiTextureRefs.length > 0) {
         lines.push(`For minor_poi_handle, use ${minorPoiTextureRefs.join(" or ")} for the scene_texture sentence.`);
+      }
+    }
+    if (hasClaimKind(view, "device_surface_observation")) {
+      const deviceSurfaceTextureRefs = textureFacts.length > 1
+        ? textureFacts.slice(1).map((fact) => fact.factRef)
+        : textureFacts.slice(0, 1).map((fact) => fact.factRef);
+      if (deviceSurfaceTextureRefs.length > 0) {
+        lines.push(`For device_surface_observation, use ${deviceSurfaceTextureRefs.join(" or ")} for the scene_texture sentence.`);
       }
     }
     lines.push("Set scene_texture sentence.text exactly to one listed text and cite only its matching backendFactRef in that sentence.");
@@ -1831,7 +1905,7 @@ function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean
     || (evidence.claimKinds.includes("support_actor_materialization") && !hasSceneTexture)
     || (evidence.authority === "route_options_receipt" && !hasSceneTexture)
     || evidence.authority === "scene_observation_receipt"
-    || evidence.claimKinds.includes("device_surface_observation")
+    || (evidence.claimKinds.includes("device_surface_observation") && !hasSceneTexture)
   );
 }
 
