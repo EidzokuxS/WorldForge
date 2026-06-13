@@ -6612,3 +6612,4 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Settlement now emits `value` for clarification, local/device/scene beats, player condition operation, support actor identity/role/scene, and minor POI label/kind/result.
     - [x] Focused checks passed: `gameplay-cycle-runtime-narration` -> 97 tests, `settlement` -> 20 tests, `contracts` -> 208 tests, `stage4` -> 39 tests, and `npm --prefix backend run typecheck`.
     - [x] GitNexus all-scope `detect_changes` reported MEDIUM with the affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`; context review found the only caller is `runCleanNarration`.
+    - [x] Pushed commit `bef7768f`; `npx gitnexus analyze --embeddings` completed successfully with embeddings preserved.
