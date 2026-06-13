@@ -932,7 +932,7 @@ function positiveLocalObservationView(): CleanNarratorView {
         { factRef: "e1.f1", role: "local_observation_beat", value: "central telegraph desk is in view here.", text: "Local observation beat: central telegraph desk is in view here.", exact: true },
         { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible targets.", exact: true },
         { factRef: "e1.f3", role: "observation_query", text: "Observation query: central telegraph desk.", exact: true },
-        { factRef: "e1.f4", role: "observed_entry_labels", text: "Observed entry labels: central telegraph desk.", exact: true },
+        { factRef: "e1.f4", role: "observed_entry_labels", value: "central telegraph desk", text: "Observed entry labels: central telegraph desk.", exact: true },
         { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible target central telegraph desk.", exact: true },
         { factRef: "e1.f6", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
         { factRef: "e1.f7", role: "anchor_location", text: "Anchor location: Market.", exact: true },
@@ -3679,19 +3679,26 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("keeps bounded negative local_observation on deterministic projection without texture", async () => {
+  it("uses model-authored bounded negative local_observation prose without texture", async () => {
     const view = localObservationView();
+    let modelCalls = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("bounded negative local_observation should use deterministic accepted-evidence projection");
+        modelCalls += 1;
+        return acceptedCandidate(view, [{
+          text: "Among the checked visible entries, \"Violet Astrolabe\" has no matching visible result.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+          claimKinds: ["local_observation", "bounded_visibility_negative"],
+        }]);
       },
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("The visible actors and visible targets show no match for \"Violet Astrolabe\".");
-    expect(result.text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
+    expect(modelCalls).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Among the checked visible entries, \"Violet Astrolabe\" has no matching visible result.");
   });
 
   it("uses model-authored local_observation prose when accepted scene_texture is available", async () => {
@@ -3784,7 +3791,7 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("deterministically projects local_observation movement options without hidden placeholders", async () => {
+  it("uses model-authored local_observation movement-option prose without hidden placeholders", async () => {
     const routeBeat = "The visible route choices here are North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.";
     const view = movementView({
       acceptedEvidence: [{
@@ -3796,8 +3803,8 @@ describe("clean Stage 6 narration contracts", () => {
           { factRef: "e1.f1", role: "local_observation_beat", value: routeBeat, text: `Local observation beat: ${routeBeat}`, exact: true },
           { factRef: "e1.f2", text: "Searched visible surfaces: route options.", exact: true },
           { factRef: "e1.f3", text: "Observation query: visible routes and local targets.", exact: true },
-          { factRef: "e1.f4", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },
-          { factRef: "e1.f5", text: "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.", exact: true },
+          { factRef: "e1.f4", role: "observed_entry_labels", value: "North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },
+          { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.", exact: true },
           { factRef: "e1.f6", text: "Anchor scene: Market.", exact: true },
           { factRef: "e1.f7", text: "Anchor location: Market.", exact: true },
         ],
@@ -3807,22 +3814,45 @@ describe("clean Stage 6 narration contracts", () => {
         },
       }],
     });
+    let modelCalls = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => {
-        throw new Error("local_observation should use deterministic accepted-evidence projection");
+        modelCalls += 1;
+        return acceptedCandidate(view, [{
+          text: "North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are in view as route choices here.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+          claimKinds: ["local_observation"],
+        }]);
       },
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("The visible route choices here are North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, Upper Dam Ruins.");
+    expect(modelCalls).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are in view as route choices here.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
     expect(result.text).not.toContain("movement_option");
     expect(result.text).not.toContain("visible_target");
     expect(result.text).not.toContain("SceneFrame");
+
+    const missingObservedLabel = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, and The Copper Tap are in view as route choices here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+        claimKinds: ["local_observation"],
+      }]),
+    });
+    expect(missingObservedLabel.status).toBe("rejected");
+    if (missingObservedLabel.status !== "rejected") throw new Error("expected rejected");
+    expect(missingObservedLabel.issues.some((issue) =>
+      issue.code === "prose_quality" && issue.message.includes("missing Upper Dam Ruins")
+    )).toBe(true);
   });
 
   it("uses model-authored direct-scene prose for scene_observation receipts with direct-scene guards", async () => {

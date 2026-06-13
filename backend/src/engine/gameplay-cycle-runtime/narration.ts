@@ -181,25 +181,6 @@ function hasAcceptedSceneTextureEvidence(view: CleanNarratorView): boolean {
   );
 }
 
-function localObservationRequiresDeterministicProjection(
-  evidence: AcceptedNarrationEvidence,
-  hasSceneTexture: boolean,
-): boolean {
-  if (!evidence.claimKinds.includes("local_observation") || hasSceneTexture) return false;
-  if (evidence.claimKinds.includes("bounded_visibility_negative")) return true;
-  const hasPositiveVisibleClaim = evidence.claimKinds.some((claimKind) =>
-    claimKind === "visible_actor"
-    || claimKind === "visible_fact"
-    || claimKind === "visible_target"
-  );
-  const hasBackendFactRole = (role: AcceptedNarrationBackendFactRole): boolean =>
-    evidence.backendFacts.some((fact) => fact.role === role);
-  const hasPositiveVisibleStoryFacts = hasBackendFactRole("local_observation_beat")
-    && hasBackendFactRole("observed_entry_labels")
-    && hasBackendFactRole("observed_entry_surfaces");
-  return !(hasPositiveVisibleClaim && hasPositiveVisibleStoryFacts);
-}
-
 function isLiteraryNarrationCandidateExpected(view: CleanNarratorView): boolean {
   if (
     hasClaimKind(view, "item_state")
@@ -1116,6 +1097,14 @@ function acceptedRouteOptionLabels(view: CleanNarratorView): string[] {
     }));
 }
 
+function acceptedLocalObservationLabels(view: CleanNarratorView): string[] {
+  return uniqueStrings(view.acceptedEvidence
+    .filter((evidence) => evidence.claimKinds.includes("local_observation"))
+    .flatMap((evidence) => evidence.backendFacts)
+    .filter((fact) => fact.role === "observed_entry_labels")
+    .flatMap((fact) => splitEvidenceLabels(fact.value ?? "")));
+}
+
 function acceptedDirectSceneRouteOptionLabels(view: CleanNarratorView): string[] {
   return uniqueStrings(view.acceptedEvidence
     .filter((evidence) =>
@@ -1450,6 +1439,17 @@ function proseQualityIssues(input: {
         code: "prose_quality",
         path: "finalText",
         message: `Route-options narration must include every accepted visible route label; missing ${missingLabels.join(", ")}.`,
+      });
+    }
+  }
+
+  if (candidateCitesClaimKind(input.candidate, "local_observation")) {
+    const missingLabels = acceptedLocalObservationLabels(input.view).filter((label) => !text.includes(label));
+    if (missingLabels.length > 0) {
+      issues.push({
+        code: "prose_quality",
+        path: "finalText",
+        message: `Local-observation narration must include every accepted observed label; missing ${missingLabels.join(", ")}.`,
       });
     }
   }
@@ -1942,6 +1942,10 @@ function assertLocalObservationStoryEvidence(evidence: AcceptedNarrationEvidence
   if (!evidence.backendFacts.some((fact) => fact.role === "local_observation_beat" && fact.value?.trim())) {
     throw new Error("Local-observation prompt input requires accepted Local observation beat value evidence.");
   }
+  const observedLabelFact = evidence.backendFacts.find((fact) => fact.role === "observed_entry_labels");
+  if (observedLabelFact && !observedLabelFact.value?.trim()) {
+    throw new Error("Local-observation prompt input requires accepted Observed entry labels value evidence.");
+  }
 }
 
 function assertDeviceSurfaceStoryEvidence(evidence: AcceptedNarrationEvidence): void {
@@ -2190,10 +2194,8 @@ function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): stri
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
-  const hasSceneTexture = hasAcceptedSceneTextureEvidence(view);
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
-    || localObservationRequiresDeterministicProjection(evidence, hasSceneTexture)
   );
 }
 

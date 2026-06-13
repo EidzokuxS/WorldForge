@@ -910,6 +910,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
       const observedLabels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
       const observedSurfaceLabels = localObservationSurfaceEntryLabels(observation.matchedEntries);
+      const observedLabelList = evidenceSemicolonList(observedLabels);
       const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
         ? ["local_observation", "bounded_visibility_negative"]
         : observation.resultKind === "positive_list"
@@ -920,7 +921,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.` },
         { role: "observation_query", text: `Observation query: ${observation.queryText}.` },
         ...(observedLabels.length > 0
-          ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${evidenceSemicolonList(observedLabels)}.` }]
+          ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${observedLabelList}.`, value: observedLabelList }]
           : []),
         ...(observedSurfaceLabels.length > 0
           ? [{ role: "observed_entry_surfaces" as const, text: `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.` }]

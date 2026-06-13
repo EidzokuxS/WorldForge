@@ -1325,6 +1325,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.backendFacts[0]?.text).toContain("The Copper Tap");
     expect(observation?.backendFacts[0]?.text).toContain("Upper Dam Ruins");
     expect(observation?.backendFacts[0]?.value).toBe(routeBeat);
+    expect(observation?.backendFacts[3]?.value).toBe("North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins");
     expect(JSON.stringify(observation)).not.toContain("[hidden]");
     expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
