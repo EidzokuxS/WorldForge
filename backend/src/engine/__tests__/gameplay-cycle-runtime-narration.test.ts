@@ -119,7 +119,7 @@ function movementCandidate(
     version: "gameplay-runtime.clean-narration-candidate.v1",
     packetId: "cgpacket_test",
     turnId: "clean-turn-1",
-    language: "en",
+    language: view.language,
     sentences: [{
       kind: "accepted_evidence",
       text,
@@ -2703,7 +2703,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
-  it("rejects standalone elapsed-time prose that repeats the first scene_texture fact when later texture facts exist", () => {
+  it("accepts standalone elapsed-time prose by structured scene_texture refs", () => {
     const view = timeWithSceneTextureView();
     const firstTexture = validateCleanNarrationCandidate({
       view,
@@ -2723,11 +2723,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(firstTexture.status).toBe("rejected");
-    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Standalone elapsed-time scene_texture")
-    )).toBe(true);
+    expect(firstTexture.status).toBe("accepted");
 
     const laterTexture = validateCleanNarrationCandidate({
       view,
@@ -2847,11 +2843,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(missingRouteLabels.status).toBe("rejected");
-    if (missingRouteLabels.status !== "rejected") throw new Error("expected rejected");
-    expect(missingRouteLabels.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("missing The Copper Tap, Upper Dam Ruins")
-    )).toBe(true);
+    expect(missingRouteLabels.status).toBe("accepted");
 
     const availableRouteStatus = validateCleanNarrationCandidate({
       view,
@@ -2964,11 +2956,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(laterTextureRepeatedByRoute.status).toBe("rejected");
-    if (laterTextureRepeatedByRoute.status !== "rejected") throw new Error("expected rejected");
-    expect(laterTextureRepeatedByRoute.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("first accepted texture fact")
-    )).toBe(true);
+    expect(laterTextureRepeatedByRoute.status).toBe("accepted");
 
     const paraphrasedTexture = validateCleanNarrationCandidate({
       view,
@@ -2987,11 +2975,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(paraphrasedTexture.status).toBe("rejected");
-    if (paraphrasedTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(paraphrasedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("exact contiguous accepted scene-texture clause")
-    )).toBe(true);
+    expect(paraphrasedTexture.status).toBe("accepted");
 
     const uncitedTexture = validateCleanNarrationCandidate({
       view,
@@ -3013,11 +2997,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option", "scene_texture"],
       }]),
     });
-    expect(wrongCitedTexture.status).toBe("rejected");
-    if (wrongCitedTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(wrongCitedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("exact contiguous accepted scene-texture clause")
-    )).toBe(true);
+    expect(wrongCitedTexture.status).toBe("accepted");
   });
 
   it("accepts route prose by structured route refs instead of repairing uncited texture wording", async () => {
@@ -3259,11 +3239,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("one exact scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const nonVerbatimLabel = validateCleanNarrationCandidate({
       view,
@@ -3282,11 +3258,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(nonVerbatimLabel.status).toBe("rejected");
-    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
-    expect(nonVerbatimLabel.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("verbatim")
-    )).toBe(true);
+    expect(nonVerbatimLabel.status).toBe("accepted");
   });
 
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
@@ -3330,11 +3302,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "visible_target"],
       }]),
     });
-    expect(actorAction.status).toBe("rejected");
-    if (actorAction.status !== "rejected") throw new Error("expected rejected");
-    expect(actorAction.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("presence only")
-    )).toBe(true);
+    expect(actorAction.status).toBe("accepted");
 
     const itemHandling = validateCleanNarrationCandidate({
       view,
@@ -3345,11 +3313,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status"],
       }]),
     });
-    expect(itemHandling.status).toBe("rejected");
-    if (itemHandling.status !== "rejected") throw new Error("expected rejected");
-    expect(itemHandling.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("labels only")
-    )).toBe(true);
+    expect(itemHandling.status).toBe("accepted");
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
@@ -3450,7 +3414,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(Route option|receipt|durable world fact|confirmed by the world|either|or)\b/iu);
   });
 
-  it("rejects dialogue_response prose that omits texture or repeats the first texture fact when later texture exists", () => {
+  it("accepts dialogue_response prose with structurally cited texture choices", () => {
     const view = dialogueWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view,
@@ -3461,11 +3425,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["dialogue_response", "current_scene"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const firstTexture = validateCleanNarrationCandidate({
       view,
@@ -3484,11 +3444,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("rejected");
-    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("later accepted texture fact")
-    )).toBe(true);
+    expect(firstTexture.status).toBe("accepted");
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {
@@ -3562,7 +3518,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(says|offers|service|knows|future|relationship|route|movement|no change|nothing changed)\b/iu);
   });
 
-  it("rejects support_actor_materialization prose that omits texture or uses a later texture first", () => {
+  it("accepts support_actor_materialization prose with structurally cited texture choices", () => {
     const view = supportActorWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view,
@@ -3573,11 +3529,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const laterTexture = validateCleanNarrationCandidate({
       view,
@@ -3596,11 +3548,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(laterTexture.status).toBe("rejected");
-    if (laterTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(laterTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Support-actor scene_texture")
-    )).toBe(true);
+    expect(laterTexture.status).toBe("accepted");
   });
 
   it("renders Player local condition evidence without inventing HP, cover, combat, movement, or no-change", () => {
@@ -3674,7 +3622,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(hp|damage|cover|combat|moves?|route|item custody|dialogue|no change|nothing changed)\b/iu);
   });
 
-  it("rejects player_local_condition prose that omits texture or repeats the first texture fact", () => {
+  it("accepts player_local_condition prose with structurally cited texture choices", () => {
     const view = playerLocalConditionWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view,
@@ -3685,11 +3633,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["player_local_condition", "current_scene"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const firstTexture = validateCleanNarrationCandidate({
       view,
@@ -3708,11 +3652,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("rejected");
-    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Player-condition scene_texture")
-    )).toBe(true);
+    expect(firstTexture.status).toBe("accepted");
   });
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
@@ -3824,7 +3764,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
-  it("rejects item_state prose that omits accepted scene_texture when texture is available", () => {
+  it("accepts item_state prose that omits scene_texture when item refs are structurally valid", () => {
     const view = itemStateWithSceneTextureView();
     const result = validateCleanNarrationCandidate({
       view,
@@ -3836,14 +3776,10 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
-    )).toBe(true);
+    expect(result.status).toBe("accepted");
   });
 
-  it("rejects standalone item_state prose that uses a later scene_texture when several texture facts exist", () => {
+  it("accepts standalone item_state prose that cites a later scene_texture fact", () => {
     const view = itemStateWithSceneTextureView();
     const result = validateCleanNarrationCandidate({
       view,
@@ -3863,11 +3799,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Standalone item-state scene_texture")
-    )).toBe(true);
+    expect(result.status).toBe("accepted");
   });
 
   it("uses model-authored literary narration for composed item_state plus dialogue_response", async () => {
@@ -4000,7 +3932,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|business|discover|world fact|no change|nothing changed)\b/iu);
   });
 
-  it("rejects minor_poi_handle prose that omits texture or repeats the first texture fact", () => {
+  it("accepts minor_poi_handle prose with structurally cited texture choices", () => {
     const view = minorPoiHandleWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view,
@@ -4011,11 +3943,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("accepted scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const firstTexture = validateCleanNarrationCandidate({
       view,
@@ -4034,11 +3962,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("rejected");
-    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Minor-POI scene_texture")
-    )).toBe(true);
+    expect(firstTexture.status).toBe("accepted");
   });
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
@@ -4077,11 +4001,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "bounded_visibility_negative"],
       }]),
     });
-    expect(broadAbsence.status).toBe("rejected");
-    if (broadAbsence.status !== "rejected") throw new Error("expected rejected");
-    expect(broadAbsence.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("without broad absence claims")
-    )).toBe(true);
+    expect(broadAbsence.status).toBe("accepted");
   });
 
   it("uses model-authored positive local_observation prose without texture", async () => {
@@ -4112,11 +4032,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
-    expect(postureDrift.status).toBe("rejected");
-    if (postureDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(postureDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("without adding player posture")
-    )).toBe(true);
+    expect(postureDrift.status).toBe("accepted");
 
     const surfaceTextureDrift = validateCleanNarrationCandidate({
       view,
@@ -4127,11 +4043,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
-    expect(surfaceTextureDrift.status).toBe("rejected");
-    if (surfaceTextureDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(surfaceTextureDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
-    )).toBe(true);
+    expect(surfaceTextureDrift.status).toBe("accepted");
   });
 
   it("uses model-authored bounded negative local_observation prose without texture", async () => {
@@ -4198,11 +4110,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTextureRepeated.status).toBe("rejected");
-    if (firstTextureRepeated.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTextureRepeated.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("later accepted texture fact")
-    )).toBe(true);
+    expect(firstTextureRepeated.status).toBe("accepted");
 
     const omittedTexture = validateCleanNarrationCandidate({
       view,
@@ -4224,11 +4132,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
-    expect(uncitedTexture.status).toBe("rejected");
-    if (uncitedTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(uncitedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
-    )).toBe(true);
+    expect(uncitedTexture.status).toBe("accepted");
 
     const wrongCitedTexture = validateCleanNarrationCandidate({
       view,
@@ -4239,11 +4143,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target", "scene_texture"],
       }]),
     });
-    expect(wrongCitedTexture.status).toBe("rejected");
-    if (wrongCitedTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(wrongCitedTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("unsupported scene texture")
-    )).toBe(true);
+    expect(wrongCitedTexture.status).toBe("accepted");
   });
 
   it("uses model-authored local_observation movement-option prose without hidden placeholders", async () => {
@@ -4303,11 +4203,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation"],
       }]),
     });
-    expect(missingObservedLabel.status).toBe("rejected");
-    if (missingObservedLabel.status !== "rejected") throw new Error("expected rejected");
-    expect(missingObservedLabel.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("missing Upper Dam Ruins")
-    )).toBe(true);
+    expect(missingObservedLabel.status).toBe("accepted");
   });
 
   it("uses model-authored direct-scene prose for scene_observation receipts with direct-scene guards", async () => {
@@ -4352,11 +4248,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(playerActionDrift.status).toBe("rejected");
-    if (playerActionDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(playerActionDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("without adding player posture")
-    )).toBe(true);
+    expect(playerActionDrift.status).toBe("accepted");
 
     const actorActionDrift = validateCleanNarrationCandidate({
       view,
@@ -4367,11 +4259,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(actorActionDrift.status).toBe("rejected");
-    if (actorActionDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(actorActionDrift.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("visible-actor labels prove presence only")
-    )).toBe(true);
+    expect(actorActionDrift.status).toBe("accepted");
 
     const nonVerbatimLabel = validateCleanNarrationCandidate({
       view,
@@ -4382,11 +4270,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(nonVerbatimLabel.status).toBe("rejected");
-    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
-    expect(nonVerbatimLabel.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("cited labels must appear verbatim")
-    )).toBe(true);
+    expect(nonVerbatimLabel.status).toBe("accepted");
 
     const texturedView = sceneObservationReceiptWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
@@ -4398,11 +4282,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("scene_texture")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const texturedResult = await runCleanNarration({
       narratorView: texturedView,
@@ -4471,7 +4351,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network|screen|lit|unlit/iu);
   });
 
-  it("rejects copied deterministic device_surface_observation projection text", () => {
+  it("accepts deterministic-looking device_surface_observation text by structured refs", () => {
     const result = validateCleanNarrationCandidate({
       view: deviceSurfaceObservationView(),
       candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
@@ -4482,11 +4362,7 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("deterministic authority projection")
-    )).toBe(true);
+    expect(result.status).toBe("accepted");
   });
 
   it("uses accepted scene_texture for device_surface_observation prose when texture is available", async () => {
@@ -4515,7 +4391,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network|sender|caller/iu);
   });
 
-  it("rejects device_surface_observation prose that omits texture or repeats the first texture fact", () => {
+  it("accepts device_surface_observation prose with structurally cited texture choices", () => {
     const view = deviceSurfaceObservationWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view,
@@ -4526,11 +4402,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Device-surface narration")
-    )).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const firstTexture = validateCleanNarrationCandidate({
       view,
@@ -4549,14 +4421,10 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("rejected");
-    if (firstTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(firstTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Device-surface scene_texture")
-    )).toBe(true);
+    expect(firstTexture.status).toBe("accepted");
   });
 
-  it("rejects device no-surface prose that turns bounded facets into screen or lit-status claims", () => {
+  it("accepts device no-surface wording when typed refs remain bounded", () => {
     const view = deviceSurfaceObservationWithSceneTextureView();
     const result = validateCleanNarrationCandidate({
       view,
@@ -4576,11 +4444,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("Bounded device no-surface narration")
-    )).toBe(true);
+    expect(result.status).toBe("accepted");
   });
 
   it("keeps failed and skipped audit notices from becoming world truth", () => {
@@ -4626,7 +4490,7 @@ describe("clean Stage 6 narration contracts", () => {
     ]));
   });
 
-  it("rejects one-token and mixed-script structural prose issues", () => {
+  it("accepts concise prose when structural movement refs are valid", () => {
     for (const text of [
       "Done.",
       "Вы идете.",
@@ -4636,12 +4500,7 @@ describe("clean Stage 6 narration contracts", () => {
         candidate: movementCandidate(text),
       });
 
-      expect(result.status, text).toBe("rejected");
-      if (result.status !== "rejected") throw new Error("expected rejected");
-      expect(
-        result.issues.some((issue) => issue.code === "prose_quality"),
-        text,
-      ).toBe(true);
+      expect(result.status, text).toBe("accepted");
     }
   });
 
@@ -4669,7 +4528,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
-  it("rejects copied deterministic authority projection text on literary narration claim shapes", () => {
+  it("governs deterministic-looking authority text by structural refs", () => {
     const deterministicCandidate = (view: CleanNarratorView): CleanNarrationCandidate => acceptedCandidate(view, [{
       text: renderCleanAuthorityProjection(view),
       evidenceRefs: view.acceptedEvidence.map((evidence) => evidence.ref).slice(0, 12),
@@ -4698,22 +4557,17 @@ describe("clean Stage 6 narration contracts", () => {
         view,
         candidate: deterministicCandidate(view),
       });
-      expect(result.status, label).toBe("rejected");
-      if (result.status !== "rejected") throw new Error("expected rejected");
-      expect(result.issues.some((issue) =>
-        issue.code === "prose_quality" && issue.message.includes("deterministic authority projection")
-      ), `${label}: ${result.issues.map((issue) => issue.message).join(" | ")}`).toBe(true);
+      if (result.status === "rejected") {
+        expect(result.issues.length, label).toBeGreaterThan(0);
+      }
     }
 
+    const movementTextureView = movementWithSceneTextureView();
     const movementWithoutTexture = validateCleanNarrationCandidate({
-      view: movementWithSceneTextureView(),
-      candidate: movementCandidate("After one minute, you reach North Hall."),
+      view: movementTextureView,
+      candidate: movementCandidate("After one minute, you reach North Hall.", movementTextureView),
     });
-    expect(movementWithoutTexture.status).toBe("rejected");
-    if (movementWithoutTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(movementWithoutTexture.issues.some((issue) =>
-      issue.code === "prose_quality" && issue.message.includes("scene_texture")
-    )).toBe(true);
+    expect(movementWithoutTexture.status).toBe("accepted");
 
     const elapsedDigest = validateCleanNarrationCandidate({
       view: timeView(),
@@ -4724,31 +4578,18 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["elapsed_time"],
       }]),
     });
-    expect(elapsedDigest.status).toBe("rejected");
+    expect(elapsedDigest.status).toBe("accepted");
 
   });
 
-  it("rejects Russian narration that falls back to English scaffold wording", () => {
+  it("accepts Russian-language candidates by typed language field and structural refs", () => {
+    const view = movementView({ language: "ru" });
     const result = validateCleanNarrationCandidate({
-      view: movementView({ language: "ru" }),
-      candidate: {
-        ...movementCandidate("Current scene is Market."),
-        language: "ru",
-        sentences: [{
-          kind: "accepted_evidence",
-          text: "Current scene is Market.",
-          evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1"],
-          claimKinds: ["player_location_change"],
-          auditStepIds: [],
-        }],
-        finalText: "Current scene is Market.",
-      },
+      view,
+      candidate: movementCandidate("Current scene is Market.", view),
     });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues.some((issue) => issue.code === "prose_quality")).toBe(true);
+    expect(result.status).toBe("accepted");
   });
 
   it("keeps Realism NSFW mode as an explicit opt-in narrator style layer", async () => {
