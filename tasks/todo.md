@@ -6923,3 +6923,22 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `f9f83fad` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P252 Stage 6 sentence prose materials:
+  - Plan:
+    - [x] Run GitNexus impact before editing sentence-plan builder and prompt wording.
+    - [x] Add move/sentence-scoped `proseMaterials` to `narrativePageTask.sentencePlan[]` from preferred backend fact refs.
+    - [x] Derive material kind from typed `factUses` and material text from accepted fact value/text without parsing prose.
+    - [x] Keep prose materials truth-bounded by fact refs, entry refs, page moves, sentence-plan refs, and accepted evidence.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, and route-options expose usable prose materials.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: each `narrativePageTask.sentencePlan[]` step now carries `proseMaterials` with fact refs, typed prose use, material text, text provenance, and copy mode.
+    - Executed: material text is derived from accepted fact `value` when present, otherwise accepted fact `text`, with `materialTextSource` exposing that provenance explicitly.
+    - Executed: `copyMode` distinguishes exact texture/dialogue copying, preserved labels/times/route tokens, and material that can be phrased from the accepted beat.
+    - Executed: system prompt now tells the narrator to use `proseMaterials` as concrete sentence raw material while keeping refs as the truth boundary.
+    - Executed: focused movement, dialogue-with-context, and route-options tests prove prose material shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with no affected processes.
+    - Executed: code commit `dedfdd5a` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
