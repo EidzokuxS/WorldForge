@@ -8506,3 +8506,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. A tea stall marks a visible point at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p316-minor-poi-live-20260615-024328/prose-audit.json`: one narrative, 29 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 3 touched indexed symbols, 3 changed files, and 0 affected execution flows.
+    - Verified implementation commit: `eeb20d5f` recorded the P316 code/tests/proof notes.
