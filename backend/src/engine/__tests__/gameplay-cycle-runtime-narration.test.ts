@@ -407,14 +407,14 @@ function sceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"]
       {
         factRef: `${ref}.f1`,
         role: "scene_texture",
-        value: "Canvas awnings hang over the market lanes",
+        value: "Canvas awnings hang over the market lanes.",
         text: "Scene texture: Canvas awnings hang over the market lanes.",
         exact: true,
       },
       {
         factRef: `${ref}.f2`,
         role: "scene_texture",
-        value: "Rain taps the brass gutters",
+        value: "Rain taps the brass gutters.",
         text: "Scene texture: Rain taps the brass gutters.",
         exact: true,
       },
@@ -436,21 +436,21 @@ function threeFrameSceneTextureEvidence(ref = "e2"): CleanNarratorView["accepted
       {
         factRef: `${ref}.f1`,
         role: "scene_texture",
-        value: "Canvas awnings hang over the market lanes",
+        value: "Canvas awnings hang over the market lanes.",
         text: "Scene texture: Canvas awnings hang over the market lanes.",
         exact: true,
       },
       {
         factRef: `${ref}.f2`,
         role: "scene_texture",
-        value: "Rain taps the brass gutters",
+        value: "Rain taps the brass gutters.",
         text: "Scene texture: Rain taps the brass gutters.",
         exact: true,
       },
       {
         factRef: `${ref}.f3`,
         role: "scene_texture",
-        value: "Lantern smoke gathers under the bridge",
+        value: "Lantern smoke gathers under the bridge.",
         text: "Scene texture: Lantern smoke gathers under the bridge.",
         exact: true,
       },
@@ -2102,8 +2102,8 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
       .toEqual([
-        "Canvas awnings hang over the market lanes",
-        "Rain taps the brass gutters",
+        "Canvas awnings hang over the market lanes.",
+        "Rain taps the brass gutters.",
         "You are at Market.",
         "Market",
         "Market",
@@ -2126,7 +2126,7 @@ describe("clean Stage 6 narration contracts", () => {
           {
             factRef: "e2.f1",
             proseUse: "exact_texture_sentence",
-            materialText: "Canvas awnings hang over the market lanes",
+            materialText: "Canvas awnings hang over the market lanes.",
             materialTextSource: "accepted_value",
             copyMode: "copy_exact",
           },
@@ -2845,7 +2845,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts[0]?.text)
-      .toBe("Canvas awnings hang over the market lanes");
+      .toBe("Canvas awnings hang over the market lanes.");
   });
 
   it("includes scene_texture beside terminal item and dialogue evidence when literary prose can cite texture", () => {
@@ -2856,8 +2856,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["dialogue_response"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Canvas awnings hang over the market lanes",
-      "Rain taps the brass gutters",
+      "Canvas awnings hang over the market lanes.",
+      "Rain taps the brass gutters.",
     ]);
   });
 
@@ -2891,22 +2891,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(selectedTextureRefs(routePrompt)).toEqual([{
       preferredBackendFactRefs: ["e2.f1"],
       allowedTextureFactRefs: ["e2.f1"],
-      materialTexts: ["Canvas awnings hang over the market lanes"],
+      materialTexts: ["Canvas awnings hang over the market lanes."],
     }]);
     expect(selectedTextureRefs(timePrompt)).toEqual([{
       preferredBackendFactRefs: ["e2.f3"],
       allowedTextureFactRefs: ["e2.f3"],
-      materialTexts: ["Lantern smoke gathers under the bridge"],
+      materialTexts: ["Lantern smoke gathers under the bridge."],
     }]);
     expect(selectedTextureRefs(itemPrompt)).toEqual([{
       preferredBackendFactRefs: ["e2.f2"],
       allowedTextureFactRefs: ["e2.f2"],
-      materialTexts: ["Rain taps the brass gutters"],
+      materialTexts: ["Rain taps the brass gutters."],
     }]);
     expect(selectedTextureRefs(socialPrompt)).toEqual([{
       preferredBackendFactRefs: ["e2.f2"],
       allowedTextureFactRefs: ["e2.f2"],
-      materialTexts: ["Rain taps the brass gutters"],
+      materialTexts: ["Rain taps the brass gutters."],
     }]);
   });
 
@@ -2932,8 +2932,8 @@ describe("clean Stage 6 narration contracts", () => {
       expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
       expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
       expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-        "Canvas awnings hang over the market lanes",
-        "Rain taps the brass gutters",
+        "Canvas awnings hang over the market lanes.",
+        "Rain taps the brass gutters.",
       ]);
     }
   });
@@ -2948,8 +2948,8 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Canvas awnings hang over the market lanes",
-      "Rain taps the brass gutters",
+      "Canvas awnings hang over the market lanes.",
+      "Rain taps the brass gutters.",
     ]);
   });
 

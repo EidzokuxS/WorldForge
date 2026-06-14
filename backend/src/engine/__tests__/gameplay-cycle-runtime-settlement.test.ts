@@ -821,6 +821,9 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(texture?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: North Hall narrows beneath a row of iron lamps.",
     ]);
+    expect(texture?.backendFacts.map((entry) => entry.value)).toEqual([
+      "North Hall narrows beneath a row of iron lamps.",
+    ]);
     expect(movement).toMatchObject({
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
@@ -1000,6 +1003,10 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(textureEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.",
       "Scene texture: Brass bells tremble above the ticket window.",
+    ]);
+    expect(textureEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
+      "Lantern smoke clings to the ticket counter beside the wet stone floor.",
+      "Brass bells tremble above the ticket window.",
     ]);
     expect(textureEvidence?.limits.proves).toEqual(["public current-scene description texture"]);
     expect(textureEvidence?.limits.doesNotProve).toContain("route truth");

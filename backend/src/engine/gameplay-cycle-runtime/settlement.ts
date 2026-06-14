@@ -536,23 +536,68 @@ function routeChoiceLabelsBeat(originLabel: string, labels: readonly string[]): 
 
 function compactSceneTexture(value: string | null | undefined): string | null {
   if (!value) return null;
-  const compact = value
-    .replace(/\s+/gu, " ")
-    .trim()
-    .replace(/\.$/u, "");
+  const compact = compactInlineWhitespace(value);
   if (compact.length === 0) return null;
   return compact.length <= 420 ? compact : `${compact.slice(0, 417).trimEnd()}...`;
 }
 
+function isInlineWhitespace(value: string): boolean {
+  return value === " " || value === "\t" || value === "\n" || value === "\r" || value === "\f";
+}
+
+function compactInlineWhitespace(value: string): string {
+  let result = "";
+  let pendingSpace = false;
+  for (const character of value.trim()) {
+    if (isInlineWhitespace(character)) {
+      pendingSpace = result.length > 0;
+      continue;
+    }
+    if (pendingSpace) result += " ";
+    result += character;
+    pendingSpace = false;
+  }
+  return result;
+}
+
+function isSentenceTerminal(value: string): boolean {
+  return value === "." || value === "!" || value === "?";
+}
+
+function sentenceTextureMaterial(value: string): string {
+  const compact = compactInlineWhitespace(value);
+  if (compact.length === 0) return compact;
+  const lastCharacter = compact.at(-1);
+  return lastCharacter && isSentenceTerminal(lastCharacter) ? compact : `${compact}.`;
+}
+
 function splitSceneTextureClauses(value: string): string[] {
-  return uniqueStrings((value.match(/[^.!?]+(?:[.!?]+|$)/gu) ?? [value])
-    .map((clause) =>
-      clause
-        .replace(/\s+/gu, " ")
-        .trim()
-        .replace(/[.!?]+$/u, "")
-    )
-    .filter((clause) => clause.length > 0));
+  const compact = compactInlineWhitespace(value);
+  const clauses: string[] = [];
+  let clauseStart = 0;
+
+  for (let index = 0; index < compact.length; index += 1) {
+    if (!isSentenceTerminal(compact[index])) continue;
+
+    let clauseEnd = index + 1;
+    while (clauseEnd < compact.length && isSentenceTerminal(compact[clauseEnd])) {
+      clauseEnd += 1;
+    }
+
+    const clause = compact.slice(clauseStart, clauseEnd).trim();
+    if (clause.length > 0) clauses.push(sentenceTextureMaterial(clause));
+
+    clauseStart = clauseEnd;
+    while (clauseStart < compact.length && isInlineWhitespace(compact[clauseStart])) {
+      clauseStart += 1;
+    }
+    index = clauseStart - 1;
+  }
+
+  const tail = compact.slice(clauseStart).trim();
+  if (tail.length > 0) clauses.push(sentenceTextureMaterial(tail));
+
+  return uniqueStrings(clauses);
 }
 
 function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
@@ -601,14 +646,14 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       authority: "scene_frame_snapshot",
       claimKinds: ["scene_texture"],
       text: textures.length === 1
-        ? `Current scene texture: ${textures[0]}.`
-        : `Current scene texture: ${textures.join(" ")}.`,
+        ? `Current scene texture: ${textures[0]}`
+        : `Current scene texture: ${textures.join(" ")}`,
       visibleRefs: uniqueStrings([
         frame.scene.currentScene.ref,
         frame.scene.currentLocation.ref,
       ]),
       backendFacts: textures.map((texture, index) =>
-        fact(textureEvidenceId, index + 1, "scene_texture", `Scene texture: ${texture}.`, texture)
+        fact(textureEvidenceId, index + 1, "scene_texture", `Scene texture: ${texture}`, texture)
       ),
       limits: {
         proves: ["public current-scene description texture"],

@@ -8228,3 +8228,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p306-bounded-negative-live-20260614-235814/prose-audit.json`: one narrative, 32 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 6 touched symbols, 6 changed files, and no affected processes.
     - Verified commit/push/index: code commit `d9567dd0` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
+
+- P307 Stage 6 scene-texture sentence boundary:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p307-prose-scan-20260615-000525` passed 12/12 clean-runtime probes, but item transfer rendered `...across the water Brass Tube leaves...`.
+    - [x] Root owner is `sceneEvidence()`: `scene_texture.text` is a complete accepted sentence, while `scene_texture.value` is a punctuation-stripped fragment. Stage 6 copies the value as prose material, so the sentence boundary belongs at the accepted material source.
+  - Plan:
+    - [x] Run GitNexus impact for `sceneEvidence` before editing.
+    - [x] Make `scene_texture` backend fact values complete sentence material with owned terminal punctuation.
+    - [x] Keep `scene_texture.text` and accepted evidence limits aligned with the same sentence material.
+    - [x] Update settlement/narration contract tests where they inspect scene texture values.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live item-transfer proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live item transfer settles through clean runtime and keeps a sentence boundary between exact scene texture and item custody beat.
+    - [x] `scene_texture` values are complete public scene texture sentences, and Stage 6 copies those exact values when texture is selected.
+    - [x] Narration adds no extra scene truth, item state, actor action, movement, discovery, absence/no-change, private fact, or route truth.
+  - Review:
+    - Executed: `scene_texture` backend fact values now carry complete public scene texture sentences, so Stage 6 exact-copy material owns its terminal punctuation at the accepted evidence source.
+    - Executed: replaced the punctuation-stripping texture clause path in `settlement.ts` with a character-level sentence material contract for whitespace compaction, terminal punctuation, and clause splitting.
+    - Verified GitNexus impacts: `sceneEvidence`, `compactSceneTexture`, `splitSceneTextureClauses`, and `sceneTextureFacts` all returned LOW risk; the only direct production chain is `sceneTextureFacts` / `sceneEvidence` into `buildCleanSettledTurnPacket`.
+    - Verified focused settlement suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts --run` -> 23/23 passed.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 115/115 passed.
+    - Verified expanded runtime suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 271/271 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p307-scene-texture-boundary-live-20260615-001500`: action `I give the Brass Tube to Guide.` settled through `gameplay-cycle-runtime`, applied one item transfer mutation, preserved old runtime stores at zero, and rendered `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Brass Tube leaves Mira Voss for Guide at Lowwater Bazaar, carried now by Guide.`
+    - Verified live texture contract: prompt and settlement `scene_texture` values end with terminal punctuation, selected texture material appears verbatim in narration, and the old `water Brass Tube` run-on is absent.
+    - Verified prose audit `output/clean-runtime-p307-scene-texture-boundary-live-20260615-001500/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 4 touched settlement symbols, 4 changed files, and no affected processes.
