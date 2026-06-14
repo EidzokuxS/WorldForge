@@ -612,6 +612,33 @@ function sentencePlanPreferredFactRefs(
     .map((factUse) => factUse.factRef);
 }
 
+function selectCurrentSceneLabelAnchor(input: {
+  currentContext: CleanNarratorStoryFrameEntry[];
+  backendFactsByRef: Map<string, AcceptedNarrationEvidence["backendFacts"][number]>;
+}): { entryRefs: string[]; factRefs: string[] } {
+  for (const entry of input.currentContext) {
+    if (
+      !entry.claimKinds.includes("current_scene")
+      && !entry.claimKinds.includes("current_location")
+    ) {
+      continue;
+    }
+
+    const sceneLabelFactRef = entry.backendFactRefs.find((factRef) =>
+      input.backendFactsByRef.get(factRef)?.role === "scene_label"
+    );
+    const placeLabelFactRef = entry.backendFactRefs.find((factRef) =>
+      input.backendFactsByRef.get(factRef)?.role === "place_label"
+    );
+    const anchorFactRef = sceneLabelFactRef ?? placeLabelFactRef;
+    if (anchorFactRef) {
+      return { entryRefs: [entry.ref], factRefs: [anchorFactRef] };
+    }
+  }
+
+  return { entryRefs: [], factRefs: [] };
+}
+
 function pageTextureFrameRole(
   coreProseCues: readonly CleanNarratorProseCue[],
 ): "detail_frame" | "social_frame" | "spatial_frame" {
@@ -645,6 +672,33 @@ function selectFrameTextureFactRefs(
   if (frameRole === "detail_frame") return [textureFactRefs[textureFactRefs.length - 1]!];
   if (frameRole === "social_frame") return [textureFactRefs[Math.min(1, textureFactRefs.length - 1)]!];
   return [textureFactRefs[0]!];
+}
+
+function isStandaloneElapsedTimeMove(move: CleanNarratorPageTaskMove): boolean {
+  return move.entryProseCues.includes("elapsed_time")
+    && !move.entryProseCues.includes("movement_result");
+}
+
+function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  if (isStandaloneElapsedTimeMove(move)) {
+    const elapsedDurationFactRefs = sentencePlanPreferredFactRefs(move, ["time_value"]);
+    if (elapsedDurationFactRefs.length > 0) {
+      return [
+        ...elapsedDurationFactRefs,
+        ...sentencePlanPreferredFactRefs(move, ["scene_anchor"]),
+      ];
+    }
+  }
+
+  return sentencePlanPreferredFactRefs(move, [
+    "primary_beat",
+    "exact_dialogue_quote",
+    "state_value",
+    "time_value",
+    "label_anchor",
+    "scene_anchor",
+    "supporting_detail",
+  ]);
 }
 
 function sentencePlanHasProseUse(
@@ -772,12 +826,14 @@ function sentencePlanTextureCue(
 
 function sentencePlanAdventureSubjectFocus(
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
   proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
 ): CleanNarratorSentencePlanStep["adventureCue"]["subjectFocus"] {
   if (sentenceRole === "clarification_question") return "accepted_question";
   if (sentenceRole === "exact_context_texture") return "accepted_texture";
   if (sentenceRole === "context_anchor") return "player_scene_position";
   if (sentenceRole === "next_action_handle") return "playable_route_choices";
+  if (beatObjective === "render_elapsed_time") return "elapsed_time_value";
   if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
     return "visible_speaker";
   }
@@ -786,12 +842,14 @@ function sentencePlanAdventureSubjectFocus(
 
 function sentencePlanAdventureVerbFrame(
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
   proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
 ): CleanNarratorSentencePlanStep["adventureCue"]["verbFrame"] {
   if (sentenceRole === "clarification_question") return "ask_direct_question";
   if (sentenceRole === "exact_context_texture") return "copy_visible_texture";
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
   if (sentenceRole === "next_action_handle") return "offer_playable_choices";
+  if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
   if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
     return "frame_exact_utterance";
   }
@@ -828,11 +886,12 @@ function sentencePlanAdventureDetailPalette(
 
 function sentencePlanAdventureCue(
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
   proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
 ): CleanNarratorSentencePlanStep["adventureCue"] {
   return {
-    subjectFocus: sentencePlanAdventureSubjectFocus(sentenceRole, proseMaterials),
-    verbFrame: sentencePlanAdventureVerbFrame(sentenceRole, proseMaterials),
+    subjectFocus: sentencePlanAdventureSubjectFocus(sentenceRole, beatObjective, proseMaterials),
+    verbFrame: sentencePlanAdventureVerbFrame(sentenceRole, beatObjective, proseMaterials),
     detailPalette: sentencePlanAdventureDetailPalette(proseMaterials),
   };
 }
@@ -930,6 +989,18 @@ function sentencePlanProseAssembly(
           closingFunction: "settle_outcome",
         };
       }
+      if (beatObjective === "render_elapsed_time") {
+        return {
+          perspective: "settled_result_present",
+          sentenceShape: "clock_beat_line",
+          openingSource: "elapsed_time_value",
+          verbEnergy: "pressure_time",
+          detailRhythm: "time_with_scene_anchor",
+          materialWeaveOrder: "time_pressure_then_scene_anchor",
+          styleBudget: "clock_pressure_cadence",
+          closingFunction: "settle_outcome",
+        };
+      }
       const preservesTokens = materialObligations.preserveTokenFactRefs.length > 0;
       return {
         perspective: "settled_result_present",
@@ -983,6 +1054,13 @@ function sentencePlanLiteraryCue(
           styleLevers: ["visible_speaker_frame", "accepted_label_anchor"],
         };
       }
+      if (isStandaloneElapsedTimeMove(move)) {
+        return {
+          renderShape: "mark_elapsed_time_pressure_clock_beat",
+          cadence: "pressure_clock_beat_sentence",
+          styleLevers: ["elapsed_time_pressure", "clock_pressure_verb", "concrete_present_verb"],
+        };
+      }
       const styleLevers: CleanNarratorSentencePlanStep["literaryCue"]["styleLevers"] = ["concrete_present_verb"];
       if (sentencePlanHasProseUse(move, "time_value")) styleLevers.push("elapsed_time_pressure");
       if (sentencePlanHasProseUse(move, "state_value")) styleLevers.push("settled_state_focus");
@@ -1025,7 +1103,7 @@ function sentencePlanForMove(
       proseMaterials,
       materialObligations,
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
-      adventureCue: sentencePlanAdventureCue(sentenceRole, proseMaterials),
+      adventureCue: sentencePlanAdventureCue(sentenceRole, beatObjective, proseMaterials),
       proseAssembly: sentencePlanProseAssembly(sentenceRole, beatObjective, proseMaterials, materialObligations),
       literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
     });
@@ -1040,15 +1118,7 @@ function sentencePlanForMove(
       pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
       break;
     case "render_authoritative_turn_event":
-      pushPlan("turn_event_beat", move.coverage, sentencePlanPreferredFactRefs(move, [
-        "primary_beat",
-        "exact_dialogue_quote",
-        "state_value",
-        "time_value",
-        "label_anchor",
-        "scene_anchor",
-        "supporting_detail",
-      ]));
+      pushPlan("turn_event_beat", move.coverage, selectTurnEventFactRefs(move));
       break;
     case "leave_playable_next_action_handle":
       pushPlan("next_action_handle", move.coverage, sentencePlanPreferredFactRefs(move, [
@@ -1698,17 +1768,35 @@ function buildCleanNarrativePageTask(
       evidence.backendFacts.map((fact) => [fact.factRef, fact] as const)
     ),
   );
+  const elapsedTimeSceneAnchor = selectCurrentSceneLabelAnchor({
+    currentContext: storyFrame.currentContext,
+    backendFactsByRef,
+  });
   const hasAuthoritativeTurnMove = storyFrame.pagePlan.steps.some((step) =>
     step.step === "ask_clarification" || step.step === "narrate_turn_event"
   );
   const moves: CleanNarratorPageTaskMove[] = storyFrame.pagePlan.steps.map((step, index) => {
-    const entryProseCues = uniqueStrings(step.entryRefs.flatMap((ref) => {
+    const stepEntryRefs = uniqueStrings(step.entryRefs.flatMap((ref) => [ref]));
+    const stepProseCues = uniqueStrings(stepEntryRefs.flatMap((ref) => {
       const cue = entriesByRef.get(ref)?.proseCue;
       return cue ? [cue] : [];
     })) as CleanNarratorProseCue[];
-    const moveBackendFactRefs = uniqueStrings(step.entryRefs.flatMap((ref) =>
+    const ownsStandaloneElapsedTime = step.step === "narrate_turn_event"
+      && stepProseCues.includes("elapsed_time")
+      && !stepProseCues.includes("movement_result");
+    const entryRefs = ownsStandaloneElapsedTime
+      ? uniqueStrings([...stepEntryRefs, ...elapsedTimeSceneAnchor.entryRefs])
+      : stepEntryRefs;
+    const entryProseCues = uniqueStrings(entryRefs.flatMap((ref) => {
+      const cue = entriesByRef.get(ref)?.proseCue;
+      return cue ? [cue] : [];
+    })) as CleanNarratorProseCue[];
+    const moveBackendFactRefs = uniqueStrings([
+      ...stepEntryRefs.flatMap((ref) =>
       entriesByRef.get(ref)?.backendFactRefs ?? []
-    ));
+      ),
+      ...(ownsStandaloneElapsedTime ? elapsedTimeSceneAnchor.factRefs : []),
+    ]);
     const usableFacts = moveBackendFactRefs.flatMap((factRef) => {
       const fact = backendFactsByRef.get(factRef);
       return fact ? [fact] : [];
@@ -1716,7 +1804,7 @@ function buildCleanNarrativePageTask(
     return {
       moveRef: `m${index + 1}`,
       step: step.step,
-      entryRefs: step.entryRefs,
+      entryRefs,
       entryProseCues,
       proseMove: narrativePageProseMove(step.step),
       coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
@@ -1898,7 +1986,7 @@ export function buildCleanNarrationSystemPrompt(
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns the selected public scene texture frame and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
     "Selected texture frame: when accepted scene_texture has multiple backend facts, the page task places the chosen page frame in textureCue.allowedTextureFactRefs and materialObligations for the texture sentence. Other accepted texture facts remain proof context, not default player-facing prose for this page.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
-    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials.",
+    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
@@ -1926,7 +2014,7 @@ export function buildCleanNarrationSystemPrompt(
     "Item-state surface: for item_state, phrase the accepted custody/location/equip-state operation, source/item/target values, final equip state value, and exact scene-anchor value. Prefer backendFacts with roles `custody_change` and `settled_custody` as the prose beat; use the `item_transfer_result` value as a proof detail. If sentencePlan supplies a texture sentence, keep texture in that sentence and keep the custody/state beat on item materials. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
     "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
     "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
-    "Elapsed-time surface: for standalone elapsed_time, render accepted Time beat as the turn event, with Elapsed time as the proof detail and exact scene anchor if present. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise elapsed-time beat such as '<time> pass at <scene>.' Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
+    "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
     "Route-options surface: for movement_option and route_options_receipt, render accepted Route choices beat as the turn event, with Route choice labels, Open route labels, Closed route labels, and Route choice travel costs as proof details. If sentencePlan supplies a texture sentence, keep texture there and keep the route-choice beat focused on playable labels/costs. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. If sentencePlan supplies a texture sentence, keep texture there; otherwise omit texture and use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
@@ -1945,7 +2033,7 @@ export function buildCleanNarrationSystemPrompt(
     "For scene_texture, express only cited public current-scene description texture as atmosphere around another accepted claim.",
     "For player_location_change, express the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, express only the selected visible outcome meaning.",
-    "For standalone elapsed_time, express the accepted elapsed time fact.",
+    "For standalone elapsed_time, express the accepted elapsed_time duration and scene anchor as a pressure clock beat.",
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
     "For support_actor_materialization, express the accepted `support_actor_presence` beat.",
     "For player_local_condition, express the accepted Player current-scene posture or readiness condition operation.",

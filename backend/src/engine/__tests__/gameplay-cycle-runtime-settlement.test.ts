@@ -1953,6 +1953,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Time beat: 5 minutes pass.",
       "Elapsed time: 5 minutes.",
     ]);
+    expect(elapsed?.backendFacts.find((entry) => entry.role === "elapsed_time")?.value).toBe("5 minutes");
     expect(elapsed?.limits.proves).toContain("time passage phrasing for the player");
     expect(elapsed?.limits.doesNotProve).toContain("offscreen events");
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "scene_observation_receipt");

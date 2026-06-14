@@ -238,7 +238,7 @@ function timeView(): CleanNarratorView {
       text: "5 minutes pass.",
       backendFacts: [
         { factRef: "e1.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
-        { factRef: "e1.f2", text: "Elapsed time: 5 minutes.", exact: true },
+        { factRef: "e1.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
       ],
       limits: {
         proves: ["elapsed world clock time", "time passage phrasing for the player"],
@@ -295,7 +295,7 @@ function timeWithSceneFrameSnapshotView(): CleanNarratorView {
         text: "5 minutes pass.",
         backendFacts: [
           { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
-          { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
+          { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
           proves: ["elapsed world clock time", "time passage phrasing for the player"],
@@ -341,7 +341,7 @@ function timeWithSceneTextureView(): CleanNarratorView {
         text: "5 minutes pass.",
         backendFacts: [
           { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
-          { factRef: "e5.f2", text: "Elapsed time: 5 minutes.", exact: true },
+          { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
           proves: ["elapsed world clock time", "time passage phrasing for the player"],
@@ -2470,6 +2470,62 @@ describe("clean Stage 6 narration contracts", () => {
     expect(claimKinds).not.toContain("visible_actor");
     expect(claimKinds).not.toContain("visible_target");
     expect(claimKinds).not.toContain("movement_option");
+    const elapsedStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_elapsed_time"
+    );
+    expect(elapsedStep).toMatchObject({
+      preferredBackendFactRefs: ["e5.f2", "e1.f2"],
+      adventureCue: {
+        subjectFocus: "elapsed_time_value",
+        verbFrame: "mark_elapsed_time_pressure",
+        detailPalette: ["accepted_time", "accepted_labels"],
+      },
+      proseAssembly: {
+        sentenceShape: "clock_beat_line",
+        openingSource: "elapsed_time_value",
+        verbEnergy: "pressure_time",
+        detailRhythm: "time_with_scene_anchor",
+        materialWeaveOrder: "time_pressure_then_scene_anchor",
+        styleBudget: "clock_pressure_cadence",
+      },
+      literaryCue: {
+        renderShape: "mark_elapsed_time_pressure_clock_beat",
+        cadence: "pressure_clock_beat_sentence",
+        styleLevers: ["elapsed_time_pressure", "clock_pressure_verb", "concrete_present_verb"],
+      },
+    });
+    expect(elapsedStep?.proseMaterials).toEqual([
+      {
+        factRef: "e5.f2",
+        proseUse: "time_value",
+        materialText: "5 minutes",
+        materialTextSource: "accepted_value",
+        copyMode: "preserve_token",
+      },
+      {
+        factRef: "e1.f2",
+        proseUse: "scene_anchor",
+        materialText: "Market",
+        materialTextSource: "accepted_value",
+        copyMode: "preserve_token",
+      },
+    ]);
+  });
+
+  it("keeps selected scene texture separate from standalone elapsed-time clock-beat material", () => {
+    const promptInput = buildCleanNarratorPromptInput(timeWithSceneTextureView());
+    const textureStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "exact_context_texture"
+    );
+    const elapsedStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_elapsed_time"
+    );
+
+    expect(textureStep?.preferredBackendFactRefs).toEqual(["e2.f2"]);
+    expect(textureStep?.materialObligations.coreMaterialFactRefs).toEqual(["e2.f2"]);
+    expect(elapsedStep?.preferredBackendFactRefs).toEqual(["e5.f2", "e3.f2"]);
+    expect(elapsedStep?.materialObligations.coreMaterialFactRefs).toEqual(["e5.f2", "e3.f2"]);
+    expect(elapsedStep?.proseMaterials.map((material) => material.materialText)).toEqual(["5 minutes", "Market"]);
   });
 
   it("keeps all accepted route-option facts in literary prompt input", () => {
@@ -3116,16 +3172,16 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes pass in Market.",
+          text: "Five minutes gather at Market.",
           evidenceRefs: ["e5", "e3"],
-          backendFactRefs: ["e5.f1", "e3.f1"],
+          backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes gather at Market.");
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
@@ -3141,9 +3197,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes pass in Market.",
+          text: "Five minutes gather at Market.",
           evidenceRefs: ["e5", "e3"],
-          backendFactRefs: ["e5.f1", "e3.f1"],
+          backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
         },
       ]),
@@ -3161,9 +3217,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes pass in Market.",
+          text: "Five minutes gather at Market.",
           evidenceRefs: ["e5", "e3"],
-          backendFactRefs: ["e5.f1", "e3.f1"],
+          backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
         },
       ]),
@@ -3190,9 +3246,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes pass in Market.",
+          text: "Five minutes gather at Market.",
           evidenceRefs: ["e5", "e3"],
-          backendFactRefs: ["e5.f1", "e3.f1"],
+          backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
         },
       ]),
@@ -3465,9 +3521,9 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: "Five minutes pass in Market.",
+            text: "Five minutes gather at Market.",
             evidenceRefs: ["e5", "e3"],
-            backendFactRefs: ["e5.f1", "e3.f1"],
+            backendFactRefs: ["e5.f2", "e3.f2"],
             claimKinds: ["elapsed_time", "current_scene"],
           },
         ]);
@@ -3476,7 +3532,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes gather at Market.");
   });
 
   it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {
@@ -5154,7 +5210,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(timeView(), [{
         text: "Five minutes pass.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1"],
+        backendFactRefs: ["e1.f2"],
         claimKinds: ["elapsed_time"],
       }]),
     });
@@ -5356,7 +5412,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted `travel_beat` value as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Time beat as the turn event");
+    expect(buildCleanNarrationSystemPrompt()).toContain("accepted elapsed_time duration value and any cited scene_anchor material as the clock beat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("clock_beat_line with pressure_time");
+    expect(buildCleanNarrationSystemPrompt()).toContain("pressure clock beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Route beat as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");

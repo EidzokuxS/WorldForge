@@ -7423,3 +7423,26 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `db-proof.json` passed assertions that all three accepted texture facts remained in `narratorView.acceptedEvidence`, while the final narrative copied only `e2.f1` and omitted reserve texture facts `e2.f2` and `e2.f3`.
     - Verified: diagnostic prose audit recognized one `result.json`, counted 50 words, and reported zero hits, zero list-like starts, and zero `youOpening`.
     - Executed: isolated backend proof server used port `31746` with PID `17692`; after proof it was stopped and the final port check returned zero connections.
+
+- P276 Stage 6 elapsed-time clock-beat prose plan:
+  - Plan:
+    - [x] Fix standalone elapsed-time prose so textured pages are built from typed duration/scene/texture material instead of the summary-shaped `time_beat` phrase as the sentence's main prose source.
+    - [x] Give `elapsed_time` backend facts a clean duration value at settlement so Stage 6 can preserve `5 minutes` without showing `Elapsed time:` metadata to the narrator as prose.
+    - [x] Narrow elapsed-time sentence-plan preferred/core refs to duration plus scene anchor when available, leaving `time_beat` as proof context rather than the default player-facing phrase source.
+    - [x] Update prompt contract and focused tests so selected texture + elapsed time reads as a clock beat, not `Five minutes pass in <scene>`, while no-texture deterministic projection remains available.
+    - [x] Run focused narration/settlement tests, expanded clean-runtime tests, typecheck, hygiene scans, GitNexus checks, live proof, journal, commit/push/index.
+  - Review:
+    - Executed: changed settlement evidence so `elapsed_time` backend facts carry value `5 minutes` while the older `time_beat` remains proof/projection context.
+    - Executed: changed Stage 6 sentence planning so standalone elapsed-time `turn_event_beat` owns typed `time_value` plus current `scene_anchor` materials when a current scene label is accepted. Live prompt proof rebuilt `s3` as preferred refs `["e9.f2","e1.f2"]` with materials `["5 minutes","Lowwater Bazaar"]`.
+    - Executed: added a positive pressure-clock contract through typed cues: `mark_elapsed_time_pressure`, `pressure_time`, `time_pressure_then_scene_anchor`, `clock_pressure_cadence`, and `mark_elapsed_time_pressure_clock_beat`. No runtime semantic regex or fallback path was added.
+    - Executed: first clean live proof at `output/clean-runtime-p276-elapsed-clock-live-env-20260614-121900` reached `gameplay-cycle-runtime` and correctly advanced world time to 5, but exposed the remaining Stage 6 prompt-data gap by producing `Five minutes pass at Lowwater Bazaar.`; that proof was rejected and used only as diagnosis.
+    - Verified: focused narration suite passed 105/105; settlement suite passed 21/21.
+    - Verified: expanded clean-runtime suite passed 373/373 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only LF/CRLF warnings, and diff-level gameplay-runtime scan found no added `= /`, `.test(`, or `.replace(` runtime lines.
+    - Verified: final live proof artifact `output/clean-runtime-p276-elapsed-clock-live-pressure-20260614-123100` cloned `p69-item-transfer-045651`, ran `I wait here for five minutes.`, settled through `gameplay-cycle-runtime`, returned `worldVersion=1`, `worldTimeMinutes=5`, `mutationApplied=true`, and `settled=true`.
+    - Verified: final DB proof asserted accepted `time_advance` receipt, world clock/tick 5, turn clock ledger delta 5 with reason `wait`, authority trace operation `gameplay-cycle-runtime.clock.advance.v1`, clean record +1, Stage 4 receipt +1, and all old runtime stores at zero.
+    - Verified: final player-facing narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Five minutes settle over Lowwater Bazaar.`
+    - Verified: prose audit on the final proof saw one `result.json`, counted 27 words, and reported zero hits including `stockElapsedSummary=0`.
+    - Executed: isolated backend proof servers on ports `31750` and `31751` were stopped; final `31751` listener check returned zero connections.
+    - Verified: GitNexus `detect_changes(scope=all)` and `detect_changes(scope=staged)` both reported LOW risk, 6 changed files, 14 touched symbols, and 0 affected execution flows.

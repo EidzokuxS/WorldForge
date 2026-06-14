@@ -1244,7 +1244,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, "time_beat", `Time beat: ${timeBeat}`, timeBeat),
-          fact(evidenceId, 2, "elapsed_time", `Elapsed time: ${elapsedDuration}.`),
+          fact(evidenceId, 2, "elapsed_time", `Elapsed time: ${elapsedDuration}.`, elapsedDuration),
         ],
         limits: {
           proves: ["elapsed world clock time", "time passage phrasing for the player"],
