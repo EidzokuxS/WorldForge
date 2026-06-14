@@ -787,9 +787,9 @@ function playerLocalConditionView(): CleanNarratorView {
       ref: "e1",
       authority: "player_local_condition_receipt",
       claimKinds: ["player_local_condition"],
-      text: "Player is kneeling. Current scene anchor: Market.",
+      text: "You kneel at Market. Current scene anchor: Market.",
       backendFacts: [
-        { factRef: "e1.f1", role: "player_condition_operation", value: "Player is kneeling.", text: "Player is kneeling.", exact: true },
+        { factRef: "e1.f1", role: "player_condition_operation", value: "You kneel at Market.", text: "You kneel at Market.", exact: true },
         { factRef: "e1.f2", role: "condition_key", text: "Condition key: kneeling.", exact: true },
         { factRef: "e1.f3", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
         { factRef: "e1.f4", role: "condition_result", text: "Condition result: applied.", exact: true },
@@ -810,9 +810,9 @@ function playerLocalConditionWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "player_local_condition_receipt",
         claimKinds: ["player_local_condition"],
-        text: "Player is hands visible. Current scene anchor: Market.",
+        text: "Your hands are visible at Market. Current scene anchor: Market.",
         backendFacts: [
-          { factRef: "e5.f1", role: "player_condition_operation", value: "Player is hands visible.", text: "Player is hands visible.", exact: true },
+          { factRef: "e5.f1", role: "player_condition_operation", value: "Your hands are visible at Market.", text: "Your hands are visible at Market.", exact: true },
           { factRef: "e5.f2", role: "condition_key", text: "Condition key: hands_visible.", exact: true },
           { factRef: "e5.f3", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
           { factRef: "e5.f4", role: "condition_result", text: "Condition result: applied.", exact: true },
@@ -3361,7 +3361,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(renderCleanAuthorityProjection(withOpaqueFactText(
       playerLocalConditionView(),
       "player_condition_operation",
-    ))).toBe("Player is kneeling.");
+    ))).toBe("You kneel at Market.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(
       playerLocalConditionView(),
       "player_condition_operation",
@@ -4729,7 +4729,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
     const text = renderCleanAuthorityProjection(playerLocalConditionView());
 
-    expect(text).toBe("Player is kneeling.");
+    expect(text).toBe("You kneel at Market.");
     expect(text).not.toMatch(/\bCondition key|Current scene anchor|Condition result|hp|damage|cover|combat|moves?|nothing changed|no change\b/iu);
 
     const inventedHp = validateCleanNarrationCandidate({
@@ -4763,7 +4763,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Player is hands visible.");
+    expect(result.text).toBe("Your hands are visible at Market.");
     expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
@@ -4778,7 +4778,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Player is kneeling.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. You kneel at Market.");
     expect(result.text).not.toMatch(/\b(hp|damage|cover|combat|moves?|route|item custody|dialogue|no change|nothing changed)\b/iu);
   });
 
@@ -4818,7 +4818,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Player is kneeling at Market.",
+        text: "You kneel at Market.",
         evidenceRefs: ["e1", "e3"],
         backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
         claimKinds: ["player_local_condition", "current_scene"],
@@ -4836,7 +4836,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Player is kneeling at Market.",
+          text: "You kneel at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
           claimKinds: ["player_local_condition", "current_scene"],

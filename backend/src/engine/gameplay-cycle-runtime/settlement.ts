@@ -468,6 +468,90 @@ function fact(
   };
 }
 
+type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
+
+function playerLocalConditionStateText(condition: PlayerLocalConditionResult): string {
+  const anchor = condition.anchorSceneLabel;
+  const target = condition.targetLabel;
+  switch (condition.conditionKey) {
+    case "kneeling":
+      return `You are kneeling at ${anchor}.`;
+    case "crouched":
+      return `You are crouched at ${anchor}.`;
+    case "prone":
+      return `You are prone at ${anchor}.`;
+    case "taking_cover":
+      return `You are keeping to cover at ${anchor}.`;
+    case "keeping_distance":
+      return target
+        ? `You keep distance from ${target} at ${anchor}.`
+        : `You keep distance at ${anchor}.`;
+    case "stepped_back":
+      return target
+        ? `You keep a step back from ${target} at ${anchor}.`
+        : `You keep a step back at ${anchor}.`;
+    case "braced":
+      return `You are braced at ${anchor}.`;
+    case "hands_visible":
+      return `Your hands are visible at ${anchor}.`;
+    case "hands_raised":
+      return `Your hands are raised at ${anchor}.`;
+    case "gripping_held_item":
+      return target
+        ? `You keep ${target} in hand at ${anchor}.`
+        : `You keep the held item in hand at ${anchor}.`;
+  }
+}
+
+function playerLocalConditionAppliedText(condition: PlayerLocalConditionResult): string {
+  const anchor = condition.anchorSceneLabel;
+  const target = condition.targetLabel;
+  switch (condition.conditionKey) {
+    case "kneeling":
+      return `You kneel at ${anchor}.`;
+    case "crouched":
+      return `You crouch at ${anchor}.`;
+    case "prone":
+      return `You go prone at ${anchor}.`;
+    case "taking_cover":
+      return `You take a covered posture at ${anchor}.`;
+    case "keeping_distance":
+      return target
+        ? `You keep distance from ${target} at ${anchor}.`
+        : `You keep distance at ${anchor}.`;
+    case "stepped_back":
+      return target
+        ? `You step back from ${target} at ${anchor}.`
+        : `You step back at ${anchor}.`;
+    case "braced":
+      return `You brace yourself at ${anchor}.`;
+    case "hands_visible":
+      return `Your hands are visible at ${anchor}.`;
+    case "hands_raised":
+      return `You raise your hands at ${anchor}.`;
+    case "gripping_held_item":
+      return target
+        ? `You grip ${target} at ${anchor}.`
+        : `You grip the held item at ${anchor}.`;
+  }
+}
+
+function playerLocalConditionClearedText(condition: PlayerLocalConditionResult): string {
+  return `You clear the ${condition.conditionLabel} posture at ${condition.anchorSceneLabel}.`;
+}
+
+function playerLocalConditionOperationText(condition: PlayerLocalConditionResult): string {
+  switch (condition.resultKind) {
+    case "already_present":
+      return playerLocalConditionStateText(condition);
+    case "cleared":
+      return playerLocalConditionClearedText(condition);
+    case "replaced":
+    case "applied":
+      return playerLocalConditionAppliedText(condition);
+  }
+}
+
 function boundedBackendFacts(facts: Array<ReturnType<typeof fact>>): Array<ReturnType<typeof fact>> {
   return facts.slice(0, 8);
 }
@@ -1213,13 +1297,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "player_local_condition_receipt" && receipt.publicResult.condition) {
       const evidenceId = nextEvidenceId(evidence);
       const condition = receipt.publicResult.condition;
-      const operationText = condition.resultKind === "already_present"
-        ? `Player is already ${condition.conditionLabel}.`
-        : condition.resultKind === "cleared"
-          ? `Player clears ${condition.conditionLabel}.`
-          : condition.resultKind === "replaced"
-            ? `Player changes local posture/readiness to ${condition.conditionLabel}.`
-            : `Player is ${condition.conditionLabel}.`;
+      const operationText = playerLocalConditionOperationText(condition);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",

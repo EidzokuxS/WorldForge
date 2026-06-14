@@ -417,7 +417,7 @@ function playerLocalConditionReceipt(inputFrame = frame(), inputChecklist = chec
       mayAuthorizeMutation: true,
     },
     publicResult: {
-      summary: "Player is kneeling in Market.",
+      summary: "You kneel at Market.",
       visibleRefs: ["Player", "Market"],
       routeStatus: null,
       locationChange: null,
@@ -1268,13 +1268,13 @@ describe("clean Stage 5 settlement contracts", () => {
     const condition = packet.acceptedEvidence.find((entry) => entry.authority === "player_local_condition_receipt");
     expect(condition?.claimKinds).toEqual(["player_local_condition"]);
     expect(condition?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Player is kneeling.",
+      "You kneel at Market.",
       "Condition key: kneeling.",
       "Current scene anchor: Market.",
       "Condition result: applied.",
       "Condition target: Market.",
     ]);
-    expect(condition?.backendFacts[0]?.value).toBe("Player is kneeling.");
+    expect(condition?.backendFacts[0]?.value).toBe("You kneel at Market.");
     expect(condition?.limits.doesNotProve).toContain("HP change");
     expect(condition?.limits.doesNotProve).toContain("movement");
     expect(condition?.limits.doesNotProve).toContain("dialogue content");

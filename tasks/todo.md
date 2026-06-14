@@ -8339,3 +8339,27 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: accepted local-observation beats were `Courier satchel, Sealed lacquer message tube, and Brass Tube are with you.` and `Brass Tube is with you.`, and both narratives included those exact sentences with no `You have`.
     - Verified prose audit `output/clean-runtime-p310-inventory-localobs-final-r2-20260615-011200/prose-audit.json`: 2 narratives, average 29.5 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified commit/push/index: P310 implementation commit `8f761b0b` recorded the code/test/proof changes; final record commit pushed to `develop`; GitNexus re-indexed final HEAD with embeddings.
+
+- P311 Stage 6 player-local-condition story beat:
+  - Diagnosis:
+    - [x] Fresh post-P310 scan `output/clean-runtime-p311-prose-scan-20260615-020000` settled 13/13 probes through clean runtime.
+    - [x] Prose audit `output/clean-runtime-p311-prose-scan-20260615-020000/prose-audit.json` passed mechanically, but the player-condition probe still rendered as status telemetry: `Player is crouched.`
+    - [x] Root owner is the accepted `player_condition_operation` backend fact in settlement evidence. Stage 6 deterministic projection is copying the owned fact correctly; the fact itself is not yet player-facing story prose.
+  - Plan:
+    - [x] Run GitNexus impact for `buildCleanSettledTurnPacket`, `renderPlayerLocalConditionProjection`, and `localConditionResult` before editing.
+    - [x] Change settlement-owned `player_condition_operation` text to a player-facing posture/readiness beat using accepted condition key, result kind, target label, and scene anchor.
+    - [x] Update focused settlement/narration tests for crouched/kneeling/hands-visible condition prose.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live player-condition proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I crouch down beside the market walkway and keep my hands visible.` settles through clean runtime and no longer renders `Player is crouched.`
+    - [x] Accepted condition prose remains bounded to Player local posture/readiness plus current scene anchor; no HP, damage, cover effectiveness, stealth, movement, item custody/equip, dialogue, NPC condition, absence/no-change, route truth, private fact, or extra world truth.
+    - [x] The fix changes typed condition material ownership, not prompt policing, regex cleanup, or fallback narration.
+  - Review:
+    - Executed: `player_condition_operation` is now built by settlement from accepted `conditionKey`, `resultKind`, optional `targetLabel`, and `anchorSceneLabel`; deterministic Stage 6 still copies the owned condition fact.
+    - Verified focused settlement/narration tests: 139/139 passed.
+    - Verified expanded clean-runtime slice: 389/389 passed across contracts, Stage 4, settlement, and narration.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p311-player-condition-live-20260615-021500`: clean runtime settled one accepted `condition_set`, wrote one active condition row, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, and kept legacy runtime stores at 0.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You crouch at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p311-player-condition-live-20260615-021500/prose-audit.json`: one narrative, 24 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
