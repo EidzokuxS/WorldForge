@@ -8421,3 +8421,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live proof `output/clean-runtime-p313-minor-poi-live-20260615-020500`: clean runtime settled one accepted `minor_poi_create` receipt, wrote one clean turn record, one clean Stage 4 receipt, one active minor POI row, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, and kept old saga/narrator/v2 stores at 0.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, tea stall is now visible as a stall.`
     - Verified prose audit `output/clean-runtime-p313-minor-poi-live-20260615-020500/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified implementation commit: `23a09459` recorded the P313 code/tests/proof notes.
