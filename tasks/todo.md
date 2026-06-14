@@ -6820,3 +6820,19 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `d24110f8` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P246 Stage 6 page-move usable facts:
+  - Plan:
+    - [x] Run GitNexus impact before editing page task builder, prompt input construction, and prompt wording.
+    - [x] Add move-scoped `usableFacts` to `narrativePageTask.moves[]`, grouped from accepted evidence backend facts by page move.
+    - [x] Preserve the truth boundary by keeping usable facts tied to existing fact refs, roles, values/text, and exactness.
+    - [x] Update focused narration tests proving movement and route page tasks expose move-local usable facts.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask`, `buildCleanNarratorPromptInput`, and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: each `narrativePageTask.moves[]` now includes `usableFacts` grouped from accepted backend facts for that move's entry refs, preserving `factRef`, `role`, `value`, `text`, and `exact`.
+    - Executed: system prompt now tells the narrator to draw page-move material from `usableFacts` while citing only allowed refs.
+    - Executed: focused prompt-input tests prove movement/dialogue/route page moves expose move-local usable fact values.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `ff5e749f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
