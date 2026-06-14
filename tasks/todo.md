@@ -8350,7 +8350,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Change settlement-owned `player_condition_operation` text to a player-facing posture/readiness beat using accepted condition key, result kind, target label, and scene anchor.
     - [x] Update focused settlement/narration tests for crouched/kneeling/hands-visible condition prose.
     - [x] Run focused tests, expanded clean-runtime tests, typecheck, live player-condition proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live `I crouch down beside the market walkway and keep my hands visible.` settles through clean runtime and no longer renders `Player is crouched.`
     - [x] Accepted condition prose remains bounded to Player local posture/readiness plus current scene anchor; no HP, damage, cover effectiveness, stealth, movement, item custody/equip, dialogue, NPC condition, absence/no-change, route truth, private fact, or extra world truth.
@@ -8363,3 +8363,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live proof `output/clean-runtime-p311-player-condition-live-20260615-021500`: clean runtime settled one accepted `condition_set`, wrote one active condition row, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, and kept legacy runtime stores at 0.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You crouch at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p311-player-condition-live-20260615-021500/prose-audit.json`: one narrative, 24 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified commit/push/index: P311 implementation commit `cab399a8` recorded code/tests/proof; final record commit pushed to `develop`; GitNexus re-indexed final HEAD with embeddings.
