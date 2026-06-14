@@ -7225,3 +7225,24 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Reviewed: GitNexus `detect_changes` reported HIGH because it mapped `normalizeText` to `renderCleanAuthorityProjection` and line-shift/touched symbols to `runCleanNarration`; diff/context review showed real edits limited to leak validation, text normalization, and tests, with both affected flows covered by the executed suites.
     - Executed: code commit `d5d97e90` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P268 Stage 6 page focus contract:
+  - Plan:
+    - [x] Inspect current Stage 6 page-task shape and representative narration tests.
+    - [x] Run GitNexus impact before editing page-task/prompt symbols.
+    - [x] Add page-level `pageFocus` to `narrativePageTask` that names core moves/sentences, framing moves/sentences, emphasis, and core-frame relationship.
+    - [x] Derive page focus from typed page moves and sentence roles so accepted turn events or playable route handles become the page core while context remains frame material.
+    - [x] Teach the prompt to use `pageFocus` as the composition hierarchy for turning accepted changelog into a story page.
+    - [x] Update focused narration tests proving single result, context+dialogue, route choices, and audit-only page focus.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added page-level `pageFocus` to `narrativePageTask` with core move/sentence refs, frame move/sentence refs, emphasis, core-frame relationship, and context use.
+    - Executed: derived `pageFocus` from existing typed page moves and sentence-plan coverage so accepted turn events, playable next-action handles, and accepted clarification questions become the page core while current-scene/texture context stays frame material.
+    - Executed: Stage 6 prompt now tells the narrator to treat core refs as the story page center and frame refs as orientation before the core, without changing evidence ownership or gameplay truth.
+    - Verified: focused narration suite passed 102/102.
+    - Verified: expanded clean-runtime suite passed 370/370 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: `rg -n "= /|\\.test\\(|replace\\(/" backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
+    - Reviewed: GitNexus `detect_changes` reported HIGH because the new `narrativePageTask.pageFocus` schema field maps through `buildCleanNarratorPromptInput` and `runCleanNarration`; pre-edit impact was LOW, diff/context review showed the changed surface limited to the page-task contract/prompt/tests, and executed suites cover the affected clean narration flow.
+    - Executed: code commit `51b32a15` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
