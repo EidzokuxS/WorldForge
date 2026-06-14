@@ -6960,3 +6960,21 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `38fcf23f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P254 Stage 6 story page brief:
+  - Plan:
+    - [x] Run GitNexus impact before editing page-task builder and prompt wording.
+    - [x] Add typed `storyPageBrief` to `narrativePageTask` so Stage 6 receives an explicit writer-facing page contract.
+    - [x] Derive brief fields from `pageArc`, ordered moves, and sentence plan refs, not from prose text.
+    - [x] Keep the brief advisory and truth-bounded through accepted evidence, move refs, sentence refs, and prose materials.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, route-options, and clarification briefs.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`. Zod schema constants were not indexed as individual GitNexus symbols, so schema impact was covered by focused tests, typecheck, and staged detect.
+    - Executed: `narrativePageTask` now carries `storyPageBrief` with page kind, second-person present stance, grounded adventure register, composition job, opening/closing instructions, and required/optional move and sentence refs.
+    - Executed: `storyPageBrief` derives from `pageArc`, ordered page moves, and sentence-plan coverage refs without reading prose text.
+    - Executed: system prompt now names `storyPageBrief` as the writer-facing page contract for turning accepted changelog material into one playable story page.
+    - Executed: focused movement, dialogue-with-context, route-options, and clarification tests prove the intended brief shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `beaf1460` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
