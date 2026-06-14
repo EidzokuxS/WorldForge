@@ -7167,3 +7167,22 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus impact for `sentencePlanProseAssembly` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
     - Executed: code commit `3fce3999` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P265 Stage 6 page performance plan:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Add page-level `pagePerformance` to `narrativePageTask`.
+    - [x] Derive opening beat, page motion, continuity material, closing beat, and reader handoff from `pageArc` plus sentence roles.
+    - [x] Teach the prompt to use `pagePerformance` to connect sentence objects into one text-RPG page.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added page-level `pagePerformance` to `narrativePageTask` with opening beat, page motion, continuity material, closing beat, and reader handoff.
+    - Executed: derived `pagePerformance` from `pageArc` and sentence roles so sentence objects can be connected into one text-RPG page instead of isolated beats.
+    - Executed: Stage 6 prompt now tells the narrator to use `pagePerformance` as the page choreography while preserving sentence refs and evidence refs.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` was LOW; all-scope/staged `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
+    - Executed: code commit `4a5eb004` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
