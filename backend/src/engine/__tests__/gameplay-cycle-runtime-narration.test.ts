@@ -1349,6 +1349,12 @@ describe("clean Stage 6 narration contracts", () => {
         closingBeat: "settled_result_closure",
         readerHandoff: "continue_from_result",
       },
+      pageVariation: {
+        openingRotation: "core_result_first",
+        cadenceTarget: "single_micro_beat",
+        dictionPalette: ["scene_anchor_tokens", "concrete_result_verbs", "time_pressure"],
+        variationBoundary: "vary_syntax_only_inside_cited_material",
+      },
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1493,6 +1499,12 @@ describe("clean Stage 6 narration contracts", () => {
       continuityMaterial: "context_labels_to_result",
       closingBeat: "settled_result_closure",
       readerHandoff: "continue_from_result",
+    });
+    expect(promptInput.narrativePageTask.pageVariation).toEqual({
+      openingRotation: "context_label_first",
+      cadenceTarget: "context_then_short_result",
+      dictionPalette: ["scene_anchor_tokens", "quote_frame"],
+      variationBoundary: "vary_syntax_only_inside_cited_material",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_settled_result_page",
@@ -1775,6 +1787,17 @@ describe("clean Stage 6 narration contracts", () => {
       continuityMaterial: "texture_to_choices",
       closingBeat: "playable_handle_closure",
       readerHandoff: "choose_next_action",
+    });
+    expect(promptInput.narrativePageTask.pageVariation).toEqual({
+      openingRotation: "texture_sentence_first",
+      cadenceTarget: "context_then_playable_handle",
+      dictionPalette: [
+        "accepted_texture_atmosphere",
+        "scene_anchor_tokens",
+        "time_pressure",
+        "playable_route_labels",
+      ],
+      variationBoundary: "vary_syntax_only_inside_cited_material",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_playable_choices_page",
@@ -4734,6 +4757,19 @@ describe("clean Stage 6 narration contracts", () => {
         mayUseAsWorldTruth: false,
       }],
     });
+    const promptInput = buildCleanNarratorPromptInput(view);
+    expect(promptInput.narrativePageTask.pageArc).toEqual({
+      arcShape: "audit_notice_only",
+      pageCadence: "audit_notice_only",
+      readerPosture: "review_audit_notice",
+      closingIntent: "audit_notice",
+    });
+    expect(promptInput.narrativePageTask.pageVariation).toEqual({
+      openingRotation: "audit_notice_first",
+      cadenceTarget: "audit_notice_sentence",
+      dictionPalette: ["audit_notice_clarity"],
+      variationBoundary: "vary_syntax_only_inside_cited_material",
+    });
     const result = validateCleanNarrationCandidate({
       view,
       candidate: {
@@ -4961,6 +4997,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMotion");
     expect(buildCleanNarrationSystemPrompt()).toContain("continuityMaterial");
     expect(buildCleanNarrationSystemPrompt()).toContain("readerHandoff");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Page variation:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageVariation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("openingRotation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("cadenceTarget");
+    expect(buildCleanNarrationSystemPrompt()).toContain("dictionPalette");
+    expect(buildCleanNarrationSystemPrompt()).toContain("variationBoundary");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");

@@ -2753,12 +2753,14 @@ const cleanNarratorSentencePlanStepSchema = z.object({
 const cleanNarratorPageArcSchema = z.object({
   arcShape: z.enum([
     "accepted_clarification_question",
+    "audit_notice_only",
     "context_then_choice_handle",
     "context_then_settled_result",
     "single_choice_handle",
     "single_settled_result",
   ]),
   pageCadence: z.enum([
+    "audit_notice_only",
     "context_then_choice",
     "context_then_result",
     "question_only",
@@ -2768,9 +2770,11 @@ const cleanNarratorPageArcSchema = z.object({
     "answer_the_prompted_clarification",
     "choose_visible_next_action",
     "continue_from_settled_result",
+    "review_audit_notice",
   ]),
   closingIntent: z.enum([
     "accepted_question",
+    "audit_notice",
     "playable_next_action",
     "settled_result",
   ]),
@@ -2779,12 +2783,14 @@ const cleanNarratorPageArcSchema = z.object({
 const cleanNarratorPagePerformanceSchema = z.object({
   openingBeat: z.enum([
     "accepted_question_opening",
+    "audit_notice_opening",
     "context_anchor_opening",
     "exact_texture_opening",
     "playable_choices_opening",
     "settled_result_opening",
   ]),
   pageMotion: z.enum([
+    "audit_notice_only",
     "context_to_choices",
     "context_to_result",
     "question_only",
@@ -2793,6 +2799,7 @@ const cleanNarratorPagePerformanceSchema = z.object({
   ]),
   continuityMaterial: z.enum([
     "accepted_question",
+    "audit_notice",
     "context_labels_to_choices",
     "context_labels_to_result",
     "playable_route_material",
@@ -2802,6 +2809,7 @@ const cleanNarratorPagePerformanceSchema = z.object({
   ]),
   closingBeat: z.enum([
     "accepted_question_closure",
+    "audit_notice_closure",
     "playable_handle_closure",
     "settled_result_closure",
   ]),
@@ -2809,11 +2817,43 @@ const cleanNarratorPagePerformanceSchema = z.object({
     "answer_clarification",
     "choose_next_action",
     "continue_from_result",
+    "review_audit_notice",
   ]),
+}).strict();
+
+const cleanNarratorPageVariationSchema = z.object({
+  openingRotation: z.enum([
+    "audit_notice_first",
+    "context_label_first",
+    "core_result_first",
+    "question_material_first",
+    "route_choice_first",
+    "texture_sentence_first",
+  ]),
+  cadenceTarget: z.enum([
+    "audit_notice_sentence",
+    "choice_list_as_sentence",
+    "context_then_playable_handle",
+    "context_then_short_result",
+    "direct_question",
+    "single_micro_beat",
+  ]),
+  dictionPalette: z.array(z.enum([
+    "accepted_texture_atmosphere",
+    "audit_notice_clarity",
+    "concrete_result_verbs",
+    "playable_route_labels",
+    "question_clarity",
+    "quote_frame",
+    "scene_anchor_tokens",
+    "time_pressure",
+  ])).min(1).max(7),
+  variationBoundary: z.literal("vary_syntax_only_inside_cited_material"),
 }).strict();
 
 const cleanNarratorStoryPageBriefSchema = z.object({
   pageKind: z.enum([
+    "audit_notice_page",
     "clarification_prompt_page",
     "context_to_playable_choices_page",
     "context_to_settled_result_page",
@@ -2825,18 +2865,21 @@ const cleanNarratorStoryPageBriefSchema = z.object({
   compositionJob: z.enum([
     "ask_accepted_clarification",
     "land_settled_turn_result",
+    "render_audit_notice",
     "place_context_then_land_result",
     "place_context_then_offer_playable_choices",
     "offer_playable_choices",
   ]),
   openingInstruction: z.enum([
     "ask_accepted_question",
+    "begin_with_audit_notice",
     "begin_with_accepted_context",
     "begin_with_playable_choices",
     "begin_with_settled_result",
   ]),
   closingInstruction: z.enum([
     "close_on_accepted_question",
+    "close_on_audit_notice",
     "close_on_playable_handle",
     "close_on_settled_result",
   ]),
@@ -2855,6 +2898,7 @@ const cleanNarratorPageTaskSchema = z.object({
   storyPageBrief: cleanNarratorStoryPageBriefSchema,
   pageArc: cleanNarratorPageArcSchema,
   pagePerformance: cleanNarratorPagePerformanceSchema,
+  pageVariation: cleanNarratorPageVariationSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();
