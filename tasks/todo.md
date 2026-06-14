@@ -6905,3 +6905,21 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `a26f3314` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P251 Stage 6 narrative page arc:
+  - Plan:
+    - [x] Run GitNexus impact before editing page-task builder and prompt wording.
+    - [x] Add a typed `pageArc` to `narrativePageTask` that describes the whole page shape, not just individual sentence objects.
+    - [x] Derive page arc from page moves: single settled beat, context-to-result, context-to-choice handle, or accepted clarification.
+    - [x] Keep page arc advisory and truth-bounded through existing moves, sentence-plan refs, accepted evidence, and backend fact refs.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, route-options, and clarification page arcs.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: `narrativePageTask` now carries `pageArc` with `arcShape`, `pageCadence`, `readerPosture`, and `closingIntent`.
+    - Executed: page arcs derive from page moves into accepted clarification, single settled result, context-to-result, single choice handle, or context-to-choice handle shapes.
+    - Executed: system prompt now tells the narrator to use `pageArc` as whole-page flow while keeping accepted evidence as the only fact source.
+    - Executed: focused movement, dialogue-with-context, route-options, and clarification tests prove page arc shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `f9f83fad` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
