@@ -1501,6 +1501,80 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(observation)).not.toContain("SceneFrame");
   });
 
+  it("settles inventory local_observation as carried inventory evidence", () => {
+    const inputFrame = frame({
+      playerAction: "What am I carrying?",
+      inventory: [
+        { ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] },
+        { ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] },
+      ],
+      citableRefs: ["Player", "Market", "Courier satchel", "Brass Tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: "Current inventory items include Courier satchel and Brass Tube.",
+        visibleRefs: ["Player", "Market", "Courier satchel", "Brass Tube"],
+        localObservation: {
+          type: "local_observation",
+          surfaceVersion: "scene_frame_current_observation_surface.v1",
+          resultKind: "positive_list",
+          mode: "list_surface",
+          queryText: "What am I carrying?",
+          targetLabel: null,
+          matchedEntries: [
+            {
+              surfaceKind: "inventory_item",
+              label: "Courier satchel",
+              detail: "inventory item label only",
+            },
+            {
+              surfaceKind: "inventory_item",
+              label: "Brass Tube",
+              detail: "inventory item label only",
+            },
+          ],
+          searchedSurfaceKinds: ["inventory_item"],
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          boundedNegative: false,
+          summary: "Current inventory items include Courier satchel and Brass Tube.",
+          claimStatus: "bounded_current_scene_observation_only",
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.claimKinds).toEqual(["local_observation"]);
+    expect(observation?.text).toBe("You have Courier satchel and Brass Tube with you.");
+    expect(observation?.backendFacts).toHaveLength(8);
+    expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Local observation beat: You have Courier satchel and Brass Tube with you.",
+      "Searched visible surfaces: inventory items.",
+      "Observation query: What am I carrying?.",
+      "Observed entry labels: Courier satchel; Brass Tube.",
+      "Observed inventory item labels: Courier satchel; Brass Tube.",
+      "Observed entry surfaces: inventory item Courier satchel; inventory item Brass Tube.",
+      "Anchor scene: Market.",
+      "Anchor location: Market.",
+    ]);
+    expect(observation?.backendFacts.find((entry) => entry.role === "observed_inventory_item_labels")?.value)
+      .toBe("Courier satchel; Brass Tube");
+    expect(observation?.backendFacts[0]?.value).toBe("You have Courier satchel and Brass Tube with you.");
+    expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
+    expect(observation?.text).not.toContain("in sight");
+    expect(observation?.text).not.toContain("in view");
+    expect(observation?.text).not.toContain("visible at");
+  });
+
   it("settles device_surface_observation receipts as bounded public device surface evidence only", () => {
     const inputFrame = frame({
       playerAction: "I check whether the Burner phone has a message.",

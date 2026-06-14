@@ -7912,3 +7912,32 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: prose audit passed for the live artifact with 1 narrative, 52 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM risk, 6 touched indexed symbols, 4 changed files, and 5 affected clean narration/projection execution flows.
     - Executed: committed and pushed `481c6143 Preserve route option shared costs`, then refreshed GitNexus with `npx gitnexus analyze --embeddings`.
+
+- P294 Stage 6 inventory local-observation prose:
+  - Diagnosis:
+    - [x] Fresh probe batch `output/clean-runtime-p294-prose-gap-probes-20260614-200900` showed `What am I carrying?` settling correctly through `local_observation`, but narrating inventory as scenery: `Courier satchel, Sealed lacquer message tube, and Brass Tube are in sight.`
+    - [x] Root owner is the accepted evidence shape: the receipt exposes `inventory_item` entries through generic observation labels, so Stage 6 receives a visible-observation task instead of carried-inventory material.
+  - Plan:
+    - [x] Run GitNexus impact for settlement/narration owner symbols before editing.
+    - [x] Add a typed settled backend fact for observed inventory item labels and make the local observation beat say the items are with the player.
+    - [x] Route inventory local-observation sentence planning through inventory-status material rather than visible-entry material.
+    - [x] Add focused settlement and narration tests for `What am I carrying?` as carried inventory prose.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live proof, prose audit, GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `What am I carrying?` settles through clean runtime with no restore.
+    - [x] Exact inventory item labels remain present and are phrased as carried/with-player state.
+    - [x] Narration does not turn inventory into visible scenery, item readiness/handling, item state change, route, movement, absence, no-change, or discovery.
+  - Review:
+    - Executed: settlement now renders positive `inventory_item` local observations as `You have <labels> with you.` and exposes `observed_inventory_item_labels` as a typed backend fact.
+    - Executed: inventory local-observation evidence limits now prove `matching current inventory entries` instead of current visible entries.
+    - Executed: Stage 6 maps `observed_inventory_item_labels` to inventory-status material and selects only the inventory beat plus inventory labels for that sentence, leaving scene placement out unless independently supplied.
+    - Executed: local-observation literary cues route inventory material through settled-result wording while visible actor/target observations keep the visible-observation cue.
+    - Verified: GitNexus impact before editing was LOW for `buildCleanSettledTurnPacket`, `sentencePlanForMove`, `selectLocalObservationFactRefs`, `narrativeFactProseUse`, `buildCleanNarrationSystemPrompt`, and `sentencePlanLiteraryCue`; no HIGH/CRITICAL warnings appeared.
+    - Verified: focused settlement+narration tests passed 137/137.
+    - Verified: expanded clean-runtime slice passed 384/384 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Executed: final live proof artifact `output/clean-runtime-p294-inventory-local-observation-live-accepted-20260614-202900` cloned `p69-item-transfer-045651`, ran `What am I carrying?`, and stopped backend port `31767` after proof.
+    - Verified: live narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.`
+    - Verified: final proof summary passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `local_observation` receipt, clean record +1, Stage 4 receipt +1, authority traces +0, clock ledger +0, old runtime stores 0, carried inventory beat, `observed_inventory_item_labels`, and `matching current inventory entries`.
+    - Verified: prose audit passed for the final inventory artifact with one narrative, 34 words, zero one-token output, zero `youOpening`, and all hit counters 0.

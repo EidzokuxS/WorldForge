@@ -1177,6 +1177,44 @@ function visibleActorLocalObservationWithSceneTextureView(): CleanNarratorView {
   });
 }
 
+function inventoryLocalObservationWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      {
+        ref: "e1",
+        authority: "local_observation_receipt",
+        claimKinds: ["local_observation"],
+        text: "You have Courier satchel and Brass Tube with you.",
+        backendFacts: [
+          { factRef: "e1.f1", role: "local_observation_beat", value: "You have Courier satchel and Brass Tube with you.", text: "Local observation beat: You have Courier satchel and Brass Tube with you.", exact: true },
+          { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: inventory items.", exact: true },
+          { factRef: "e1.f3", role: "observation_query", text: "Observation query: What am I carrying?.", exact: true },
+          { factRef: "e1.f4", role: "observed_entry_labels", value: "Courier satchel; Brass Tube", text: "Observed entry labels: Courier satchel; Brass Tube.", exact: true },
+          { factRef: "e1.f5", role: "observed_inventory_item_labels", value: "Courier satchel; Brass Tube", text: "Observed inventory item labels: Courier satchel; Brass Tube.", exact: true },
+          { factRef: "e1.f6", role: "observed_entry_surfaces", text: "Observed entry surfaces: inventory item Courier satchel; inventory item Brass Tube.", exact: true },
+          { factRef: "e1.f7", role: "anchor_scene", value: "Lowwater Bazaar", text: "Anchor scene: Lowwater Bazaar.", exact: true },
+          { factRef: "e1.f8", role: "anchor_location", value: "Lowwater Bazaar", text: "Anchor location: Lowwater Bazaar.", exact: true },
+        ],
+        limits: {
+          proves: ["matching current inventory entries"],
+          doesNotProve: [
+            "visible scene target",
+            "hidden discovery",
+            "concealed or thorough search result",
+            "private facts",
+            "item use or effects",
+            "item state change",
+            "route truth beyond route option/check receipts",
+            "movement",
+            "no-change",
+          ],
+        },
+      },
+      sceneTextureEvidence("e2"),
+    ],
+  });
+}
+
 function sceneObservationReceiptView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
@@ -5239,6 +5277,49 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Rain taps the brass gutters. Guide is in sight at Lowwater Bazaar.");
     for (const internalToken of ["SceneFrame", "worldVersion", "surface entry", "visible actor", "route", "Brass Tube", "no change"]) {
       expect(result.text).not.toContain(internalToken);
+    }
+  });
+
+  it("shapes inventory local_observation as carried inventory material with texture", async () => {
+    const view = inventoryLocalObservationWithSceneTextureView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const observationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_local_observation"
+    );
+
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f5"]);
+    expect(observationStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
+      "primary_beat",
+      "inventory_status",
+    ]);
+    expect(observationStep?.adventureCue.subjectFocus).toBe("settled_result_material");
+    expect(observationStep?.adventureCue.verbFrame).toBe("land_settled_result");
+    expect(observationStep?.literaryCue.renderShape).toBe("land_settled_turn_result");
+    expect(observationStep?.proseAssembly.sentenceShape).toBe("result_beat_line");
+
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Courier satchel and Brass Tube are with you.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f5"],
+          claimKinds: ["local_observation"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Courier satchel and Brass Tube are with you.");
+    for (const unsupportedText of ["in sight", "visible at", "visible target", "you grip", "you ready", "route", "no change"]) {
+      expect(result.text).not.toContain(unsupportedText);
     }
   });
 

@@ -2276,6 +2276,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "observed_device_facets",
   "observed_entry_labels",
   "observed_entry_surfaces",
+  "observed_inventory_item_labels",
   "observation_query",
   "open_route_labels",
   "oracle_selected_meaning",

@@ -303,6 +303,9 @@ function localObservationStoryBeat(observation: {
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
   }
+  if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "inventory_item") {
+    return `You have ${evidenceEnglishList(labels)} with you.`;
+  }
   if (observation.resultKind === "positive_list") {
     return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in the current visible set.`;
   }
@@ -931,7 +934,14 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
       const observedLabels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
       const observedSurfaceLabels = localObservationSurfaceEntryLabels(observation.matchedEntries);
+      const observedInventoryLabels = uniqueStrings(observation.matchedEntries
+        .filter((entry) => entry.surfaceKind === "inventory_item")
+        .map((entry) => entry.label));
       const observedLabelList = evidenceSemicolonList(observedLabels);
+      const observedInventoryLabelList = evidenceSemicolonList(observedInventoryLabels);
+      const isInventoryObservation = observation.resultKind === "positive_list"
+        && observation.searchedSurfaceKinds.length === 1
+        && observation.searchedSurfaceKinds[0] === "inventory_item";
       const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
         ? ["local_observation", "bounded_visibility_negative"]
         : observation.resultKind === "positive_list"
@@ -943,6 +953,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         { role: "observation_query", text: `Observation query: ${observation.queryText}.` },
         ...(observedLabels.length > 0
           ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${observedLabelList}.`, value: observedLabelList }]
+          : []),
+        ...(observedInventoryLabels.length > 0
+          ? [{ role: "observed_inventory_item_labels" as const, text: `Observed inventory item labels: ${observedInventoryLabelList}.`, value: observedInventoryLabelList }]
           : []),
         ...(observedSurfaceLabels.length > 0
           ? [{ role: "observed_entry_surfaces" as const, text: `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.` }]
@@ -964,7 +977,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         limits: {
           proves: boundedNegative
             ? ["bounded no-match against enumerated current visible entries"]
-            : ["matching current visible entries"],
+            : isInventoryObservation
+              ? ["matching current inventory entries"]
+              : ["matching current visible entries"],
           doesNotProve: LOCAL_OBSERVATION_DOES_NOT_PROVE,
         },
       });
