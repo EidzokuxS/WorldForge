@@ -7497,3 +7497,28 @@ Session: `gm-v1-consequenc-slice`.
     - Accepted proof narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. The Brass Tube passes from Mira Voss to Guide and settles carried with Guide at Lowwater Bazaar.`
     - Verification so far: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 108/108; `npm --prefix backend run typecheck` passed; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p279-item-custody-scene-beat-proof/prose-audit.json --fail-on-hits output/clean-runtime-p279-item-custody-scene-beat-proof` counted 1 result, 34 words, and all hits 0.
     - GitNexus: `detect_changes(scope=all/staged)` reported LOW risk, 4 changed files, 4 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warnings.
+
+- P280 Stage 6 route-choice scene-exit handoff plan:
+  - Diagnosis:
+    - [x] Rebuilt `output/clean-runtime-p270-p279-prose-audit-rollup.json`; leak/stock counters remain 0, but route inquiry still reads like exposed route affordance prose: `From Lowwater Bazaar, the one-minute routes fan open in every direction: ...`.
+    - [x] Chosen root owner: route-choice sentence task card plus deterministic authority projection. Accepted `route_options` evidence already owns origin, exact labels, and costs; Stage 6 needs a positive scene-exit handoff shape for those materials.
+    - [x] GitNexus pre-edit impact: `renderRouteOptionsProjection`, `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, and `buildCleanNarrationSystemPrompt` are LOW risk; direct blast radius is `renderCleanAuthorityProjection`/`runCleanNarration`.
+  - Plan:
+    - [x] Extend route-choice typed cues so `next_action_handle` route sentences say `scene_exit_choice_line` / `route_choices_as_scene_exits` instead of generic `choice_handle_line`.
+    - [x] Update `choicePresentation` closing style for wide route groups from route fan/menu wording to scene-exit handoff wording while preserving exact route labels and costs.
+    - [x] Render deterministic `route_options` projection from accepted `route_origin`, `route_choice_labels`/`open_route_labels`, and `route_choice_travel_costs`, so projection no longer copies summary-shaped `route_choices_beat` text.
+    - [x] Update prompt contract/examples to teach route choices as playable exits from the accepted scene, with labels/costs exact and no player movement/current-scene change.
+    - [x] Update focused narration tests to prove the new typed task card, projection wording, model-accepted route prose, and wide-route proof shape.
+    - [x] Verify with focused narration tests, typecheck, prose audit/proof artifact, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] A route-options page can read as a compact in-world exit handoff, e.g. labels stand as one-minute exits from `Lowwater Bazaar`, rather than a route menu line.
+    - [x] Every accepted route label remains present verbatim when the receipt supplies it.
+    - [x] Costs remain exact when supplied; omitted costs do not invent time.
+    - [x] No route-choice prose claims player movement, arrival, route safety, hidden routes, discovery, or scene change unless separately accepted evidence owns that claim.
+  - Review:
+    - Fix: Stage 6 route-choice sentence plans now emit scene-exit task-card fields: `offer_scene_exits`, `scene_exit_choice_line`, `route_exit_label`, `offer_scene_exit`, `exit_group_with_cost`, `exits_then_costs`, `scene_exit_handoff_cadence`, `leave_scene_exit_handoff`, and `scene_exit_choice_sentence`.
+    - Fix: `next_action_handle` route pages select `route_origin`, `open_route_labels`/`route_choice_labels`, and `route_choice_travel_costs` as core prose material; `route_choices_beat` remains proof context and is no longer copied as player-facing route prose. Direct-scene route handles keep their visible scene/actor/inventory/target label anchors plus route exit refs.
+    - Fix: deterministic `route_options` projection now builds an exit handoff from accepted route roles: `At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.`
+    - Fix: route-choice validation now preserves exact accepted labels and supplied cost text for sentences that declare/cite route-choice material, without adding semantic string-ban scanning.
+    - Proof: `output/clean-runtime-p280-route-options-scene-exit-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput`, `validateCleanNarrationCandidate`, and `renderCleanAuthorityProjection`; projection and accepted candidate both use the scene-exit handoff sentence above.
+    - Verification so far: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 108/108; `npm --prefix backend run typecheck` passed; `git diff --check` passed with LF/CRLF warnings only; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p280-route-options-scene-exit-proof/prose-audit.json --fail-on-hits output/clean-runtime-p280-route-options-scene-exit-proof` counted 1 result, 33 words, and all hits 0.
