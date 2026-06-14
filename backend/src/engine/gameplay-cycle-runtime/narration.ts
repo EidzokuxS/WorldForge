@@ -173,9 +173,8 @@ function preferredPromptFactsByRole(
   if (missingRoleFact) {
     throw new Error(`Prompt fact selection for ${evidence.authority} requires typed backend fact roles.`);
   }
-  const roleSet = new Set<AcceptedNarrationBackendFactRole>(roles);
-  const preferred = evidence.backendFacts.filter((fact) =>
-    fact.role !== undefined && roleSet.has(fact.role)
+  const preferred = roles.flatMap((role) =>
+    evidence.backendFacts.filter((fact) => fact.role === role)
   );
   if (preferred.length === 0) {
     throw new Error(`Prompt fact selection for ${evidence.authority} requires at least one preferred backend fact role.`);
@@ -186,13 +185,13 @@ function preferredPromptFactsByRole(
 function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
   if (evidence.claimKinds.includes("item_state")) {
     return preferredPromptFactsByRole(evidence, [
-      "custody_change",
       "settled_custody",
+      "custody_change",
       "item_label",
-      "source_label",
       "target_label",
       "final_equip_state",
       "current_scene_anchor",
+      "source_label",
       "item_transfer_result",
     ]);
   }
@@ -612,6 +611,17 @@ function sentencePlanPreferredFactRefs(
     .map((factUse) => factUse.factRef);
 }
 
+function sentencePlanFactRefsByRole(
+  move: CleanNarratorPageTaskMove,
+  roles: readonly string[],
+): string[] {
+  return uniqueStrings(roles.flatMap((role) =>
+    move.usableFacts
+      .filter((fact) => fact.role === role)
+      .map((fact) => fact.factRef)
+  ));
+}
+
 function selectCurrentSceneLabelAnchor(input: {
   currentContext: CleanNarratorStoryFrameEntry[];
   backendFactsByRef: Map<string, AcceptedNarrationEvidence["backendFacts"][number]>;
@@ -688,6 +698,19 @@ function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
         ...sentencePlanPreferredFactRefs(move, ["scene_anchor"]),
       ];
     }
+  }
+
+  if (move.entryProseCues.includes("item_state") && !move.entryProseCues.includes("dialogue_response")) {
+    return sentencePlanFactRefsByRole(move, [
+      "settled_custody",
+      "custody_change",
+      "item_label",
+      "target_label",
+      "final_equip_state",
+      "current_scene_anchor",
+      "source_label",
+      "item_transfer_result",
+    ]);
   }
 
   return sentencePlanPreferredFactRefs(move, [
@@ -834,6 +857,7 @@ function sentencePlanAdventureSubjectFocus(
   if (sentenceRole === "context_anchor") return "player_scene_position";
   if (sentenceRole === "next_action_handle") return "playable_route_choices";
   if (beatObjective === "render_elapsed_time") return "elapsed_time_value";
+  if (beatObjective === "render_item_custody") return "item_custody_state";
   if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
     return "visible_speaker";
   }
@@ -850,6 +874,7 @@ function sentencePlanAdventureVerbFrame(
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
   if (sentenceRole === "next_action_handle") return "offer_playable_choices";
   if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
+  if (beatObjective === "render_item_custody") return "land_item_custody";
   if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
     return "frame_exact_utterance";
   }
@@ -1001,6 +1026,18 @@ function sentencePlanProseAssembly(
           closingFunction: "settle_outcome",
         };
       }
+      if (beatObjective === "render_item_custody") {
+        return {
+          perspective: "settled_result_present",
+          sentenceShape: "item_custody_line",
+          openingSource: "item_label_or_custody_state",
+          verbEnergy: "land_custody",
+          detailRhythm: "item_custody_with_holder",
+          materialWeaveOrder: "custody_then_holder",
+          styleBudget: "item_custody_cadence",
+          closingFunction: "settle_outcome",
+        };
+      }
       const preservesTokens = materialObligations.preserveTokenFactRefs.length > 0;
       return {
         perspective: "settled_result_present",
@@ -1018,6 +1055,7 @@ function sentencePlanProseAssembly(
 function sentencePlanLiteraryCue(
   move: CleanNarratorPageTaskMove,
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
 ): CleanNarratorSentencePlanStep["literaryCue"] {
   switch (sentenceRole) {
     case "clarification_question":
@@ -1059,6 +1097,13 @@ function sentencePlanLiteraryCue(
           renderShape: "mark_elapsed_time_pressure_clock_beat",
           cadence: "pressure_clock_beat_sentence",
           styleLevers: ["elapsed_time_pressure", "clock_pressure_verb", "concrete_present_verb"],
+        };
+      }
+      if (beatObjective === "render_item_custody") {
+        return {
+          renderShape: "land_item_custody",
+          cadence: "custody_beat_sentence",
+          styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus"],
         };
       }
       const styleLevers: CleanNarratorSentencePlanStep["literaryCue"]["styleLevers"] = ["concrete_present_verb"];
@@ -1105,7 +1150,7 @@ function sentencePlanForMove(
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
       adventureCue: sentencePlanAdventureCue(sentenceRole, beatObjective, proseMaterials),
       proseAssembly: sentencePlanProseAssembly(sentenceRole, beatObjective, proseMaterials, materialObligations),
-      literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
+      literaryCue: sentencePlanLiteraryCue(move, sentenceRole, beatObjective),
     });
   };
 
@@ -1115,7 +1160,9 @@ function sentencePlanForMove(
       break;
     case "establish_playable_context":
       pushPlan("exact_context_texture", move.coverage, selectFrameTextureFactRefs(move, coreProseCues));
-      pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
+      if (!coreProseCues.includes("item_state")) {
+        pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
+      }
       break;
     case "render_authoritative_turn_event":
       pushPlan("turn_event_beat", move.coverage, selectTurnEventFactRefs(move));
@@ -2011,8 +2058,8 @@ export function buildCleanNarrationSystemPrompt(
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different adventureCue subject/verb pairings across nearby turns.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
-    "Item-state surface: for item_state, phrase the accepted custody/location/equip-state operation, source/item/target values, final equip state value, and exact scene-anchor value. Prefer backendFacts with roles `custody_change` and `settled_custody` as the prose beat; use the `item_transfer_result` value as a proof detail. If sentencePlan supplies a texture sentence, keep texture in that sentence and keep the custody/state beat on item materials. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",
-    "Item-state grammar: make the item or settled custody state carry the sentence. Render target labels as holder or placement phrases such as with, by, carried by, held by, or at the exact target label.",
+    "Item-state surface: for item_state, use the item custody sentence plan as a custody-state task card. Make the item label or settled custody state the grammatical center, phrase from backendFacts with roles `settled_custody` and `custody_change`, preserve the source endpoint inside custody_change plus item/target/final state labels, and keep the item sentence on item/custody materials. The item sentence may use the scene token already present in custody/settled-custody material; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
+    "Item-state grammar: item_custody_line with land_custody lands ownership and equip state through item-owned custody verbs such as passes, rests with, is carried by, is held by, or remains at the exact target label. Source and target labels are custody endpoints; handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
     "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
@@ -2037,7 +2084,7 @@ export function buildCleanNarrationSystemPrompt(
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
     "For support_actor_materialization, express the accepted `support_actor_presence` beat.",
     "For player_local_condition, express the accepted Player current-scene posture or readiness condition operation.",
-    "For item_state, express the accepted item custody, location, or equip-state operation as a single custody/state beat.",
+    "For item_state, express the accepted item custody, location, or equip-state operation as a single item_custody_line custody/state beat.",
     "For minor_poi_handle, express the accepted visible current-scene place label and kind as an ordinary scene point or meeting spot.",
     "For local_observation, express the accepted current visible observation result; for bounded_visibility_negative, express that current visible entries showed no matching visible result.",
     "For device_surface_observation, express the accepted modeled public device surface facets or the bounded current visible device-surface result.",
