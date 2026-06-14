@@ -8239,7 +8239,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Keep `scene_texture.text` and accepted evidence limits aligned with the same sentence material.
     - [x] Update settlement/narration contract tests where they inspect scene texture values.
     - [x] Run focused tests, expanded clean-runtime tests, typecheck, live item-transfer proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live item transfer settles through clean runtime and keeps a sentence boundary between exact scene texture and item custody beat.
     - [x] `scene_texture` values are complete public scene texture sentences, and Stage 6 copies those exact values when texture is selected.
@@ -8256,3 +8256,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live texture contract: prompt and settlement `scene_texture` values end with terminal punctuation, selected texture material appears verbatim in narration, and the old `water Brass Tube` run-on is absent.
     - Verified prose audit `output/clean-runtime-p307-scene-texture-boundary-live-20260615-001500/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 4 touched settlement symbols, 4 changed files, and no affected processes.
+    - Verified commit/push: code commit `27e49cf7` pushed to `develop`.
