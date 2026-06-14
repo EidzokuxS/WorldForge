@@ -3496,6 +3496,16 @@ function renderPlayerLocalConditionProjection(evidence: AcceptedNarrationEvidenc
   );
 }
 
+function renderPlayerLocalConditionTurnProjection(
+  view: CleanNarratorView,
+  evidence: AcceptedNarrationEvidence,
+): string {
+  return [
+    renderSceneTextureProjection(view),
+    renderPlayerLocalConditionProjection(evidence),
+  ].filter((text): text is string => Boolean(text && normalizeText(text).length > 0)).join(" ");
+}
+
 function renderItemStateProjection(evidence: AcceptedNarrationEvidence): string {
   const settledCustody = trimSentencePeriod(requireFactValueByRole(
     evidence,
@@ -3590,11 +3600,17 @@ function renderSupportActorTurnProjection(view: CleanNarratorView, supportActor:
   ].filter((text): text is string => Boolean(text && normalizeText(text).length > 0)).join(" ");
 }
 
+function isStandalonePlayerLocalConditionView(view: CleanNarratorView): boolean {
+  const terminalEvidence = view.acceptedEvidence.filter(isLiteraryTerminalEvidence);
+  return terminalEvidence.length === 1
+    && terminalEvidence[0]!.claimKinds.includes("player_local_condition");
+}
+
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("support_actor_materialization")
-  );
+  ) || isStandalonePlayerLocalConditionView(view);
 }
 
 export function renderCleanAuthorityProjection(view: CleanNarratorView): string {
@@ -3731,7 +3747,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("player_local_condition")
   );
   if (playerLocalCondition) {
-    return renderPlayerLocalConditionProjection(playerLocalCondition);
+    return renderPlayerLocalConditionTurnProjection(view, playerLocalCondition);
   }
 
   const sceneBeat = view.acceptedEvidence.find((evidence) =>

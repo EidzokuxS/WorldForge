@@ -4752,48 +4752,65 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses model-authored player_local_condition prose without scene_texture even with snapshot context", async () => {
+  it("uses deterministic player_local_condition prose without scene_texture even with snapshot context", async () => {
     const view = playerLocalConditionWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(view, [{
-        text: "You hold your hands plainly visible at Market.",
-        evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1", "e5.f3", "e5.f4", "e5.f5"],
-        claimKinds: ["player_local_condition"],
-      }]),
+      generateCandidate: async () => {
+        throw new Error("model generator should not be called for player_local_condition");
+      },
     });
 
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("You hold your hands plainly visible at Market.");
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Player is hands visible.");
     expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
-  it("uses accepted scene_texture for player_local_condition prose when texture is available", async () => {
+  it("uses deterministic player_local_condition prose with accepted scene_texture when texture is available", async () => {
     const view = playerLocalConditionWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(view, [
-        {
-          text: "Rain taps the brass gutters.",
-          evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f2"],
-          claimKinds: ["scene_texture"],
-        },
-        {
-          text: "Player is kneeling at Market.",
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
-          claimKinds: ["player_local_condition", "current_scene"],
-        },
-      ]),
+      generateCandidate: async () => {
+        throw new Error("model generator should not be called for player_local_condition");
+      },
     });
 
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Player is kneeling at Market.");
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Player is kneeling.");
     expect(result.text).not.toMatch(/\b(hp|damage|cover|combat|moves?|route|item custody|dialogue|no change|nothing changed)\b/iu);
+  });
+
+  it("keeps composed player_local_condition plus dialogue on the model-authored route", async () => {
+    const view = movementView({
+      acceptedEvidence: [
+        playerLocalConditionView().acceptedEvidence[0]!,
+        {
+          ref: "e2",
+          authority: "terminal_dialogue_receipt",
+          claimKinds: ["dialogue_response"],
+          text: 'Guide says: "The north stairs flooded before dawn."',
+          backendFacts: [
+            { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+            { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+            { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+          ],
+          limits: {
+            proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+            doesNotProve: ["truth of speaker claim", "durable world fact", "movement", "item state"],
+          },
+        },
+      ],
+    });
+
+    await expect(runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("model route reached for composed player_local_condition");
+      },
+    })).rejects.toThrow("model route reached for composed player_local_condition");
   });
 
   it("accepts player_local_condition prose with structurally cited texture choices", () => {

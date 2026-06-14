@@ -8283,3 +8283,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified focused visible-actors prose audit `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000/visible-actors-prose-audit.json`: one narrative, 28 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Diagnostic for next slice: the same after-fix scan exposed a separate `player-condition` narration validation failure after settlement: sentence 1 cited current-scene evidence outside its page move/sentence-plan refs. Treat this as P309, separate from the GM-read nullable-method contract.
     - Verified commit/push: code commit `b708ca6e` pushed to `develop`.
+
+- P309 Stage 6 player-local-condition owner:
+  - Diagnosis:
+    - [x] Live scan `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000` exposed a separate post-settlement `player-condition` narration failure: Stage 6 model prose cited `current_scene` material outside the `player_local_condition` page move/sentence plan.
+    - [x] Root owner is Stage 6 routing: `renderCleanAuthorityProjection()` already has a typed `player_condition_operation` projection, but `needsDeterministicAuthorityProjection()` no longer selects it for `player_local_condition`, so a one-beat local state receipt goes through open model composition.
+  - Plan:
+    - [x] Run GitNexus impact for `needsDeterministicAuthorityProjection` and `renderCleanAuthorityProjection` before editing.
+    - [x] Route standalone `player_local_condition` through primary deterministic authority projection, with accepted scene texture preserved as its own preceding sentence when present.
+    - [x] Keep composed `player_local_condition` plus another terminal receipt on the model-authored route so deterministic projection cannot drop the second accepted beat.
+    - [x] Update focused narration tests so standalone player-local-condition receipts prove the model generator is not called.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live player-condition proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] `I crouch down beside the market walkway and keep my hands visible.` settles through clean runtime and produces a final narrative.
+    - [x] Narration stays inside accepted scene texture plus `player_condition_operation`; it adds no unsupported current-scene sentence, route truth, item state, movement, dialogue, HP/combat, absence, or no-change claim.
+    - [x] The fix is a primary typed owner route, not a regex cleanup and not a gameplay fallback.
+  - Review:
+    - Executed: `needsDeterministicAuthorityProjection()` now selects deterministic authority projection for a standalone `player_local_condition` terminal receipt, while composed player-condition plus another terminal receipt stays model-authored.
+    - Executed: `renderCleanAuthorityProjection()` now renders accepted scene texture plus the accepted `player_condition_operation` value for standalone player-local-condition pages.
+    - Verified GitNexus impacts before edits: `needsDeterministicAuthorityProjection` LOW and `renderCleanAuthorityProjection` LOW; direct caller/process is `runCleanNarration`.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 116/116 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 388/388 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck` passed.
+    - Verified final live proof `output/clean-runtime-p309-player-condition-final-live-clean-20260615-004800`: clean runtime settled one `condition_set` receipt, recorded active `crouched` player condition, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, kept Brass Tube with Mira Voss, and kept legacy runtime stores at 0.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Player is crouched.`
+    - Verified prose audit `output/clean-runtime-p309-player-condition-final-live-clean-20260615-004800/prose-audit.json`: one narrative, 22 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 3 touched narration symbols, 3 changed files, and one affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`.
