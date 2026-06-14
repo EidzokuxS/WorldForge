@@ -2538,6 +2538,27 @@ const cleanNarratorSentencePlanStepSchema = z.object({
   coverage: z.enum(["required", "optional"]),
   entryRefs: z.array(shortText).min(1).max(24),
   preferredBackendFactRefs: z.array(shortText).min(1).max(24),
+  proseMaterials: z.array(z.object({
+    factRef: shortText,
+    proseUse: z.enum([
+      "exact_dialogue_quote",
+      "exact_texture_sentence",
+      "label_anchor",
+      "primary_beat",
+      "route_choice",
+      "scene_anchor",
+      "state_value",
+      "supporting_detail",
+      "time_value",
+    ]),
+    materialText: shortText,
+    materialTextSource: z.enum(["accepted_text", "accepted_value"]),
+    copyMode: z.enum([
+      "copy_exact",
+      "phrase_from_material",
+      "preserve_token",
+    ]),
+  }).strict()).min(1).max(24),
   literaryCue: z.object({
     renderShape: z.enum([
       "ask_accepted_clarification",

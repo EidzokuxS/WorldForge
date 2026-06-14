@@ -1352,6 +1352,36 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        proseMaterials: [
+          {
+            factRef: "e1.f1",
+            proseUse: "primary_beat",
+            materialText: "After 1 minute, you reach North Hall.",
+            materialTextSource: "accepted_value",
+            copyMode: "phrase_from_material",
+          },
+          {
+            factRef: "e1.f2",
+            proseUse: "label_anchor",
+            materialText: "North Hall",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f3",
+            proseUse: "time_value",
+            materialText: "1 minute",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f4",
+            proseUse: "label_anchor",
+            materialText: "North Hall",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+        ],
         literaryCue: {
           renderShape: "land_settled_turn_result",
           cadence: "compact_present_beat",
@@ -1438,6 +1468,29 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        proseMaterials: [
+          {
+            factRef: "e1.f1",
+            proseUse: "scene_anchor",
+            materialText: "You are at Market.",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f2",
+            proseUse: "scene_anchor",
+            materialText: "Market",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f3",
+            proseUse: "scene_anchor",
+            materialText: "Market",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+        ],
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1451,6 +1504,22 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e5"],
         preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+        proseMaterials: [
+          {
+            factRef: "e5.f1",
+            proseUse: "label_anchor",
+            materialText: "Speaker: Guide.",
+            materialTextSource: "accepted_text",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e5.f2",
+            proseUse: "exact_dialogue_quote",
+            materialText: 'Guide says: "The north stairs flooded before dawn."',
+            materialTextSource: "accepted_value",
+            copyMode: "copy_exact",
+          },
+        ],
         literaryCue: {
           renderShape: "frame_exact_quote",
           cadence: "quote_framed_beat",
@@ -1586,6 +1655,22 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+        proseMaterials: [
+          {
+            factRef: "e2.f1",
+            proseUse: "exact_texture_sentence",
+            materialText: "Canvas awnings hang over the market lanes",
+            materialTextSource: "accepted_value",
+            copyMode: "copy_exact",
+          },
+          {
+            factRef: "e2.f2",
+            proseUse: "exact_texture_sentence",
+            materialText: "Rain taps the brass gutters",
+            materialTextSource: "accepted_value",
+            copyMode: "copy_exact",
+          },
+        ],
         literaryCue: {
           renderShape: "copy_exact_context_texture",
           cadence: "exact_short_sentence",
@@ -1599,6 +1684,29 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+        proseMaterials: [
+          {
+            factRef: "e3.f1",
+            proseUse: "scene_anchor",
+            materialText: "You are at Market.",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e3.f2",
+            proseUse: "scene_anchor",
+            materialText: "Market",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e3.f3",
+            proseUse: "scene_anchor",
+            materialText: "Market",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+        ],
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1612,6 +1720,43 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        proseMaterials: [
+          {
+            factRef: "e1.f1",
+            proseUse: "primary_beat",
+            materialText: "From Market, visible route choices are North Hall (1 minute).",
+            materialTextSource: "accepted_value",
+            copyMode: "phrase_from_material",
+          },
+          {
+            factRef: "e1.f3",
+            proseUse: "route_choice",
+            materialText: "North Hall",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f4",
+            proseUse: "route_choice",
+            materialText: "North Hall",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f5",
+            proseUse: "route_choice",
+            materialText: "none",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+          {
+            factRef: "e1.f6",
+            proseUse: "time_value",
+            materialText: "North Hall: 1 minute",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
+          },
+        ],
         literaryCue: {
           renderShape: "leave_playable_choice_handle",
           cadence: "choice_handle_sentence",
@@ -4727,6 +4872,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlanRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Prose materials:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("proseMaterials");
+    expect(buildCleanNarrationSystemPrompt()).toContain("copyMode");
     expect(buildCleanNarrationSystemPrompt()).toContain("Literary cues:");
     expect(buildCleanNarrationSystemPrompt()).toContain("literaryCue.renderShape");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");

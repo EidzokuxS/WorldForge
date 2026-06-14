@@ -642,6 +642,46 @@ function sentencePlanHasProseUse(
   return move.factUses.some((factUse) => factUse.proseUse === proseUse);
 }
 
+function sentencePlanMaterialCopyMode(
+  proseUse: CleanNarratorFactUse["proseUse"],
+): CleanNarratorSentencePlanStep["proseMaterials"][number]["copyMode"] {
+  switch (proseUse) {
+    case "exact_dialogue_quote":
+    case "exact_texture_sentence":
+      return "copy_exact";
+    case "label_anchor":
+    case "route_choice":
+    case "scene_anchor":
+    case "state_value":
+    case "time_value":
+      return "preserve_token";
+    case "primary_beat":
+    case "supporting_detail":
+      return "phrase_from_material";
+  }
+}
+
+function sentencePlanProseMaterials(
+  move: CleanNarratorPageTaskMove,
+  preferredBackendFactRefs: string[],
+): CleanNarratorSentencePlanStep["proseMaterials"] {
+  const factsByRef = new Map(move.usableFacts.map((fact) => [fact.factRef, fact]));
+  const usesByRef = new Map(move.factUses.map((factUse) => [factUse.factRef, factUse.proseUse]));
+  return preferredBackendFactRefs.flatMap((factRef) => {
+    const fact = factsByRef.get(factRef);
+    const proseUse = usesByRef.get(factRef);
+    if (!fact || !proseUse) return [];
+    const value = fact.value?.trim();
+    return [{
+      factRef,
+      proseUse,
+      materialText: value && value.length > 0 ? normalizeText(value) : normalizeText(fact.text),
+      materialTextSource: value && value.length > 0 ? "accepted_value" : "accepted_text",
+      copyMode: sentencePlanMaterialCopyMode(proseUse),
+    }];
+  });
+}
+
 function sentencePlanLiteraryCue(
   move: CleanNarratorPageTaskMove,
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
@@ -712,6 +752,7 @@ function sentencePlanForMove(
       coverage,
       entryRefs: move.entryRefs,
       preferredBackendFactRefs,
+      proseMaterials: sentencePlanProseMaterials(move, preferredBackendFactRefs),
       literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
     });
   };
@@ -1781,6 +1822,7 @@ export function buildCleanNarrationSystemPrompt(
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
+    "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
