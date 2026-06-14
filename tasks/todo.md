@@ -8478,3 +8478,5 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor stands beside the stall boards, against worn counter boards. Local Vendor says: "Right here, then. I'll stand where you've got a clear view—no tricks, no slipping off between the stalls."`
     - Verified accepted support actor facts: `support_actor_visible_cue = A local vendor stands beside the stall boards, against worn counter boards.` and `support_actor_public_summary = An ordinary local vendor stands beside the stall boards at Lowwater Bazaar, against worn counter boards.`
     - Verified prose audit `output/clean-runtime-p315-support-cue-live-20260615-022618/prose-audit.json`: one narrative, 54 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 1 touched indexed owner, 4 changed files, and 0 affected execution flows.
+    - Verified implementation commit: `ece6c2ed` recorded the P315 code/tests/proof notes.
