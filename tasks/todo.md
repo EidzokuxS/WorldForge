@@ -7014,3 +7014,21 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed; `rg` found no legacy prose-quality runtime/test symbols.
     - Verified: GitNexus `detect_changes` reported low risk and 0 affected execution flows for staged backend changes.
     - Executed: code commit `5f390517` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P257 Stage 6 typed texture cue:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Add a typed sentence-level texture cue derived from sentence role and prose materials.
+    - [x] Use the cue to tell the narrator whether texture is exact standalone context or omitted from a sentence, instead of primitive-specific first/later wording.
+    - [x] Remove stale first/later texture prompt instructions that survived the legacy prose validator removal.
+    - [x] Update focused narration tests proving the new cue and prompt wording.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added `textureCue` to `cleanNarratorSentencePlanStepSchema` with `copy_exact_texture_sentence` and `omit_texture_in_this_sentence` modes.
+    - Executed: derived each sentence texture cue from sentence role plus typed `proseMaterials`; exact texture ownership now belongs only to `exact_context_texture` sentence objects.
+    - Executed: rewrote Stage 6 prompt texture guidance around `textureCue`, removing stale first/later texture selection rules from runtime prompt text.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed and `rg` found no first/later texture-selection strings in runtime/contracts.
+    - Verified: GitNexus all-scope `detect_changes` reported low risk and 0 affected execution flows.
