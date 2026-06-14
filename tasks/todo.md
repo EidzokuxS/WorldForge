@@ -8161,7 +8161,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update focused narration tests so dialogue pages use texture plus dialogue beat, without separate scene placement.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live dialogue proof, and prose audit.
     - [x] Run GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live dialogue settles through clean runtime and reads as texture plus accepted quote/response.
     - [x] Exact speaker and accepted dialogue quote remain present.
@@ -8174,3 +8174,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live proof `output/clean-runtime-p304-dialogue-context-live-20260614-235000`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `dialogue_record` receipt present, legacy runtime stores stayed 0, sentence-plan had one texture frame and one dialogue event with no `context_anchor`, and accepted text was `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Guide says: "Ah, the Brass Tube — you carry it well. That casing is charter-stamped; it's a courier's sealed dispatch tube, meant for the bond-clerks at Charter Gallery. Whatever's rolled inside was sealed by the sender and can only be read by the addressee, so handle it carefully. Don't force the cap — the locking ring will bend if you lever it."`
     - Verified prose audit `output/clean-runtime-p304-dialogue-context-live-20260614-235000/prose-audit.json`: one narrative, 79 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.
+    - Verified commit/push/index: code commit `251f6fea` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
