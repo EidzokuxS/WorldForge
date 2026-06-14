@@ -7148,3 +7148,22 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus impact for `sentencePlanProseAssembly` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
     - Executed: code commit `de800886` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P264 Stage 6 typed style budget:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Extend sentence-level `proseAssembly` with typed `styleBudget`.
+    - [x] Derive style budget from sentence role, beat objective, prose materials, and material obligations.
+    - [x] Teach the prompt to use `styleBudget` as the positive boundary for atmosphere, cadence, quote framing, choices, and result phrasing.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: extended sentence-level `proseAssembly` with `styleBudget` so Stage 6 names the allowed literary spend for direct questions, exact texture atmosphere, quote frames, result cadence, route readability, and scene anchors.
+    - Executed: derived `styleBudget` from sentence role, beat objective, `proseMaterials`, and `materialObligations`; no prose-string policing, regex gates, or gameplay substitutions were added.
+    - Executed: Stage 6 prompt now uses `proseAssembly.styleBudget` as the positive boundary for cadence, syntax, sensory angle, quote framing, choice readability, and sentence rhythm from accepted facts.
+    - Verified: focused narration suite passed 100/100 after updating the stale prompt expectation.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus impact for `sentencePlanProseAssembly` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
+    - Executed: code commit `3fce3999` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
