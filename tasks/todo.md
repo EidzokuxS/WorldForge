@@ -7050,3 +7050,21 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `npm --prefix backend run typecheck` passed.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus all-scope `detect_changes` reported low risk and 0 affected execution flows.
+
+- P259 Stage 6 typed beat objectives:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Carry story-frame prose cues into narrative page moves as typed beat source data.
+    - [x] Add sentence-level `beatObjective` derived from move prose cues and sentence role.
+    - [x] Teach the prompt to use beat objectives for arrival, custody, reply, choices, observation, condition, device, and clarification prose.
+    - [x] Update focused narration tests proving move cues, sentence objectives, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added move-level `entryProseCues` to carry story-frame prose cue ownership into the page task.
+    - Executed: added sentence-level `beatObjective` derived from sentence role and move prose cues, covering movement arrival, elapsed time, route status/options, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, generic evidence, and clarification.
+    - Executed: Stage 6 prompt now tells the narrator to use `beatObjective` as the concrete RPG sentence job.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
