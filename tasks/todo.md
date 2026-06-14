@@ -6978,3 +6978,20 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `beaf1460` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P255 Stage 6 non-blocking prose quality:
+  - Plan:
+    - [x] Run GitNexus impact before editing narration validation behavior.
+    - [x] Remove `prose_quality` from the runtime rejection path so old style/semantic text gates no longer block an otherwise structurally valid narration.
+    - [x] Keep schema, evidence refs, backend fact refs, page move refs, sentence plan refs, private markers, backend refs, and language contract checks in hard validation.
+    - [x] Update focused tests so unsupported prose-quality examples prove structural acceptance while existing structural failures still reject.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `validateCleanNarrationCandidate` and `proseQualityIssues` reported LOW scope before edits; later all-scope/staged `detect_changes` reported HIGH because `runCleanNarration` itself changed.
+    - Inspected: `runCleanNarration` context shows `validateCleanNarrationCandidate` as its direct validator call; no other indexed caller depends on the new runtime flag.
+    - Executed: `validateCleanNarrationCandidate` now accepts optional `enforceProseQuality`; direct validator calls default to legacy prose-quality enforcement for audit/regression tests.
+    - Executed: `runCleanNarration` passes `enforceProseQuality: false`, so runtime rejection/repair remains focused on schema, refs, page moves, sentence plan refs, leakage, and language contracts rather than old semantic prose gates.
+    - Executed: five Stage 6 runtime repair-loop tests now prove structurally valid prose-quality cases are accepted in one model attempt without validation feedback.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests; expanded clean-runtime suite passed 368 tests across contracts, Stage4, settlement, and narration; `npm --prefix backend run typecheck` passed.
+    - Inspected: HIGH GitNexus detect affected only indexed `runCleanNarration` flows; broadened verification covered those clean-runtime contracts before commit.
+    - Executed: code commit `f9403105` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
