@@ -1938,7 +1938,7 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceRole: "exact_context_texture",
         coverage: "optional",
         entryRefs: ["e2", "e3"],
-        preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+        preferredBackendFactRefs: ["e2.f1"],
         claimFocus: {
           primaryClaimKinds: ["scene_texture"],
           supportingClaimKinds: ["current_scene", "current_location"],
@@ -1953,18 +1953,11 @@ describe("clean Stage 6 narration contracts", () => {
             materialTextSource: "accepted_value",
             copyMode: "copy_exact",
           },
-          {
-            factRef: "e2.f2",
-            proseUse: "exact_texture_sentence",
-            materialText: "Rain taps the brass gutters",
-            materialTextSource: "accepted_value",
-            copyMode: "copy_exact",
-          },
         ],
         materialObligations: {
-          allowedMaterialFactRefs: ["e2.f1", "e2.f2"],
-          coreMaterialFactRefs: ["e2.f1", "e2.f2"],
-          exactCopyFactRefs: ["e2.f1", "e2.f2"],
+          allowedMaterialFactRefs: ["e2.f1"],
+          coreMaterialFactRefs: ["e2.f1"],
+          exactCopyFactRefs: ["e2.f1"],
           preserveTokenFactRefs: [],
           phraseFromMaterialFactRefs: [],
           citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
@@ -1972,7 +1965,7 @@ describe("clean Stage 6 narration contracts", () => {
         textureCue: {
           mode: "copy_exact_texture_sentence",
           playerFacingUse: "standalone_context_sentence",
-          allowedTextureFactRefs: ["e2.f1", "e2.f2"],
+          allowedTextureFactRefs: ["e2.f1"],
         },
         adventureCue: {
           subjectFocus: "accepted_texture",
@@ -3136,9 +3129,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
   });
 
-  it("accepts standalone elapsed-time prose by structured scene_texture refs", () => {
+  it("accepts standalone elapsed-time prose with the selected texture frame", () => {
     const view = timeWithSceneTextureView();
-    const firstTexture = validateCleanNarrationCandidate({
+    const reserveTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
@@ -3156,9 +3149,9 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(firstTexture.status).toBe("accepted");
+    expect(reserveTexture.status).toBe("rejected");
 
-    const laterTexture = validateCleanNarrationCandidate({
+    const selectedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
@@ -3176,7 +3169,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(laterTexture.status).toBe("accepted");
+    expect(selectedTexture.status).toBe("accepted");
   });
 
   it("allows standalone elapsed-time prose to use later scene_texture when route options are only contextual evidence", () => {
@@ -3372,7 +3365,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(stockRouteListShape.status).toBe("accepted");
 
-    const laterTextureRepeatedByRoute = validateCleanNarrationCandidate({
+    const reserveTextureRepeatedByRoute = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
@@ -3389,7 +3382,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(laterTextureRepeatedByRoute.status).toBe("accepted");
+    expect(reserveTextureRepeatedByRoute.status).toBe("rejected");
 
     const paraphrasedTexture = validateCleanNarrationCandidate({
       view,
@@ -3456,7 +3449,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Market stalls surround you while the visible way leads to North Hall.");
   });
 
-  it("accepts repeated first scene_texture in standalone elapsed-time runtime prose without prose-quality repair", async () => {
+  it("accepts selected scene_texture in standalone elapsed-time runtime prose without prose-quality repair", async () => {
     const view = timeWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3466,9 +3459,9 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         return acceptedCandidate(view, [
           {
-            text: "Canvas awnings hang over the market lanes.",
+            text: "Rain taps the brass gutters.",
             evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f1"],
+            backendFactRefs: ["e2.f2"],
             claimKinds: ["scene_texture"],
           },
           {
@@ -3483,7 +3476,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass in Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
   });
 
   it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {
@@ -3509,7 +3502,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("The Brass Tube passes from Player to Guide and is carried at Market.");
   });
 
-  it("accepts first scene_texture reuse for dialogue_response at runtime without prose-quality repair", async () => {
+  it("accepts selected scene_texture frame for dialogue_response at runtime without prose-quality repair", async () => {
     const view = dialogueWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3520,9 +3513,9 @@ describe("clean Stage 6 narration contracts", () => {
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [
           {
-            text: "Canvas awnings hang over the market lanes.",
+            text: "Rain taps the brass gutters.",
             evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f1"],
+            backendFactRefs: ["e2.f2"],
             claimKinds: ["scene_texture"],
           },
           {
@@ -3537,7 +3530,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Canvas awnings hang over the market lanes. At Market, Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
   });
 
   it("accepts missing scene_texture for support_actor_materialization at runtime without prose-quality repair", async () => {
@@ -3860,13 +3853,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(missingTexture.status).toBe("accepted");
 
-    const firstTexture = validateCleanNarrationCandidate({
+    const selectedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -3877,7 +3870,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("accepted");
+    expect(selectedTexture.status).toBe("accepted");
   });
 
   it("renders support actor materialization without inventing dialogue or services", () => {
@@ -3972,9 +3965,9 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -3987,7 +3980,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is now in view at Market as a vendor.");
+    expect(result.text).toBe("Rain taps the brass gutters. Local Vendor is now in view at Market as a vendor.");
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4123,13 +4116,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(missingTexture.status).toBe("accepted");
 
-    const firstTexture = validateCleanNarrationCandidate({
+    const selectedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -4140,7 +4133,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("accepted");
+    expect(selectedTexture.status).toBe("accepted");
   });
 
   it("renders item_state evidence without expanding it into dialogue, discovery, use, consent, or no-change", () => {
@@ -4233,9 +4226,9 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -4248,7 +4241,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. The Brass Tube passes from Player to Guide and is carried at Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. The Brass Tube passes from Player to Guide and is carried at Market.");
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
@@ -4485,13 +4478,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(missingTexture.status).toBe("accepted");
 
-    const firstTexture = validateCleanNarrationCandidate({
+    const selectedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -4502,7 +4495,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("accepted");
+    expect(selectedTexture.status).toBe("accepted");
   });
 
   it("renders local_observation evidence without broad absence, discovery, route truth, device status, or no-change", () => {
@@ -4633,13 +4626,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Rain taps the brass gutters. The central telegraph desk is in view here.");
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
 
-    const firstTextureRepeated = validateCleanNarrationCandidate({
+    const selectedTextureRepeated = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -4650,7 +4643,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTextureRepeated.status).toBe("accepted");
+    expect(selectedTextureRepeated.status).toBe("accepted");
 
     const omittedTexture = validateCleanNarrationCandidate({
       view,
@@ -4674,7 +4667,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(uncitedTexture.status).toBe("accepted");
 
-    const wrongCitedTexture = validateCleanNarrationCandidate({
+    const reserveCitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
         text: "Market stalls surround you while the central telegraph desk is in view here.",
@@ -4683,7 +4676,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target", "scene_texture"],
       }]),
     });
-    expect(wrongCitedTexture.status).toBe("accepted");
+    expect(reserveCitedTexture.status).toBe("rejected");
   });
 
   it("uses model-authored local_observation movement-option prose without hidden placeholders", async () => {
@@ -4944,13 +4937,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(missingTexture.status).toBe("accepted");
 
-    const firstTexture = validateCleanNarrationCandidate({
+    const selectedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f1"],
+          backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
         },
         {
@@ -4961,7 +4954,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(firstTexture.status).toBe("accepted");
+    expect(selectedTexture.status).toBe("accepted");
   });
 
   it("accepts device no-surface wording when typed refs remain bounded", () => {

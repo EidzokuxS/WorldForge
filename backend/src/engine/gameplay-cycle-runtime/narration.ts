@@ -612,6 +612,41 @@ function sentencePlanPreferredFactRefs(
     .map((factUse) => factUse.factRef);
 }
 
+function pageTextureFrameRole(
+  coreProseCues: readonly CleanNarratorProseCue[],
+): "detail_frame" | "social_frame" | "spatial_frame" {
+  if (coreProseCues.some((cue) =>
+    cue === "device_surface_observation"
+    || cue === "elapsed_time"
+    || cue === "item_state"
+    || cue === "minor_poi_handle"
+    || cue === "player_local_condition"
+  )) {
+    return "detail_frame";
+  }
+  if (coreProseCues.some((cue) =>
+    cue === "dialogue_response"
+    || cue === "local_observation"
+    || cue === "support_actor_materialization"
+  )) {
+    return "social_frame";
+  }
+  return "spatial_frame";
+}
+
+function selectFrameTextureFactRefs(
+  move: CleanNarratorPageTaskMove,
+  coreProseCues: readonly CleanNarratorProseCue[],
+): string[] {
+  const textureFactRefs = sentencePlanPreferredFactRefs(move, ["exact_texture_sentence"]);
+  if (textureFactRefs.length <= 1) return textureFactRefs;
+
+  const frameRole = pageTextureFrameRole(coreProseCues);
+  if (frameRole === "detail_frame") return [textureFactRefs[textureFactRefs.length - 1]!];
+  if (frameRole === "social_frame") return [textureFactRefs[Math.min(1, textureFactRefs.length - 1)]!];
+  return [textureFactRefs[0]!];
+}
+
 function sentencePlanHasProseUse(
   move: CleanNarratorPageTaskMove,
   proseUse: CleanNarratorFactUse["proseUse"],
@@ -966,6 +1001,7 @@ function sentencePlanForMove(
   sentenceIndex: number,
   claimKindsByEntryRef: Map<string, CleanNarrationClaimKind[]>,
   claimKindsByFactRef: Map<string, CleanNarrationClaimKind[]>,
+  coreProseCues: readonly CleanNarratorProseCue[],
 ): CleanNarratorSentencePlanDraft[] {
   const steps: CleanNarratorSentencePlanDraft[] = [];
   const pushPlan = (
@@ -1000,7 +1036,7 @@ function sentencePlanForMove(
       pushPlan("clarification_question", "required", sentencePlanPreferredFactRefs(move, ["primary_beat", "supporting_detail"]));
       break;
     case "establish_playable_context":
-      pushPlan("exact_context_texture", move.coverage, sentencePlanPreferredFactRefs(move, ["exact_texture_sentence"]));
+      pushPlan("exact_context_texture", move.coverage, selectFrameTextureFactRefs(move, coreProseCues));
       pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
       break;
     case "render_authoritative_turn_event":
@@ -1693,12 +1729,16 @@ function buildCleanNarrativePageTask(
     };
   });
   const sentencePlanDrafts: CleanNarratorSentencePlanDraft[] = [];
+  const coreProseCues = uniqueStrings(moves
+    .filter((move) => move.coverage === "required")
+    .flatMap((move) => move.entryProseCues)) as CleanNarratorProseCue[];
   for (const move of moves) {
     sentencePlanDrafts.push(...sentencePlanForMove(
       move,
       sentencePlanDrafts.length,
       claimKindsByEntryRef,
       claimKindsByFactRef,
+      coreProseCues,
     ));
   }
   const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
@@ -1855,7 +1895,8 @@ export function buildCleanNarrationSystemPrompt(
     "Material obligations: each sentencePlan step carries materialObligations. Cite backendFactRefs only from allowedMaterialFactRefs on the cited sentencePlanRefs, include at least one coreMaterialFactRefs value, copy exactCopyFactRefs materials exactly when used, preserve labels/time/state from preserveTokenFactRefs, and phrase phraseFromMaterialFactRefs into natural adventure prose.",
     "Flow cues: each sentencePlan step includes flowCue.pagePosition, flowCue.transitionRole, and flowCue.readerEffect. Use flowCue to connect sentence objects as opening, continuation, closing, or single-beat page flow while preserving the cited refs for every claim.",
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
-    "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns public scene texture and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
+    "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns the selected public scene texture frame and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
+    "Selected texture frame: when accepted scene_texture has multiple backend facts, the page task places the chosen page frame in textureCue.allowedTextureFactRefs and materialObligations for the texture sentence. Other accepted texture facts remain proof context, not default player-facing prose for this page.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
     "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
@@ -1875,7 +1916,7 @@ export function buildCleanNarrationSystemPrompt(
     "Echo firewall: the player's request wording is already spent before Stage 6; answer the accepted outcome with fresh scene wording and preserve only accepted labels or quotes.",
     "Texture scope: use concrete sensory, room, body, and emotional-temperature detail only when it is already present in accepted backendFacts; every texture beat must point to a cited visible fact.",
     "Scene-texture evidence: scene_texture may color the prose with public current-scene description texture only. It does not prove route truth, movement, actor action, discovery, absence, no-change, item state, or private knowledge.",
-    "Scene-texture exactness: when textureCue.mode is copy_exact_texture_sentence, set sentence.text to one exact contiguous accepted scene-texture material from textureCue.allowedTextureFactRefs, with the matching backendFactRefs for that clause.",
+    "Scene-texture exactness: when textureCue.mode is copy_exact_texture_sentence, set sentence.text to the selected exact contiguous accepted scene-texture material from textureCue.allowedTextureFactRefs, with the matching backendFactRefs for that clause.",
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose the sentence opening from proseAssembly.openingSource, adventureCue.subjectFocus, and adventureCue.verbFrame; vary sentence shape through proseAssembly.sentenceShape, detailRhythm, materialWeaveOrder, and styleBudget while keeping refs unchanged.",

@@ -7402,3 +7402,24 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `db-proof.json` passed all assertions, including old-store zeros, receipt order, refreshed-frame dialogue boundary, post-frame actor visibility, unchanged `Brass Tube` custody with `Mira Voss` as `carried`, and absence of setup/service/debug prose outside the accepted quote.
     - Verified: prose audit passed with 1 result, 112 words, zero hits, zero list-like starts, and zero `youOpening`.
     - Executed: no code patch was needed for this slice; P273's `support_actor_presence` primary beat also held in the composed support+dialogue path.
+
+- P275 Stage 6 selected texture-frame prose plan:
+  - Plan:
+    - [x] Fix the repeated-location-digest shape by giving Stage 6 a typed single texture-frame selection per story page.
+    - [x] Keep accepted `scene_texture` evidence available as proof context while narrowing `sentencePlan` material obligations for the texture sentence to the selected frame fact.
+    - [x] Update the prompt contract so the narrator copies the selected texture frame and treats other accepted texture facts as reserve context, not default prose.
+    - [x] Update focused narration tests proving route-choice/context pages carry one selected texture fact in `preferredBackendFactRefs`, `proseMaterials`, `materialObligations`, and `textureCue`.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, diff/GitNexus checks, live proof, journal, commit/push/index if runtime code changed.
+  - Review:
+    - Executed: added typed Stage 6 texture-frame selection in `backend/src/engine/gameplay-cycle-runtime/narration.ts`. Route/context pages select the spatial frame, social pages select the social frame, and detail/state pages select the detail frame while accepted `scene_texture` evidence remains available as proof context.
+    - Executed: narrowed `establish_playable_context` sentence plans so `preferredBackendFactRefs`, `proseMaterials`, `materialObligations`, and `textureCue.allowedTextureFactRefs` carry the selected texture fact for the player-facing texture sentence.
+    - Executed: updated clean narration prompt contract to state that `mode=copy_exact_texture_sentence` owns the selected public scene texture frame, while reserve accepted texture facts remain proof context for the page.
+    - Verified: focused narration suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` with 104/104 tests.
+    - Verified: expanded clean-runtime suite passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` with 372/372 tests.
+    - Verified: `npm --prefix backend run typecheck` passed, `git diff --check` passed with only existing LF/CRLF warnings, and literal runtime scans for `= /`, `.test(`, and `replace(` in `narration.ts` returned no matches.
+    - Verified: GitNexus impact before edits reported LOW risk for `sentencePlanForMove`, `sentencePlanPreferredFactRefs`, and `buildCleanNarrationSystemPrompt`; `gitnexus_detect_changes(scope=all)` reported LOW affected scope before live proof.
+    - Verified: live proof artifact `output/clean-runtime-p275-selected-texture-route-live-20260614-115000` cloned `p69-item-transfer-045651`, ran `What routes can I take from here?`, settled through `gameplay-cycle-runtime`, left `mutationApplied=false`, and kept old runtime stores at zero.
+    - Verified: live player-facing narrative used one selected texture sentence plus the route beat: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From Lowwater Bazaar, the one-minute routes fan open in every direction: Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, Upper Dam Ruins.`
+    - Verified: `db-proof.json` passed assertions that all three accepted texture facts remained in `narratorView.acceptedEvidence`, while the final narrative copied only `e2.f1` and omitted reserve texture facts `e2.f2` and `e2.f3`.
+    - Verified: diagnostic prose audit recognized one `result.json`, counted 50 words, and reported zero hits, zero list-like starts, and zero `youOpening`.
+    - Executed: isolated backend proof server used port `31746` with PID `17692`; after proof it was stopped and the final port check returned zero connections.
