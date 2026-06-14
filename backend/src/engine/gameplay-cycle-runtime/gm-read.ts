@@ -132,6 +132,7 @@ export const gmReadModelGenerationSchema = gmReadSchema.extend({
   liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
   uncertainty: gmReadGenerationUncertaintySchema.optional(),
   actionInterpretation: gmReadActionInterpretationSchema.extend({
+    method: z.string().trim().max(500).nullable().optional(),
     targetRefs: z.array(gmReadGenerationModelSafeRef).max(12).optional(),
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
@@ -360,6 +361,19 @@ function normalizeGmReadTargetRefsCandidate(candidate: unknown): unknown {
   };
 }
 
+function normalizeGmReadMethodCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation) || Object.hasOwn(actionInterpretation, "method")) return candidate;
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      method: null,
+    },
+  };
+}
+
 function normalizeGmReadLocalObservationTargetCandidate(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const actionInterpretation = candidate.actionInterpretation;
@@ -380,7 +394,8 @@ function normalizeGmReadLocalObservationTargetCandidate(candidate: unknown): unk
 
 function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
   const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(candidate);
-  const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedUncertainty);
+  const normalizedMethod = normalizeGmReadMethodCandidate(normalizedUncertainty);
+  const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedMethod);
   const normalizedLocalObservation = normalizeGmReadLocalObservationTargetCandidate(normalizedTargetRefs);
   const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedLocalObservation);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;

@@ -2647,6 +2647,51 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.repairAttempted).toBe(true);
   });
 
+  it("canonicalizes omitted GM-read method as null for visible actor observations", async () => {
+    const frame = localObservationFrame({
+      playerAction: "Who is visible nearby?",
+    });
+    const read = {
+      ...localObservationGmRead(frame),
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "Which visible actor surface should Stage 4 list?",
+      actionInterpretation: {
+        summary: "The player asks which people are visible nearby.",
+        playerIntent: "List visible people nearby.",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation" as const,
+        localObservationNeed: {
+          actorRef: "Player" as const,
+          mode: "list_surface" as const,
+          queryText: "visible people nearby",
+          targetRef: null,
+          surfaceKinds: ["visible_actor" as const],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "Visible actor listing needs a bounded local observation receipt.",
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(read).success).toBe(true);
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => read,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.repairAttempted).toBe(false);
+    expect(result.read.actionInterpretation.method).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed).toMatchObject({
+      mode: "list_surface",
+      targetRef: null,
+      surfaceKinds: ["visible_actor"],
+    });
+    expect(gmReadSchema.parse(result.read).actionInterpretation.method).toBeNull();
+  });
+
   it("repairs an exact current-frame handoff into typed item_transfer admission", async () => {
     const frame = itemTransferActionPlanFrame();
     const calls: string[] = [];

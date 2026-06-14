@@ -8257,3 +8257,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p307-scene-texture-boundary-live-20260615-001500/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 4 touched settlement symbols, 4 changed files, and no affected processes.
     - Verified commit/push: code commit `27e49cf7` pushed to `develop`.
+
+- P308 clean GM-read nullable method contract:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p308-prose-scan-20260615-002200` passed 11/12 probes after P307; `visible-actors` failed before settlement with `CleanGmReadGenerationError`.
+    - [x] Root owner is the Stage 3 GM-read model-output schema: `actionInterpretation.method` is nullable in meaning, but generation schema required the property. The visible-actor observation output omitted it, native JSON validation failed, and clean runtime restored the pre-turn state.
+  - Plan:
+    - [x] Run GitNexus impact for the indexed GM-read validation path before editing.
+    - [x] Make model-generation `actionInterpretation.method` optional while canonical `GmRead` stores omitted method as `null`.
+    - [x] Add contract coverage for generated visible-actor observation without `method`.
+    - [x] Run focused GM-read/runtime tests, full clean-runtime slice, typecheck, live visible-actors proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] `Who is visible nearby?` settles through clean runtime instead of restoring pre-turn state.
+    - [x] Accepted GM-read/action checklist/stage4 evidence keeps method absence as `null`, with no invented action method.
+    - [x] Final narration lists accepted visible actor presence and adds no dialogue, movement, item state, hidden discovery, absence/no-change, private fact, or route truth.
+  - Review:
+    - Executed: GM-read model generation now accepts omitted `actionInterpretation.method`, and `normalizeGmReadCandidateForValidation()` canonicalizes that absence to `method: null` before strict `gmReadSchema` validation.
+    - Verified focused contract test: generated visible-actor observation without `method` is accepted by `gmReadModelGenerationSchema`, returns from `runCleanGmRead()` with `method: null`, and still parses through canonical `gmReadSchema`.
+    - Verified GitNexus impacts: `validateGmReadCandidate`, `runCleanGmRead`, and `normalizeGmReadCandidateForValidation` returned LOW risk; `gmReadActionInterpretationSchema` / `gmReadModelGenerationSchema` are not indexed as named symbols.
+    - Verified focused contract suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts --run` -> 210/210 passed.
+    - Verified expanded clean-runtime suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 387/387 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck` passed.
+    - Verified live P308 proof inside `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000`: `visible-actors` settled through `gameplay-cycle-runtime`, applied no mutation, kept old runtime stores zero, accepted `local_observation` evidence for Guide, and rendered `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Guide is in sight at Lowwater Bazaar.`
+    - Verified focused visible-actors prose audit `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000/visible-actors-prose-audit.json`: one narrative, 28 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Diagnostic for next slice: the same after-fix scan exposed a separate `player-condition` narration validation failure after settlement: sentence 1 cited current-scene evidence outside its page move/sentence-plan refs. Treat this as P309, separate from the GM-read nullable-method contract.
