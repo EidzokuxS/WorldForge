@@ -8212,7 +8212,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Change bounded negative sentence-plan material so query and scene drive the prose while `local_observation_beat` proves the bounded no-match.
     - [x] Update focused narration tests for query/scene-driven bounded no-match prose.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live bounded-negative proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live bounded negative local observation settles through clean runtime and reads as a compact scene observation, not a backend visibility formula.
     - [x] Exact query text and scene anchor remain preserved.
@@ -8227,3 +8227,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Violet Astrolabe does not stand out in the visible scene at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p306-bounded-negative-live-20260614-235814/prose-audit.json`: one narrative, 32 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 6 touched symbols, 6 changed files, and no affected processes.
+    - Verified commit/push/index: code commit `d9567dd0` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
