@@ -7068,7 +7068,6 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `npm --prefix backend run typecheck` passed.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
-    - Executed: code commit `cfa63d19` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
 
 - P260 Stage 6 sentence claim focus:
   - Plan:
@@ -7089,3 +7088,25 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `npm --prefix backend run typecheck` passed.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
+    - Executed: code commit `cfa63d19` and journal commit `fef0b32a` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P261 Stage 6 sentence material obligations:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task/validation symbols.
+    - [x] Add sentence-level `materialObligations` derived from typed `proseMaterials`.
+    - [x] Separate allowed material fact refs, core material fact refs, exact-copy refs, preserve-token refs, and phrase-from-material refs.
+    - [x] Validate that output backendFactRefs come from the material obligations of cited sentencePlanRefs.
+    - [x] Teach the prompt to use material obligations as the concrete evidence payload for each RPG sentence.
+    - [x] Update focused narration tests for movement, dialogue/context, route options, and off-plan material rejection.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added sentence-level `materialObligations` with allowed, core, exact-copy, preserve-token, and phrase-from-material backend fact groups.
+    - Executed: derived obligations from the already-owned `proseMaterials`; supporting receipt details now remain plan-owned material while core material stays distinct.
+    - Executed: validation now requires output `backendFactRefs` to come from `materialObligations.allowedMaterialFactRefs` on cited `sentencePlanRefs`, with at least one core material fact.
+    - Executed: Stage 6 prompt and repair guidance now tell the narrator to use material obligations as the concrete evidence payload for each RPG sentence.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope in `runCleanNarration` Stage 6 flow coverage.
+    - Executed: code commit `11d960af` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
