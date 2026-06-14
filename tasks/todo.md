@@ -8150,3 +8150,27 @@ Session: `gm-v1-consequenc-slice`.
     - Verified GitNexus impact: `directSceneSnapshotPromptEvidence` LOW, no upstream affected processes; `selectPromptAcceptedEvidence` LOW, direct caller `buildCleanNarratorPromptInput`, affected process `runCleanNarration`.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope summary, 2 touched indexed symbols, 3 changed files, affected process family `runCleanNarration`, and no HIGH/CRITICAL impact results.
     - Verified commit/push/index: code commit `ab611659` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
+
+- P304 Stage 6 dialogue context-anchor ownership:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p303-prose-scan-20260614-233000` shows `Guide, what do you know about the Brass Tube?` settling through clean runtime, but Stage 6 inserts a standalone scene-anchor sentence between accepted texture and accepted dialogue: `Lowwater Bazaar holds its grid of lashed platforms and shouting bidders around you.`
+    - [x] Root owner is Stage 6 sentence planning: the accepted dialogue receipt owns the spoken event, the selected scene texture owns the frame, and the optional `context_anchor` sentence gives scene placement an extra player-facing slot on a dialogue page.
+  - Plan:
+    - [x] Run GitNexus impact for `sentencePlanForMove` before editing.
+    - [x] Suppress standalone `context_anchor` for dialogue-response pages while preserving texture frame and dialogue event material.
+    - [x] Update focused narration tests so dialogue pages use texture plus dialogue beat, without separate scene placement.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live dialogue proof, and prose audit.
+    - [x] Run GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live dialogue settles through clean runtime and reads as texture plus accepted quote/response.
+    - [x] Exact speaker and accepted dialogue quote remain present.
+    - [x] Narration adds no extra scene truth, movement, item ownership/state change, NPC action beyond the accepted utterance, discovery, absence/no-change, private fact, or route truth.
+  - Review:
+    - Executed: `sentencePlanForMove` now suppresses the standalone `context_anchor` only when a dialogue page's context move owns accepted `scene_texture`; no-texture dialogue still keeps scene-anchor framing.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 115/115 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 386/386 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p304-dialogue-context-live-20260614-235000`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `dialogue_record` receipt present, legacy runtime stores stayed 0, sentence-plan had one texture frame and one dialogue event with no `context_anchor`, and accepted text was `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Guide says: "Ah, the Brass Tube — you carry it well. That casing is charter-stamped; it's a courier's sealed dispatch tube, meant for the bond-clerks at Charter Gallery. Whatever's rolled inside was sealed by the sender and can only be read by the addressee, so handle it carefully. Don't force the cap — the locking ring will bend if you lever it."`
+    - Verified prose audit `output/clean-runtime-p304-dialogue-context-live-20260614-235000/prose-audit.json`: one narrative, 79 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.

@@ -3987,10 +3987,10 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
-            evidenceRefs: ["e1", "e3"],
-            backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
-            claimKinds: ["dialogue_response", "current_scene"],
+            text: 'Guide answers: "The north stairs flooded before dawn."',
+            evidenceRefs: ["e1"],
+            backendFactRefs: ["e1.f1", "e1.f2"],
+            claimKinds: ["dialogue_response"],
           },
         ]);
       },
@@ -3998,7 +3998,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Rain taps the brass gutters. Guide answers: "The north stairs flooded before dawn."');
   });
 
   it("accepts missing scene_texture for support_actor_materialization at runtime without prose-quality repair", async () => {
@@ -4454,6 +4454,10 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses later accepted scene_texture for dialogue_response prose when texture is available", async () => {
     const view = dialogueWithSceneTextureView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
+      step.sentenceRole === "context_anchor"
+    )).toBe(false);
     const result = await runCleanNarration({
       narratorView: view,
       provider,
@@ -4465,16 +4469,16 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
-          claimKinds: ["dialogue_response", "current_scene"],
+          text: 'Guide answers: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f2"],
+          claimKinds: ["dialogue_response"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Rain taps the brass gutters. Guide answers: "The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(Route option|receipt|durable world fact|confirmed by the world|either|or)\b/iu);
   });
 
@@ -4483,10 +4487,10 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
-        evidenceRefs: ["e1", "e3"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
-        claimKinds: ["dialogue_response", "current_scene"],
+        text: 'Guide answers: "The north stairs flooded before dawn."',
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2"],
+        claimKinds: ["dialogue_response"],
       }]),
     });
     expect(missingTexture.status).toBe("accepted");
@@ -4501,10 +4505,10 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
-          claimKinds: ["dialogue_response", "current_scene"],
+          text: 'Guide answers: "The north stairs flooded before dawn."',
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f2"],
+          claimKinds: ["dialogue_response"],
         },
       ]),
     });
