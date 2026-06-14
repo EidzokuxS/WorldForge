@@ -8324,7 +8324,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update focused settlement/narration tests for inventory observation prose.
     - [x] Fix the adjacent typed GM Read generation contract for omitted `list_surface.localObservationNeed.queryText` by canonicalizing it from `SceneFrame.playerAction` before strict validation.
     - [x] Run focused tests, expanded clean-runtime tests, typecheck, live inventory/object proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live `What am I carrying?` and `Look at the Brass Tube.` settle through clean runtime with item-centered with-player prose.
     - [x] Accepted item labels remain exact and complete.
@@ -8338,3 +8338,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: inventory queryText canonicalized to `What am I carrying?`; object queryText stayed `Brass Tube`.
     - Verified: accepted local-observation beats were `Courier satchel, Sealed lacquer message tube, and Brass Tube are with you.` and `Brass Tube is with you.`, and both narratives included those exact sentences with no `You have`.
     - Verified prose audit `output/clean-runtime-p310-inventory-localobs-final-r2-20260615-011200/prose-audit.json`: 2 narratives, average 29.5 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified commit/push/index: P310 implementation commit `8f761b0b` recorded the code/test/proof changes; final record commit pushed to `develop`; GitNexus re-indexed final HEAD with embeddings.
