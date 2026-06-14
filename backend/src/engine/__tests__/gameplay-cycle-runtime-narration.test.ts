@@ -1052,13 +1052,13 @@ function localObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "local_observation_receipt",
       claimKinds: ["local_observation", "bounded_visibility_negative"],
-      text: "Among what is visible at Market, Violet Astrolabe does not appear.",
+      text: "Violet Astrolabe does not stand out in the visible scene at Market.",
       backendFacts: [
-        { factRef: "e1.f1", role: "local_observation_beat", value: "Among what is visible at Market, Violet Astrolabe does not appear.", text: "Local observation beat: Among what is visible at Market, Violet Astrolabe does not appear.", exact: true },
-        { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible actors and visible targets.", exact: true },
-        { factRef: "e1.f3", role: "observation_query", text: "Observation query: Violet Astrolabe.", exact: true },
-        { factRef: "e1.f4", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f5", role: "anchor_location", text: "Anchor location: Market.", exact: true },
+        { factRef: "e1.f1", role: "local_observation_beat", value: "Violet Astrolabe does not stand out in the visible scene at Market.", text: "Local observation beat: Violet Astrolabe does not stand out in the visible scene at Market.", exact: true },
+        { factRef: "e1.f2", role: "searched_visible_surfaces", value: "visible actors and visible targets", text: "Searched visible surfaces: visible actors and visible targets.", exact: true },
+        { factRef: "e1.f3", role: "observation_query", value: "Violet Astrolabe", text: "Observation query: Violet Astrolabe.", exact: true },
+        { factRef: "e1.f4", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f5", role: "anchor_location", value: "Market", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["bounded no-match against enumerated current visible entries"],
@@ -3340,7 +3340,7 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Oracle projection requires accepted selected visible outcome value evidence.");
 
     expect(renderCleanAuthorityProjection(withOpaqueFactText(localObservationView(), "local_observation_beat")))
-      .toBe("Among what is visible at Market, Violet Astrolabe does not appear.");
+      .toBe("Violet Astrolabe does not stand out in the visible scene at Market.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(localObservationView(), "local_observation_beat")))
       .toThrow("Local-observation projection requires accepted Local observation beat value evidence.");
 
@@ -5241,7 +5241,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For local_observation");
     const text = renderCleanAuthorityProjection(localObservationView());
 
-    expect(text).toBe("Among what is visible at Market, Violet Astrolabe does not appear.");
+    expect(text).toBe("Violet Astrolabe does not stand out in the visible scene at Market.");
     expect(text).not.toMatch(/\b(SceneFrame|worldVersion|surface entry)\b/u);
     expect(text).not.toMatch(/\b(absent|does not exist|nowhere|discover|route|phone|device|nothing changed|no change)\b/iu);
 
@@ -5312,13 +5312,14 @@ describe("clean Stage 6 narration contracts", () => {
       step.beatObjective === "render_local_observation"
     );
 
-    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f3", "e1.f4"]);
-    expect(observationStep?.proseMaterials.map((material) => material.factRef)).toEqual(["e1.f1", "e1.f3", "e1.f4"]);
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f3", "e1.f4", "e1.f1"]);
+    expect(observationStep?.proseMaterials.map((material) => material.factRef)).toEqual(["e1.f3", "e1.f4", "e1.f1"]);
     expect(observationStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
-      "primary_beat",
-      "supporting_detail",
+      "label_anchor",
       "scene_anchor",
+      "primary_beat",
     ]);
+    expect(observationStep?.proseAssembly.materialWeaveOrder).toBe("query_scene_then_bounded_no_match_proof");
 
     let modelCalls = 0;
     const result = await runCleanNarration({
@@ -5327,9 +5328,9 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => {
         modelCalls += 1;
         return acceptedCandidate(view, [{
-          text: "Among what is visible at Market, Violet Astrolabe does not appear.",
+          text: "Violet Astrolabe does not stand out in the visible scene at Market.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f3", "e1.f4", "e1.f1"],
           claimKinds: ["local_observation", "bounded_visibility_negative"],
         }]);
       },
@@ -5337,7 +5338,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Among what is visible at Market, Violet Astrolabe does not appear.");
+    expect(result.text).toBe("Violet Astrolabe does not stand out in the visible scene at Market.");
   });
 
   it("uses model-authored local_observation prose when accepted scene_texture is available", async () => {

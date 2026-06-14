@@ -1404,15 +1404,21 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
-    expect(observation?.text).toBe("Among what is visible at Market, Violet Astrolabe does not appear.");
+    expect(observation?.text).toBe("Violet Astrolabe does not stand out in the visible scene at Market.");
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: Among what is visible at Market, Violet Astrolabe does not appear.",
+      "Local observation beat: Violet Astrolabe does not stand out in the visible scene at Market.",
       "Searched visible surfaces: visible actors and visible targets.",
       "Observation query: Violet Astrolabe.",
       "Anchor scene: Market.",
       "Anchor location: Market.",
     ]);
-    expect(observation?.backendFacts[0]?.value).toBe("Among what is visible at Market, Violet Astrolabe does not appear.");
+    expect(observation?.backendFacts.map((entry) => entry.value)).toEqual([
+      "Violet Astrolabe does not stand out in the visible scene at Market.",
+      "visible actors and visible targets",
+      "Violet Astrolabe",
+      "Market",
+      "Market",
+    ]);
     expect(observation?.limits.proves).toEqual([
       "bounded no-match against enumerated current visible entries",
     ]);

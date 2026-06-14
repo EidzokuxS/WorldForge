@@ -294,7 +294,7 @@ function localObservationStoryBeat(observation: {
   anchorSceneLabel: string;
 }): string {
   if (observation.resultKind === "bounded_no_match") {
-    return `Among what is visible at ${observation.anchorSceneLabel}, ${observation.queryText} does not appear.`;
+    return `${observation.queryText} does not stand out in the visible scene at ${observation.anchorSceneLabel}.`;
   }
   if (observation.matchedEntries.length === 0) {
     throw new Error("Local observation story evidence requires matched entries for non-negative results.");
@@ -955,8 +955,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           : ["local_observation", "visible_target"];
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
         { role: "local_observation_beat", text: `Local observation beat: ${localBeat}`, value: localBeat },
-        { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.` },
-        { role: "observation_query", text: `Observation query: ${observation.queryText}.` },
+        { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.`, value: surfaceGroup },
+        { role: "observation_query", text: `Observation query: ${observation.queryText}.`, value: observation.queryText },
         ...(observedLabels.length > 0
           ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${observedLabelList}.`, value: observedLabelList }]
           : []),
@@ -966,8 +966,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         ...(observedSurfaceLabels.length > 0
           ? [{ role: "observed_entry_surfaces" as const, text: `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.` }]
           : []),
-        { role: "anchor_scene", text: `Anchor scene: ${observation.anchorSceneLabel}.` },
-        { role: "anchor_location", text: `Anchor location: ${observation.anchorLocationLabel}.` },
+        { role: "anchor_scene", text: `Anchor scene: ${observation.anchorSceneLabel}.`, value: observation.anchorSceneLabel },
+        { role: "anchor_location", text: `Anchor location: ${observation.anchorLocationLabel}.`, value: observation.anchorLocationLabel },
       ];
       evidence.push({
         evidenceId,

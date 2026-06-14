@@ -8201,3 +8201,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p305-item-transfer-endpoint-live-20260614-234006/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 5 touched narration symbols, 4 changed files, and no affected processes.
     - Verified commit/push/index: code commit `b40d575d` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
+
+- P306 Stage 6 bounded negative local-observation prose:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p306-prose-scan-20260614-234804` shows clean runtime still settling 12/12 probes after P305, but bounded no-match local observation reads like a visibility check: `Among what is visible at Lowwater Bazaar, no sheltered message stall appears.`
+    - [x] Root owner is local-observation material ownership: Stage 4 settlement exposes `observation_query` and `anchor_scene` only as labeled text, while Stage 6 prefers `local_observation_beat` as the surface for bounded negative pages.
+  - Plan:
+    - [x] Run GitNexus impact for settlement local-observation fact payload, `selectLocalObservationFactRefs`, local-observation prose assembly, and prompt contract before editing.
+    - [x] Give bounded negative local-observation facts typed `value` payloads for query and scene anchors.
+    - [x] Change bounded negative sentence-plan material so query and scene drive the prose while `local_observation_beat` proves the bounded no-match.
+    - [x] Update focused narration tests for query/scene-driven bounded no-match prose.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live bounded-negative proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live bounded negative local observation settles through clean runtime and reads as a compact scene observation, not a backend visibility formula.
+    - [x] Exact query text and scene anchor remain preserved.
+    - [x] Narration stays bounded to visible scene observation and adds no hidden discovery, broad absence, thorough search result, route truth, mutation, item state, dialogue, private fact, or no-change claim.
+  - Review:
+    - Verified fresh scan before the fix: `output/clean-runtime-p306-prose-scan-20260614-234804` passed 12/12 clean-runtime probes; bounded negative local observation still surfaced `Among what is visible at Lowwater Bazaar, no sheltered message stall appears.`
+    - Verified GitNexus impacts before edits: `localObservationStoryBeat`, `stage4Evidence`, `selectLocalObservationFactRefs`, `narrativeFactProseUse`, `sentencePlanProseAssembly`, and `buildCleanNarrationSystemPrompt` were LOW risk.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` passed 115 tests.
+    - Verified expanded runtime suite: `gameplay-cycle-runtime-contracts`, `gameplay-cycle-runtime-settlement`, and `gameplay-cycle-runtime-stage4` passed 271 tests.
+    - Verified typecheck: `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p306-bounded-negative-live-20260614-235814`: action `Do I see a Violet Astrolabe here?` settled through `gameplay-cycle-runtime`, accepted one `local_observation` bounded no-match receipt, applied no mutation, kept old runtime stores zero, preserved `observation_query=Violet Astrolabe`, preserved `anchor_scene=Lowwater Bazaar`, and used `query_scene_then_bounded_no_match_proof`.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Violet Astrolabe does not stand out in the visible scene at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p306-bounded-negative-live-20260614-235814/prose-audit.json`: one narrative, 32 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 6 touched symbols, 6 changed files, and no affected processes.
