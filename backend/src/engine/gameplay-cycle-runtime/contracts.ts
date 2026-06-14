@@ -2635,12 +2635,47 @@ const cleanNarratorPageArcSchema = z.object({
   ]),
 }).strict();
 
+const cleanNarratorStoryPageBriefSchema = z.object({
+  pageKind: z.enum([
+    "clarification_prompt_page",
+    "context_to_playable_choices_page",
+    "context_to_settled_result_page",
+    "playable_choices_page",
+    "settled_turn_page",
+  ]),
+  narratorStance: z.literal("second_person_present_player_view"),
+  proseRegister: z.literal("grounded_adventure_micro_page"),
+  compositionJob: z.enum([
+    "ask_accepted_clarification",
+    "land_settled_turn_result",
+    "place_context_then_land_result",
+    "place_context_then_offer_playable_choices",
+    "offer_playable_choices",
+  ]),
+  openingInstruction: z.enum([
+    "ask_accepted_question",
+    "begin_with_accepted_context",
+    "begin_with_playable_choices",
+    "begin_with_settled_result",
+  ]),
+  closingInstruction: z.enum([
+    "close_on_accepted_question",
+    "close_on_playable_handle",
+    "close_on_settled_result",
+  ]),
+  requiredMoveRefs: z.array(shortText).max(4),
+  optionalMoveRefs: z.array(shortText).max(4),
+  requiredSentenceRefs: z.array(shortText).max(6),
+  optionalSentenceRefs: z.array(shortText).max(6),
+}).strict();
+
 const cleanNarratorPageTaskSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-page-task.v1"),
   source: z.literal("derived_from_story_frame_page_plan"),
   referenceProfile: z.literal("zetta_micro_1_1_3_primary_ff5_micro_secondary"),
   pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
   truthBoundary: z.literal("accepted_evidence_only"),
+  storyPageBrief: cleanNarratorStoryPageBriefSchema,
   pageArc: cleanNarratorPageArcSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),

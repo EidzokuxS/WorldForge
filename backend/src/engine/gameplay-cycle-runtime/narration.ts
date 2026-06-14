@@ -390,6 +390,7 @@ type CleanNarratorFactUse = CleanNarratorPageTaskMove["factUses"][number];
 type CleanNarratorSentencePlanStep = CleanNarratorPromptInput["narrativePageTask"]["sentencePlan"][number];
 type CleanNarratorSentencePlanDraft = Omit<CleanNarratorSentencePlanStep, "flowCue">;
 type CleanNarratorPageArc = CleanNarratorPromptInput["narrativePageTask"]["pageArc"];
+type CleanNarratorStoryPageBrief = CleanNarratorPromptInput["narrativePageTask"]["storyPageBrief"];
 
 function evidenceIncludesClaimKind(
   evidence: AcceptedNarrationEvidence,
@@ -887,6 +888,96 @@ function buildCleanNarrativePageArc(
   };
 }
 
+function storyPageBriefKind(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorStoryPageBrief["pageKind"] {
+  switch (pageArc.arcShape) {
+    case "accepted_clarification_question":
+      return "clarification_prompt_page";
+    case "context_then_choice_handle":
+      return "context_to_playable_choices_page";
+    case "context_then_settled_result":
+      return "context_to_settled_result_page";
+    case "single_choice_handle":
+      return "playable_choices_page";
+    case "single_settled_result":
+      return "settled_turn_page";
+  }
+}
+
+function storyPageBriefCompositionJob(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorStoryPageBrief["compositionJob"] {
+  switch (pageArc.arcShape) {
+    case "accepted_clarification_question":
+      return "ask_accepted_clarification";
+    case "context_then_choice_handle":
+      return "place_context_then_offer_playable_choices";
+    case "context_then_settled_result":
+      return "place_context_then_land_result";
+    case "single_choice_handle":
+      return "offer_playable_choices";
+    case "single_settled_result":
+      return "land_settled_turn_result";
+  }
+}
+
+function storyPageBriefOpeningInstruction(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorStoryPageBrief["openingInstruction"] {
+  switch (pageArc.arcShape) {
+    case "accepted_clarification_question":
+      return "ask_accepted_question";
+    case "context_then_choice_handle":
+    case "context_then_settled_result":
+      return "begin_with_accepted_context";
+    case "single_choice_handle":
+      return "begin_with_playable_choices";
+    case "single_settled_result":
+      return "begin_with_settled_result";
+  }
+}
+
+function storyPageBriefClosingInstruction(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorStoryPageBrief["closingInstruction"] {
+  switch (pageArc.closingIntent) {
+    case "accepted_question":
+      return "close_on_accepted_question";
+    case "playable_next_action":
+      return "close_on_playable_handle";
+    case "settled_result":
+      return "close_on_settled_result";
+  }
+}
+
+function buildCleanStoryPageBrief(
+  pageArc: CleanNarratorPageArc,
+  moves: CleanNarratorPageTaskMove[],
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorStoryPageBrief {
+  return {
+    pageKind: storyPageBriefKind(pageArc),
+    narratorStance: "second_person_present_player_view",
+    proseRegister: "grounded_adventure_micro_page",
+    compositionJob: storyPageBriefCompositionJob(pageArc),
+    openingInstruction: storyPageBriefOpeningInstruction(pageArc),
+    closingInstruction: storyPageBriefClosingInstruction(pageArc),
+    requiredMoveRefs: moves
+      .filter((move) => move.coverage === "required")
+      .map((move) => move.moveRef),
+    optionalMoveRefs: moves
+      .filter((move) => move.coverage === "optional")
+      .map((move) => move.moveRef),
+    requiredSentenceRefs: sentencePlan
+      .filter((step) => step.coverage === "required")
+      .map((step) => step.sentenceRef),
+    optionalSentenceRefs: sentencePlan
+      .filter((step) => step.coverage === "optional")
+      .map((step) => step.sentenceRef),
+  };
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
@@ -930,6 +1021,7 @@ function buildCleanNarrativePageTask(
     sentencePlanDrafts.push(...sentencePlanForMove(move, sentencePlanDrafts.length));
   }
   const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
+  const pageArc = buildCleanNarrativePageArc(moves);
 
   return {
     version: "gameplay-runtime.clean-narrator-page-task.v1",
@@ -937,7 +1029,8 @@ function buildCleanNarrativePageTask(
     referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
     pageGoal: "turn_changelog_to_grounded_text_rpg_page",
     truthBoundary: "accepted_evidence_only",
-    pageArc: buildCleanNarrativePageArc(moves),
+    storyPageBrief: buildCleanStoryPageBrief(pageArc, moves, sentencePlan),
+    pageArc,
     moves,
     sentencePlan,
   };
@@ -1873,6 +1966,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
+    "Story page brief: promptInput.narrativePageTask.storyPageBrief names the writer-facing page kind, second-person present stance, grounded adventure register, composition job, opening instruction, closing instruction, and required/optional move and sentence refs. Use it to turn the accepted changelog into one playable story page while keeping every claim inside cited evidence.",
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of facts.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",

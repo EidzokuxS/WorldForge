@@ -1324,6 +1324,18 @@ describe("clean Stage 6 narration contracts", () => {
       referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
       pageGoal: "turn_changelog_to_grounded_text_rpg_page",
       truthBoundary: "accepted_evidence_only",
+      storyPageBrief: {
+        pageKind: "settled_turn_page",
+        narratorStance: "second_person_present_player_view",
+        proseRegister: "grounded_adventure_micro_page",
+        compositionJob: "land_settled_turn_result",
+        openingInstruction: "begin_with_settled_result",
+        closingInstruction: "close_on_settled_result",
+        requiredMoveRefs: ["m1"],
+        optionalMoveRefs: [],
+        requiredSentenceRefs: ["s1"],
+        optionalSentenceRefs: [],
+      },
       pageArc: {
         arcShape: "single_settled_result",
         pageCadence: "single_compact_beat",
@@ -1432,6 +1444,18 @@ describe("clean Stage 6 narration contracts", () => {
       pageCadence: "context_then_result",
       readerPosture: "continue_from_settled_result",
       closingIntent: "settled_result",
+    });
+    expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
+      pageKind: "context_to_settled_result_page",
+      narratorStance: "second_person_present_player_view",
+      proseRegister: "grounded_adventure_micro_page",
+      compositionJob: "place_context_then_land_result",
+      openingInstruction: "begin_with_accepted_context",
+      closingInstruction: "close_on_settled_result",
+      requiredMoveRefs: ["m2"],
+      optionalMoveRefs: ["m1"],
+      requiredSentenceRefs: ["s2"],
+      optionalSentenceRefs: ["s1"],
     });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
@@ -1618,6 +1642,18 @@ describe("clean Stage 6 narration contracts", () => {
       pageCadence: "context_then_choice",
       readerPosture: "choose_visible_next_action",
       closingIntent: "playable_next_action",
+    });
+    expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
+      pageKind: "context_to_playable_choices_page",
+      narratorStance: "second_person_present_player_view",
+      proseRegister: "grounded_adventure_micro_page",
+      compositionJob: "place_context_then_offer_playable_choices",
+      openingInstruction: "begin_with_accepted_context",
+      closingInstruction: "close_on_playable_handle",
+      requiredMoveRefs: ["m2"],
+      optionalMoveRefs: ["m1"],
+      requiredSentenceRefs: ["s3"],
+      optionalSentenceRefs: ["s1", "s2"],
     });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
@@ -1859,6 +1895,18 @@ describe("clean Stage 6 narration contracts", () => {
       pageCadence: "question_only",
       readerPosture: "answer_the_prompted_clarification",
       closingIntent: "accepted_question",
+    });
+    expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
+      pageKind: "clarification_prompt_page",
+      narratorStance: "second_person_present_player_view",
+      proseRegister: "grounded_adventure_micro_page",
+      compositionJob: "ask_accepted_clarification",
+      openingInstruction: "ask_accepted_question",
+      closingInstruction: "close_on_accepted_question",
+      requiredMoveRefs: ["m1"],
+      optionalMoveRefs: [],
+      requiredSentenceRefs: ["s1"],
+      optionalSentenceRefs: [],
     });
     expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("clarification_request");
     expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("clarification");
@@ -4889,6 +4937,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("FF5 Micro");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Story page brief:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.storyPageBrief");
+    expect(buildCleanNarrationSystemPrompt()).toContain("writer-facing page kind");
+    expect(buildCleanNarrationSystemPrompt()).toContain("required/optional move and sentence refs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page arc:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageArc");
     expect(buildCleanNarrationSystemPrompt()).toContain("reader posture");
