@@ -6836,3 +6836,19 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `ff5e749f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P247 Stage 6 page-move fact use plan:
+  - Plan:
+    - [x] Run GitNexus impact before editing page task builder and prompt wording.
+    - [x] Add move-scoped `factUses` to `narrativePageTask.moves[]`, assigning each usable fact a typed prose use.
+    - [x] Derive prose uses from accepted backend fact roles, not prose text.
+    - [x] Update focused narration tests proving movement, dialogue, and route page moves expose primary/exact/label/time uses.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: each `narrativePageTask.moves[]` now includes `factUses` with typed `proseUse` values derived from backend fact roles.
+    - Executed: prose-use mapping distinguishes primary beats, exact scene texture, exact dialogue quote, labels, scene anchors, route choices, time values, state values, and supporting detail without prose text scanning.
+    - Executed: system prompt now names the fact use plan so the narrator uses `usableFacts` according to move-local prose purpose.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `4d711aa0` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
