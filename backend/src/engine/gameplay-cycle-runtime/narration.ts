@@ -360,6 +360,7 @@ type CleanNarratorSentencePlanDraft = Omit<CleanNarratorSentencePlanStep, "flowC
 type CleanNarratorPageArc = CleanNarratorPromptInput["narrativePageTask"]["pageArc"];
 type CleanNarratorPagePerformance = CleanNarratorPromptInput["narrativePageTask"]["pagePerformance"];
 type CleanNarratorPageVariation = CleanNarratorPromptInput["narrativePageTask"]["pageVariation"];
+type CleanNarratorPageFocus = CleanNarratorPromptInput["narrativePageTask"]["pageFocus"];
 type CleanNarratorStoryPageBrief = CleanNarratorPromptInput["narrativePageTask"]["storyPageBrief"];
 
 function evidenceIncludesClaimKind(
@@ -1417,6 +1418,82 @@ function buildCleanPageVariation(
   };
 }
 
+function pageFocusEmphasis(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorPageFocus["emphasis"] {
+  switch (pageArc.closingIntent) {
+    case "accepted_question":
+      return "accepted_clarification";
+    case "audit_notice":
+      return "audit_notice";
+    case "playable_next_action":
+      return "playable_next_action";
+    case "settled_result":
+      return "settled_turn_event";
+  }
+}
+
+function pageFocusCoreFrameRelationship(
+  pageArc: CleanNarratorPageArc,
+): CleanNarratorPageFocus["coreFrameRelationship"] {
+  switch (pageArc.arcShape) {
+    case "accepted_clarification_question":
+      return "question_is_page_core";
+    case "audit_notice_only":
+      return "audit_notice_only";
+    case "context_then_choice_handle":
+      return "context_frames_choices";
+    case "context_then_settled_result":
+      return "context_frames_result";
+    case "single_choice_handle":
+      return "choices_stand_alone";
+    case "single_settled_result":
+      return "result_stands_alone";
+  }
+}
+
+function pageFocusContextUse(
+  pageArc: CleanNarratorPageArc,
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorPageFocus["contextUse"] {
+  if (pageArc.arcShape === "audit_notice_only") return "audit_only";
+  if (sentencePlan.some((step) =>
+    step.coverage === "optional" && step.sentenceRole === "exact_context_texture"
+  )) {
+    return "texture_before_core";
+  }
+  if (sentencePlan.some((step) =>
+    step.coverage === "optional" && step.sentenceRole === "context_anchor"
+  )) {
+    return "orient_before_core";
+  }
+  return "none";
+}
+
+function buildCleanPageFocus(
+  pageArc: CleanNarratorPageArc,
+  moves: CleanNarratorPageTaskMove[],
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorPageFocus {
+  return {
+    coreMoveRefs: moves
+      .filter((move) => move.coverage === "required")
+      .map((move) => move.moveRef),
+    frameMoveRefs: moves
+      .filter((move) => move.coverage === "optional")
+      .map((move) => move.moveRef),
+    coreSentenceRefs: sentencePlan
+      .filter((step) => step.coverage === "required")
+      .map((step) => step.sentenceRef),
+    frameSentenceRefs: sentencePlan
+      .filter((step) => step.coverage === "optional")
+      .map((step) => step.sentenceRef),
+    emphasis: pageFocusEmphasis(pageArc),
+    coreFrameRelationship: pageFocusCoreFrameRelationship(pageArc),
+    contextUse: pageFocusContextUse(pageArc, sentencePlan),
+  };
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
@@ -1488,6 +1565,7 @@ function buildCleanNarrativePageTask(
     pageArc,
     pagePerformance,
     pageVariation: buildCleanPageVariation(pagePerformance, sentencePlan),
+    pageFocus: buildCleanPageFocus(pageArc, moves, sentencePlan),
     moves,
     sentencePlan,
   };
@@ -1615,6 +1693,7 @@ export function buildCleanNarrationSystemPrompt(
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of facts.",
     "Page performance: promptInput.narrativePageTask.pagePerformance names openingBeat, pageMotion, continuityMaterial, closingBeat, and readerHandoff. Use it to connect sentencePlan steps into one text-RPG page: start from the opening material, carry continuity material through the page motion, and land the reader handoff while preserving sentence refs and evidence refs.",
     "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, cadenceTarget, dictionPalette, and variationBoundary. Use it to vary syntax, cadence, and RPG diction across pages while staying inside cited proseMaterials; variationBoundary=vary_syntax_only_inside_cited_material means style changes the phrasing path, not the facts.",
+    "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs and frameMoveRefs/frameSentenceRefs, plus emphasis, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",

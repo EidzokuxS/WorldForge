@@ -1355,6 +1355,15 @@ describe("clean Stage 6 narration contracts", () => {
         dictionPalette: ["scene_anchor_tokens", "concrete_result_verbs", "time_pressure"],
         variationBoundary: "vary_syntax_only_inside_cited_material",
       },
+      pageFocus: {
+        coreMoveRefs: ["m1"],
+        frameMoveRefs: [],
+        coreSentenceRefs: ["s1"],
+        frameSentenceRefs: [],
+        emphasis: "settled_turn_event",
+        coreFrameRelationship: "result_stands_alone",
+        contextUse: "none",
+      },
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1505,6 +1514,15 @@ describe("clean Stage 6 narration contracts", () => {
       cadenceTarget: "context_then_short_result",
       dictionPalette: ["scene_anchor_tokens", "quote_frame"],
       variationBoundary: "vary_syntax_only_inside_cited_material",
+    });
+    expect(promptInput.narrativePageTask.pageFocus).toEqual({
+      coreMoveRefs: ["m2"],
+      frameMoveRefs: ["m1"],
+      coreSentenceRefs: ["s2"],
+      frameSentenceRefs: ["s1"],
+      emphasis: "settled_turn_event",
+      coreFrameRelationship: "context_frames_result",
+      contextUse: "orient_before_core",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_settled_result_page",
@@ -1798,6 +1816,15 @@ describe("clean Stage 6 narration contracts", () => {
         "playable_route_labels",
       ],
       variationBoundary: "vary_syntax_only_inside_cited_material",
+    });
+    expect(promptInput.narrativePageTask.pageFocus).toEqual({
+      coreMoveRefs: ["m2"],
+      frameMoveRefs: ["m1"],
+      coreSentenceRefs: ["s3"],
+      frameSentenceRefs: ["s1", "s2"],
+      emphasis: "playable_next_action",
+      coreFrameRelationship: "context_frames_choices",
+      contextUse: "texture_before_core",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_playable_choices_page",
@@ -4770,6 +4797,15 @@ describe("clean Stage 6 narration contracts", () => {
       dictionPalette: ["audit_notice_clarity"],
       variationBoundary: "vary_syntax_only_inside_cited_material",
     });
+    expect(promptInput.narrativePageTask.pageFocus).toEqual({
+      coreMoveRefs: [],
+      frameMoveRefs: [],
+      coreSentenceRefs: [],
+      frameSentenceRefs: [],
+      emphasis: "audit_notice",
+      coreFrameRelationship: "audit_notice_only",
+      contextUse: "audit_only",
+    });
     const result = validateCleanNarrationCandidate({
       view,
       candidate: {
@@ -5026,6 +5062,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("cadenceTarget");
     expect(buildCleanNarrationSystemPrompt()).toContain("dictionPalette");
     expect(buildCleanNarrationSystemPrompt()).toContain("variationBoundary");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Page focus:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageFocus");
+    expect(buildCleanNarrationSystemPrompt()).toContain("coreMoveRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("coreSentenceRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("frameMoveRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("coreFrameRelationship");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");

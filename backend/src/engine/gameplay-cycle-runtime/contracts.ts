@@ -2851,6 +2851,33 @@ const cleanNarratorPageVariationSchema = z.object({
   variationBoundary: z.literal("vary_syntax_only_inside_cited_material"),
 }).strict();
 
+const cleanNarratorPageFocusSchema = z.object({
+  coreMoveRefs: z.array(shortText).max(4),
+  frameMoveRefs: z.array(shortText).max(4),
+  coreSentenceRefs: z.array(shortText).max(6),
+  frameSentenceRefs: z.array(shortText).max(6),
+  emphasis: z.enum([
+    "accepted_clarification",
+    "audit_notice",
+    "playable_next_action",
+    "settled_turn_event",
+  ]),
+  coreFrameRelationship: z.enum([
+    "audit_notice_only",
+    "choices_stand_alone",
+    "context_frames_choices",
+    "context_frames_result",
+    "question_is_page_core",
+    "result_stands_alone",
+  ]),
+  contextUse: z.enum([
+    "audit_only",
+    "none",
+    "orient_before_core",
+    "texture_before_core",
+  ]),
+}).strict();
+
 const cleanNarratorStoryPageBriefSchema = z.object({
   pageKind: z.enum([
     "audit_notice_page",
@@ -2899,6 +2926,7 @@ const cleanNarratorPageTaskSchema = z.object({
   pageArc: cleanNarratorPageArcSchema,
   pagePerformance: cleanNarratorPagePerformanceSchema,
   pageVariation: cleanNarratorPageVariationSchema,
+  pageFocus: cleanNarratorPageFocusSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();
