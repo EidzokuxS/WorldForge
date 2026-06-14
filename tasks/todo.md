@@ -8175,3 +8175,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p304-dialogue-context-live-20260614-235000/prose-audit.json`: one narrative, 79 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.
     - Verified commit/push/index: code commit `251f6fea` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
+
+- P305 Stage 6 item-transfer custody endpoint prose:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p303-prose-scan-20260614-233000` shows `I give the Brass Tube to Guide.` settling through clean runtime, but Stage 6 renders custody as changelog-like prose: `The Brass Tube passes from Mira Voss and settles with Guide, carried at Lowwater Bazaar.`
+    - [x] Root owner is Stage 6 item_state task material: the sentence plan centers `custody_change` / `settled_custody` text before the endpoint labels, and the prompt shortlist omits `source_label` because item_state is capped at six facts.
+  - Plan:
+    - [x] Run GitNexus impact for `maxPromptBackendFactsForEvidence`, `selectTurnEventFactRefs`, `sentencePlanProseAssembly`, and `buildCleanNarrationSystemPrompt` before editing.
+    - [x] Expand item_state prompt material to include source, target, final equip state, scene anchor, and custody proof.
+    - [x] Change item custody sentence-plan assembly so endpoint labels/state drive prose while custody facts prove the transfer.
+    - [x] Update focused narration tests for endpoint-driven item custody prose.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live item-transfer proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live item transfer settles through clean runtime and reads as an item custody scene beat driven by custody endpoints.
+    - [x] Exact item, source, target, final equip state, and scene anchor remain preserved.
+    - [x] Narration stays inside item custody state: transfer endpoint, carried state, scene anchor, and accepted texture only.
+  - Review:
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` passed 115 tests.
+    - Verified typecheck: `npm --prefix backend run typecheck` passed.
+    - Verified expanded runtime suite: `gameplay-cycle-runtime-contracts`, `gameplay-cycle-runtime-settlement`, and `gameplay-cycle-runtime-stage4` passed 271 tests.
+    - Verified live proof `output/clean-runtime-p305-item-transfer-endpoint-live-20260614-234006`: action `I give the Brass Tube to Guide.` settled through `gameplay-cycle-runtime`, accepted one `item_transfer` receipt, changed `Brass Tube.owner` from `Mira Voss` to `Guide`, preserved `equipState=carried`, advanced `worldVersion 0 -> 1`, kept world time/current tick stable, and kept old runtime stores zero.
+    - Verified live narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Brass Tube leaves Mira Voss for Guide at Lowwater Bazaar, carried now by Guide.`
+    - Verified prompt contract: item_state prompt facts include `settled_custody`, `custody_change`, `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`; sentence plan prefers endpoint/state/scene refs before custody proof and uses `item_source_target_state_scene_then_custody_proof`.
+    - Verified prose audit `output/clean-runtime-p305-item-transfer-endpoint-live-20260614-234006/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 5 touched narration symbols, 4 changed files, and no affected processes.

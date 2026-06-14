@@ -2764,6 +2764,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "exits_only",
       "exits_then_costs",
       "item_then_custody_then_holder_scene",
+      "item_source_target_state_scene_then_custody_proof",
       "minor_poi_label_kind_then_scene",
       "observed_labels_then_scene",
       "actor_then_role_then_scene",
