@@ -7606,3 +7606,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `db-proof.json` passed with no issues; old v2/saga/narrator/oracle/simulation stores all stayed 0.
     - Verified: prose audit passed with 1 result, 71 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
     - Executed: no runtime code patch was needed for P283; P282's typed page split held in live clean-runtime execution.
+
+- P284 Stage 6 support-role repetition polish:
+  - Diagnosis:
+    - [x] Rebuilt `output/clean-runtime-p270-p283-prose-audit-rollup.json`; leak/debug/stock counters remain 0, but accepted texture sentences repeat across isolated proof samples and the live P283 support-presence line repeats role material: `A Local Vendor takes a place in view at Lowwater Bazaar, a vendor among the stalls.`
+    - [x] Chosen root owner: support-actor presence sentence task/prompt. Accepted evidence owns actor label, role label, scene anchor, and presence; Stage 6 should use role as context without forcing the same noun into the line twice when the actor label already carries it.
+  - Plan:
+    - [x] Inspect current support-presence sentence-plan prompt/material obligations.
+    - [x] Run GitNexus impact for the owner symbol(s) before editing.
+    - [x] Update the positive Stage 6 support-presence contract so `support_role` is contextual material and the sentence may omit a duplicated role phrase when the actor label already conveys it.
+    - [x] Add/adjust focused tests with a `Local Vendor` label proving the accepted line can read as presence prose without the second `as a vendor` / `a vendor among...` phrase while keeping actor and scene exact.
+    - [x] Verify with focused narration tests, expanded clean-runtime tests if runtime code changes, typecheck, proof/audit, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] Support actor presence can read as `Local Vendor takes a visible place at Market.` or equivalent scene-presence prose without repeated role nouns.
+    - [x] Actor label and scene anchor remain exact.
+    - [x] Role evidence remains available as accepted context, but Stage 6 does not force a duplicate player-facing role phrase.
+    - [x] No support-presence prose adds service/setup/trade/work/dialogue/relationship/private knowledge/movement/absence/no-change claims.
+  - Review:
+    - Executed: updated support-presence typed cues from `actor_role_with_scene_anchor` / `actor_then_role_then_scene` to `actor_presence_with_scene_role_context` / `actor_then_scene_with_role_context` for newly generated sentence plans, while keeping old enum values accepted for existing artifacts.
+    - Executed: updated Stage 6 prompt contract so `support_role` is identity context: include it when it adds new player-facing clarity and let the actor label carry it when repeating the role would duplicate the same noun.
+    - Executed: focused narration tests now accept `Local Vendor takes a visible place at Market.` for support actor pages and composed support+dialogue pages while still citing `support_role`, `visible_support_actor`, `anchor_scene`, and `support_actor_presence`.
+    - Verified: GitNexus impact before editing was LOW for `buildCleanNarrationSystemPrompt` and `sentencePlanProseAssembly`; the nearest schema owner was not indexed as a symbol, so the schema enum edit stayed in the same focused contract scope.
+    - Verified: focused narration suite passed 111/111.
+    - Verified: expanded clean-runtime suite passed 379/379 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with LF/CRLF warnings only, and diff-level runtime scan found no added `= /`, `.test(`, or `replace(` lines in narration/contracts runtime diff.
+    - Proof: `output/clean-runtime-p284-support-role-context-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput` and `validateCleanNarrationCandidate`; support step carries `actor_presence_with_scene_role_context` and `actor_then_scene_with_role_context`.
+    - Accepted proof narration: `Rain taps the brass gutters. Local Vendor takes a visible place at Market.`
+    - Verified: prose audit passed with 1 result, 13 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.

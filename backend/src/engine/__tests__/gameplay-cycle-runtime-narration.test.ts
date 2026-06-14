@@ -2478,8 +2478,8 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceShape: "support_actor_presence_line",
         openingSource: "visible_support_actor_label",
         verbEnergy: "place_presence",
-        detailRhythm: "actor_role_with_scene_anchor",
-        materialWeaveOrder: "actor_then_role_then_scene",
+        detailRhythm: "actor_presence_with_scene_role_context",
+        materialWeaveOrder: "actor_then_scene_with_role_context",
         styleBudget: "support_presence_cadence",
       },
       literaryCue: {
@@ -3799,7 +3799,7 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [{
-          text: "Local Vendor takes a visible place at Market as a vendor.",
+          text: "Local Vendor takes a visible place at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -3809,7 +3809,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Local Vendor takes a visible place at Market as a vendor.");
+    expect(result.text).toBe("Local Vendor takes a visible place at Market.");
   });
 
   it("accepts direct-scene implied action at runtime without prose-quality repair", async () => {
@@ -4186,7 +4186,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "Local Vendor takes a visible place at Market as a vendor.",
+        text: "Local Vendor takes a visible place at Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1"],
         claimKinds: ["visible_actor", "support_actor_materialization"],
@@ -4194,7 +4194,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Local Vendor takes a visible place at Market as a vendor.");
+    expect(result.text).toBe("Local Vendor takes a visible place at Market.");
     for (const forbidden of [
       "Visible support actor",
       "Visible person now in view",
@@ -4233,7 +4233,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Local Vendor takes a visible place at Market as a vendor.",
+          text: "Local Vendor takes a visible place at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4242,7 +4242,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Local Vendor takes a visible place at Market as a vendor.");
+    expect(result.text).toBe("Rain taps the brass gutters. Local Vendor takes a visible place at Market.");
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4266,7 +4266,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Local Vendor takes a visible place at Market as a vendor.",
+        text: "Local Vendor takes a visible place at Market.",
         evidenceRefs: ["e1", "e3"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1", "e3.f1"],
         claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4284,7 +4284,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Local Vendor takes a visible place at Market as a vendor.",
+          text: "Local Vendor takes a visible place at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4307,7 +4307,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Local Vendor takes a visible place at Market as a vendor.",
+          text: "Local Vendor takes a visible place at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization"],
@@ -4322,7 +4322,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. Local Vendor takes a visible place at Market as a vendor. Local Vendor answers: "The audit bell rang before dawn."');
+    expect(result.text).toBe('Rain taps the brass gutters. Local Vendor takes a visible place at Market. Local Vendor answers: "The audit bell rang before dawn."');
     for (const forbidden of [
       "has set up",
       "set up",
@@ -5710,7 +5710,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");
-    expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line with actor_then_role_then_scene");
+    expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line with actor_then_scene_with_role_context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("let the actor label carry it when repeating the role would duplicate");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the condition beat on condition/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
