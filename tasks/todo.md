@@ -7315,3 +7315,33 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You drop into a crouch at Lowwater Bazaar.`
     - Verified: prose audit passed with 1 result, 65 words, zero hits, zero list-like starts, and zero `youOpening`.
     - Executed: no code fix was needed for this slice; proof confirmed the current player-local-condition Stage 6 contract stays grounded and prose-readable for this fixture.
+
+- P272 Stage 6 minor-POI handle live proof:
+  - Plan:
+    - [x] Restore handoff/context and confirm current worktree state.
+    - [x] Inspect `minor_poi_create` and `support_actor_create` admission/checklist/Stage4 ownership contracts.
+    - [x] Choose `minor_poi_create` for the next fresh live proof because it has a typed current-scene place-handle surface, accepted receipt, dedicated DB table, authority trace, and bounded narration claim.
+    - [x] Start an isolated clean-runtime backend on a fresh port and record PID/logs under a proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Inspect the clone's current SceneFrame/DB before sending the action.
+    - [x] Run one Codex-chosen current-scene place-handle action: `I mark a tea stall beside the market walkway as a place to meet.`
+    - [x] Verify SSE runtime, accepted `minor_poi_create` receipt, `clean_gameplay_minor_pois` row/trace/world-version deltas, old-store counts, and player-facing narrative.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Fix typed Stage 6 contract if proof exposes a root prose/truth gap; otherwise record proof results and commit/push/index the journal.
+  - Review:
+    - Executed: first diagnostic live proof at `output/clean-runtime-p272-minor-poi-live-20260614-101604` passed gameplay truth but exposed a Stage 6 prose source leak: the page said `target handle` in player-facing narration.
+    - Executed: fixed the root cause at typed source boundaries, not with a string-banlist: `stage4Evidence` now renders minor-POI accepted evidence as player-facing `scene point` material, `renderMinorPoiProjection` outputs ordinary visible scene nouns, and the Stage 6 minor-POI prompt translates POI label/kind/result into a scene point or meeting spot.
+    - Verified: GitNexus impact for `buildCleanNarrationSystemPrompt`, `buildCleanNarrativePageTask`, and `stage4Evidence` was LOW before editing.
+    - Verified: focused narration+settlement suite passed 125/125.
+    - Verified: expanded clean-runtime suite passed 372/372 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Executed: fixed live proof at `output/clean-runtime-p272-minor-poi-live-fixed-20260614-102655` on backend port `31741`/PID `56564`, then stopped it; final PID/port checks returned false.
+    - Verified: fixed clone `clean-runtime-p272-minor-poi-live-fixed-20260614-102655` ran `I mark a tea stall beside the market walkway as a place to meet.` and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, accepted `minor_poi_create` receipt, clean record +1, receipt +1, minor POI +1, authority trace +1, worldVersion +1, world time/tick +0, clock ledger +0, and all old stores at 0.
+    - Verified: post-turn `AuthoritativeSceneFrame` exposes `tea_stall` as a `place_handle` target and `currentScenePlaceHandleSurface.existingPlaceHandleRefs` includes `tea_stall`.
+    - Verified: `Brass Tube` custody stayed stable with `Mira Voss` as `carried`.
+    - Verified: fixed player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. A tea stall marks a visible meeting spot here at Lowwater Bazaar.`
+    - Verified: `db-proof.json` passed all assertions, including player-facing minor-POI evidence text and absence of `target handle`/`place handle`/receipt/debug terms in narration.
+    - Verified: prose audit passed with 1 result, 69 words, zero hits, zero list-like starts, and zero `youOpening`.
+    - Reviewed: GitNexus all-scope and staged `detect_changes` reported LOW risk, changed symbols limited to `buildCleanNarrationSystemPrompt`, `renderMinorPoiProjection`, and `stage4Evidence`, with 0 affected execution flows.

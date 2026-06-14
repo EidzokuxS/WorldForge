@@ -215,7 +215,7 @@ const MINOR_POI_DOES_NOT_PROVE = [
   "world fact",
   "dialogue content",
   "NPC private knowledge",
-  "absence or no-change beyond the accepted visible place handle",
+  "absence or no-change beyond the accepted visible scene point",
 ];
 
 const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
@@ -1195,8 +1195,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const evidenceId = nextEvidenceId(evidence);
       const minorPoi = receipt.publicResult.minorPoi;
       const operationText = minorPoi.resultKind === "reused"
-        ? `Visible current-scene place handle reused: ${minorPoi.poiLabel}.`
-        : `Visible current-scene place handle created: ${minorPoi.poiLabel}.`;
+        ? `Visible current-scene point reused: ${minorPoi.poiLabel}.`
+        : `Visible current-scene point marked: ${minorPoi.poiLabel}.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -1207,17 +1207,17 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, "minor_poi_operation", operationText, operationText),
-          fact(evidenceId, 2, "place_handle_label", `Place handle label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
-          fact(evidenceId, 3, "place_handle_kind", `Place handle kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
+          fact(evidenceId, 2, "place_handle_label", `Scene point label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
+          fact(evidenceId, 3, "place_handle_kind", `Scene point kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
           fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
-          fact(evidenceId, 5, "handle_result", `Handle result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
-          fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene target handle only, not a movement destination."),
+          fact(evidenceId, 5, "handle_result", `Scene point result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
+          fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene point for reference only; movement uses separate route evidence."),
         ],
         limits: {
           proves: [
-            "accepted visible current-scene place handle label",
-            "accepted place handle kind",
-            "current visible target handle",
+            "accepted visible current-scene point label",
+            "accepted scene point kind",
+            "current visible scene point",
           ],
           doesNotProve: MINOR_POI_DOES_NOT_PROVE,
         },

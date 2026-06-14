@@ -1339,14 +1339,14 @@ describe("clean Stage 5 settlement contracts", () => {
     const handle = packet.acceptedEvidence.find((entry) => entry.authority === "minor_poi_handle_receipt");
     expect(handle?.claimKinds).toEqual(["minor_poi_handle", "visible_target"]);
     expect(handle?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Visible current-scene place handle created: Tea Stall.",
-      "Place handle label: Tea Stall.",
-      "Place handle kind: stall.",
+      "Visible current-scene point marked: Tea Stall.",
+      "Scene point label: Tea Stall.",
+      "Scene point kind: stall.",
       "Current scene anchor: Market.",
-      "Handle result: created.",
-      "This is a visible current-scene target handle only, not a movement destination.",
+      "Scene point result: created.",
+      "This is a visible current-scene point for reference only; movement uses separate route evidence.",
     ]);
-    expect(handle?.backendFacts[0]?.value).toBe("Visible current-scene place handle created: Tea Stall.");
+    expect(handle?.backendFacts[0]?.value).toBe("Visible current-scene point marked: Tea Stall.");
     expect(handle?.backendFacts[1]?.value).toBe("Tea Stall");
     expect(handle?.backendFacts[2]?.value).toBe("stall");
     expect(handle?.backendFacts[4]?.value).toBe("created");
@@ -1357,7 +1357,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "legal movement destination",
       "location reveal",
       "world fact",
-      "absence or no-change beyond the accepted visible place handle",
+      "absence or no-change beyond the accepted visible scene point",
     ]));
     expect(JSON.stringify(view)).not.toContain("stage4-minor-poi-secret");
     expect(JSON.stringify(view)).not.toContain("stage4-authority-minor-poi");

@@ -908,20 +908,20 @@ function minorPoiHandleView(): CleanNarratorView {
       ref: "e1",
       authority: "minor_poi_handle_receipt",
       claimKinds: ["minor_poi_handle", "visible_target"],
-      text: "Visible current-scene place handle created: Tea Stall. Current scene anchor: Market.",
+      text: "Visible current-scene point marked: Tea Stall. Current scene anchor: Market.",
       backendFacts: [
-        { factRef: "e1.f1", role: "minor_poi_operation", value: "Visible current-scene place handle created: Tea Stall.", text: "Visible current-scene place handle created: Tea Stall.", exact: true },
-        { factRef: "e1.f2", role: "place_handle_label", value: "Tea Stall", text: "Place handle label: Tea Stall.", exact: true },
-        { factRef: "e1.f3", role: "place_handle_kind", value: "stall", text: "Place handle kind: stall.", exact: true },
+        { factRef: "e1.f1", role: "minor_poi_operation", value: "Visible current-scene point marked: Tea Stall.", text: "Visible current-scene point marked: Tea Stall.", exact: true },
+        { factRef: "e1.f2", role: "place_handle_label", value: "Tea Stall", text: "Scene point label: Tea Stall.", exact: true },
+        { factRef: "e1.f3", role: "place_handle_kind", value: "stall", text: "Scene point kind: stall.", exact: true },
         { factRef: "e1.f4", role: "current_scene_anchor", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f5", role: "handle_result", value: "created", text: "Handle result: created.", exact: true },
-        { factRef: "e1.f6", role: "place_handle_scope", text: "This is a visible current-scene target handle only, not a movement destination.", exact: true },
+        { factRef: "e1.f5", role: "handle_result", value: "created", text: "Scene point result: created.", exact: true },
+        { factRef: "e1.f6", role: "place_handle_scope", text: "This is a visible current-scene point for reference only; movement uses separate route evidence.", exact: true },
       ],
       limits: {
         proves: [
-          "accepted visible current-scene place handle label",
-          "accepted place handle kind",
-          "current SceneFrame target handle",
+          "accepted visible current-scene point label",
+          "accepted scene point kind",
+          "current visible scene point",
         ],
         doesNotProve: [
           "actor presence",
@@ -936,7 +936,7 @@ function minorPoiHandleView(): CleanNarratorView {
           "world fact",
           "dialogue content",
           "NPC private knowledge",
-          "absence or no-change beyond the accepted visible place handle",
+          "absence or no-change beyond the accepted visible scene point",
         ],
       },
     }],
@@ -2942,7 +2942,7 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Support-actor projection requires accepted Visible support actor value evidence.");
 
     expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "place_handle_label")))
-      .toBe("Tea Stall is now available here as a visible stall handle.");
+      .toBe("Tea Stall is now available here as a visible stall.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(minorPoiHandleView(), "place_handle_kind")))
       .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
   });
@@ -4297,8 +4297,26 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
     const text = renderCleanAuthorityProjection(minorPoiHandleView());
 
-    expect(text).toBe("Tea Stall is now available here as a visible stall handle.");
-    expect(text).not.toMatch(/\b(Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|arrive|service|inventory|sign says|nothing changed|no change)\b/iu);
+    expect(text).toBe("Tea Stall is now available here as a visible stall.");
+    for (const forbidden of [
+      "Visible current-scene",
+      "Place handle",
+      "Current scene anchor",
+      "Handle result",
+      "target handle",
+      "place handle",
+      "route",
+      "reachable",
+      "travel",
+      "arrive",
+      "service",
+      "inventory",
+      "sign says",
+      "nothing changed",
+      "no change",
+    ]) {
+      expect(text).not.toContain(forbidden);
+    }
 
     const unsupported = validateCleanNarrationCandidate({
       view: minorPoiHandleView(),
@@ -4326,7 +4344,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "At Market, Tea Stall marks a visible stall handle.",
+        text: "At Market, Tea Stall marks a visible stall.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
         claimKinds: ["minor_poi_handle", "visible_target"],
@@ -4334,8 +4352,25 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Tea Stall marks a visible stall handle.");
-    expect(result.text).not.toMatch(/Visible current-scene|Place handle|Current scene anchor|Handle result|route|reachable|travel|service|inventory|sign says|nothing changed|no change/iu);
+    expect(result.text).toBe("At Market, Tea Stall marks a visible stall.");
+    for (const forbidden of [
+      "Visible current-scene",
+      "Place handle",
+      "Current scene anchor",
+      "Handle result",
+      "target handle",
+      "place handle",
+      "route",
+      "reachable",
+      "travel",
+      "service",
+      "inventory",
+      "sign says",
+      "nothing changed",
+      "no change",
+    ]) {
+      expect(result.text).not.toContain(forbidden);
+    }
   });
 
   it("uses accepted scene_texture for minor_poi_handle prose when texture is available", async () => {
@@ -4351,7 +4386,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Tea Stall is available here as a visible stall handle at Market.",
+          text: "Tea Stall is available here as a visible stall at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
           claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
@@ -4360,8 +4395,25 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall is available here as a visible stall handle at Market.");
-    expect(result.text).not.toMatch(/\b(route|reachable|travel|arrive|service|inventory|sign says|business|discover|world fact|no change|nothing changed)\b/iu);
+    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall is available here as a visible stall at Market.");
+    for (const forbidden of [
+      "target handle",
+      "place handle",
+      "route",
+      "reachable",
+      "travel",
+      "arrive",
+      "service",
+      "inventory",
+      "sign says",
+      "business",
+      "discover",
+      "world fact",
+      "no change",
+      "nothing changed",
+    ]) {
+      expect(result.text).not.toContain(forbidden);
+    }
   });
 
   it("accepts minor_poi_handle prose with structurally cited texture choices", () => {
@@ -4369,7 +4421,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Tea Stall is available here as a visible stall handle at Market.",
+        text: "Tea Stall is available here as a visible stall at Market.",
         evidenceRefs: ["e1", "e3"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
         claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
@@ -4387,7 +4439,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Tea Stall is available here as a visible stall handle at Market.",
+          text: "Tea Stall is available here as a visible stall at Market.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
           claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
@@ -5269,7 +5321,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the condition beat on condition/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the handle beat on place-handle/scene materials");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the POI beat on label/kind/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Device-surface surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the device beat on device/facet materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
