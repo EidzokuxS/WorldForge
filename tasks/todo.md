@@ -7732,3 +7732,34 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: final support actor receipt exposed `publicSummary=An ordinary local vendor is visible beside a counter or stall at Lowwater Bazaar.` and `visibleCue=A local vendor is visible beside a counter or stall, with worn wood nearby.`
     - Verified: final player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor is visible beside a counter or stall, with worn wood nearby. Local Vendor says: "You picked a lively day to wander the stalls. The customs shed burnt through three audit seals by midday, and the Resonance Tower started broadcasting again around dusk yesterday."`
     - Verified: prose audit passed for `output/clean-runtime-p287-support-cue-live-static-20260614-162906/prose-audit.json` with 1 result, 67 words, zero one-token output, zero `youOpening`, zero direct implied action, and all hit counters 0.
+
+- P288 Stage 6 direct-scene broad-look adventure page:
+  - Diagnosis:
+    - [x] The main goal still requires normal player-facing turns to read like text RPG adventure prose, not status surfaces.
+    - [x] Direct-scene/broad-look is the core player orientation command and currently still has accepted examples shaped like `Courier satchel is with you and Notice Board is visible`.
+    - [x] Root owner should be the direct-scene page task and sentence material contract: accepted `scene_frame_snapshot` facts already own scene label, texture, visible actors, inventory labels, visible targets, and route labels/costs.
+  - Plan:
+    - [x] Run a fresh current-code live broad-look proof on a clean-start clone and inspect the actual player-facing page.
+    - [x] If it still reads like status/list prose, run GitNexus impact for the direct-scene sentence/page-task owner symbols before editing.
+    - [x] Shape direct-scene prompt/sentence materials as an adventure orientation page: selected texture, exact scene anchor, visible actors, carried inventory, visible targets, and route choice handoff.
+    - [x] Add focused tests proving direct-scene prose can be atmospheric while preserving every cited label exactly and adding no movement, discovery, actor action, item handling, route safety, absence, no-change, private knowledge, or new world truth.
+    - [x] Verify with focused narration tests, expanded clean-runtime tests if runtime contract changes, typecheck, live proof, prose audit, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] Live broad-look narration reads as a concise adventure orientation page, not a raw inventory/target/exit list.
+    - [x] Exact accepted scene, actor, item, target, and route labels remain present when cited.
+    - [x] Route labels remain choices only; no travel/arrival/current-scene change is narrated.
+    - [x] Inventory labels remain custody/status only; no handling, readiness, or item-use action is narrated.
+  - Review:
+    - Executed: broad-look inventory is now exposed as typed `inventory_status_beat` evidence (`You have ... with you.`), with `inventory_labels` kept as labels only and explicit evidence limits excluding handling/readiness/state change/transfer.
+    - Executed: Stage 6 fact use, sentence plan, prose assembly, literary cue, prompt text, and validator now carry `inventory_status` as exact accepted material instead of asking the narrator to infer from labels.
+    - Executed: direct-scene next-action planning now separates route-choice material from inventory-status material so the inventory sentence no longer receives a route-exit task card.
+    - Executed: `turn-processor.empty-narration` test fixture now mocks the current V1 packet-store boundary and asserts pending narration through the streaming `error` event contract.
+    - Verified: GitNexus impact before edits was LOW for the edited direct-scene narration owner symbols, including `sceneEvidence`, `stage4Evidence`, `preferredPromptFacts`, `narrativeFactProseUse`, `selectPlayableNextActionFactRefs`, `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, `sentencePlanAdventureSubjectFocus`, `sentencePlanAdventureVerbFrame`, `validateCleanNarrationCandidate`, `sentencePlanForMove`, and `buildCleanNarrativePageTask`.
+    - Verified: focused runtime tests passed 340/340 across gameplay-cycle-runtime contracts, settlement, and narration.
+    - Verified: expanded slice passed 616/616 across contracts, settlement, narration, visible narration guards, grounding guards, tool contracts, and empty-narration integration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only CRLF warnings; GitNexus `detect_changes(scope=all)` reported MEDIUM risk, 25 touched symbols, 4 affected `runCleanNarration` process traces, and no HIGH/CRITICAL warning.
+    - Verified: live proof artifact `output/clean-runtime-p288-inventory-status-live-accepted-20260614-172434` cloned `p69-item-transfer-045651`, ran `I look around.`, settled through `gameplay-cycle-runtime`, and left mutation/world time/world version/current tick unchanged.
+    - Verified: live proof deltas were chat +2, clean record +1, Stage4 scene observation receipt +1, authority traces +0, clock ledger +0, and all old v2/saga/narrator/oracle/simulation stores 0.
+    - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in view at Lowwater Bazaar, where visible exits are Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins. You have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.`
+    - Verified: proof summary passed with exact inventory status present and no handling/readiness hits; prose audit passed with 64 words, zero one-token output, zero `youOpening`, and all hit counters 0.

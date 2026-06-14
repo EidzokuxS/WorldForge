@@ -911,8 +911,21 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
     const targetEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_target"));
     const actorEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_actor"));
+    const inventoryEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("inventory_status"));
     expect(actorEvidence?.text).toBe("Guide is in view here.");
     expect(actorEvidence?.limits.proves).toEqual(["actor visible in the current scene"]);
+    expect(inventoryEvidence?.text).toBe("You have Courier satchel with you.");
+    expect(inventoryEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Inventory status beat: You have Courier satchel with you.",
+      "Inventory labels: Courier satchel.",
+    ]);
+    expect(inventoryEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
+      "You have Courier satchel with you.",
+      "Courier satchel",
+    ]);
+    expect(inventoryEvidence?.limits.proves).toEqual(["inventory items are with the player in the current inventory view"]);
+    expect(inventoryEvidence?.limits.doesNotProve).toContain("item handling");
+    expect(inventoryEvidence?.limits.doesNotProve).toContain("item readiness");
     expect(targetEvidence?.text).toBe("Targets in view here include Guide, Notice Board, North Hall.");
     expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
       "Visible target labels: Guide; Notice Board; North Hall.",
@@ -1979,7 +1992,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Place label: Market.",
       "Visible actor labels: Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier.",
       "Visible scene facts: Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge.",
-      "Inventory labels: Brass Tube; Field Notebook; Pocket Lens; Token Pouch.",
+      "Inventory status beat: You have Brass Tube, Field Notebook, Pocket Lens, and Token Pouch with you.",
       "Route choices beat: From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
       "Route choice labels: North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door.",
     ]);
@@ -1989,7 +2002,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Market",
       "Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier",
       "Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge",
-      "Brass Tube; Field Notebook; Pocket Lens; Token Pouch",
+      "You have Brass Tube, Field Notebook, Pocket Lens, and Token Pouch with you.",
       "From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
       "North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door",
     ]);

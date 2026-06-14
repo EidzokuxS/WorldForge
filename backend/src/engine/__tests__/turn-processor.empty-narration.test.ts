@@ -20,8 +20,15 @@ const {
   markTurnSagaFinalizedMock,
   persistSettledTurnPacketMock,
   recordNarratorAttemptMock,
+  persistSettledTurnPacketV1Mock,
+  readSettledTurnPacketV1Mock,
+  recordNarrationAttemptFailedV1Mock,
+  recordNarrationAttemptStartedV1Mock,
+  recordNarrationAttemptSucceededV1Mock,
   recordTurnAuthorityStageMock,
   releaseTurnSagaWorkerMock,
+  markSettledTurnProjectedV1Mock,
+  settledTurnPacketV1StoreState,
   transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcomeMock,
 } = vi.hoisted(() => ({
@@ -44,8 +51,15 @@ const {
   markTurnSagaFinalizedMock: vi.fn(),
   persistSettledTurnPacketMock: vi.fn(),
   recordNarratorAttemptMock: vi.fn(),
+  persistSettledTurnPacketV1Mock: vi.fn(),
+  readSettledTurnPacketV1Mock: vi.fn(),
+  recordNarrationAttemptFailedV1Mock: vi.fn(),
+  recordNarrationAttemptStartedV1Mock: vi.fn(),
+  recordNarrationAttemptSucceededV1Mock: vi.fn(),
   recordTurnAuthorityStageMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
+  markSettledTurnProjectedV1Mock: vi.fn(),
+  settledTurnPacketV1StoreState: { packet: null as unknown },
   transitionTurnSagaStatusMock: vi.fn(),
   updateNarratorAttemptOutcomeMock: vi.fn(),
 }));
@@ -315,6 +329,16 @@ vi.mock("../transient-scene-lifecycle.js", () => ({
   cleanupTransientSceneObjects: vi.fn(),
 }));
 
+vi.mock("../settled-turn-packet-v1-store.js", () => ({
+  durableEventIdsFromPacketV1: vi.fn(() => []),
+  markSettledTurnProjectedV1: markSettledTurnProjectedV1Mock,
+  persistSettledTurnPacketV1: persistSettledTurnPacketV1Mock,
+  readSettledTurnPacketV1: readSettledTurnPacketV1Mock,
+  recordNarrationAttemptFailedV1: recordNarrationAttemptFailedV1Mock,
+  recordNarrationAttemptStartedV1: recordNarrationAttemptStartedV1Mock,
+  recordNarrationAttemptSucceededV1: recordNarrationAttemptSucceededV1Mock,
+}));
+
 import { processTurn, type TurnEvent } from "../turn-processor.js";
 
 const provider = {
@@ -461,6 +485,21 @@ beforeEach(() => {
   delete process.env.SCENE_PLAN_ENABLED;
   getDbMock.mockReturnValue(createDb());
   readCampaignConfigMock.mockReturnValue({ currentTick: 5 });
+  settledTurnPacketV1StoreState.packet = null;
+  persistSettledTurnPacketV1Mock.mockImplementation(({ packet }: { packet: unknown }) => {
+    settledTurnPacketV1StoreState.packet = packet;
+    return { packetId: (packet as { packetId?: string }).packetId ?? "packet-empty-narration", sagaId: "v1-saga-empty-narration" };
+  });
+  readSettledTurnPacketV1Mock.mockImplementation(() => settledTurnPacketV1StoreState.packet);
+  recordNarrationAttemptStartedV1Mock.mockImplementation((input: { packetId: string }) => ({
+    attemptId: "v1-attempt-empty-narration",
+    sagaId: "v1-saga-empty-narration",
+    packetId: input.packetId,
+    attemptIndex: 1,
+  }));
+  recordNarrationAttemptFailedV1Mock.mockImplementation(() => undefined);
+  recordNarrationAttemptSucceededV1Mock.mockImplementation(() => undefined);
+  markSettledTurnProjectedV1Mock.mockImplementation(() => undefined);
   resolveDueWorldWorkForScopeMock.mockReturnValue({
     phase: "pre_scene_frame",
     executed: [],
@@ -624,85 +663,67 @@ beforeEach(() => {
 });
 
 describe("processTurn empty final narration", () => {
-  it("does not finalize the scene-plan path when packet-guarded narration is blank", async () => {
+  it("does not finalize the v1 streaming path when final narration is blank", async () => {
     const onPostTurn = vi.fn();
-    safeGenerateObjectMock.mockResolvedValueOnce({
-      object: {
-        version: "grounded-sentence-draft.v2",
-        sentences: [{
-          factRefs: ["e1.s1"],
-          evidenceRefs: ["e1"],
-        }],
-      },
-      trace: {
-        strategy: "native_json",
-        primaryStrategy: "native_json",
-        finishReason: "stop",
-      },
-    });
-    runVisibleNarrationWithPacketGuardMock.mockImplementation(async (args) => ({
+    generateTextMock.mockResolvedValueOnce({
       text: "   ",
-      draft: await args.generateNarration({ attempt: 1, guardAddendum: null }),
-      attempts: 2,
-      retried: true,
-      validation: { ok: true, violations: [] },
-      guardAddendum: null,
-    }));
+      reasoningText: undefined,
+    });
 
     const { events, thrown } = await collectEventsUntilError(
       processTurn(createOptions({ onPostTurn })),
     );
 
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).name).toBe("PendingSettledTurnNarrationError");
-    expect(errorMessages(thrown).some((message) =>
-      message.includes("Final visible narration was empty")
-    )).toBe(true);
+    const errorEvent = events.find((event) => event.type === "error");
+    expect(thrown).toBeUndefined();
+    expect(errorEvent?.data).toMatchObject({
+      error: "Visible narration failed after accepted truth was persisted.",
+      pendingNarration: true,
+      retryable: true,
+    });
+    expect(recordNarrationAttemptFailedV1Mock).toHaveBeenCalledWith(expect.objectContaining({
+      attemptId: "v1-attempt-empty-narration",
+      reason: "Narrator returned empty narration.",
+    }));
     expect(events.some((event) => event.type === "narrative")).toBe(false);
     expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
     expect(events.some((event) => event.type === "done")).toBe(false);
-    expect(appendChatMessagesMock).toHaveBeenCalledWith("campaign-empty-narration", [
-      { role: "user", content: "I wait and watch what changes." },
-    ]);
-    expect(appendChatMessagesMock).not.toHaveBeenCalledWith(
-      "campaign-empty-narration",
-      [{ role: "assistant", content: "   " }],
-    );
+    expect(appendChatMessagesMock).not.toHaveBeenCalled();
     expect(incrementTickMock).not.toHaveBeenCalled();
+    expect(advanceCampaignTickMock).not.toHaveBeenCalled();
     expect(onPostTurn).not.toHaveBeenCalled();
   });
 
-  it("does not finalize the legacy path when final narration stays blank after retry", async () => {
+  it("does not finalize when SCENE_PLAN_ENABLED is false and final narration is blank", async () => {
     const onPostTurn = vi.fn();
     process.env.SCENE_PLAN_ENABLED = "false";
-    generateTextMock
-      .mockResolvedValueOnce({
-        text: "",
-        reasoningText: undefined,
-      })
-      .mockResolvedValueOnce({
-        text: "   ",
-        reasoningText: undefined,
-      });
+    generateTextMock.mockResolvedValueOnce({
+      text: "",
+      reasoningText: undefined,
+    });
 
     const { events, thrown } = await collectEventsUntilError(
       processTurn(createOptions({ onPostTurn })),
     );
 
-    expect(generateTextMock).toHaveBeenCalledTimes(2);
-    expect(thrown).toBeInstanceOf(Error);
-    expect(String((thrown as Error).message)).toContain("Final visible narration was empty");
+    const errorEvent = events.find((event) => event.type === "error");
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(thrown).toBeUndefined();
+    expect(errorEvent?.data).toMatchObject({
+      error: "Visible narration failed after accepted truth was persisted.",
+      pendingNarration: true,
+      retryable: true,
+    });
+    expect(recordNarrationAttemptFailedV1Mock).toHaveBeenCalledWith(expect.objectContaining({
+      attemptId: "v1-attempt-empty-narration",
+      reason: "Narrator returned empty narration.",
+    }));
     expect(events.some((event) => event.type === "narrative")).toBe(false);
     expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
     expect(events.some((event) => event.type === "done")).toBe(false);
-    expect(appendChatMessagesMock).toHaveBeenCalledWith("campaign-empty-narration", [
-      { role: "user", content: "I wait and watch what changes." },
-    ]);
-    expect(appendChatMessagesMock).not.toHaveBeenCalledWith(
-      "campaign-empty-narration",
-      [{ role: "assistant", content: "   " }],
-    );
+    expect(appendChatMessagesMock).not.toHaveBeenCalled();
     expect(incrementTickMock).not.toHaveBeenCalled();
+    expect(advanceCampaignTickMock).not.toHaveBeenCalled();
     expect(onPostTurn).not.toHaveBeenCalled();
   });
 });

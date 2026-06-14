@@ -481,6 +481,17 @@ function evidenceSemicolonList(labels: readonly string[]): string {
   return uniqueStrings(labels.map(trimTrailingSentencePunctuation).filter((label) => label.length > 0)).join("; ");
 }
 
+function evidenceNaturalList(labels: readonly string[]): string {
+  const values = uniqueStrings(labels.map(trimTrailingSentencePunctuation).filter((label) => label.length > 0));
+  if (values.length <= 2) return values.join(" and ");
+  const last = values[values.length - 1]!;
+  return `${values.slice(0, -1).join(", ")}, and ${last}`;
+}
+
+function inventoryStatusBeat(labels: readonly string[]): string {
+  return `You have ${evidenceNaturalList(labels)} with you.`;
+}
+
 function scenePlacementText(currentScene: string, currentLocation: string): string {
   return currentScene === currentLocation
     ? `You are at ${currentScene}.`
@@ -635,20 +646,26 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
     });
   }
 
-  for (const item of frame.inventory.slice(0, 6)) {
+  const inventoryItems = frame.inventory.slice(0, 6);
+  if (inventoryItems.length > 0) {
     const itemEvidenceId = nextEvidenceId(evidence);
+    const inventoryLabels = inventoryItems.map((item) => item.label);
+    const inventoryStatus = inventoryStatusBeat(inventoryLabels);
     evidence.push({
       evidenceId: itemEvidenceId,
       sourceKind: "scene_frame",
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: `${item.label} is in your inventory.`,
-      visibleRefs: [item.ref],
-      backendFacts: [fact(itemEvidenceId, 1, "inventory_labels", `Inventory labels: ${item.label}.`, item.label)],
+      text: inventoryStatus,
+      visibleRefs: uniqueStrings(inventoryItems.map((item) => item.ref)),
+      backendFacts: [
+        fact(itemEvidenceId, 1, "inventory_status_beat", `Inventory status beat: ${inventoryStatus}`, inventoryStatus),
+        fact(itemEvidenceId, 2, "inventory_labels", `Inventory labels: ${evidenceSemicolonList(inventoryLabels)}.`, evidenceSemicolonList(inventoryLabels)),
+      ],
       limits: {
-        proves: ["inventory item label in the current inventory view"],
-        doesNotProve: ["item state change", "item transfer", "absence of other items"],
+        proves: ["inventory items are with the player in the current inventory view"],
+        doesNotProve: ["item handling", "item readiness", "item state change", "item transfer", "absence of other items"],
       },
     });
   }
@@ -865,6 +882,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       if (observation.visibleFacts.length > 0) claimKinds.push("visible_fact");
       if (observation.inventory.length > 0) claimKinds.push("inventory_status");
       if (observation.movementOptions.length > 0) claimKinds.push("movement_option");
+      const inventoryStatus = inventoryStatusBeat(observation.inventory);
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
         { role: "scene_placement", text: `Scene placement: ${scenePlacement}`, value: scenePlacement },
         { role: "scene_label", text: `Scene label: ${observation.currentScene}.`, value: observation.currentScene },
@@ -876,7 +894,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           ? [{ role: "visible_scene_facts" as const, text: `Visible scene facts: ${evidenceSemicolonList(observation.visibleFacts.slice(0, 4))}.`, value: evidenceSemicolonList(observation.visibleFacts.slice(0, 4)) }]
           : []),
         ...(observation.inventory.length > 0
-          ? [{ role: "inventory_labels" as const, text: `Inventory labels: ${evidenceSemicolonList(observation.inventory)}.`, value: evidenceSemicolonList(observation.inventory) }]
+          ? [
+            { role: "inventory_status_beat" as const, text: `Inventory status beat: ${inventoryStatus}`, value: inventoryStatus },
+          ]
           : []),
         ...(observation.movementOptions.length > 0
           ? [{ role: "route_choices_beat" as const, text: `Route choices beat: ${routeBeat}`, value: routeBeat }]

@@ -556,11 +556,14 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: "Courier satchel is in your inventory.",
-      backendFacts: [{ factRef: "e2.f1", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true }],
+      text: "You have Courier satchel with you.",
+      backendFacts: [
+        { factRef: "e2.f1", role: "inventory_status_beat", value: "You have Courier satchel with you.", text: "Inventory status beat: You have Courier satchel with you.", exact: true },
+        { factRef: "e2.f2", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true },
+      ],
       limits: {
-        proves: ["inventory item label only"],
-        doesNotProve: ["item contents", "item use", "ownership transfer"],
+        proves: ["inventory item is with the player"],
+        doesNotProve: ["item handling", "item readiness", "item contents", "item use", "ownership transfer"],
       },
     }, {
       ref: "e3",
@@ -635,11 +638,14 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e3",
       authority: "scene_frame_snapshot",
       claimKinds: ["inventory_status"],
-      text: "Courier satchel is in your inventory.",
-      backendFacts: [{ factRef: "e3.f1", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true }],
+      text: "You have Courier satchel with you.",
+      backendFacts: [
+        { factRef: "e3.f1", role: "inventory_status_beat", value: "You have Courier satchel with you.", text: "Inventory status beat: You have Courier satchel with you.", exact: true },
+        { factRef: "e3.f2", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true },
+      ],
       limits: {
-        proves: ["inventory item label only"],
-        doesNotProve: ["item contents", "item use", "ownership transfer"],
+        proves: ["inventory item is with the player"],
+        doesNotProve: ["item handling", "item readiness", "item contents", "item use", "ownership transfer"],
       },
     }, {
       ref: "e4",
@@ -1131,7 +1137,7 @@ function sceneObservationReceiptView(): CleanNarratorView {
           { factRef: "e5.f2", role: "scene_label", value: "Market", text: "Scene label: Market.", exact: true },
           { factRef: "e5.f3", role: "place_label", value: "Market", text: "Place label: Market.", exact: true },
           { factRef: "e5.f4", role: "visible_actor_labels", value: "Guide", text: "Visible actor labels: Guide.", exact: true },
-          { factRef: "e5.f5", role: "inventory_labels", value: "Courier satchel", text: "Inventory labels: Courier satchel.", exact: true },
+          { factRef: "e5.f5", role: "inventory_status_beat", value: "You have Courier satchel with you.", text: "Inventory status beat: You have Courier satchel with you.", exact: true },
           { factRef: "e5.f6", role: "route_choices_beat", value: "From Market, visible route choices are North Hall.", text: "Route choices beat: From Market, visible route choices are North Hall.", exact: true },
           { factRef: "e5.f7", role: "route_choice_labels", value: "North Hall", text: "Route choice labels: North Hall.", exact: true },
         ],
@@ -2012,7 +2018,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m1",
         sentenceRole: "exact_context_texture",
         coverage: "optional",
-        entryRefs: ["e2", "e3"],
+        entryRefs: ["e2"],
         preferredBackendFactRefs: ["e2.f1"],
         claimFocus: {
           primaryClaimKinds: ["scene_texture"],
@@ -2073,7 +2079,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m1",
         sentenceRole: "context_anchor",
         coverage: "optional",
-        entryRefs: ["e2", "e3"],
+        entryRefs: ["e3"],
         preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
         claimFocus: {
           primaryClaimKinds: ["current_scene", "current_location"],
@@ -2576,6 +2582,10 @@ describe("clean Stage 6 narration contracts", () => {
       evidence.authority === "scene_frame_snapshot"
       && evidence.claimKinds.includes("movement_option")
     );
+    const inventoryEvidence = promptInput.acceptedEvidence.find((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && evidence.claimKinds.includes("inventory_status")
+    );
 
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
     expect(promptInput.acceptedEvidence.some((evidence) =>
@@ -2584,6 +2594,25 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.acceptedEvidence.some((evidence) =>
       evidence.claimKinds.includes("movement_option")
     )).toBe(true);
+    expect(inventoryEvidence?.backendFacts.map((fact) => [fact.role, fact.text])).toEqual([
+      ["inventory_status_beat", "You have Courier satchel with you."],
+      ["inventory_labels", "Courier satchel"],
+    ]);
+    const inventoryStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "next_action_handle"
+      && step.proseMaterials.some((material) => material.factRef === "e2.f1")
+    );
+    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f1"]);
+    expect(inventoryStatusStep?.beatObjective).toBe("render_direct_scene_snapshot");
+    expect(inventoryStatusStep?.proseMaterials).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        factRef: "e2.f1",
+        proseUse: "inventory_status",
+        materialText: "You have Courier satchel with you.",
+        copyMode: "copy_exact",
+      }),
+    ]));
+    expect(inventoryStatusStep?.materialObligations.exactCopyFactRefs).toEqual(["e2.f1"]);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
       "From Market, visible route choices are North Hall (1 minute).",
       "Market",
@@ -3816,7 +3845,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Local Vendor is visible beside a counter or stall, with worn wood nearby.");
   });
 
-  it("accepts direct-scene implied action at runtime without prose-quality repair", async () => {
+  it("accepts direct-scene custody status at runtime without prose-quality repair", async () => {
     const view = movementView({
       acceptedEvidence: [
         sceneTextureEvidence("e6"),
@@ -3838,16 +3867,16 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: "You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.",
-            evidenceRefs: ["e1", "e2", "e3", "e4"],
-            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3"],
-            claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
+            text: "At Market, Guide is in view, Brass Tube is visible, and North Hall is the exit you can choose; it takes 1 minute.",
+            evidenceRefs: ["e1", "e2", "e4", "e5"],
+            backendFactRefs: ["e1.f1", "e2.f1", "e4.f3", "e5.f2", "e5.f4", "e5.f6"],
+            claimKinds: ["current_scene", "visible_actor", "visible_target", "movement_option"],
           },
           {
-            text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
-            evidenceRefs: ["e5"],
-            backendFactRefs: ["e5.f2", "e5.f4", "e5.f6"],
-            claimKinds: ["movement_option"],
+            text: "You have Courier satchel with you.",
+            evidenceRefs: ["e3"],
+            backendFactRefs: ["e3.f1"],
+            claimKinds: ["inventory_status"],
           },
         ]);
       },
@@ -3855,7 +3884,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view, Brass Tube is visible, and North Hall is the exit you can choose; it takes 1 minute. You have Courier satchel with you.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -3904,28 +3933,28 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Courier satchel is with you and Notice Board is visible.",
-          evidenceRefs: ["e1", "e2", "e3"],
-          backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
-          claimKinds: ["current_scene", "inventory_status", "visible_target"],
+          text: "At Market, Notice Board is visible, and North Hall is the exit you can choose; it takes 1 minute.",
+          evidenceRefs: ["e1", "e3", "e4"],
+          backendFactRefs: ["e1.f1", "e3.f1", "e4.f2", "e4.f4", "e4.f6"],
+          claimKinds: ["current_scene", "visible_target", "movement_option"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
-          evidenceRefs: ["e4"],
-          backendFactRefs: ["e4.f2", "e4.f4", "e4.f6"],
-          claimKinds: ["movement_option"],
+          text: "You have Courier satchel with you.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["inventory_status"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Courier satchel is with you and Notice Board is visible. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Notice Board is visible, and North Hall is the exit you can choose; it takes 1 minute. You have Courier satchel with you.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
 
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, Courier satchel is with you and Notice Board is visible. At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "At Market, Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.",
         evidenceRefs: ["e1", "e2", "e3", "e4"],
         backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f2", "e4.f4", "e4.f6"],
         claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
@@ -3943,20 +3972,24 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, a courier satchel is with you and Notice Board is visible.",
+          text: "At Market, Notice Board is visible, and the courier satchel sits at your side.",
           evidenceRefs: ["e1", "e2", "e3"],
           backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
           claimKinds: ["current_scene", "inventory_status", "visible_target"],
         },
       ]),
     });
-    expect(nonVerbatimLabel.status).toBe("accepted");
+    expect(nonVerbatimLabel.status).toBe("rejected");
+    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
+    expect(nonVerbatimLabel.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
   });
 
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel. Brass Tube and Notice Board are visible. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(text).toBe("You are at Market. Guide is here. You have Courier satchel with you. Brass Tube and Notice Board are visible. At Market, North Hall is the exit you can choose; it takes 1 minute.");
     expect(text).not.toContain("Guide, Courier satchel");
     expect(text).not.toContain("Guide, Brass Tube");
     expect(text).not.toContain("Courier satchel is visible");
@@ -3970,7 +4003,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible. At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "At Market, Guide is here, and Brass Tube and Notice Board are visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.",
         evidenceRefs: ["e1", "e2", "e3", "e4", "e5"],
         backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f4", "e4.f5", "e5.f2", "e5.f4", "e5.f6"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
@@ -3994,7 +4027,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "visible_target"],
       }]),
     });
-    expect(actorAction.status).toBe("accepted");
+    expect(actorAction.status).toBe("rejected");
 
     const itemHandling = validateCleanNarrationCandidate({
       view,
@@ -4005,7 +4038,11 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status"],
       }]),
     });
-    expect(itemHandling.status).toBe("accepted");
+    expect(itemHandling.status).toBe("rejected");
+    if (itemHandling.status !== "rejected") throw new Error("expected rejected");
+    expect(itemHandling.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
@@ -5085,7 +5122,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => {
         modelCalls += 1;
         return acceptedCandidate(view, [{
-          text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is an exit you can choose.",
+          text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
           claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
@@ -5095,7 +5132,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is an exit you can choose.");
+    expect(result.text).toBe("At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.");
     expect(result.text).not.toMatch(/\b(Current scene is|Visible actor:|Inventory item:|Movement option:|backend|receipt|nothing changed|no change)\b/iu);
 
     const rawReceiptSummary = validateCleanNarrationCandidate({
@@ -5107,7 +5144,11 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(rawReceiptSummary.status).toBe("accepted");
+    expect(rawReceiptSummary.status).toBe("rejected");
+    if (rawReceiptSummary.status !== "rejected") throw new Error("expected rejected");
+    expect(rawReceiptSummary.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
 
     const playerActionDrift = validateCleanNarrationCandidate({
       view,
@@ -5118,7 +5159,11 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(playerActionDrift.status).toBe("accepted");
+    expect(playerActionDrift.status).toBe("rejected");
+    if (playerActionDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(playerActionDrift.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
 
     const actorActionDrift = validateCleanNarrationCandidate({
       view,
@@ -5129,7 +5174,11 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(actorActionDrift.status).toBe("accepted");
+    expect(actorActionDrift.status).toBe("rejected");
+    if (actorActionDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(actorActionDrift.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
 
     const nonVerbatimLabel = validateCleanNarrationCandidate({
       view,
@@ -5140,13 +5189,17 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
       }]),
     });
-    expect(nonVerbatimLabel.status).toBe("accepted");
+    expect(nonVerbatimLabel.status).toBe("rejected");
+    if (nonVerbatimLabel.status !== "rejected") throw new Error("expected rejected");
+    expect(nonVerbatimLabel.issues.some((issue) =>
+      issue.message.includes("copy accepted inventory status material")
+    )).toBe(true);
 
     const texturedView = sceneObservationReceiptWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view: texturedView,
       candidate: acceptedCandidate(texturedView, [{
-        text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is an exit you can choose.",
+        text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
         evidenceRefs: ["e5"],
         backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
@@ -5165,7 +5218,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is an exit you can choose.",
+          text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
           claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
@@ -5173,7 +5226,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
     expect(texturedResult.source).toBe("model");
-    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view, Courier satchel is in your inventory, and North Hall is an exit you can choose.");
+    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {

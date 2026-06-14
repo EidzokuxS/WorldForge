@@ -168,13 +168,13 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       language: "en",
       sentences: [{
         kind: "accepted_evidence",
-        text: "At Lowwater Bazaar, Guide is here, Courier satchel is with you, and Brass Tube is visible.",
+        text: "At Lowwater Bazaar, Guide is here, you have Courier satchel with you, and Brass Tube is visible.",
         evidenceRefs,
         backendFactRefs: evidenceRefs.map((ref) => `${ref}.f1`),
         claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target", "movement_option"],
         auditStepIds: [],
       }],
-      finalText: "At Lowwater Bazaar, Guide is here, Courier satchel is with you, and Brass Tube is visible.",
+      finalText: "At Lowwater Bazaar, Guide is here, you have Courier satchel with you, and Brass Tube is visible.",
     });
 
     expect(parsed.sentences[0]?.evidenceRefs).toHaveLength(12);

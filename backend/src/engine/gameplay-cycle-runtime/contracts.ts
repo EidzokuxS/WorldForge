@@ -2266,6 +2266,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "elapsed_travel_time",
   "final_equip_state",
   "handle_result",
+  "inventory_status_beat",
   "inventory_labels",
   "item_label",
   "item_transfer_result",
@@ -2533,6 +2534,7 @@ const cleanNarratorFactUseSchema = z.object({
   proseUse: z.enum([
     "exact_dialogue_quote",
     "exact_texture_sentence",
+    "inventory_status",
     "label_anchor",
     "primary_beat",
     "route_choice",
@@ -2608,6 +2610,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
     proseUse: z.enum([
       "exact_dialogue_quote",
       "exact_texture_sentence",
+      "inventory_status",
       "label_anchor",
       "primary_beat",
       "route_choice",

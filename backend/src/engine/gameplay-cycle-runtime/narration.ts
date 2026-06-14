@@ -285,6 +285,7 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
       "scene_texture",
       "visible_scene_facts",
       "visible_actor_labels",
+      "inventory_status_beat",
       "inventory_labels",
       "visible_target_labels",
       "visible_actor_target_labels",
@@ -554,6 +555,8 @@ function narrativeFactProseUse(
     case "settled_custody":
     case "visible_scene_facts":
       return "primary_beat";
+    case "inventory_status_beat":
+      return "inventory_status";
     case "elapsed_time":
     case "elapsed_travel_time":
     case "route_choice_travel_costs":
@@ -643,6 +646,7 @@ function moveHasDirectSceneSurfaceFacts(move: CleanNarratorPageTaskMove): boolea
     || fact.role === "place_label"
     || fact.role === "visible_actor_labels"
     || fact.role === "visible_actor_target_labels"
+    || fact.role === "inventory_status_beat"
     || fact.role === "inventory_labels"
     || fact.role === "visible_target_labels"
   );
@@ -650,12 +654,25 @@ function moveHasDirectSceneSurfaceFacts(move: CleanNarratorPageTaskMove): boolea
 
 function selectPlayableNextActionFactRefs(move: CleanNarratorPageTaskMove): string[] {
   if (move.entryProseCues.includes("direct_scene_snapshot") || moveHasDirectSceneSurfaceFacts(move)) {
+    const directSceneSurfaceRefs = move.factUses
+      .filter((factUse) => factUse.proseUse === "scene_anchor" || factUse.proseUse === "label_anchor")
+      .flatMap((factUse) => {
+        const fact = move.usableFacts.find((entry) => entry.factRef === factUse.factRef);
+        return fact?.role === "inventory_labels" ? [] : [factUse.factRef];
+      });
     return uniqueStrings([
-      ...sentencePlanPreferredFactRefs(move, ["scene_anchor", "label_anchor"]),
+      ...directSceneSurfaceRefs,
       ...selectRouteChoiceFactRefs(move),
     ]);
   }
   return selectRouteChoiceFactRefs(move);
+}
+
+function selectDirectSceneInventoryStatusFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  if (!move.entryProseCues.includes("direct_scene_snapshot") && !moveHasDirectSceneSurfaceFacts(move)) {
+    return [];
+  }
+  return sentencePlanFactRefsByRole(move, ["inventory_status_beat"]);
 }
 
 function selectCurrentSceneLabelAnchor(input: {
@@ -832,6 +849,7 @@ function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
     "exact_dialogue_quote",
     "state_value",
     "time_value",
+    "inventory_status",
     "label_anchor",
     "scene_anchor",
     "supporting_detail",
@@ -851,6 +869,7 @@ function sentencePlanMaterialCopyMode(
   switch (proseUse) {
     case "exact_dialogue_quote":
     case "exact_texture_sentence":
+    case "inventory_status":
       return "copy_exact";
     case "label_anchor":
     case "route_choice":
@@ -969,6 +988,9 @@ function sentencePlanAdventureSubjectFocus(
   if (sentenceRole === "clarification_question") return "accepted_question";
   if (sentenceRole === "exact_context_texture") return "accepted_texture";
   if (sentenceRole === "context_anchor") return "player_scene_position";
+  if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
+    return "settled_result_material";
+  }
   if (sentenceRole === "next_action_handle") return "playable_route_choices";
   if (beatObjective === "render_elapsed_time") return "elapsed_time_value";
   if (beatObjective === "render_item_custody") return "item_custody_state";
@@ -987,6 +1009,9 @@ function sentencePlanAdventureVerbFrame(
   if (sentenceRole === "clarification_question") return "ask_direct_question";
   if (sentenceRole === "exact_context_texture") return "copy_visible_texture";
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
+  if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
+    return "land_settled_result";
+  }
   if (sentenceRole === "next_action_handle") return "offer_scene_exits";
   if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
   if (beatObjective === "render_item_custody") return "land_scene_custody";
@@ -1006,6 +1031,8 @@ function sentencePlanAdventureDetailPalette(
         return "accepted_quote";
       case "exact_texture_sentence":
         return "accepted_texture";
+      case "inventory_status":
+        return "accepted_state";
       case "label_anchor":
       case "scene_anchor":
         return "accepted_labels";
@@ -1106,6 +1133,18 @@ function sentencePlanProseAssembly(
         closingFunction: "orient_context",
       };
     case "next_action_handle": {
+      if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
+        return {
+          perspective: "second_person_present",
+          sentenceShape: "result_beat_line",
+          openingSource: "core_material_subject",
+          verbEnergy: "copy_exact",
+          detailRhythm: "single_core_material",
+          materialWeaveOrder: "result_only",
+          styleBudget: "result_beat_cadence",
+          closingFunction: "orient_context",
+        };
+      }
       const carriesCost = proseMaterials.some((material) => material.proseUse === "time_value");
       return {
         perspective: "playable_choice_present",
@@ -1189,6 +1228,7 @@ function sentencePlanLiteraryCue(
   move: CleanNarratorPageTaskMove,
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
   beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
 ): CleanNarratorSentencePlanStep["literaryCue"] {
   switch (sentenceRole) {
     case "clarification_question":
@@ -1210,6 +1250,13 @@ function sentencePlanLiteraryCue(
         styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
       };
     case "next_action_handle":
+      if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
+        return {
+          renderShape: "land_settled_turn_result",
+          cadence: "compact_present_beat",
+          styleLevers: ["settled_state_focus", "accepted_label_anchor"],
+        };
+      }
       return {
         renderShape: "leave_scene_exit_handoff",
         cadence: "scene_exit_choice_sentence",
@@ -1264,6 +1311,7 @@ function sentencePlanForMove(
   sentenceIndex: number,
   claimKindsByEntryRef: Map<string, CleanNarrationClaimKind[]>,
   claimKindsByFactRef: Map<string, CleanNarrationClaimKind[]>,
+  entryRefsByFactRef: Map<string, string[]>,
   coreProseCues: readonly CleanNarratorProseCue[],
 ): CleanNarratorSentencePlanDraft[] {
   const steps: CleanNarratorSentencePlanDraft[] = [];
@@ -1277,6 +1325,9 @@ function sentencePlanForMove(
     const proseMaterials = sentencePlanProseMaterials(move, preferredBackendFactRefs);
     const beatObjective = beatObjectiveOverride ?? sentencePlanBeatObjective(move, sentenceRole);
     const materialObligations = sentencePlanMaterialObligations(proseMaterials);
+    const entryRefs = uniqueStrings(preferredBackendFactRefs.flatMap((factRef) =>
+      entryRefsByFactRef.get(factRef) ?? []
+    ));
     const hasSupportActorPresentationDetail = preferredBackendFactRefs.some((factRef) => {
       const fact = move.usableFacts.find((entry) => entry.factRef === factRef);
       return fact?.role === "support_actor_visible_cue"
@@ -1287,7 +1338,7 @@ function sentencePlanForMove(
       moveRef: move.moveRef,
       sentenceRole,
       coverage,
-      entryRefs: move.entryRefs,
+      entryRefs: entryRefs.length > 0 ? entryRefs : move.entryRefs,
       preferredBackendFactRefs,
       claimFocus: sentencePlanClaimFocus(move, preferredBackendFactRefs, claimKindsByEntryRef, claimKindsByFactRef),
       beatObjective,
@@ -1302,7 +1353,7 @@ function sentencePlanForMove(
         materialObligations,
         hasSupportActorPresentationDetail,
       ),
-      literaryCue: sentencePlanLiteraryCue(move, sentenceRole, beatObjective),
+      literaryCue: sentencePlanLiteraryCue(move, sentenceRole, beatObjective, proseMaterials),
     });
   };
 
@@ -1339,6 +1390,12 @@ function sentencePlanForMove(
       break;
     case "leave_playable_next_action_handle":
       pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
+      pushPlan(
+        "next_action_handle",
+        move.coverage,
+        selectDirectSceneInventoryStatusFactRefs(move),
+        "render_direct_scene_snapshot",
+      );
       break;
   }
   return steps;
@@ -1968,9 +2025,14 @@ function buildCleanNarrativePageTask(
   const entriesByRef = new Map(entries.map((entry) => [entry.ref, entry] as const));
   const claimKindsByEntryRef = new Map(entries.map((entry) => [entry.ref, entry.claimKinds] as const));
   const claimKindsByFactRef = new Map<string, CleanNarrationClaimKind[]>();
+  const entryRefsByFactRef = new Map<string, string[]>();
   for (const entry of entries) {
     for (const factRef of entry.backendFactRefs) {
       claimKindsByFactRef.set(factRef, entry.claimKinds);
+      entryRefsByFactRef.set(factRef, uniqueStrings([
+        ...(entryRefsByFactRef.get(factRef) ?? []),
+        entry.ref,
+      ]));
     }
   }
   const backendFactsByRef = new Map(
@@ -2036,6 +2098,7 @@ function buildCleanNarrativePageTask(
       sentencePlanDrafts.length,
       claimKindsByEntryRef,
       claimKindsByFactRef,
+      entryRefsByFactRef,
       coreProseCues,
     ));
   }
@@ -2187,7 +2250,7 @@ export function buildCleanNarrationSystemPrompt(
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",
-    "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
+    "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence, exact_dialogue_quote, and inventory_status copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, textureCue to decide whether this sentence owns texture, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
     "Material obligations: each sentencePlan step carries materialObligations. Cite backendFactRefs only from allowedMaterialFactRefs on the cited sentencePlanRefs, include at least one coreMaterialFactRefs value, copy exactCopyFactRefs materials exactly when used, preserve labels/time/state from preserveTokenFactRefs, and phrase phraseFromMaterialFactRefs into natural adventure prose.",
@@ -2234,7 +2297,7 @@ export function buildCleanNarrationSystemPrompt(
     "Minor-POI surface: for minor_poi_handle, translate the accepted POI label, kind, result, and exact scene anchor into ordinary player-facing scene prose: '<label> is now a visible <kind> here', '<label> marks a meeting spot at <scene>', or '<label> remains a marked <kind> in <scene>'. Keep handle-related contract vocabulary in citation metadata; player-facing text uses ordinary scene nouns such as stall, counter, bench, sign, doorway, workstation, marked point, or meeting spot. If sentencePlan supplies a texture sentence, keep texture there and keep the POI beat on label/kind/scene materials. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. If sentencePlan supplies a texture sentence, keep texture there and keep the device beat on device/facet materials. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
     "Oracle-outcome surface: for oracle_outcome, turn the cited selected visible outcome meaning into a concrete player-facing story beat. Keep the sentence grounded in the cited oracle_outcome backend fact and its evidence limits. Movement, route status, item state, dialogue, discovery, condition, world truth, absence, and private knowledge enter the story through their own accepted evidence entries.",
-    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
+    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory_status custody/status material copied exactly, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Inventory labels name items; inventory_status states only that the item is with the player. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite sentencePlanRefs from promptInput.narrativePageTask.sentencePlan plus evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation, composed item_state plus dialogue_response, and composed support_actor_materialization plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
@@ -2467,6 +2530,21 @@ export function validateCleanNarrationCandidate(input: {
           path: `sentences.${index}.backendFactRefs`,
           message: "Narration sentence must cite at least one core material backend fact from its cited sentence-plan refs.",
         });
+      }
+      const exactInventoryStatusMaterials = citedSentencePlans.flatMap((step) =>
+        step?.proseMaterials.filter((material) =>
+          material.proseUse === "inventory_status"
+          && sentence.backendFactRefs.includes(material.factRef)
+        ) ?? []
+      );
+      for (const material of exactInventoryStatusMaterials) {
+        if (!sentence.text.includes(material.materialText)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.text`,
+            message: `Narration sentence must copy accepted inventory status material ${material.factRef}: ${material.materialText}`,
+          });
+        }
       }
       const sentencePlanPrimaryClaimKinds = new Set(citedSentencePlans.flatMap((step) =>
         step?.claimFocus.primaryClaimKinds ?? []
@@ -2885,6 +2963,11 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     const labels = fact?.value?.trim();
     return labels ? splitEvidenceLabels(labels) : [];
   });
+  const valuesFromRole = (role: AcceptedNarrationBackendFactRole): string[] => sceneFacts.flatMap((evidence) => {
+    const fact = evidence.backendFacts.find((entry) => entry.role === role);
+    const value = fact?.value?.trim();
+    return value ? [normalizeText(value)] : [];
+  });
 
   const currentScene = firstRoleValue("scene_label");
   const currentPlace = firstRoleValue("place_label");
@@ -2893,6 +2976,8 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     ...labelsFromRole("visible_actor_target_labels"),
   ]);
   const inventory = uniqueStrings(labelsFromRole("inventory_labels"));
+  const inventoryStatusBeats = uniqueStrings(valuesFromRole("inventory_status_beat"))
+    .map(trimSentencePeriod);
   const visibleSceneFacts = labelsFromRole("visible_scene_facts");
   const routeOptionLabels = uniqueStrings(sceneFacts
     .filter((evidence) => evidence.claimKinds.includes("movement_option"))
@@ -2930,7 +3015,11 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     sentences.push(`${visibleFact}.`);
   }
   if (actors.length > 0) sentences.push(`${englishList(actors)} ${actors.length === 1 ? "is" : "are"} here.`);
-  if (inventory.length > 0) sentences.push(`You have ${englishList(inventory)}.`);
+  if (inventoryStatusBeats.length > 0) {
+    sentences.push(...inventoryStatusBeats.map((beat) => `${beat}.`));
+  } else if (inventory.length > 0) {
+    sentences.push(`You have ${englishList(inventory)} with you.`);
+  }
   if (targets.length > 0) sentences.push(`${englishList(targets)} ${targets.length === 1 ? "is" : "are"} visible.`);
   if (routeFacts.length > 0) sentences.push(renderRouteOptionsProjection(routeEvidence));
   return sentences.length > 0 ? sentences.join(" ") : null;
