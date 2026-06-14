@@ -1653,6 +1653,8 @@ function sentencePlanForMove(
         && !coreProseCues.includes("route_status")
         && !coreProseCues.includes("minor_poi_handle")
         && !coreProseCues.includes("direct_scene_snapshot")
+        && !coreProseCues.includes("local_observation")
+        && !coreProseCues.includes("bounded_visibility_negative")
         && !suppressRouteOptionsContextAnchor
       ) {
         pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));

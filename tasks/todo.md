@@ -8099,3 +8099,27 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: live proof `output/clean-runtime-p301-direct-scene-surface-route-live-20260614-223000` r8 settled through `gameplay-cycle-runtime`, left `mutationApplied=false`, kept legacy runtime tables at 0, and produced separated texture/surface/inventory/route sentences.
     - Verified: accepted r8 text was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in sight at Lowwater Bazaar. Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from here.`
     - Verified: prose audit passed for the proof artifact with 1 narrative, 65 words, zero receipt/debug/enum/surface/list/digest/old-formula hits, zero `youOpening`, and zero list-like starts.
+
+- P302 Stage 6 inventory local-observation context ownership:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p302-prose-gap-scan-20260614-230500` shows `Look at the Brass Tube.` settling through clean runtime, but Stage 6 inserts an extra context sentence: `Lowwater Bazaar shifts beneath your feet. Brass Tube is with you.`
+    - [x] Root owner is Stage 6 page-task planning: the accepted `local_observation` receipt already owns the inventory-status result, while the optional `context_anchor` sentence gives scene placement an extra player-facing slot on a page that only needs texture plus the observation result.
+  - Plan:
+    - [x] Run GitNexus impact for `sentencePlanForMove` before editing.
+    - [x] Suppress standalone `context_anchor` for local-observation and bounded local-observation event pages.
+    - [x] Update focused narration tests so inventory/object local-observation pages use texture plus the owned result sentence, without separate scene placement.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live object-look proof, and prose audit.
+    - [x] Run GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `Look at the Brass Tube.` settles through clean runtime and closes on the owned inventory-status observation sentence.
+    - [x] Exact item label and accepted with-player state remain present.
+    - [x] Narration adds no movement, player sensation/posture, item handling/readiness, item state change, discovery, absence/no-change, private fact, or extra world truth.
+  - Review:
+    - Executed: `sentencePlanForMove` now suppresses the standalone `context_anchor` sentence when the page is owned by `local_observation` or `bounded_visibility_negative`; scene texture remains available as the opening frame, and the observation event remains the owner of item/visibility result material.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 115/115 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 386/386 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p302-object-look-context-live-20260614-231000`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, legacy runtime stores stayed 0, sentence-plan had no `context_anchor`, and accepted text was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. The Brass Tube is with you at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p302-object-look-context-live-20260614-231000/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.

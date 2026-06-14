@@ -5436,8 +5436,12 @@ describe("clean Stage 6 narration contracts", () => {
     const observationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.beatObjective === "render_local_observation"
     );
+    const contextAnchorStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "context_anchor"
+    );
 
     expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f5"]);
+    expect(contextAnchorStep).toBeUndefined();
     expect(observationStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
       "primary_beat",
       "inventory_status",
