@@ -829,6 +829,7 @@ function sentencePlanProseAssembly(
         openingSource: "accepted_question",
         verbEnergy: "ask",
         detailRhythm: "single_core_material",
+        materialWeaveOrder: "accepted_question_only",
         closingFunction: "request_answer",
       };
     case "exact_context_texture":
@@ -838,6 +839,7 @@ function sentencePlanProseAssembly(
         openingSource: "accepted_texture_material",
         verbEnergy: "copy_exact",
         detailRhythm: "texture_line",
+        materialWeaveOrder: "texture_exact_only",
         closingFunction: "orient_context",
       };
     case "context_anchor":
@@ -847,19 +849,21 @@ function sentencePlanProseAssembly(
         openingSource: "preserved_label_anchor",
         verbEnergy: "concrete_present",
         detailRhythm: "scene_anchor_tokens",
+        materialWeaveOrder: "scene_anchor_only",
         closingFunction: "orient_context",
       };
-    case "next_action_handle":
+    case "next_action_handle": {
+      const carriesCost = proseMaterials.some((material) => material.proseUse === "time_value");
       return {
         perspective: "playable_choice_present",
         sentenceShape: "choice_handle_line",
         openingSource: "playable_route_label",
         verbEnergy: "offer_choice",
-        detailRhythm: proseMaterials.some((material) => material.proseUse === "time_value")
-          ? "choice_group_with_cost"
-          : "choice_group",
+        detailRhythm: carriesCost ? "choice_group_with_cost" : "choice_group",
+        materialWeaveOrder: carriesCost ? "choices_then_costs" : "choices_only",
         closingFunction: "offer_next_action",
       };
+    }
     case "turn_event_beat":
       if (beatObjective === "frame_dialogue_reply") {
         return {
@@ -868,17 +872,18 @@ function sentencePlanProseAssembly(
           openingSource: "visible_speaker_label",
           verbEnergy: "frame_speech",
           detailRhythm: "exact_quote_with_frame",
+          materialWeaveOrder: "speaker_then_quote",
           closingFunction: "settle_outcome",
         };
       }
+      const preservesTokens = materialObligations.preserveTokenFactRefs.length > 0;
       return {
         perspective: "settled_result_present",
         sentenceShape: "result_beat_line",
         openingSource: "core_material_subject",
         verbEnergy: "land_result",
-        detailRhythm: materialObligations.preserveTokenFactRefs.length > 0
-          ? "core_with_preserved_tokens"
-          : "single_core_material",
+        detailRhythm: preservesTokens ? "core_with_preserved_tokens" : "single_core_material",
+        materialWeaveOrder: preservesTokens ? "result_then_preserved_tokens" : "result_only",
         closingFunction: "settle_outcome",
       };
   }
@@ -1379,7 +1384,7 @@ export function buildCleanNarrationSystemPrompt(
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns public scene texture and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
-    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, and page-ending job before phrasing the cited proseMaterials.",
+    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, and page-ending job before phrasing the cited proseMaterials.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
@@ -1400,7 +1405,7 @@ export function buildCleanNarrationSystemPrompt(
     "Scene-texture exactness: when textureCue.mode is copy_exact_texture_sentence, set sentence.text to one exact contiguous accepted scene-texture material from textureCue.allowedTextureFactRefs, with the matching backendFactRefs for that clause.",
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
-    "Use grounded variety: choose the sentence opening from proseAssembly.openingSource, adventureCue.subjectFocus, and adventureCue.verbFrame; vary sentence shape through proseAssembly.sentenceShape and detailRhythm while keeping refs unchanged.",
+    "Use grounded variety: choose the sentence opening from proseAssembly.openingSource, adventureCue.subjectFocus, and adventureCue.verbFrame; vary sentence shape through proseAssembly.sentenceShape, detailRhythm, and materialWeaveOrder while keeping refs unchanged.",
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different adventureCue subject/verb pairings across nearby turns.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",

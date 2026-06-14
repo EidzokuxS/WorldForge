@@ -1425,6 +1425,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "core_material_subject",
           verbEnergy: "land_result",
           detailRhythm: "core_with_preserved_tokens",
+          materialWeaveOrder: "result_then_preserved_tokens",
           closingFunction: "settle_outcome",
         },
         literaryCue: {
@@ -1585,6 +1586,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "preserved_label_anchor",
           verbEnergy: "concrete_present",
           detailRhythm: "scene_anchor_tokens",
+          materialWeaveOrder: "scene_anchor_only",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -1658,6 +1660,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "visible_speaker_label",
           verbEnergy: "frame_speech",
           detailRhythm: "exact_quote_with_frame",
+          materialWeaveOrder: "speaker_then_quote",
           closingFunction: "settle_outcome",
         },
         literaryCue: {
@@ -1860,6 +1863,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "accepted_texture_material",
           verbEnergy: "copy_exact",
           detailRhythm: "texture_line",
+          materialWeaveOrder: "texture_exact_only",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -1933,6 +1937,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "preserved_label_anchor",
           verbEnergy: "concrete_present",
           detailRhythm: "scene_anchor_tokens",
+          materialWeaveOrder: "scene_anchor_only",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -2027,6 +2032,7 @@ describe("clean Stage 6 narration contracts", () => {
           openingSource: "playable_route_label",
           verbEnergy: "offer_choice",
           detailRhythm: "choice_group_with_cost",
+          materialWeaveOrder: "choices_then_costs",
           closingFunction: "offer_next_action",
         },
         literaryCue: {
@@ -4969,6 +4975,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("openingSource");
     expect(buildCleanNarrationSystemPrompt()).toContain("verbEnergy");
     expect(buildCleanNarrationSystemPrompt()).toContain("detailRhythm");
+    expect(buildCleanNarrationSystemPrompt()).toContain("materialWeaveOrder");
     expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
     expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");

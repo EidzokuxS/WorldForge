@@ -2674,6 +2674,16 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "single_core_material",
       "texture_line",
     ]),
+    materialWeaveOrder: z.enum([
+      "accepted_question_only",
+      "choices_only",
+      "choices_then_costs",
+      "result_only",
+      "result_then_preserved_tokens",
+      "scene_anchor_only",
+      "speaker_then_quote",
+      "texture_exact_only",
+    ]),
     closingFunction: z.enum([
       "offer_next_action",
       "orient_context",
