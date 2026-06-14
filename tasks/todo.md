@@ -8533,3 +8533,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Five minutes slip by at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p317-elapsed-live-20260615-025305/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 4 touched indexed symbols, 5 changed files, and one affected `renderCleanAuthorityProjection -> normalizeText` process; no HIGH/CRITICAL warnings.
+    - Verified implementation commit: `81a7eb1c` recorded the P317 code/tests/proof notes.
