@@ -8135,7 +8135,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update focused narration tests so direct-scene surface prompt evidence no longer exposes route-overlapping target aggregates while route handoff preserves every route label.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live direct-look proof, and prose audit.
     - [x] Run GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live `I look around.` keeps visible actor material separate from route labels.
     - [x] Exact accepted route labels remain present in the route handoff sentence.
@@ -8149,3 +8149,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p303-direct-look-visible-target-live-20260614-234000/prose-audit.json`: one narrative, 65 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus impact: `directSceneSnapshotPromptEvidence` LOW, no upstream affected processes; `selectPromptAcceptedEvidence` LOW, direct caller `buildCleanNarratorPromptInput`, affected process `runCleanNarration`.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope summary, 2 touched indexed symbols, 3 changed files, affected process family `runCleanNarration`, and no HIGH/CRITICAL impact results.
+    - Verified commit/push/index: code commit `ab611659` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
