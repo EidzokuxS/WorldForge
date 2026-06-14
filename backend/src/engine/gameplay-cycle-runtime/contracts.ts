@@ -2559,6 +2559,17 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "preserve_token",
     ]),
   }).strict()).min(1).max(24),
+  textureCue: z.object({
+    mode: z.enum([
+      "copy_exact_texture_sentence",
+      "omit_texture_in_this_sentence",
+    ]),
+    playerFacingUse: z.enum([
+      "none",
+      "standalone_context_sentence",
+    ]),
+    allowedTextureFactRefs: z.array(shortText).max(12),
+  }).strict(),
   flowCue: z.object({
     pagePosition: z.enum([
       "closing",

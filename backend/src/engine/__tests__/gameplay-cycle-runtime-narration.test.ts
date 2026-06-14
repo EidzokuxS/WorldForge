@@ -1394,6 +1394,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        textureCue: {
+          mode: "omit_texture_in_this_sentence",
+          playerFacingUse: "none",
+          allowedTextureFactRefs: [],
+        },
         literaryCue: {
           renderShape: "land_settled_turn_result",
           cadence: "compact_present_beat",
@@ -1520,6 +1525,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        textureCue: {
+          mode: "omit_texture_in_this_sentence",
+          playerFacingUse: "none",
+          allowedTextureFactRefs: [],
+        },
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1554,6 +1564,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "copy_exact",
           },
         ],
+        textureCue: {
+          mode: "omit_texture_in_this_sentence",
+          playerFacingUse: "none",
+          allowedTextureFactRefs: [],
+        },
         literaryCue: {
           renderShape: "frame_exact_quote",
           cadence: "quote_framed_beat",
@@ -1722,6 +1737,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "copy_exact",
           },
         ],
+        textureCue: {
+          mode: "copy_exact_texture_sentence",
+          playerFacingUse: "standalone_context_sentence",
+          allowedTextureFactRefs: ["e2.f1", "e2.f2"],
+        },
         literaryCue: {
           renderShape: "copy_exact_context_texture",
           cadence: "exact_short_sentence",
@@ -1763,6 +1783,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        textureCue: {
+          mode: "omit_texture_in_this_sentence",
+          playerFacingUse: "none",
+          allowedTextureFactRefs: [],
+        },
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1818,6 +1843,11 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        textureCue: {
+          mode: "omit_texture_in_this_sentence",
+          playerFacingUse: "none",
+          allowedTextureFactRefs: [],
+        },
         literaryCue: {
           renderShape: "leave_playable_choice_handle",
           cadence: "choice_handle_sentence",
@@ -4688,6 +4718,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlanRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("textureCue");
     expect(buildCleanNarrationSystemPrompt()).toContain("Prose materials:");
     expect(buildCleanNarrationSystemPrompt()).toContain("proseMaterials");
     expect(buildCleanNarrationSystemPrompt()).toContain("copyMode");
@@ -4695,6 +4726,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("flowCue.pagePosition");
     expect(buildCleanNarrationSystemPrompt()).toContain("Literary cues:");
     expect(buildCleanNarrationSystemPrompt()).toContain("literaryCue.renderShape");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Texture cues:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("mode=copy_exact_texture_sentence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("mode=omit_texture_in_this_sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
@@ -4726,13 +4760,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");
     expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_materialization uses the first accepted texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the presence beat on actor/role/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("player_local_condition uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the condition beat on condition/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("minor_poi_handle uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the handle beat on place-handle/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Device-surface surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("device_surface_observation uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the device beat on device/facet materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
@@ -4744,6 +4778,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Echo firewall:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Texture scope:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Door rotation:");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("uses the first accepted texture fact");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("uses a later texture fact");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("choose a later texture fact");
   });
 
   it("composes runtime through Stage 6 with only CleanNarratorView input", async () => {
