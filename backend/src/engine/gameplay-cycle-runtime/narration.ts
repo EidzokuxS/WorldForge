@@ -930,6 +930,14 @@ function selectLocalObservationFactRefs(move: CleanNarratorPageTaskMove): string
     ]);
   }
 
+  if (move.entryProseCues.includes("bounded_visibility_negative")) {
+    return sentencePlanFactRefsByRole(move, [
+      "local_observation_beat",
+      "observation_query",
+      "anchor_scene",
+    ]);
+  }
+
   return sentencePlanFactRefsByRole(move, [
     "local_observation_beat",
     "searched_visible_surfaces",

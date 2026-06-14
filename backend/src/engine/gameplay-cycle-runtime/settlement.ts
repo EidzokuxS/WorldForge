@@ -291,10 +291,10 @@ function localObservationStoryBeat(observation: {
   queryText: string;
   matchedEntries: readonly { surfaceKind: string; label: string }[];
   searchedSurfaceKinds: readonly string[];
+  anchorSceneLabel: string;
 }): string {
-  const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
   if (observation.resultKind === "bounded_no_match") {
-    return `The ${surfaceGroup} show no match for "${observation.queryText}".`;
+    return `Among what is visible at ${observation.anchorSceneLabel}, ${observation.queryText} does not appear.`;
   }
   if (observation.matchedEntries.length === 0) {
     throw new Error("Local observation story evidence requires matched entries for non-negative results.");

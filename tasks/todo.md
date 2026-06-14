@@ -7999,3 +7999,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: accepted live narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From here, the path to Anchor Chain Pylon lies open.`
     - Verified: live proof passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, `settlementKind=stage4_execution`, accepted `route_check_receipt`, legacy store counts 0, exact `route_label=Anchor Chain Pylon`, and `route_status=connected`.
     - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 1 touched indexed symbol, 3 changed files, and 0 affected execution flows.
+
+- P298 Stage 6 bounded no-match prose:
+  - Diagnosis:
+    - [x] Fresh prose-gap scan `output/clean-runtime-p297-prose-gap-scan-20260614-211200` showed bounded no-match settling correctly, but narration reads as a surface report: `At Lowwater Bazaar, the visible targets and actors show no match for "Violet Astrolabe".`
+    - [x] Root owner is Settlement accepted evidence wording: `local_observation_beat` already contains surface-kind/status language, so Stage 6 receives a dry beat instead of a story-page bounded observation.
+  - Plan:
+    - [x] Run GitNexus impact for `localObservationStoryBeat` before editing.
+    - [x] Render bounded no-match story beat from exact query plus exact scene anchor, while preserving bounded visibility limits.
+    - [x] Update focused settlement/narration tests for player-facing bounded observation wording.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live bounded-no-match proof, GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `Do I see a Violet Astrolabe here?` reads as bounded scene prose rather than `visible targets and actors show no match`.
+    - [x] Exact query label and scene anchor remain grounded in accepted evidence.
+    - [x] Narration adds no broad absence, hidden-search/discovery, route truth, item/device state, movement, no-change, private fact, or world truth.
+  - Review:
+    - Changed `localObservationStoryBeat` so bounded no-match accepted evidence is `Among what is visible at <scene>, <query> does not appear.`
+    - Changed `selectLocalObservationFactRefs` so bounded no-match Stage 6 prose material uses the observation beat, query, and scene anchor; `searched_visible_surfaces` stays out of that sentence plan.
+    - Verified focused settlement+narration tests: 138/138 passed.
+    - Verified expanded clean-runtime tests: 386/386 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live artifact `output/clean-runtime-p298-bounded-no-match-live-clean-20260614-213100`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `local_observation_receipt`, `bounded_visibility_negative`, legacy counts 0.
+    - Live narrative: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You stand at Lowwater Bazaar. Among everything visible at Lowwater Bazaar, Violet Astrolabe does not appear.`
+    - Verified GitNexus impact: `localObservationStoryBeat` LOW, `selectLocalObservationFactRefs` LOW.
+    - Verified GitNexus all-scope `detect_changes`: LOW risk, 3 touched indexed symbols, 6 changed files, 0 affected execution flows.
