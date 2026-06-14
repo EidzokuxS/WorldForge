@@ -8110,7 +8110,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update focused narration tests so inventory/object local-observation pages use texture plus the owned result sentence, without separate scene placement.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live object-look proof, and prose audit.
     - [x] Run GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live `Look at the Brass Tube.` settles through clean runtime and closes on the owned inventory-status observation sentence.
     - [x] Exact item label and accepted with-player state remain present.
@@ -8123,3 +8123,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live proof `output/clean-runtime-p302-object-look-context-live-20260614-231000`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, legacy runtime stores stayed 0, sentence-plan had no `context_anchor`, and accepted text was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. The Brass Tube is with you at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p302-object-look-context-live-20260614-231000/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.
+    - Verified commit/push/index: code commit `824e6f47` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
