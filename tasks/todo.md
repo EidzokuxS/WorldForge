@@ -7295,3 +7295,23 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: literal scan for ` = /`, `.test(`, and `replace(` in `backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
     - Reviewed: GitNexus impact for `buildCleanNarrativePageTask`, `buildCleanNarrationSystemPrompt`, and `sentencePlanProseAssembly` was LOW; final staged/all `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task processes, with line-shift touched symbols outside the actual changed helper body.
     - Executed: code commit `51bc7d55` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P271 Stage 6 player-local-condition live proof:
+  - Plan:
+    - [x] Inspect current worktree, recent Stage 6 journal, and latest proof artifacts.
+    - [x] Start a clean-runtime backend on an isolated port and record PID/logs under a fresh proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Run one Codex-chosen player-local-condition `/api/chat/action` turn.
+    - [x] Verify SSE runtime, accepted `condition_set` receipt, DB condition/trace/world-version deltas, old-store counts, and player-facing narrative.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Fix typed Stage 6 contract if proof exposes a root prose/truth gap; otherwise record proof results and commit/push/index the journal.
+  - Review:
+    - Executed: started isolated clean-runtime backend on port `31732` with PID `65940`, then stopped it after proof; final PID/port checks returned no rows.
+    - Executed: created fresh clean-start clone `clean-runtime-p271-player-condition-live-20260614-100752` from `p69-item-transfer-045651`.
+    - Verified: live proof artifact `output/clean-runtime-p271-player-condition-live-20260614-100752` ran `I crouch down beside the market walkway and keep my hands visible.` and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, `condition_set` receipt accepted, clean record +1, receipt +1, actor condition +1, authority trace +1, worldVersion +1, world time/tick +0, clock ledger +0, and all old stores at 0.
+    - Verified: active condition row has `conditionKey=crouched`, `conditionGroup=player_local_posture`, `conditionScope=current_scene`, `targetLabel=Lowwater Bazaar`, and `resultWorldVersion=1`.
+    - Verified: item custody stayed stable; `Brass Tube` remained with `Mira Voss` as `carried`.
+    - Verified: player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You drop into a crouch at Lowwater Bazaar.`
+    - Verified: prose audit passed with 1 result, 65 words, zero hits, zero list-like starts, and zero `youOpening`.
+    - Executed: no code fix was needed for this slice; proof confirmed the current player-local-condition Stage 6 contract stays grounded and prose-readable for this fixture.
