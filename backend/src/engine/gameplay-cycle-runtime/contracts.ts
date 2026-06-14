@@ -2506,6 +2506,7 @@ const cleanNarratorPageTaskMoveSchema = z.object({
   ]),
   coverage: z.enum(["required", "optional"]),
   allowedBackendFactRefs: z.array(shortText).min(1).max(192),
+  usableFacts: z.array(cleanSettledBackendFactSchema).min(1).max(192),
 }).strict();
 
 const cleanNarratorPageTaskSchema = z.object({

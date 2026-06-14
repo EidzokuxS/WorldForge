@@ -44,6 +44,16 @@ function pageMoveRefsForSentence(
     .map((move) => move.moveRef);
 }
 
+function promptBackendFactsForRefs(
+  promptInput: ReturnType<typeof buildCleanNarratorPromptInput>,
+  refs: readonly string[],
+) {
+  const refSet = new Set(refs);
+  return promptInput.acceptedEvidence
+    .filter((evidence) => refSet.has(evidence.ref))
+    .flatMap((evidence) => evidence.backendFacts);
+}
+
 function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarratorView {
   return {
     version: "gameplay-runtime.narrator-view.v1",
@@ -1303,8 +1313,11 @@ describe("clean Stage 6 narration contracts", () => {
         proseMove: "render_authoritative_turn_event",
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
       }],
     });
+    expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
+      .toEqual(["After 1 minute, you reach North Hall.", "North Hall", "1 minute", "North Hall"]);
   });
 
   it("builds a structured story frame from prompt accepted evidence", () => {
@@ -1344,6 +1357,7 @@ describe("clean Stage 6 narration contracts", () => {
         proseMove: "establish_playable_context",
         coverage: "optional",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
       },
       {
         moveRef: "m2",
@@ -1352,8 +1366,11 @@ describe("clean Stage 6 narration contracts", () => {
         proseMove: "render_authoritative_turn_event",
         coverage: "required",
         allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+        usableFacts: promptBackendFactsForRefs(promptInput, ["e5"]),
       },
     ]);
+    expect(promptInput.narrativePageTask.moves[1]?.usableFacts.map((fact) => fact.value))
+      .toEqual([undefined, 'Guide says: "The north stairs flooded before dawn."', undefined]);
   });
 
   it("keeps movement receipts as authoritative turn events", () => {
@@ -1433,6 +1450,7 @@ describe("clean Stage 6 narration contracts", () => {
         proseMove: "establish_playable_context",
         coverage: "optional",
         allowedBackendFactRefs: ["e2.f1", "e2.f2", "e3.f1", "e3.f2", "e3.f3"],
+        usableFacts: promptBackendFactsForRefs(promptInput, ["e2", "e3"]),
       },
       {
         moveRef: "m2",
@@ -1441,8 +1459,17 @@ describe("clean Stage 6 narration contracts", () => {
         proseMove: "leave_playable_next_action_handle",
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
       },
     ]);
+    expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
+      .toEqual([
+        "Canvas awnings hang over the market lanes",
+        "Rain taps the brass gutters",
+        "You are at Market.",
+        "Market",
+        "Market",
+      ]);
   });
 
   it("checks narration sentence page-move refs against the narrative page task", () => {
@@ -4516,6 +4543,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
+    expect(buildCleanNarrationSystemPrompt()).toContain("usableFacts");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");

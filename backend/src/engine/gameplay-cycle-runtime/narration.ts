@@ -551,10 +551,16 @@ function narrativePageMoveCoverage(
 
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
+  acceptedEvidence: AcceptedNarrationEvidence[],
 ): CleanNarratorPromptInput["narrativePageTask"] {
   const entriesByRef = new Map(
     [...storyFrame.currentContext, ...storyFrame.turnEvents]
       .map((entry) => [entry.ref, entry] as const),
+  );
+  const backendFactsByRef = new Map(
+    acceptedEvidence.flatMap((evidence) =>
+      evidence.backendFacts.map((fact) => [fact.factRef, fact] as const)
+    ),
   );
   const hasAuthoritativeTurnMove = storyFrame.pagePlan.steps.some((step) =>
     step.step === "ask_clarification" || step.step === "narrate_turn_event"
@@ -574,6 +580,12 @@ function buildCleanNarrativePageTask(
       allowedBackendFactRefs: uniqueStrings(step.entryRefs.flatMap((ref) =>
         entriesByRef.get(ref)?.backendFactRefs ?? []
       )),
+      usableFacts: uniqueStrings(step.entryRefs.flatMap((ref) =>
+        entriesByRef.get(ref)?.backendFactRefs ?? []
+      )).flatMap((factRef) => {
+        const fact = backendFactsByRef.get(factRef);
+        return fact ? [fact] : [];
+      }),
     })),
   };
 }
@@ -1476,7 +1488,7 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     preserveLabelsVerbatim: view.preserveLabelsVerbatim,
     acceptedEvidence,
     storyFrame,
-    narrativePageTask: buildCleanNarrativePageTask(storyFrame),
+    narrativePageTask: buildCleanNarrativePageTask(storyFrame, acceptedEvidence),
     stepAuditForGrounding: view.stepAuditForGrounding,
     guard: view.guard,
   });
@@ -1508,7 +1520,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
-    "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material only from its allowedBackendFactRefs plus the cited accepted evidence.",
+    "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
