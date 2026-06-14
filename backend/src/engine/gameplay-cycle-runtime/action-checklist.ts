@@ -962,6 +962,15 @@ function stepFor(input: {
   return step;
 }
 
+function trimTerminalIntentPunctuation(value: string): string {
+  const trimmed = value.trim();
+  let end = trimmed.length;
+  while (end > 0 && ".!?".includes(trimmed[end - 1] ?? "")) {
+    end -= 1;
+  }
+  return trimmed.slice(0, end);
+}
+
 export function buildDeterministicGmActionChecklist(input: {
   frame: AuthoritativeSceneFrame;
   gmRead: GmRead;
@@ -1019,7 +1028,7 @@ export function buildDeterministicGmActionChecklist(input: {
   const deviceObservationNeed = input.gmRead.actionInterpretation.interactionKind === "device_status_observation"
     ? input.gmRead.actionInterpretation.deviceObservationNeed ?? null
     : null;
-  const dialoguePlayerIntent = input.gmRead.actionInterpretation.playerIntent.trim().replace(/[.!?]+$/u, "");
+  const dialoguePlayerIntent = trimTerminalIntentPunctuation(input.gmRead.actionInterpretation.playerIntent);
 
   let localConditionStepId: GmActionChecklistStepId | null = null;
   let itemTransferStepId: GmActionChecklistStepId | null = null;
@@ -1367,6 +1376,7 @@ export function buildDeterministicGmActionChecklist(input: {
         requestedRoleText: supportActorNeed.requestedRoleText,
         anchorRef: sceneRef,
         intendedUse: supportActorNeed.intendedUse,
+        dialogueRequestText: supportActorNeed.dialogueRequestText ?? null,
         reusePolicy: "reuse_matching_temporary_current_scene_or_create",
       },
       purpose: `Plan ordinary current-scene support actor materialization for ${supportActorNeed.roleKind}.`,
@@ -1397,10 +1407,10 @@ export function buildDeterministicGmActionChecklist(input: {
           speakerRef: null,
           materializedSpeakerBindingId: "materialized_speaker",
           addresseeRef: "Player",
-          playerIntent: dialoguePlayerIntent,
+          playerIntent: trimTerminalIntentPunctuation(supportActorNeed.dialogueRequestText ?? dialoguePlayerIntent),
           responseScope: "visible_speaker_response_only",
         },
-        purpose: `Record one visible response only after the ${supportActorNeed.roleKind} is materialized and the SceneFrame is refreshed.`,
+        purpose: `Record one visible response to Player request only after the ${supportActorNeed.roleKind} is materialized and the SceneFrame is refreshed: ${trimTerminalIntentPunctuation(supportActorNeed.dialogueRequestText ?? dialoguePlayerIntent)}.`,
         intendedSummary: "Stage 4 may record dialogue only from the freshly materialized support actor after a post-dependency authoritative SceneFrame contains that actor.",
         expectedVisibleSummary: "If support materialization is accepted and refreshed into SceneFrame actors/citableRefs, one visible support actor response may be recorded; the response does not prove world facts.",
       }));

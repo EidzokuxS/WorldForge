@@ -5266,6 +5266,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           requestedRoleText: "local vendor",
           currentScenePlausibility: "ordinary_local_role",
           intendedUse: "dialogue_requested_but_not_yet_recorded",
+          dialogueRequestText: "Ask what changed today.",
           evidenceRefs: ["Player", "Market"],
         },
       },
@@ -5317,12 +5318,80 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           speakerSource: "materialized_support_actor",
           speakerRef: null,
           materializedSpeakerBindingId: "materialized_speaker",
-          playerIntent: "Ask a local vendor what changed today",
+          playerIntent: "Ask what changed today",
           responseScope: "visible_speaker_response_only",
         },
       },
     });
     expect(result.checklist.steps[1]?.targetRefs).not.toContain("Local Vendor");
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("uses the concrete support actor dialogue request as the dependent response task", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I call over a local vendor and ask them to stand where I can see them.",
+      capabilities: [
+        { capabilityId: "observe_visible", evidenceAuthority: "observation_only", allowed: true },
+        { capabilityId: "support_actor_create", evidenceAuthority: "terminal_receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player"],
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "Can one ordinary local vendor be materialized, then respond to the player's placement request?",
+      actionInterpretation: {
+        summary: "The player calls over an ordinary local vendor and asks them to stay visible.",
+        playerIntent: "Call over a local vendor and ask them to stand where I can see them.",
+        method: "call over and ask",
+        targetRefs: ["Market"],
+        interactionKind: "ordinary_support_actor_needed",
+        supportActorNeed: {
+          roleKind: "vendor",
+          requestedRoleText: "local vendor",
+          currentScenePlausibility: "ordinary_local_role",
+          intendedUse: "dialogue_requested_but_not_yet_recorded",
+          dialogueRequestText: "Stand where I can see you.",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Support actor materialization and dependent dialogue require backend receipts.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-support-stand-visible",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps[0]?.intended.supportActorPlan).toMatchObject({
+      roleKind: "vendor",
+      requestedRoleText: "local vendor",
+      dialogueRequestText: "Stand where I can see you.",
+    });
+    expect(result.checklist.steps[1]?.intended.dialoguePlan).toMatchObject({
+      speakerSource: "materialized_support_actor",
+      playerIntent: "Stand where I can see you",
+      responseScope: "visible_speaker_response_only",
+    });
+    expect(result.checklist.steps[1]?.purpose).toContain("Stand where I can see you");
     expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
       .toBe("accepted");
   });
@@ -5355,6 +5424,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           requestedRoleText: "local market guide",
           currentScenePlausibility: "ordinary_local_role",
           intendedUse: "dialogue_requested_but_not_yet_recorded",
+          dialogueRequestText: "Please watch the small tea stall while I sort my courier tube.",
           evidenceRefs: ["Player", "Market", "small_tea_stall"],
         },
       },

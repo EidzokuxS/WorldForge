@@ -8406,7 +8406,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Render accepted scene texture plus ordinary scene-point prose from label/kind/result/scene anchor.
     - [x] Keep composed minor-POI plus another terminal receipt on the model-authored route.
     - [x] Run focused tests, expanded clean-runtime tests, typecheck, live minor-POI proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live `I mark a tea stall near the walkway as a place to meet.` settles through clean runtime and no longer renders `marks a visible stall`.
     - [x] Final narration stays inside accepted scene texture plus accepted POI label/kind/result/scene anchor; no route truth, movement destination, service/business fact, sign text, discovery/search result, NPC truth, inventory, absence/no-change, private fact, or extra world truth.
@@ -8422,3 +8422,32 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, tea stall is now visible as a stall.`
     - Verified prose audit `output/clean-runtime-p313-minor-poi-live-20260615-020500/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified implementation commit: `23a09459` recorded the P313 code/tests/proof notes.
+    - Verified commit/push/index: implementation commit `23a09459` and record commit `8f6505d3` were pushed to `develop`; GitNexus re-indexed final HEAD with embeddings.
+
+- P314 clean support-actor dialogue request ownership:
+  - Diagnosis:
+    - [x] Existing support-actor live proof shows Stage 6 copies accepted evidence correctly; the bad service line is already in `terminal_dialogue_receipt`.
+    - [x] Root owner is the support-actor dialogue task shape: `supportActorNeed` only carries role/intendedUse, while the dependent dialogue step relies on broad `playerIntent`.
+  - Plan:
+    - [x] Run GitNexus impact for GM Read prompt/validation and deterministic checklist owners.
+    - [x] Add typed support-actor dialogue request text at GM Read admission and checklist dialogue plan boundaries.
+    - [x] Feed the dependent Stage 4 dialogue task card the concrete player request for the materialized actor.
+    - [x] Update focused contract/stage4 tests for a "stand where I can see them" support actor request.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live `I call over a local vendor and ask them to stand where I can see them.` settles through clean runtime with support actor materialization plus a dialogue response to that request.
+    - [x] Final narration stays inside accepted scene texture, support actor presence, and exact accepted dialogue; no service/trade offer, route truth, item state, movement, durable commitment, hidden fact, absence/no-change, or private fact.
+    - [x] The fix is a typed request contract, not regex, banlist validation, or gameplay fallback.
+  - Review:
+    - Executed: `supportActorNeed.dialogueRequestText` is now a typed GM Read field required for dependent support-actor dialogue; presence-only support actor turns keep it absent/null.
+    - Executed: deterministic checklist support-actor composition now carries that request into `supportActorPlan` and uses it as the dependent `dialoguePlan.playerIntent`, so Stage 4's dialogue task card asks for the concrete response task.
+    - Executed: replaced the adjacent terminal punctuation trim regex in `action-checklist.ts` with a small character loop while touching that owner.
+    - Verified GitNexus impacts before edits: `buildDeterministicGmActionChecklist`, `buildGmReadSystemPrompt`, `validateGmReadCandidate`, `validateGmActionChecklistCandidate`, `assertGmRead`, and `assertGmActionChecklist` all returned LOW risk; schema consts were not indexed as named symbols.
+    - Verified focused contracts suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts --run` -> 212/212 passed.
+    - Verified focused Stage 4 suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 39/39 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 392/392 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p314-support-dialogue-live-20260615-021636`: clean runtime settled one accepted `support_actor_create` and one accepted `dialogue_record`, created temporary `Local Vendor`, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, kept old saga/narrator/v2 stores at 0, and stopped backend port 31794 after proof.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor stands beside a counter or stall, with worn wood nearby. Local Vendor says: "Right here, then. I'll stand where you can see me — no sudden moves."`
+    - Verified accepted dialogue receipt quote and summary answer the placement request instead of offering vendor service/trade.
+    - Verified prose audit `output/clean-runtime-p314-support-dialogue-live-20260615-021636/prose-audit.json`: one narrative, 51 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.

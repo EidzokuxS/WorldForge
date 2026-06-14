@@ -523,8 +523,25 @@ export const gmReadActionInterpretationSchema = z.object({
       "dialogue_requested_but_not_yet_recorded",
       "service_requested_but_not_yet_resolved",
     ]),
+    dialogueRequestText: shortText.nullable().optional(),
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
-  }).strict().nullable().optional(),
+  }).strict().superRefine((need, ctx) => {
+    const requestText = need.dialogueRequestText?.trim() ?? "";
+    if (need.intendedUse === "dialogue_requested_but_not_yet_recorded" && requestText.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["dialogueRequestText"],
+        message: "supportActorNeed.dialogueRequestText is required when intendedUse=dialogue_requested_but_not_yet_recorded.",
+      });
+    }
+    if (need.intendedUse !== "dialogue_requested_but_not_yet_recorded" && requestText.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["dialogueRequestText"],
+        message: "supportActorNeed.dialogueRequestText belongs only to dialogue_requested_but_not_yet_recorded.",
+      });
+    }
+  }).nullable().optional(),
   localConditionNeed: z.object({
     actorRef: z.literal("Player"),
     operation: z.enum(["apply", "clear"]),
@@ -936,6 +953,7 @@ export const gmActionChecklistStepSchema = z.object({
         "dialogue_requested_but_not_yet_recorded",
         "service_requested_but_not_yet_resolved",
       ]),
+      dialogueRequestText: shortText.nullable().optional(),
       reusePolicy: z.literal("reuse_matching_temporary_current_scene_or_create"),
     }).strict().nullable().optional(),
     dialoguePlan: z.object({
