@@ -7574,3 +7574,35 @@ Session: `gm-v1-consequenc-slice`.
     - Verification: `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p282-support-dialogue-page-split-proof/prose-audit.json --fail-on-hits output/clean-runtime-p282-support-dialogue-page-split-proof` counted 1 result, 25 words, and all hits 0.
     - Verification: diff-level runtime scan found no added `= /`, `.test(`, or `replace(` lines in `narration.ts`.
     - GitNexus: all-scope `detect_changes` reported LOW risk, 3 changed files, 8 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warning.
+
+- P283 Stage 6 composed support-actor dialogue live proof:
+  - Diagnosis:
+    - [x] P274 live proof exposed the composed support+dialogue prose problem in the live clean runtime: support actor presence and dialogue response collapsed into one receipt-shaped sentence.
+    - [x] P282 fixed the typed page task in proof form: one `render_support_actor_presence` sentence followed by one `frame_dialogue_reply` sentence, with separate accepted evidence refs.
+    - [x] Current worktree is clean after P282 commit/push/index; the next required proof is live execution through `/api/chat/action` on a fresh clean-start clone.
+  - Plan:
+    - [x] Start an isolated clean-runtime backend on a fresh port and record PID/logs under a P283 proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Inspect the clone's current SceneFrame/DB before action.
+    - [x] Run one Codex-chosen composed support actor + dialogue action: `I ask a local vendor what changed today.`
+    - [x] Verify SSE runtime, accepted support actor receipt, accepted dialogue receipt, refreshed-frame dialogue boundary, actor persistence/visibility, authority trace/world-version deltas, old-store counts, and player-facing narrative.
+    - [x] Confirm the live player-facing page uses separate support presence and exact quote beats rather than one merged receipt sentence.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] If proof exposes a root prose/truth gap, run GitNexus impact for the owner symbols before editing; otherwise record proof results and commit/push/index the journal.
+  - Success criteria:
+    - [x] Live narration keeps texture, support presence, and dialogue as separate playable beats.
+    - [x] The support sentence cites support actor evidence only; the dialogue sentence cites dialogue evidence only.
+    - [x] The exact accepted quote appears verbatim.
+    - [x] No support prose adds setup, service, trade, work action, relationship, hidden knowledge, movement, absence, or no-change without accepted evidence.
+  - Review:
+    - Executed: isolated clean-runtime backend ran on port `31747` with PID `45544` under `output/clean-runtime-p283-support-dialogue-live-20260614-144439`, then was stopped; final port/PID checks returned `PORT_FREE` and `PID_STOPPED`.
+    - Executed: fresh clean-start clone `clean-runtime-p283-support-dialogue-live-20260614-144439` was created from `p69-item-transfer-045651`, loaded through the live backend, and inspected before action.
+    - Verified: pre-frame exposed `support_actor_create` and `dialogue_record`; only `Guide` was visible as an actor before the turn; clean receipts/records/traces and old runtime stores were all 0.
+    - Verified: live action `I ask a local vendor what changed today.` returned `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, clean record +1, Stage 4 receipts +2, authority trace +1, worldVersion `0 -> 1`, world time/current tick `0/0`, and clock ledger +0.
+    - Verified: accepted receipts were `support_actor_create` with `support_actor_materialization_receipt`, followed by `dialogue_record` with `terminal_dialogue_receipt`; dialogue used refreshed frame `frame-17c7e7e8320b-0fac98f0` and base worldVersion 1 after support materialization.
+    - Verified: `Local Vendor` persisted as a temporary current-scene NPC and appeared in the post-frame alongside `Guide`; `Brass Tube` custody stayed with `Mira Voss` as `carried`.
+    - Verified: player-facing narrative used separate texture, support-presence, and quote beats: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. A Local Vendor takes a place in view at Lowwater Bazaar, a vendor among the stalls. Local Vendor says: "What changed today? Ha — the canal boats stopped running at midday, that's what. Courier traffic from the upper wards dried up too. Something's unsettled the usual rhythm around here, though nobody's saying exactly what."`
+    - Verified: `db-proof.json` passed with no issues; old v2/saga/narrator/oracle/simulation stores all stayed 0.
+    - Verified: prose audit passed with 1 result, 71 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+    - Executed: no runtime code patch was needed for P283; P282's typed page split held in live clean-runtime execution.
