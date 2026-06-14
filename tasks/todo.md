@@ -6887,3 +6887,21 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with no affected processes.
     - Executed: code commit `fc2713e4` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P250 Stage 6 sentence literary cues:
+  - Plan:
+    - [x] Run GitNexus impact before editing sentence-plan builder and prompt wording.
+    - [x] Add typed `literaryCue` data to `narrativePageTask.sentencePlan[]` with render shape, cadence, and style levers.
+    - [x] Derive cues from sentence role and accepted fact-use roles, not prose text.
+    - [x] Keep cues advisory and truth-bounded through existing move refs, sentence-plan refs, entry refs, and preferred backend fact refs.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, and route-options sentence plans expose literary cues.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: each `narrativePageTask.sentencePlan[]` step now carries typed `literaryCue` data with `renderShape`, `cadence`, and `styleLevers`.
+    - Executed: literary cues are derived from sentence role plus accepted `factUses`, including exact texture copying, context placement, framed dialogue quotes, settled turn results, and playable route-choice handles.
+    - Executed: system prompt now tells the narrator to use literary cues as prose method while staying inside the step refs.
+    - Executed: focused movement, dialogue-with-context, and route-options tests prove the intended cue shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `a26f3314` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
