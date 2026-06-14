@@ -7110,3 +7110,22 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope in `runCleanNarration` Stage 6 flow coverage.
     - Executed: code commit `11d960af` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P262 Stage 6 sentence prose assembly:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Add sentence-level `proseAssembly` derived from sentence role, beat objective, prose materials, and material obligations.
+    - [x] Use `proseAssembly` as a positive craft contract for perspective, sentence shape, opening source, verb energy, detail rhythm, and closing function.
+    - [x] Teach the prompt to use prose assembly as the sentence construction method for text-RPG adventure prose.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added sentence-level `proseAssembly` with perspective, sentence shape, opening source, verb energy, detail rhythm, and closing function to the Stage 6 sentence plan contract.
+    - Executed: derived `proseAssembly` from existing typed sentence inputs: sentence role, beat objective, prose materials, and material obligations. No prose-string policing, regex gates, or gameplay substitutions were added.
+    - Executed: Stage 6 prompt now names `proseAssembly` as the sentence construction contract for turning cited `proseMaterials` into text-RPG adventure prose.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus impact for `sentencePlanForMove` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
+    - Executed: code commit `eb729a81` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
