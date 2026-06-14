@@ -2566,12 +2566,39 @@ const cleanNarratorSentencePlanStepSchema = z.object({
   }).strict(),
 }).strict();
 
+const cleanNarratorPageArcSchema = z.object({
+  arcShape: z.enum([
+    "accepted_clarification_question",
+    "context_then_choice_handle",
+    "context_then_settled_result",
+    "single_choice_handle",
+    "single_settled_result",
+  ]),
+  pageCadence: z.enum([
+    "context_then_choice",
+    "context_then_result",
+    "question_only",
+    "single_compact_beat",
+  ]),
+  readerPosture: z.enum([
+    "answer_the_prompted_clarification",
+    "choose_visible_next_action",
+    "continue_from_settled_result",
+  ]),
+  closingIntent: z.enum([
+    "accepted_question",
+    "playable_next_action",
+    "settled_result",
+  ]),
+}).strict();
+
 const cleanNarratorPageTaskSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-page-task.v1"),
   source: z.literal("derived_from_story_frame_page_plan"),
   referenceProfile: z.literal("zetta_micro_1_1_3_primary_ff5_micro_secondary"),
   pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
   truthBoundary: z.literal("accepted_evidence_only"),
+  pageArc: cleanNarratorPageArcSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();

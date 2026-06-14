@@ -1324,6 +1324,12 @@ describe("clean Stage 6 narration contracts", () => {
       referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
       pageGoal: "turn_changelog_to_grounded_text_rpg_page",
       truthBoundary: "accepted_evidence_only",
+      pageArc: {
+        arcShape: "single_settled_result",
+        pageCadence: "single_compact_beat",
+        readerPosture: "continue_from_settled_result",
+        closingIntent: "settled_result",
+      },
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1386,6 +1392,12 @@ describe("clean Stage 6 narration contracts", () => {
       { step: "open_with_context", entryRefs: ["e1"] },
       { step: "narrate_turn_event", entryRefs: ["e5"] },
     ]);
+    expect(promptInput.narrativePageTask.pageArc).toEqual({
+      arcShape: "context_then_settled_result",
+      pageCadence: "context_then_result",
+      readerPosture: "continue_from_settled_result",
+      closingIntent: "settled_result",
+    });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
         moveRef: "m1",
@@ -1517,6 +1529,12 @@ describe("clean Stage 6 narration contracts", () => {
       { step: "open_with_context", entryRefs: ["e2", "e3"] },
       { step: "close_with_next_action_context", entryRefs: ["e1"] },
     ]);
+    expect(promptInput.narrativePageTask.pageArc).toEqual({
+      arcShape: "context_then_choice_handle",
+      pageCadence: "context_then_choice",
+      readerPosture: "choose_visible_next_action",
+      closingIntent: "playable_next_action",
+    });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
         moveRef: "m1",
@@ -1661,6 +1679,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "ask_clarification", entryRefs: ["e1"] },
     ]);
+    expect(promptInput.narrativePageTask.pageArc).toEqual({
+      arcShape: "accepted_clarification_question",
+      pageCadence: "question_only",
+      readerPosture: "answer_the_prompted_clarification",
+      closingIntent: "accepted_question",
+    });
     expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("clarification_request");
     expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("clarification");
     expect(promptInput.storyFrame.currentContext.map((entry) => entry.ref)).toEqual(["e2"]);
@@ -4690,6 +4714,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("FF5 Micro");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Page arc:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageArc");
+    expect(buildCleanNarrationSystemPrompt()).toContain("reader posture");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("usableFacts");
