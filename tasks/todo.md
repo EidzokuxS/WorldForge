@@ -7246,3 +7246,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `rg -n "= /|\\.test\\(|replace\\(/" backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
     - Reviewed: GitNexus `detect_changes` reported HIGH because the new `narrativePageTask.pageFocus` schema field maps through `buildCleanNarratorPromptInput` and `runCleanNarration`; pre-edit impact was LOW, diff/context review showed the changed surface limited to the page-task contract/prompt/tests, and executed suites cover the affected clean narration flow.
     - Executed: code commit `51b32a15` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P269 Stage 6 page-focus live proof:
+  - Plan:
+    - [x] Inspect current worktree and existing live/prose-audit harnesses.
+    - [x] Start a clean-runtime backend on an isolated port and record its PID/log under a new proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Run one Codex-chosen route-check or item-transfer `/api/chat/action` turn against the current code.
+    - [x] Verify SSE runtime, DB deltas, old-store counts, accepted receipt/evidence shape, and player-facing narrative.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Record results in this journal, commit/push/index if the proof or journal changes.
+  - Review:
+    - Executed: first diagnostic live proof at `output/clean-runtime-p269-page-focus-live-20260614-093158` showed clean gameplay truth but prose still emitted the summary-style line `You are at Lowwater Bazaar.` before the route result; the reused old harness also crashed after response on stale SQL against `clean_gameplay_turn_records.id`.
+    - Executed: fixed the root cause by extending typed `narrativePageTask.pageFocus` with `preferredFrameSentenceRefs` and `frameSelection`, derived from sentence roles so texture context wins over scene-anchor support when both are available.
+    - Executed: Stage 6 prompt now tells the narrator to use preferred frame sentence refs before the core, while treating other frame refs as optional support material.
+    - Verified: fixed live proof at `output/clean-runtime-p269-page-focus-live-fixed-20260614-093740` cloned `p69-item-transfer-045651`, ran `Can I reach Anchor Chain Pylon from here without moving?`, and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, `route_check` receipt accepted, clean record +1, receipt +1, chat +2, world clock/version/tick +0, trace +0, ledger +0, and all old stores at 0.
+    - Verified: fixed player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You stand at Lowwater Bazaar, where dockworkers unload cargo and signal-house representatives shout bids for night courier contracts across the water. The path to Anchor Chain Pylon is open from here.`
+    - Verified: prose audit passed on the fixed proof artifact with 1 result, 50 words, zero hits, zero list-like starts, and zero `youOpening`.
+    - Verified: focused narration suite passed 103/103.
+    - Verified: expanded clean-runtime suite passed 371/371 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: literal scan for ` = /`, `.test(`, and `replace(` in `backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
+    - Reviewed: GitNexus `detect_changes(scope=all)` reported MEDIUM scope limited to `buildCleanPageFocus`, `buildCleanNarrativePageTask`, `buildCleanNarrationSystemPrompt`, and four `runCleanNarration` page-task processes.
+    - Executed: code commit `170f5842` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
