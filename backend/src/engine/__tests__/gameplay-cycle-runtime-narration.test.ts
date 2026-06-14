@@ -1346,6 +1346,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m1",
         step: "narrate_turn_event",
         entryRefs: ["e1"],
+        entryProseCues: ["movement_result"],
         proseMove: "render_authoritative_turn_event",
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
@@ -1364,6 +1365,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        beatObjective: "render_movement_arrival",
         proseMaterials: [
           {
             factRef: "e1.f1",
@@ -1472,6 +1474,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m1",
         step: "open_with_context",
         entryRefs: ["e1"],
+        entryProseCues: ["current_scene_anchor"],
         proseMove: "establish_playable_context",
         coverage: "optional",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
@@ -1486,6 +1489,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m2",
         step: "narrate_turn_event",
         entryRefs: ["e5"],
+        entryProseCues: ["dialogue_response"],
         proseMove: "render_authoritative_turn_event",
         coverage: "required",
         allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
@@ -1507,6 +1511,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        beatObjective: "place_current_scene",
         proseMaterials: [
           {
             factRef: "e1.f1",
@@ -1558,6 +1563,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e5"],
         preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+        beatObjective: "frame_dialogue_reply",
         proseMaterials: [
           {
             factRef: "e5.f1",
@@ -1690,6 +1696,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m1",
         step: "open_with_context",
         entryRefs: ["e2", "e3"],
+        entryProseCues: ["scene_texture", "current_scene_anchor"],
         proseMove: "establish_playable_context",
         coverage: "optional",
         allowedBackendFactRefs: ["e2.f1", "e2.f2", "e3.f1", "e3.f2", "e3.f3"],
@@ -1706,6 +1713,7 @@ describe("clean Stage 6 narration contracts", () => {
         moveRef: "m2",
         step: "close_with_next_action_context",
         entryRefs: ["e1"],
+        entryProseCues: ["route_options"],
         proseMove: "leave_playable_next_action_handle",
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
@@ -1736,6 +1744,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+        beatObjective: "copy_scene_texture",
         proseMaterials: [
           {
             factRef: "e2.f1",
@@ -1780,6 +1789,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+        beatObjective: "place_current_scene",
         proseMaterials: [
           {
             factRef: "e3.f1",
@@ -1831,6 +1841,7 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        beatObjective: "render_route_choices",
         proseMaterials: [
           {
             factRef: "e1.f1",
@@ -4740,7 +4751,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("reader posture");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
+    expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");
     expect(buildCleanNarrationSystemPrompt()).toContain("usableFacts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Beat objectives:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("beatObjective");
+    expect(buildCleanNarrationSystemPrompt()).toContain("movement arrival");
+    expect(buildCleanNarrationSystemPrompt()).toContain("item custody");
+    expect(buildCleanNarrationSystemPrompt()).toContain("dialogue reply");
     expect(buildCleanNarrationSystemPrompt()).toContain("Fact use plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("factUses");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");

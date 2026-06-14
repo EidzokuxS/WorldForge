@@ -733,6 +733,33 @@ function sentencePlanAdventureCue(
   };
 }
 
+function sentencePlanBeatObjective(
+  move: CleanNarratorPageTaskMove,
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+): CleanNarratorSentencePlanStep["beatObjective"] {
+  if (sentenceRole === "clarification_question") return "ask_clarification_question";
+  if (sentenceRole === "exact_context_texture") return "copy_scene_texture";
+  if (sentenceRole === "context_anchor") return "place_current_scene";
+  if (sentenceRole === "next_action_handle") return "render_route_choices";
+
+  const cues = new Set(move.entryProseCues);
+  if (cues.has("dialogue_response")) return "frame_dialogue_reply";
+  if (cues.has("item_state")) return "render_item_custody";
+  if (cues.has("movement_result")) return "render_movement_arrival";
+  if (cues.has("elapsed_time")) return "render_elapsed_time";
+  if (cues.has("route_status")) return "render_route_status";
+  if (cues.has("route_options")) return "render_route_choices";
+  if (cues.has("local_observation") || cues.has("bounded_visibility_negative")) return "render_local_observation";
+  if (cues.has("device_surface_observation")) return "render_device_surface";
+  if (cues.has("support_actor_materialization")) return "render_support_actor_presence";
+  if (cues.has("player_local_condition")) return "render_player_condition";
+  if (cues.has("minor_poi_handle")) return "render_minor_poi_handle";
+  if (cues.has("oracle_outcome")) return "render_oracle_outcome";
+  if (cues.has("scene_beat")) return "render_scene_beat";
+  if (cues.has("direct_scene_snapshot")) return "render_direct_scene_snapshot";
+  return "render_generic_evidence";
+}
+
 function sentencePlanLiteraryCue(
   move: CleanNarratorPageTaskMove,
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
@@ -804,6 +831,7 @@ function sentencePlanForMove(
       coverage,
       entryRefs: move.entryRefs,
       preferredBackendFactRefs,
+      beatObjective: sentencePlanBeatObjective(move, sentenceRole),
       proseMaterials,
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
       adventureCue: sentencePlanAdventureCue(sentenceRole, proseMaterials),
@@ -1047,6 +1075,10 @@ function buildCleanNarrativePageTask(
     step.step === "ask_clarification" || step.step === "narrate_turn_event"
   );
   const moves: CleanNarratorPageTaskMove[] = storyFrame.pagePlan.steps.map((step, index) => {
+    const entryProseCues = uniqueStrings(step.entryRefs.flatMap((ref) => {
+      const cue = entriesByRef.get(ref)?.proseCue;
+      return cue ? [cue] : [];
+    })) as CleanNarratorProseCue[];
     const moveBackendFactRefs = uniqueStrings(step.entryRefs.flatMap((ref) =>
       entriesByRef.get(ref)?.backendFactRefs ?? []
     ));
@@ -1058,6 +1090,7 @@ function buildCleanNarrativePageTask(
       moveRef: `m${index + 1}`,
       step: step.step,
       entryRefs: step.entryRefs,
+      entryProseCues,
       proseMove: narrativePageProseMove(step.step),
       coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
       allowedBackendFactRefs: moveBackendFactRefs,
@@ -1191,6 +1224,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story page brief: promptInput.narrativePageTask.storyPageBrief names the writer-facing page kind, second-person present stance, grounded adventure register, composition job, opening instruction, closing instruction, and required/optional move and sentence refs. Use it to turn the accepted changelog into one playable story page while keeping every claim inside cited evidence.",
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of facts.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
+    "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, textureCue to decide whether this sentence owns texture, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
