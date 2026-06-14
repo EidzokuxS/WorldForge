@@ -7068,3 +7068,24 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `npm --prefix backend run typecheck` passed.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
+    - Executed: code commit `cfa63d19` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P260 Stage 6 sentence claim focus:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task/validation symbols.
+    - [x] Add sentence-level `claimFocus` derived from sentence-plan entry refs and accepted evidence claimKinds.
+    - [x] Use `claimFocus` to separate primary claimKinds from supporting claimKinds for each RPG sentence job.
+    - [x] Enforce the structured claim-focus contract in validation without prose scanning.
+    - [x] Teach the prompt to cite `claimFocus` when turning accepted evidence into adventure prose.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and validation rejection for off-plan claimKinds.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added `claimFocus` to each Stage 6 sentence plan step with `primaryClaimKinds`, `supportingClaimKinds`, and explicit primary-claim citation mode.
+    - Executed: derived claim focus from story-frame entry refs and accepted backend fact refs; missing accepted claim ownership fails prompt-task construction.
+    - Executed: validation now requires output sentence `claimKinds` to come from the primary claimKinds of cited `sentencePlanRefs`; combined sentences must cite combined plan refs.
+    - Executed: Stage 6 prompt and repair guidance now name `claimFocus` as the claim-level ownership contract.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus all-scope `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
