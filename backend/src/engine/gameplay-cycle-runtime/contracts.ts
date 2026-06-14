@@ -2489,6 +2489,21 @@ const cleanNarratorStoryFrameSchema = z.object({
   pagePlan: cleanNarratorPagePlanSchema,
 }).strict();
 
+const cleanNarratorFactUseSchema = z.object({
+  factRef: shortText,
+  proseUse: z.enum([
+    "exact_dialogue_quote",
+    "exact_texture_sentence",
+    "label_anchor",
+    "primary_beat",
+    "route_choice",
+    "scene_anchor",
+    "state_value",
+    "supporting_detail",
+    "time_value",
+  ]),
+}).strict();
+
 const cleanNarratorPageTaskMoveSchema = z.object({
   moveRef: shortText,
   step: z.enum([
@@ -2507,6 +2522,7 @@ const cleanNarratorPageTaskMoveSchema = z.object({
   coverage: z.enum(["required", "optional"]),
   allowedBackendFactRefs: z.array(shortText).min(1).max(192),
   usableFacts: z.array(cleanSettledBackendFactSchema).min(1).max(192),
+  factUses: z.array(cleanNarratorFactUseSchema).min(1).max(192),
 }).strict();
 
 const cleanNarratorPageTaskSchema = z.object({

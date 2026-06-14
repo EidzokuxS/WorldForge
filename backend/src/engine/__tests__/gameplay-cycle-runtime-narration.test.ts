@@ -1314,6 +1314,12 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
+        factUses: [
+          { factRef: "e1.f1", proseUse: "primary_beat" },
+          { factRef: "e1.f2", proseUse: "label_anchor" },
+          { factRef: "e1.f3", proseUse: "time_value" },
+          { factRef: "e1.f4", proseUse: "label_anchor" },
+        ],
       }],
     });
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
@@ -1358,6 +1364,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
+        factUses: [
+          { factRef: "e1.f1", proseUse: "scene_anchor" },
+          { factRef: "e1.f2", proseUse: "scene_anchor" },
+          { factRef: "e1.f3", proseUse: "scene_anchor" },
+        ],
       },
       {
         moveRef: "m2",
@@ -1367,6 +1378,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e5"]),
+        factUses: [
+          { factRef: "e5.f1", proseUse: "label_anchor" },
+          { factRef: "e5.f2", proseUse: "exact_dialogue_quote" },
+          { factRef: "e5.f3", proseUse: "supporting_detail" },
+        ],
       },
     ]);
     expect(promptInput.narrativePageTask.moves[1]?.usableFacts.map((fact) => fact.value))
@@ -1451,6 +1467,13 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         allowedBackendFactRefs: ["e2.f1", "e2.f2", "e3.f1", "e3.f2", "e3.f3"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e2", "e3"]),
+        factUses: [
+          { factRef: "e2.f1", proseUse: "exact_texture_sentence" },
+          { factRef: "e2.f2", proseUse: "exact_texture_sentence" },
+          { factRef: "e3.f1", proseUse: "scene_anchor" },
+          { factRef: "e3.f2", proseUse: "scene_anchor" },
+          { factRef: "e3.f3", proseUse: "scene_anchor" },
+        ],
       },
       {
         moveRef: "m2",
@@ -1460,6 +1483,14 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e1"]),
+        factUses: [
+          { factRef: "e1.f1", proseUse: "primary_beat" },
+          { factRef: "e1.f2", proseUse: "scene_anchor" },
+          { factRef: "e1.f3", proseUse: "route_choice" },
+          { factRef: "e1.f4", proseUse: "route_choice" },
+          { factRef: "e1.f5", proseUse: "route_choice" },
+          { factRef: "e1.f6", proseUse: "time_value" },
+        ],
       },
     ]);
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
@@ -4544,6 +4575,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("usableFacts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Fact use plan:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("factUses");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");

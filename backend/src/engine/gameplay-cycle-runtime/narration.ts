@@ -385,6 +385,7 @@ type CleanNarratorProseCue = CleanNarratorStoryFrameEntry["proseCue"];
 type CleanNarratorCompositionSlot = CleanNarratorStoryFrameEntry["compositionSlot"];
 type CleanNarratorPagePlanStep = CleanNarratorPromptInput["storyFrame"]["pagePlan"]["steps"][number];
 type CleanNarratorPageTaskMove = CleanNarratorPromptInput["narrativePageTask"]["moves"][number];
+type CleanNarratorFactUse = CleanNarratorPageTaskMove["factUses"][number];
 
 function evidenceIncludesClaimKind(
   evidence: AcceptedNarrationEvidence,
@@ -549,6 +550,78 @@ function narrativePageMoveCoverage(
   return "required";
 }
 
+function narrativeFactProseUse(
+  fact: AcceptedNarrationEvidence["backendFacts"][number],
+): CleanNarratorFactUse["proseUse"] {
+  switch (fact.role) {
+    case "scene_texture":
+      return "exact_texture_sentence";
+    case "dialogue_quote":
+      return "exact_dialogue_quote";
+    case "travel_beat":
+    case "time_beat":
+    case "route_beat":
+    case "route_choices_beat":
+    case "device_surface_beat":
+    case "local_observation_beat":
+    case "scene_beat":
+    case "oracle_selected_meaning":
+    case "player_condition_operation":
+    case "minor_poi_operation":
+    case "custody_change":
+    case "settled_custody":
+    case "visible_scene_facts":
+      return "primary_beat";
+    case "elapsed_time":
+    case "elapsed_travel_time":
+    case "route_choice_travel_costs":
+      return "time_value";
+    case "route_choice_labels":
+    case "open_route_labels":
+    case "closed_route_labels":
+      return "route_choice";
+    case "scene_placement":
+    case "current_scene_anchor":
+    case "anchor_scene":
+    case "anchor_location":
+    case "scene_label":
+    case "place_label":
+    case "route_origin":
+      return "scene_anchor";
+    case "condition_key":
+    case "condition_result":
+    case "condition_target":
+    case "final_equip_state":
+    case "handle_result":
+    case "item_transfer_result":
+    case "materialization_result":
+    case "route_status":
+      return "state_value";
+    case "current_place_after_movement":
+    case "destination_label":
+    case "device_label":
+    case "inventory_labels":
+    case "item_label":
+    case "observed_entry_labels":
+    case "place_handle_label":
+    case "route_label":
+    case "source_label":
+    case "speaker_label":
+    case "support_role":
+    case "target_label":
+    case "visible_actor_labels":
+    case "visible_actor_target_labels":
+    case "visible_item_target_labels":
+    case "visible_location_target_labels":
+    case "visible_place_handle_target_labels":
+    case "visible_support_actor":
+    case "visible_target_labels":
+      return "label_anchor";
+    default:
+      return "supporting_detail";
+  }
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
@@ -571,22 +644,28 @@ function buildCleanNarrativePageTask(
     referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
     pageGoal: "turn_changelog_to_grounded_text_rpg_page",
     truthBoundary: "accepted_evidence_only",
-    moves: storyFrame.pagePlan.steps.map((step, index) => ({
-      moveRef: `m${index + 1}`,
-      step: step.step,
-      entryRefs: step.entryRefs,
-      proseMove: narrativePageProseMove(step.step),
-      coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
-      allowedBackendFactRefs: uniqueStrings(step.entryRefs.flatMap((ref) =>
+    moves: storyFrame.pagePlan.steps.map((step, index) => {
+      const moveBackendFactRefs = uniqueStrings(step.entryRefs.flatMap((ref) =>
         entriesByRef.get(ref)?.backendFactRefs ?? []
-      )),
-      usableFacts: uniqueStrings(step.entryRefs.flatMap((ref) =>
-        entriesByRef.get(ref)?.backendFactRefs ?? []
-      )).flatMap((factRef) => {
+      ));
+      const usableFacts = moveBackendFactRefs.flatMap((factRef) => {
         const fact = backendFactsByRef.get(factRef);
         return fact ? [fact] : [];
-      }),
-    })),
+      });
+      return {
+        moveRef: `m${index + 1}`,
+        step: step.step,
+        entryRefs: step.entryRefs,
+        proseMove: narrativePageProseMove(step.step),
+        coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
+        allowedBackendFactRefs: moveBackendFactRefs,
+        usableFacts,
+        factUses: usableFacts.map((fact) => ({
+          factRef: fact.factRef,
+          proseUse: narrativeFactProseUse(fact),
+        })),
+      };
+    }),
   };
 }
 
@@ -1521,6 +1600,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
+    "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
