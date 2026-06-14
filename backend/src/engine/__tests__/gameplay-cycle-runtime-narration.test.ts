@@ -4789,18 +4789,41 @@ describe("clean Stage 6 narration contracts", () => {
     expect(renderCleanAuthorityProjection(view)).toContain("not confirmed");
   });
 
-  it("rejects private, backend, old-runtime, and oracle adapter leaks", () => {
+  it("rejects private terms and exact prompt-owned internal token leaks", () => {
+    const view = movementView();
     const result = validateCleanNarrationCandidate({
-      view: movementView(),
-      candidate: movementCandidate("You move to location:secret after roll reasoning."),
+      view,
+      candidate: movementCandidate(`You move to North Hall, then ${view.packetId}, e1.f1, and the secret chamber remain visible.`),
     });
 
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") throw new Error("expected rejected");
     expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
       "backend_ref",
-      "old_runtime_marker",
+      "private_term",
     ]));
+  });
+
+  it("accepts punctuation that only looked like backend syntax under the removed mask", () => {
+    const result = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate("You move to North Hall; route: open, roll steady."),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
+  it("normalizes sentence and final text whitespace without regex masking", () => {
+    const candidate = movementCandidate("After 1 minute,\n\tyou reach North Hall.");
+    const result = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: {
+        ...candidate,
+        finalText: "After 1 minute, you reach North Hall.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
   });
 
   it("accepts concise prose when structural movement refs are valid", () => {

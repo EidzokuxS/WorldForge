@@ -63,17 +63,24 @@ export class CleanNarrationValidationError extends Error {
   }
 }
 
-const UUID_LIKE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
-const BACKEND_REF = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player):[^\s",.]+/i;
-const BACKEND_DASH_ID = /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|receipt|route|scene|turn|world|loc|player|stage4-receipt)-[a-z0-9][a-z0-9-]*\b/i;
-const OLD_RUNTIME_MARKER = /\b(?:narrator_attempt|clean_narrator_attempt|settled_turn_packet|receipt_ledger|gameplay_cycle_v2|turn_saga|tool_payload|privateResult|chance|roll|reasoning)\b/i;
-
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function normalizeText(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
+  const trimmed = value.trim();
+  let result = "";
+  let sawWhitespace = false;
+  for (const char of trimmed) {
+    if (char.trim().length === 0) {
+      sawWhitespace = result.length > 0;
+      continue;
+    }
+    if (sawWhitespace && result.length > 0) result += " ";
+    result += char;
+    sawWhitespace = false;
+  }
+  return result;
 }
 
 type CleanNarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
@@ -1496,6 +1503,7 @@ function zodIssue(issue: { path: PropertyKey[]; message: string }): CleanNarrati
 
 function leakageIssues(input: {
   view: CleanNarratorView;
+  promptInput: CleanNarratorPromptInput;
   candidate: CleanNarrationCandidate;
 }): CleanNarrationValidationIssue[] {
   const text = input.candidate.sentences.map((sentence) => sentence.text).join("\n")
@@ -1518,22 +1526,39 @@ function leakageIssues(input: {
     }
   }
 
-  if (UUID_LIKE.test(text) || BACKEND_REF.test(text) || BACKEND_DASH_ID.test(text)) {
+  const internalToken = knownInternalNarrationTokens(input.view, input.promptInput)
+    .find((token) => text.includes(token));
+  if (internalToken) {
     issues.push({
       code: "backend_ref",
       path: "finalText",
-      message: "Narration candidate exposed backend-looking refs.",
-    });
-  }
-  if (OLD_RUNTIME_MARKER.test(text)) {
-    issues.push({
-      code: "old_runtime_marker",
-      path: "finalText",
-      message: "Narration candidate exposed old runtime or hidden adapter markers.",
+      message: `Narration candidate copied internal prompt token ${internalToken} into player-facing text.`,
     });
   }
 
   return issues;
+}
+
+function knownInternalNarrationTokens(
+  view: CleanNarratorView,
+  promptInput: CleanNarratorPromptInput,
+): string[] {
+  return uniqueStrings([
+    view.packetId,
+    view.campaignId,
+    view.turnId,
+    promptInput.version,
+    promptInput.storyFrame.version,
+    promptInput.storyFrame.pagePlan.version,
+    promptInput.narrativePageTask.version,
+    ...view.acceptedEvidence.flatMap((evidence) => [
+      evidence.ref,
+      ...evidence.backendFacts.map((fact) => fact.factRef),
+    ]),
+    ...view.stepAuditForGrounding.map((step) => step.stepId),
+    ...promptInput.narrativePageTask.moves.map((move) => move.moveRef),
+    ...promptInput.narrativePageTask.sentencePlan.map((step) => step.sentenceRef),
+  ]).filter((token) => token.length >= 4);
 }
 
 function isDirectSceneEvidence(evidence: AcceptedNarrationEvidence): boolean {
@@ -1976,7 +2001,7 @@ export function validateCleanNarrationCandidate(input: {
       message: "Narration candidate finalText cannot be empty.",
     });
   }
-  issues.push(...leakageIssues({ view: input.view, candidate }));
+  issues.push(...leakageIssues({ view: input.view, promptInput, candidate }));
 
   if (issues.length > 0) {
     return { status: "rejected", issues };
@@ -2029,7 +2054,8 @@ function projectionLanguage(view: CleanNarratorView): "ru" | "en" {
 }
 
 function trimSentencePeriod(value: string): string {
-  return normalizeText(value).replace(/\.$/u, "");
+  const compact = normalizeText(value);
+  return compact.endsWith(".") ? compact.slice(0, -1) : compact;
 }
 
 function splitEvidenceLabels(value: string): string[] {
