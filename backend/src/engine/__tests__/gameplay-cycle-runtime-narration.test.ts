@@ -1321,6 +1321,14 @@ describe("clean Stage 6 narration contracts", () => {
           { factRef: "e1.f4", proseUse: "label_anchor" },
         ],
       }],
+      sentencePlan: [{
+        sentenceRef: "s1",
+        moveRef: "m1",
+        sentenceRole: "turn_event_beat",
+        coverage: "required",
+        entryRefs: ["e1"],
+        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+      }],
     });
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
       .toEqual(["After 1 minute, you reach North Hall.", "North Hall", "1 minute", "North Hall"]);
@@ -1387,6 +1395,24 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.narrativePageTask.moves[1]?.usableFacts.map((fact) => fact.value))
       .toEqual([undefined, 'Guide says: "The north stairs flooded before dawn."', undefined]);
+    expect(promptInput.narrativePageTask.sentencePlan).toEqual([
+      {
+        sentenceRef: "s1",
+        moveRef: "m1",
+        sentenceRole: "context_anchor",
+        coverage: "optional",
+        entryRefs: ["e1"],
+        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+      },
+      {
+        sentenceRef: "s2",
+        moveRef: "m2",
+        sentenceRole: "turn_event_beat",
+        coverage: "required",
+        entryRefs: ["e5"],
+        preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+      },
+    ]);
   });
 
   it("keeps movement receipts as authoritative turn events", () => {
@@ -1501,6 +1527,32 @@ describe("clean Stage 6 narration contracts", () => {
         "Market",
         "Market",
       ]);
+    expect(promptInput.narrativePageTask.sentencePlan).toEqual([
+      {
+        sentenceRef: "s1",
+        moveRef: "m1",
+        sentenceRole: "exact_context_texture",
+        coverage: "optional",
+        entryRefs: ["e2", "e3"],
+        preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+      },
+      {
+        sentenceRef: "s2",
+        moveRef: "m1",
+        sentenceRole: "context_anchor",
+        coverage: "optional",
+        entryRefs: ["e2", "e3"],
+        preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+      },
+      {
+        sentenceRef: "s3",
+        moveRef: "m2",
+        sentenceRole: "next_action_handle",
+        coverage: "required",
+        entryRefs: ["e1"],
+        preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+      },
+    ]);
   });
 
   it("checks narration sentence page-move refs against the narrative page task", () => {
@@ -4578,6 +4630,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Fact use plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("factUses");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Sentence plan:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preferredBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");

@@ -386,6 +386,7 @@ type CleanNarratorCompositionSlot = CleanNarratorStoryFrameEntry["compositionSlo
 type CleanNarratorPagePlanStep = CleanNarratorPromptInput["storyFrame"]["pagePlan"]["steps"][number];
 type CleanNarratorPageTaskMove = CleanNarratorPromptInput["narrativePageTask"]["moves"][number];
 type CleanNarratorFactUse = CleanNarratorPageTaskMove["factUses"][number];
+type CleanNarratorSentencePlanStep = CleanNarratorPromptInput["narrativePageTask"]["sentencePlan"][number];
 
 function evidenceIncludesClaimKind(
   evidence: AcceptedNarrationEvidence,
@@ -622,6 +623,66 @@ function narrativeFactProseUse(
   }
 }
 
+function sentencePlanPreferredFactRefs(
+  move: CleanNarratorPageTaskMove,
+  proseUses: CleanNarratorFactUse["proseUse"][],
+): string[] {
+  const useSet = new Set(proseUses);
+  return move.factUses
+    .filter((factUse) => useSet.has(factUse.proseUse))
+    .map((factUse) => factUse.factRef);
+}
+
+function sentencePlanForMove(
+  move: CleanNarratorPageTaskMove,
+  sentenceIndex: number,
+): CleanNarratorSentencePlanStep[] {
+  const steps: CleanNarratorSentencePlanStep[] = [];
+  const pushPlan = (
+    sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+    coverage: CleanNarratorSentencePlanStep["coverage"],
+    preferredBackendFactRefs: string[],
+  ) => {
+    if (preferredBackendFactRefs.length === 0) return;
+    steps.push({
+      sentenceRef: `s${sentenceIndex + steps.length + 1}`,
+      moveRef: move.moveRef,
+      sentenceRole,
+      coverage,
+      entryRefs: move.entryRefs,
+      preferredBackendFactRefs,
+    });
+  };
+
+  switch (move.proseMove) {
+    case "ask_accepted_question":
+      pushPlan("clarification_question", "required", sentencePlanPreferredFactRefs(move, ["primary_beat", "supporting_detail"]));
+      break;
+    case "establish_playable_context":
+      pushPlan("exact_context_texture", move.coverage, sentencePlanPreferredFactRefs(move, ["exact_texture_sentence"]));
+      pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
+      break;
+    case "render_authoritative_turn_event":
+      pushPlan("turn_event_beat", move.coverage, sentencePlanPreferredFactRefs(move, [
+        "primary_beat",
+        "exact_dialogue_quote",
+        "state_value",
+        "time_value",
+        "label_anchor",
+      ]));
+      break;
+    case "leave_playable_next_action_handle":
+      pushPlan("next_action_handle", move.coverage, sentencePlanPreferredFactRefs(move, [
+        "primary_beat",
+        "route_choice",
+        "time_value",
+        "label_anchor",
+      ]));
+      break;
+  }
+  return steps;
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
@@ -638,34 +699,41 @@ function buildCleanNarrativePageTask(
   const hasAuthoritativeTurnMove = storyFrame.pagePlan.steps.some((step) =>
     step.step === "ask_clarification" || step.step === "narrate_turn_event"
   );
+  const moves: CleanNarratorPageTaskMove[] = storyFrame.pagePlan.steps.map((step, index) => {
+    const moveBackendFactRefs = uniqueStrings(step.entryRefs.flatMap((ref) =>
+      entriesByRef.get(ref)?.backendFactRefs ?? []
+    ));
+    const usableFacts = moveBackendFactRefs.flatMap((factRef) => {
+      const fact = backendFactsByRef.get(factRef);
+      return fact ? [fact] : [];
+    });
+    return {
+      moveRef: `m${index + 1}`,
+      step: step.step,
+      entryRefs: step.entryRefs,
+      proseMove: narrativePageProseMove(step.step),
+      coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
+      allowedBackendFactRefs: moveBackendFactRefs,
+      usableFacts,
+      factUses: usableFacts.map((fact) => ({
+        factRef: fact.factRef,
+        proseUse: narrativeFactProseUse(fact),
+      })),
+    };
+  });
+  const sentencePlan: CleanNarratorSentencePlanStep[] = [];
+  for (const move of moves) {
+    sentencePlan.push(...sentencePlanForMove(move, sentencePlan.length));
+  }
+
   return {
     version: "gameplay-runtime.clean-narrator-page-task.v1",
     source: "derived_from_story_frame_page_plan",
     referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
     pageGoal: "turn_changelog_to_grounded_text_rpg_page",
     truthBoundary: "accepted_evidence_only",
-    moves: storyFrame.pagePlan.steps.map((step, index) => {
-      const moveBackendFactRefs = uniqueStrings(step.entryRefs.flatMap((ref) =>
-        entriesByRef.get(ref)?.backendFactRefs ?? []
-      ));
-      const usableFacts = moveBackendFactRefs.flatMap((factRef) => {
-        const fact = backendFactsByRef.get(factRef);
-        return fact ? [fact] : [];
-      });
-      return {
-        moveRef: `m${index + 1}`,
-        step: step.step,
-        entryRefs: step.entryRefs,
-        proseMove: narrativePageProseMove(step.step),
-        coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
-        allowedBackendFactRefs: moveBackendFactRefs,
-        usableFacts,
-        factUses: usableFacts.map((fact) => ({
-          factRef: fact.factRef,
-          proseUse: narrativeFactProseUse(fact),
-        })),
-      };
-    }),
+    moves,
+    sentencePlan,
   };
 }
 
@@ -1601,6 +1669,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
+    "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",

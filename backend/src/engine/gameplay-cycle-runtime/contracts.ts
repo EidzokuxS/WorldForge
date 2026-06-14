@@ -2525,6 +2525,21 @@ const cleanNarratorPageTaskMoveSchema = z.object({
   factUses: z.array(cleanNarratorFactUseSchema).min(1).max(192),
 }).strict();
 
+const cleanNarratorSentencePlanStepSchema = z.object({
+  sentenceRef: shortText,
+  moveRef: shortText,
+  sentenceRole: z.enum([
+    "clarification_question",
+    "context_anchor",
+    "exact_context_texture",
+    "next_action_handle",
+    "turn_event_beat",
+  ]),
+  coverage: z.enum(["required", "optional"]),
+  entryRefs: z.array(shortText).min(1).max(24),
+  preferredBackendFactRefs: z.array(shortText).min(1).max(24),
+}).strict();
+
 const cleanNarratorPageTaskSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-page-task.v1"),
   source: z.literal("derived_from_story_frame_page_plan"),
@@ -2532,6 +2547,7 @@ const cleanNarratorPageTaskSchema = z.object({
   pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
   truthBoundary: z.literal("accepted_evidence_only"),
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
+  sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();
 
 const cleanNarratorAuditNoticeSchema = z.object({
