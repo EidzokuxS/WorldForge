@@ -388,6 +388,7 @@ type CleanNarratorPagePlanStep = CleanNarratorPromptInput["storyFrame"]["pagePla
 type CleanNarratorPageTaskMove = CleanNarratorPromptInput["narrativePageTask"]["moves"][number];
 type CleanNarratorFactUse = CleanNarratorPageTaskMove["factUses"][number];
 type CleanNarratorSentencePlanStep = CleanNarratorPromptInput["narrativePageTask"]["sentencePlan"][number];
+type CleanNarratorSentencePlanDraft = Omit<CleanNarratorSentencePlanStep, "flowCue">;
 type CleanNarratorPageArc = CleanNarratorPromptInput["narrativePageTask"]["pageArc"];
 
 function evidenceIncludesClaimKind(
@@ -737,8 +738,8 @@ function sentencePlanLiteraryCue(
 function sentencePlanForMove(
   move: CleanNarratorPageTaskMove,
   sentenceIndex: number,
-): CleanNarratorSentencePlanStep[] {
-  const steps: CleanNarratorSentencePlanStep[] = [];
+): CleanNarratorSentencePlanDraft[] {
+  const steps: CleanNarratorSentencePlanDraft[] = [];
   const pushPlan = (
     sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
     coverage: CleanNarratorSentencePlanStep["coverage"],
@@ -784,6 +785,59 @@ function sentencePlanForMove(
       break;
   }
   return steps;
+}
+
+function sentencePlanTransitionRole(
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+): CleanNarratorSentencePlanStep["flowCue"]["transitionRole"] {
+  switch (sentenceRole) {
+    case "clarification_question":
+      return "accepted_question";
+    case "context_anchor":
+      return "context_setup";
+    case "exact_context_texture":
+      return "context_texture";
+    case "next_action_handle":
+      return "playable_handle";
+    case "turn_event_beat":
+      return "settled_result";
+  }
+}
+
+function sentencePlanReaderEffect(
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+): CleanNarratorSentencePlanStep["flowCue"]["readerEffect"] {
+  switch (sentenceRole) {
+    case "clarification_question":
+      return "request_specific_answer";
+    case "context_anchor":
+      return "carry_forward_context";
+    case "exact_context_texture":
+      return "orient_player";
+    case "next_action_handle":
+      return "offer_next_action";
+    case "turn_event_beat":
+      return "land_outcome";
+  }
+}
+
+function sentencePlanWithFlowCues(
+  drafts: CleanNarratorSentencePlanDraft[],
+): CleanNarratorSentencePlanStep[] {
+  return drafts.map((step, index) => ({
+    ...step,
+    flowCue: {
+      pagePosition: drafts.length === 1
+        ? "single"
+        : index === 0
+          ? "opening"
+          : index === drafts.length - 1
+            ? "closing"
+            : "continuation",
+      transitionRole: sentencePlanTransitionRole(step.sentenceRole),
+      readerEffect: sentencePlanReaderEffect(step.sentenceRole),
+    },
+  }));
 }
 
 function buildCleanNarrativePageArc(
@@ -871,10 +925,11 @@ function buildCleanNarrativePageTask(
       })),
     };
   });
-  const sentencePlan: CleanNarratorSentencePlanStep[] = [];
+  const sentencePlanDrafts: CleanNarratorSentencePlanDraft[] = [];
   for (const move of moves) {
-    sentencePlan.push(...sentencePlanForMove(move, sentencePlan.length));
+    sentencePlanDrafts.push(...sentencePlanForMove(move, sentencePlanDrafts.length));
   }
+  const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
 
   return {
     version: "gameplay-runtime.clean-narrator-page-task.v1",
@@ -1823,6 +1878,7 @@ export function buildCleanNarrationSystemPrompt(
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
+    "Flow cues: each sentencePlan step includes flowCue.pagePosition, flowCue.transitionRole, and flowCue.readerEffect. Use flowCue to connect sentence objects as opening, continuation, closing, or single-beat page flow while preserving the cited refs for every claim.",
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",

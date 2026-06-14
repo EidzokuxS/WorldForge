@@ -2559,6 +2559,28 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "preserve_token",
     ]),
   }).strict()).min(1).max(24),
+  flowCue: z.object({
+    pagePosition: z.enum([
+      "closing",
+      "continuation",
+      "opening",
+      "single",
+    ]),
+    transitionRole: z.enum([
+      "accepted_question",
+      "context_setup",
+      "context_texture",
+      "playable_handle",
+      "settled_result",
+    ]),
+    readerEffect: z.enum([
+      "carry_forward_context",
+      "land_outcome",
+      "offer_next_action",
+      "orient_player",
+      "request_specific_answer",
+    ]),
+  }).strict(),
   literaryCue: z.object({
     renderShape: z.enum([
       "ask_accepted_clarification",

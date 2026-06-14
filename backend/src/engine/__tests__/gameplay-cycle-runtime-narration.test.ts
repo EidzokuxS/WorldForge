@@ -1387,6 +1387,11 @@ describe("clean Stage 6 narration contracts", () => {
           cadence: "compact_present_beat",
           styleLevers: ["concrete_present_verb", "elapsed_time_pressure", "accepted_label_anchor"],
         },
+        flowCue: {
+          pagePosition: "single",
+          transitionRole: "settled_result",
+          readerEffect: "land_outcome",
+        },
       }],
     });
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
@@ -1496,6 +1501,11 @@ describe("clean Stage 6 narration contracts", () => {
           cadence: "compact_present_beat",
           styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
         },
+        flowCue: {
+          pagePosition: "opening",
+          transitionRole: "context_setup",
+          readerEffect: "carry_forward_context",
+        },
       },
       {
         sentenceRef: "s2",
@@ -1524,6 +1534,11 @@ describe("clean Stage 6 narration contracts", () => {
           renderShape: "frame_exact_quote",
           cadence: "quote_framed_beat",
           styleLevers: ["visible_speaker_frame", "accepted_label_anchor"],
+        },
+        flowCue: {
+          pagePosition: "closing",
+          transitionRole: "settled_result",
+          readerEffect: "land_outcome",
         },
       },
     ]);
@@ -1676,6 +1691,11 @@ describe("clean Stage 6 narration contracts", () => {
           cadence: "exact_short_sentence",
           styleLevers: ["accepted_texture_only"],
         },
+        flowCue: {
+          pagePosition: "opening",
+          transitionRole: "context_texture",
+          readerEffect: "orient_player",
+        },
       },
       {
         sentenceRef: "s2",
@@ -1711,6 +1731,11 @@ describe("clean Stage 6 narration contracts", () => {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
           styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
+        },
+        flowCue: {
+          pagePosition: "continuation",
+          transitionRole: "context_setup",
+          readerEffect: "carry_forward_context",
         },
       },
       {
@@ -1761,6 +1786,11 @@ describe("clean Stage 6 narration contracts", () => {
           renderShape: "leave_playable_choice_handle",
           cadence: "choice_handle_sentence",
           styleLevers: ["playable_choice_grouping", "accepted_label_anchor", "elapsed_time_pressure"],
+        },
+        flowCue: {
+          pagePosition: "closing",
+          transitionRole: "playable_handle",
+          readerEffect: "offer_next_action",
         },
       },
     ]);
@@ -4875,6 +4905,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Prose materials:");
     expect(buildCleanNarrationSystemPrompt()).toContain("proseMaterials");
     expect(buildCleanNarrationSystemPrompt()).toContain("copyMode");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Flow cues:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("flowCue.pagePosition");
     expect(buildCleanNarrationSystemPrompt()).toContain("Literary cues:");
     expect(buildCleanNarrationSystemPrompt()).toContain("literaryCue.renderShape");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
