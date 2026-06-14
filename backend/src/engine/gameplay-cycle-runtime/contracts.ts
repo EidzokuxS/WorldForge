@@ -2776,6 +2776,42 @@ const cleanNarratorPageArcSchema = z.object({
   ]),
 }).strict();
 
+const cleanNarratorPagePerformanceSchema = z.object({
+  openingBeat: z.enum([
+    "accepted_question_opening",
+    "context_anchor_opening",
+    "exact_texture_opening",
+    "playable_choices_opening",
+    "settled_result_opening",
+  ]),
+  pageMotion: z.enum([
+    "context_to_choices",
+    "context_to_result",
+    "question_only",
+    "single_choice_handle",
+    "single_result",
+  ]),
+  continuityMaterial: z.enum([
+    "accepted_question",
+    "context_labels_to_choices",
+    "context_labels_to_result",
+    "playable_route_material",
+    "result_material",
+    "texture_to_choices",
+    "texture_to_result",
+  ]),
+  closingBeat: z.enum([
+    "accepted_question_closure",
+    "playable_handle_closure",
+    "settled_result_closure",
+  ]),
+  readerHandoff: z.enum([
+    "answer_clarification",
+    "choose_next_action",
+    "continue_from_result",
+  ]),
+}).strict();
+
 const cleanNarratorStoryPageBriefSchema = z.object({
   pageKind: z.enum([
     "clarification_prompt_page",
@@ -2818,6 +2854,7 @@ const cleanNarratorPageTaskSchema = z.object({
   truthBoundary: z.literal("accepted_evidence_only"),
   storyPageBrief: cleanNarratorStoryPageBriefSchema,
   pageArc: cleanNarratorPageArcSchema,
+  pagePerformance: cleanNarratorPagePerformanceSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();

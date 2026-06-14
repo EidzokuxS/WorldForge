@@ -1342,6 +1342,13 @@ describe("clean Stage 6 narration contracts", () => {
         readerPosture: "continue_from_settled_result",
         closingIntent: "settled_result",
       },
+      pagePerformance: {
+        openingBeat: "settled_result_opening",
+        pageMotion: "single_result",
+        continuityMaterial: "result_material",
+        closingBeat: "settled_result_closure",
+        readerHandoff: "continue_from_result",
+      },
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1479,6 +1486,13 @@ describe("clean Stage 6 narration contracts", () => {
       pageCadence: "context_then_result",
       readerPosture: "continue_from_settled_result",
       closingIntent: "settled_result",
+    });
+    expect(promptInput.narrativePageTask.pagePerformance).toEqual({
+      openingBeat: "context_anchor_opening",
+      pageMotion: "context_to_result",
+      continuityMaterial: "context_labels_to_result",
+      closingBeat: "settled_result_closure",
+      readerHandoff: "continue_from_result",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_settled_result_page",
@@ -1754,6 +1768,13 @@ describe("clean Stage 6 narration contracts", () => {
       pageCadence: "context_then_choice",
       readerPosture: "choose_visible_next_action",
       closingIntent: "playable_next_action",
+    });
+    expect(promptInput.narrativePageTask.pagePerformance).toEqual({
+      openingBeat: "exact_texture_opening",
+      pageMotion: "context_to_choices",
+      continuityMaterial: "texture_to_choices",
+      closingBeat: "playable_handle_closure",
+      readerHandoff: "choose_next_action",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_playable_choices_page",
@@ -4934,6 +4955,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Page arc:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageArc");
     expect(buildCleanNarrationSystemPrompt()).toContain("reader posture");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Page performance:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pagePerformance");
+    expect(buildCleanNarrationSystemPrompt()).toContain("openingBeat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("pageMotion");
+    expect(buildCleanNarrationSystemPrompt()).toContain("continuityMaterial");
+    expect(buildCleanNarrationSystemPrompt()).toContain("readerHandoff");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");
