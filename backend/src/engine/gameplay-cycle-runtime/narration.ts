@@ -2044,6 +2044,7 @@ export function buildCleanNarrationPrompt(input: CleanNarratorPromptInput): stri
 export function validateCleanNarrationCandidate(input: {
   view: CleanNarratorView;
   candidate: unknown;
+  enforceProseQuality?: boolean;
 }): { status: "accepted"; candidate: CleanNarrationCandidate; issues: [] } | {
   status: "rejected";
   issues: CleanNarrationValidationIssue[];
@@ -2306,7 +2307,9 @@ export function validateCleanNarrationCandidate(input: {
     });
   }
   issues.push(...leakageIssues({ view: input.view, candidate }));
-  issues.push(...proseQualityIssues({ view: input.view, candidate }));
+  if (input.enforceProseQuality ?? true) {
+    issues.push(...proseQualityIssues({ view: input.view, candidate }));
+  }
 
   if (issues.length > 0) {
     return { status: "rejected", issues };
@@ -2975,6 +2978,7 @@ export async function runCleanNarration(input: {
     const validation = validateCleanNarrationCandidate({
       view: input.narratorView,
       candidate,
+      enforceProseQuality: false,
     });
     if (validation.status === "accepted") {
       return {

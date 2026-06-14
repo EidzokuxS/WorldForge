@@ -3043,7 +3043,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Market stalls surround you while the visible way leads to North Hall.");
   });
 
-  it("repairs repeated first scene_texture in standalone elapsed-time prose", async () => {
+  it("accepts repeated first scene_texture in standalone elapsed-time runtime prose without prose-quality repair", async () => {
     const view = timeWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3051,31 +3051,11 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [
-            {
-              text: "Canvas awnings hang over the market lanes.",
-              evidenceRefs: ["e2"],
-              backendFactRefs: ["e2.f1"],
-              claimKinds: ["scene_texture"],
-            },
-            {
-              text: "Five minutes pass in Market.",
-              evidenceRefs: ["e5", "e3"],
-              backendFactRefs: ["e5.f1", "e3.f1"],
-              claimKinds: ["elapsed_time", "current_scene"],
-            },
-          ]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("Standalone elapsed-time scene_texture");
-        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
-        expect(request.prompt).toContain("For standalone elapsed_time, use e2.f2 for the scene_texture sentence.");
         return acceptedCandidate(view, [
           {
-            text: "Rain taps the brass gutters.",
+            text: "Canvas awnings hang over the market lanes.",
             evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f2"],
+            backendFactRefs: ["e2.f1"],
             claimKinds: ["scene_texture"],
           },
           {
@@ -3088,12 +3068,12 @@ describe("clean Stage 6 narration contracts", () => {
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Five minutes pass in Market.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass in Market.");
   });
 
-  it("repairs missing scene_texture for item_state inside Stage 6 before player-facing narration", async () => {
+  it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {
     const view = itemStateWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3101,41 +3081,22 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [{
-            text: "The Brass Tube passes from Player to Guide and is carried at Market.",
-            evidenceRefs: ["e1", "e3"],
-            backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
-            claimKinds: ["item_state", "current_scene"],
-          }]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("Item-state and dialogue-response narration with accepted scene_texture");
-        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
-        expect(request.prompt).toContain("For item_state, use e2.f1 for the scene_texture sentence.");
-        return acceptedCandidate(view, [
-          {
-            text: "Canvas awnings hang over the market lanes.",
-            evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f1"],
-            claimKinds: ["scene_texture"],
-          },
-          {
-            text: "The Brass Tube passes from Player to Guide and is carried at Market.",
-            evidenceRefs: ["e1", "e3"],
-            backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
-            claimKinds: ["item_state", "current_scene"],
-          },
-        ]);
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
+        return acceptedCandidate(view, [{
+          text: "The Brass Tube passes from Player to Guide and is carried at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e3.f1"],
+          claimKinds: ["item_state", "current_scene"],
+        }]);
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. The Brass Tube passes from Player to Guide and is carried at Market.");
+    expect(result.text).toBe("The Brass Tube passes from Player to Guide and is carried at Market.");
   });
 
-  it("repairs first scene_texture reuse for dialogue_response inside Stage 6 before player-facing narration", async () => {
+  it("accepts first scene_texture reuse for dialogue_response at runtime without prose-quality repair", async () => {
     const view = dialogueWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3143,30 +3104,12 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [
-            {
-              text: "Canvas awnings hang over the market lanes.",
-              evidenceRefs: ["e2"],
-              backendFactRefs: ["e2.f1"],
-              claimKinds: ["scene_texture"],
-            },
-            {
-              text: 'At Market, Guide answers: "The north stairs flooded before dawn."',
-              evidenceRefs: ["e1", "e3"],
-              backendFactRefs: ["e1.f1", "e1.f2", "e3.f1"],
-              claimKinds: ["dialogue_response", "current_scene"],
-            },
-          ]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("Dialogue-response scene_texture");
-        expect(request.prompt).toContain("For dialogue_response, use e2.f2 for the scene_texture sentence.");
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [
           {
-            text: "Rain taps the brass gutters.",
+            text: "Canvas awnings hang over the market lanes.",
             evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f2"],
+            backendFactRefs: ["e2.f1"],
             claimKinds: ["scene_texture"],
           },
           {
@@ -3179,12 +3122,12 @@ describe("clean Stage 6 narration contracts", () => {
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. At Market, Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Canvas awnings hang over the market lanes. At Market, Guide answers: "The north stairs flooded before dawn."');
   });
 
-  it("repairs missing scene_texture for support_actor_materialization inside Stage 6", async () => {
+  it("accepts missing scene_texture for support_actor_materialization at runtime without prose-quality repair", async () => {
     const view = supportActorWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
@@ -3192,40 +3135,22 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [{
-            text: "Local Vendor is present as a vendor at Market.",
-            evidenceRefs: ["e1", "e3"],
-            backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
-            claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
-          }]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("Support-actor, player-condition, and minor-POI narration with accepted scene_texture");
-        expect(request.prompt).toContain("For support_actor_materialization, use e2.f1 for the scene_texture sentence.");
-        return acceptedCandidate(view, [
-          {
-            text: "Canvas awnings hang over the market lanes.",
-            evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f1"],
-            claimKinds: ["scene_texture"],
-          },
-          {
-            text: "Local Vendor is present as a vendor at Market.",
-            evidenceRefs: ["e1", "e3"],
-            backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
-            claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
-          },
-        ]);
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
+        return acceptedCandidate(view, [{
+          text: "Local Vendor is present as a vendor at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
+        }]);
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is present as a vendor at Market.");
+    expect(result.text).toBe("Local Vendor is present as a vendor at Market.");
   });
 
-  it("repairs direct-scene implied action inside Stage 6 before player-facing narration", async () => {
+  it("accepts direct-scene implied action at runtime without prose-quality repair", async () => {
     const view = movementView({
       acceptedEvidence: [
         sceneTextureEvidence("e6"),
@@ -3238,33 +3163,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async (request) => {
         attempts += 1;
-        if (attempts === 1) {
-          return acceptedCandidate(view, [
-            {
-              text: "Canvas awnings hang over the market lanes.",
-              evidenceRefs: ["e6"],
-              backendFactRefs: ["e6.f1"],
-              claimKinds: ["scene_texture"],
-            },
-            {
-              text: "You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.",
-              evidenceRefs: ["e1", "e2", "e3", "e4"],
-              backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3"],
-              claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
-            },
-          ]);
-        }
-        expect(request.prompt).toContain("Stage 6 validation feedback");
-        expect(request.prompt).toContain("Direct-scene repair contract");
-        expect(request.prompt).toContain("Use presence and visibility shapes");
-        expect(request.prompt).toContain("Replace actor posture");
-        expect(request.prompt).toContain("Replace item handling");
-        expect(request.prompt).toContain("Allowed scene_texture sentence texts");
-        expect(request.prompt).toContain("e6.f1: Canvas awnings hang over the market lanes.");
-        expect(request.prompt).toContain("For direct-scene snapshot narration, use e6.f1 as the scene_texture sentence.text exactly");
-        expect(request.prompt).toContain("Set scene_texture sentence.text exactly to one listed text");
-        expect(request.prompt).toContain("Preserve these exact labels when cited");
-        expect(request.prompt).toContain("Courier satchel");
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [
           {
             text: "Canvas awnings hang over the market lanes.",
@@ -3273,24 +3172,18 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: "At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible.",
+            text: "You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.",
             evidenceRefs: ["e1", "e2", "e3", "e4"],
-            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3", "e4.f4"],
+            backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f3"],
             claimKinds: ["current_scene", "visible_actor", "inventory_status", "visible_target"],
-          },
-          {
-            text: "North Hall is the one-minute route choice here.",
-            evidenceRefs: ["e5"],
-            backendFactRefs: ["e5.f1", "e5.f3", "e5.f6"],
-            claimKinds: ["movement_option"],
           },
         ]);
       },
     });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is here, Courier satchel is with you, and Brass Tube and Notice Board are visible. North Hall is the one-minute route choice here.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. You look across Market as Guide waits while the Courier satchel rides at your side and Brass Tube is visible.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
