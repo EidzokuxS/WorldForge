@@ -1285,6 +1285,18 @@ function sentencePlanProseAssembly(
           closingFunction: "settle_outcome",
         };
       }
+      if (beatObjective === "render_route_status") {
+        return {
+          perspective: "playable_choice_present",
+          sentenceShape: "route_status_line",
+          openingSource: "route_label_or_status",
+          verbEnergy: "report_route_status",
+          detailRhythm: "route_status_with_label",
+          materialWeaveOrder: "route_status_then_label",
+          styleBudget: "route_status_cadence",
+          closingFunction: "settle_outcome",
+        };
+      }
       if (beatObjective === "render_item_custody") {
         return {
           perspective: "settled_result_present",
@@ -1387,6 +1399,13 @@ function sentencePlanLiteraryCue(
           renderShape: "mark_elapsed_time_pressure_clock_beat",
           cadence: "pressure_clock_beat_sentence",
           styleLevers: ["elapsed_time_pressure", "clock_pressure_verb", "concrete_present_verb"],
+        };
+      }
+      if (beatObjective === "render_route_status") {
+        return {
+          renderShape: "answer_route_status",
+          cadence: "route_status_beat_sentence",
+          styleLevers: ["route_status_focus", "accepted_label_anchor", "settled_state_focus", "concrete_present_verb"],
         };
       }
       if (beatObjective === "render_item_custody") {
@@ -2409,7 +2428,7 @@ export function buildCleanNarrationSystemPrompt(
     "Item-state grammar: scene_custody_beat_line with land_scene_custody lands ownership and equip state through item-owned custody verbs such as passes, settles with, rests with, is carried by, is held by, or remains with the exact target label. Source and target labels are custody endpoints; the scene anchor is a placement token. Handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
     "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
-    "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
+    "Route-status surface: for route_status, answer the checked path as a route_status_line. Center the exact route_label and accepted route_status value, and phrase the route_beat into ordinary path-status prose such as '<Route label> lies open from here.' Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. The result answers feasibility only: no player movement, arrival, walking, travel, safety, discovery, hidden-route, absence, no-change, or current-scene change.",
     "Route-options surface: for movement_option and route_options_receipt, render accepted route labels as scene exits the player can choose, with Route origin and Route choice travel costs as exact placement/cost details. The Route choices beat is proof context; the player-facing route sentence should phrase from route_origin, route_choice_labels/open_route_labels, and route_choice_travel_costs. If sentencePlan supplies a texture sentence, keep texture there and keep the route-choice beat focused on playable labels/costs. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. If sentencePlan supplies a texture sentence, keep texture there; otherwise omit texture and use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
     "Support-actor surface: for support_actor_materialization, use the support_actor_presence sentence plan as a scene-presence task card. Center the exact visible_support_actor label and land the presence inside the exact anchor_scene token. When support_actor_visible_cue or support_actor_public_summary is present in proseMaterials, phrase one concrete visible detail from it inside the presence line; examples of legal detail are a cited counter, gesture, position, clothing, carried object, or visible activity already named by that material. Treat support_role as identity context: include it when it adds new player-facing clarity, and let the actor label carry it when repeating the role would duplicate the same noun. The support_actor_presence fact proves that the person is in view; it is proof material rather than a sentence to copy verbatim when actor/role/scene materials are available. Presence verbs should arise from accepted cue/summary material when available; without cue material, compact presence verbs include 'takes a place in view', 'stands within sight', 'waits nearby', or 'is in view'. If sentencePlan supplies a texture sentence, keep texture there and keep the presence beat on the support actor materials. Separate accepted evidence owns dialogue, services, setup/work actions, trade behavior, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, and no-change.",
@@ -2423,7 +2442,7 @@ export function buildCleanNarrationSystemPrompt(
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
-    "For route_status, express the cited route_status backend fact.",
+    "For route_status, express the cited route_label and route_status materials as the checked path result.",
     "For scene_texture, express only cited public current-scene description texture as atmosphere around another accepted claim.",
     "For player_location_change, express the accepted player location change and accepted elapsed travel time.",
     "For oracle_outcome, express only the selected visible outcome meaning.",

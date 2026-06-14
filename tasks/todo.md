@@ -7796,3 +7796,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: proof summary passed with chat +2, clean record +1, Stage4 receipts +0 for direct scene, authority trace +0, clock ledger +0, worldVersion/time/tick +0, all old v2/saga/narrator/oracle/simulation stores 0, all inventory labels present, all route labels present, no old route surface hits, and no handling/readiness hits.
     - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You stand at Lowwater Bazaar with Guide in view, and Courier satchel, Sealed lacquer message tube, and Brass Tube on hand. From Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose.`
     - Verified: prose audit passed for `output/clean-runtime-p289-direct-scene-route-spine-live-accepted-20260614-182526/prose-audit.json` with 1 result, 69 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+
+- P290 Stage 6 route-check result prose:
+  - Diagnosis:
+    - [x] Current movement prose is already adventure-shaped in live clean runtime: `After one minute, Anchor Chain Pylon takes your weight underfoot.`
+    - [x] Current route-check prose still reads like a status answer. Diagnostic artifact `output/clean-runtime-p290-route-check-diagnostic-20260614-183452` for `Is the route to Anchor Chain Pylon open?` produced `You are at Lowwater Bazaar. From here, the path to Anchor Chain Pylon is open.` and prose audit counted one list-like sentence start.
+    - [x] Root owner is the Stage 6 `render_route_status` task card. Route mechanics are correct; the sentence plan/prompt currently treats route status as a generic `result_beat_line`.
+  - Plan:
+    - [x] Run GitNexus impact for `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, `buildCleanNarrationSystemPrompt`, and route-status prompt/projection owners before code edits.
+    - [x] Give `render_route_status` its own prose assembly and literary cue, centered on exact route label plus accepted status, with optional scene texture as separate context.
+    - [x] Update prompt contract so route-check narration answers route feasibility as a grounded path-status beat, not a receipt/status surface.
+    - [x] Update focused tests to accept a more literary route-status line and assert the sentence plan carries route label/status details.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live route-check proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live route-check narration keeps no mutation, no movement, no arrival, no safety/discovery/absence/no-change claims.
+    - [x] Exact route label remains present and uncorrupted.
+    - [x] Player-facing route-check result reads as a concise adventure answer rather than `You are at... From here...` status prose.
+  - Review:
+    - Executed: route-check settlement evidence now gives `route_label` and `route_status` backend facts clean `value` fields so Stage 6 material is `Anchor Chain Pylon`/`connected` rather than service-prefixed fact text.
+    - Executed: `render_route_status` now has a dedicated `route_status_line` prose assembly and `answer_route_status` literary cue instead of generic `result_beat_line`.
+    - Executed: Stage 6 prompt now describes route status as a grounded path-status answer centered on exact `route_label` and accepted `route_status`.
+    - Verified: GitNexus impact before editing was LOW for `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, `buildCleanNarrationSystemPrompt`, `renderRouteStatusProjection`, and `buildCleanSettledTurnPacket`; the schema enum symbol is not individually indexed.
+    - Verified: focused narration+settlement tests passed 133/133.
+    - Verified: expanded clean-runtime suite passed 617/617 across contracts, settlement, narration, visible narration guards, grounding guards, tool contracts, and empty-narration integration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only LF/CRLF warnings.
+    - Verified: live proof artifact `output/clean-runtime-p290-route-status-live-accepted-20260614-184158` cloned `p69-item-transfer-045651`, ran `Is the route to Anchor Chain Pylon open?`, and settled through `gameplay-cycle-runtime` with `mutationApplied=false`.
+    - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From here, the path to Anchor Chain Pylon lies open.`
+    - Verified: prose audit passed for `output/clean-runtime-p290-route-status-live-accepted-20260614-184158/prose-audit.json` with 1 result, 29 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.

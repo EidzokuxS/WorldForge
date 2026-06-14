@@ -175,8 +175,8 @@ function routeView(): CleanNarratorView {
       text: "From here, the path to North Hall is open.",
       backendFacts: [
         { factRef: "e1.f1", role: "route_beat", value: "From here, the path to North Hall is open.", text: "Route beat: From here, the path to North Hall is open.", exact: true },
-        { factRef: "e1.f2", text: "Route label: North Hall.", exact: true },
-        { factRef: "e1.f3", text: "Route status: connected.", exact: true },
+        { factRef: "e1.f2", role: "route_label", value: "North Hall", text: "Route label: North Hall.", exact: true },
+        { factRef: "e1.f3", role: "route_status", value: "connected", text: "Route status: connected.", exact: true },
       ],
       limits: {
         proves: ["route status only", "route status phrasing for the player"],
@@ -203,10 +203,14 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
           exact: true,
         }, {
           factRef: "e5.f2",
+          role: "route_label",
+          value: "Transmission Basement",
           text: "Route label: Transmission Basement.",
           exact: true,
         }, {
           factRef: "e5.f3",
+          role: "route_status",
+          value: "connected",
           text: "Route status: connected.",
           exact: true,
         }],
@@ -3054,21 +3058,44 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
     const view = routeWithSceneFrameSnapshotView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const routeStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_route_status"
+    );
+    expect(routeStatusStep?.proseAssembly).toMatchObject({
+      sentenceShape: "route_status_line",
+      openingSource: "route_label_or_status",
+      verbEnergy: "report_route_status",
+      materialWeaveOrder: "route_status_then_label",
+      styleBudget: "route_status_cadence",
+    });
+    expect(routeStatusStep?.literaryCue).toMatchObject({
+      renderShape: "answer_route_status",
+      cadence: "route_status_beat_sentence",
+      styleLevers: ["route_status_focus", "accepted_label_anchor", "settled_state_focus", "concrete_present_verb"],
+    });
+    expect(routeStatusStep?.proseMaterials.map((material) => [material.factRef, material.materialText])).toEqual([
+      ["e5.f1", "From here, the path to Transmission Basement is open."],
+      ["e5.f2", "Transmission Basement"],
+      ["e5.f3", "connected"],
+    ]);
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "From here, Transmission Basement is an available route.",
+        text: "Transmission Basement lies open from here.",
         evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f1"],
+        backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
         claimKinds: ["route_status"],
       }]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("From here, Transmission Basement is an available route.");
+    expect(result.text).toBe("Transmission Basement lies open from here.");
     expect(result.text).toContain("Transmission Basement");
     expect(result.text).not.toContain("Transmission Basin");
+    expect(result.text).not.toContain("You are at");
     expect(result.text).not.toMatch(/\b(settled route check|current scene|visible paths|inventory|move|arrive|travel|nothing changed|no change)\b/iu);
   });
 
@@ -5843,11 +5870,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("clock_beat_line with pressure_time");
     expect(buildCleanNarrationSystemPrompt()).toContain("pressure clock beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted Route beat as the turn event");
+    expect(buildCleanNarrationSystemPrompt()).toContain("answer the checked path as a route_status_line");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase the route_beat into ordinary path-status prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as scene exits the player can choose");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_exit_choice_line with exits_then_costs");
-    expect(buildCleanNarrationSystemPrompt()).toContain("with Route label and Route status as proof details");
+    expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");

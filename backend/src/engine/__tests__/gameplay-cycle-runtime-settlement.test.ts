@@ -1164,6 +1164,11 @@ describe("clean Stage 5 settlement contracts", () => {
       "Route label: North Hall.",
       "Route status: connected.",
     ]);
+    expect(route?.backendFacts.map((entry) => entry.value ?? null)).toEqual([
+      "From here, the path to North Hall is open.",
+      "North Hall",
+      "connected",
+    ]);
     expect(route?.limits.proves).toContain("route status phrasing for the player");
     expect(route?.limits.doesNotProve).toContain("movement");
     expect(route?.limits.doesNotProve).toContain("current-scene change");

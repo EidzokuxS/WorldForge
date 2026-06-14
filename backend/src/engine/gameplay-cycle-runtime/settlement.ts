@@ -862,8 +862,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
           fact(evidenceId, 1, "route_beat", `Route beat: ${routeBeat}`, routeBeat),
-          fact(evidenceId, 2, "route_label", `Route label: ${routeLabel}.`),
-          fact(evidenceId, 3, "route_status", `Route status: ${routeStatus}.`),
+          fact(evidenceId, 2, "route_label", `Route label: ${routeLabel}.`, routeLabel),
+          fact(evidenceId, 3, "route_status", `Route status: ${routeStatus}.`, routeStatus),
         ],
         limits: {
           proves: ["route status only", "route status phrasing for the player"],
