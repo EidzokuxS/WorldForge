@@ -300,6 +300,10 @@ function localObservationStoryBeat(observation: {
     throw new Error("Local observation story evidence requires matched entries for non-negative results.");
   }
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
+  const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
+  if (onlyInventoryMatches) {
+    return `You have ${evidenceEnglishList(labels)} with you.`;
+  }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
   }
@@ -939,12 +943,14 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         .map((entry) => entry.label));
       const observedLabelList = evidenceSemicolonList(observedLabels);
       const observedInventoryLabelList = evidenceSemicolonList(observedInventoryLabels);
-      const isInventoryObservation = observation.resultKind === "positive_list"
-        && observation.searchedSurfaceKinds.length === 1
-        && observation.searchedSurfaceKinds[0] === "inventory_item";
+      const isInventoryObservation = !boundedNegative
+        && observedInventoryLabels.length > 0
+        && observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
       const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
         ? ["local_observation", "bounded_visibility_negative"]
-        : observation.resultKind === "positive_list"
+        : isInventoryObservation
+          ? ["local_observation", "inventory_status"]
+          : observation.resultKind === "positive_list"
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [

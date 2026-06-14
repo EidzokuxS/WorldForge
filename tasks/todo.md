@@ -7941,3 +7941,34 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: live narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.`
     - Verified: final proof summary passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `local_observation` receipt, clean record +1, Stage 4 receipt +1, authority traces +0, clock ledger +0, old runtime stores 0, carried inventory beat, `observed_inventory_item_labels`, and `matching current inventory entries`.
     - Verified: prose audit passed for the final inventory artifact with one narrative, 34 words, zero one-token output, zero `youOpening`, and all hit counters 0.
+
+- P295 Stage 6 minor-POI scene-handle weaving:
+  - Diagnosis:
+    - [x] Fresh P294 probe batch `output/clean-runtime-p294-inventory-local-observation-live-accepted-20260614-202900` showed `I mark a tea stall...` settling correctly, but Stage 6 still composed it as a placement/status line: `You stand at Lowwater Bazaar, where a tea stall now marks a visible meeting spot.`
+    - [x] Root owner is the Stage 6 minor-POI sentence plan: accepted POI label/kind/result/current-scene facts are already present, but the page task can let scene placement become a separate context beat instead of event-owned scene-handle prose.
+  - Plan:
+    - [x] Run GitNexus impact for minor-POI sentence-plan owner symbols before editing.
+    - [x] Give `render_minor_poi_handle` a dedicated scene-handle sentence assembly and cue using label/kind/result/scene material.
+    - [x] Suppress standalone context-anchor placement for standalone minor-POI event pages when texture/context already opens the page.
+    - [x] Add focused narration tests proving texture + minor-POI yields one event sentence with label/kind/scene material and no route/service/business/no-change claims.
+    - [x] Fix the adjacent GM Read/Stage4 inventory ownership uncovered by live probes: omitted local-observation `targetRef` canonicalizes to `null`, and inventory target matches settle as carried inventory evidence.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live proof, GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live minor-POI narration weaves the accepted scene handle into one event beat instead of a separate `You stand/You are at` placement line.
+    - [x] Exact POI label, kind, result, and scene anchor remain present when cited.
+    - [x] Narration adds no route truth, services, sign text, business facts, NPC truth, discovery, absence/no-change, movement, or inventory claims.
+  - Review:
+    - Executed: `render_minor_poi_handle` now gets a dedicated `minor_poi_handle_line` assembly, `weave_minor_poi_scene_handle` cue, and preferred fact refs for POI label, kind, current scene, result, and operation.
+    - Executed: standalone minor-POI event pages suppress the separate context-anchor placement sentence while retaining scene texture/context as page context.
+    - Executed: GM Read model candidates may omit `localObservationNeed.targetRef`; validation canonicalizes that broad local observation target to explicit `null` before the strict `gm-read.v1` contract.
+    - Executed: Stage4 and Settlement now treat inventory `local_observation` target matches as carried inventory material, with `inventory_status` claim kind and `matching current inventory entries` limits.
+    - Verified: focused contracts+Stage4+settlement+narration suite passed 386/386.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Executed: live proof artifact `output/clean-runtime-p296-narrator-ownership-live-20260614-205420` cloned `p69-item-transfer-045651`, ran route-options, inventory-check, object-look, ready-item, guide-dialogue, and minor-POI probes against clean backend port 31769.
+    - Verified: live proof passed for all 6 probes with `runtime=gameplay-cycle-runtime`, `settlementKind=stage4_execution`, clean legacy store counts at 0, and no restored turn.
+    - Verified: inventory-check live narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. At Lowwater Bazaar, you have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.`
+    - Verified: object-look live narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You have Brass Tube with you at Lowwater Bazaar.`
+    - Verified: object-look accepted local observation evidence has claimKinds `["local_observation","inventory_status"]`, text `You have Brass Tube with you.`, and proves `matching current inventory entries`.
+    - Verified: minor-POI live narrative was `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. A tea stall marks a visible point at Lowwater Bazaar.`
+    - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 15 touched indexed symbols, 11 changed files, and 0 affected execution flows.

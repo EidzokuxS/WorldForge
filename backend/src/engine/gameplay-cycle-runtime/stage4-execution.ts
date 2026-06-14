@@ -2931,6 +2931,10 @@ function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]
   return kinds.length === 1 && kinds[0] === "visible_actor";
 }
 
+function isOnlyInventoryItemSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
+  return kinds.length === 1 && kinds[0] === "inventory_item";
+}
+
 function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: string): boolean {
   const query = normalizeObservationMatch(queryText);
   if (query.length === 0) return false;
@@ -2965,6 +2969,9 @@ function localObservationSummary(input: {
       : `Current ${surfaceGroup} show no match for "${input.effect.queryText}".`;
   }
   const labels = localObservationLabelList(input.matchedEntries);
+  if (labels.length > 0 && isOnlyInventoryItemSurface(input.effect.surfaceKinds)) {
+    return `You have ${labels} with you.`;
+  }
   if (input.resultKind === "positive_list") {
     return labels.length > 0
       ? `Current ${surfaceGroup} include: ${labels}.`

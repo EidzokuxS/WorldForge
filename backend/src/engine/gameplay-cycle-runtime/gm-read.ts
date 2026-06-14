@@ -7,6 +7,8 @@ import {
   cleanItemTransferOperationSchema,
   cleanItemTransferSourceKindSchema,
   cleanItemTransferTargetKindSchema,
+  cleanLocalObservationModeSchema,
+  cleanLocalObservationSurfaceKindSchema,
   cleanMinorPoiKindSchema,
   cleanTimeAdvanceReasonKindSchema,
   gmReadSchema,
@@ -109,6 +111,16 @@ const gmReadGenerationTimePassageNeedSchema = z.object({
   evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
 }).strict();
 
+const gmReadGenerationLocalObservationNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  mode: cleanLocalObservationModeSchema,
+  queryText: gmReadGenerationShortText,
+  targetRef: gmReadGenerationModelSafeRef.nullable().optional(),
+  surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+  allowBoundedNegative: z.boolean(),
+  evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
+}).strict();
+
 const gmReadGenerationUncertaintySchema = z.object({
   present: z.boolean(),
   question: z.string().trim().max(500).nullable().optional(),
@@ -124,6 +136,7 @@ export const gmReadModelGenerationSchema = gmReadSchema.extend({
     itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
     minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
     timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
+    localObservationNeed: gmReadGenerationLocalObservationNeedSchema.nullable().optional(),
   }).strict(),
   interpretationRationale: gmReadGenerationRepairableText,
 }).passthrough();
@@ -347,10 +360,29 @@ function normalizeGmReadTargetRefsCandidate(candidate: unknown): unknown {
   };
 }
 
+function normalizeGmReadLocalObservationTargetCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  const localObservationNeed = actionInterpretation.localObservationNeed;
+  if (!isRecord(localObservationNeed) || Object.hasOwn(localObservationNeed, "targetRef")) return candidate;
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      localObservationNeed: {
+        ...localObservationNeed,
+        targetRef: null,
+      },
+    },
+  };
+}
+
 function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
   const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(candidate);
   const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedUncertainty);
-  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedTargetRefs);
+  const normalizedLocalObservation = normalizeGmReadLocalObservationTargetCandidate(normalizedTargetRefs);
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedLocalObservation);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
   return {
     ...normalizedTransfer,

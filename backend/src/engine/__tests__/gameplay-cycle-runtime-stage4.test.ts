@@ -2723,6 +2723,53 @@ describe("clean Stage 4 executor DB contracts", () => {
       "Current visible match: visible actor Guide.",
     );
 
+    const inventoryFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-inventory-target",
+      turnId: "clean-turn-stage4-local-observation-inventory-target",
+      playerAction: "I look at the Brass Tube.",
+      actors: [],
+      targets: [],
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Brass Tube"],
+    };
+    const inventoryChecklist = checklistForKind("local_observation", inventoryFrame);
+    inventoryChecklist.steps[0] = {
+      ...inventoryChecklist.steps[0]!,
+      targetRefs: ["Brass Tube", "Market"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      intended: {
+        ...inventoryChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "Brass Tube",
+          targetRef: "Brass Tube",
+          surfaceKinds: ["inventory_item"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const inventoryTarget = await runCleanStage4Execution({
+      frame: inventoryFrame,
+      checklist: inventoryChecklist,
+    });
+    expect(inventoryTarget.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "You have Brass Tube with you.",
+        localObservation: {
+          resultKind: "positive_match",
+          queryText: "Brass Tube",
+          targetLabel: "Brass Tube",
+          matchedEntries: [expect.objectContaining({ surfaceKind: "inventory_item", label: "Brass Tube" })],
+          searchedSurfaceKinds: ["inventory_item"],
+        },
+      },
+    });
+
     const routeLabels = [
       "North Hall",
       "East Gate",

@@ -4999,6 +4999,25 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses accepted scene_texture for minor_poi_handle prose when texture is available", async () => {
     const view = minorPoiHandleWithSceneTextureView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const poiStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_minor_poi_handle"
+    );
+
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) => step.sentenceRole === "context_anchor"))
+      .toBe(false);
+    expect(poiStep?.preferredBackendFactRefs).toEqual(["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f1"]);
+    expect(poiStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
+      "label_anchor",
+      "state_value",
+      "scene_anchor",
+      "state_value",
+      "primary_beat",
+    ]);
+    expect(poiStep?.proseAssembly.sentenceShape).toBe("minor_poi_handle_line");
+    expect(poiStep?.proseAssembly.materialWeaveOrder).toBe("minor_poi_label_kind_then_scene");
+    expect(poiStep?.literaryCue.renderShape).toBe("weave_minor_poi_scene_handle");
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,
@@ -5010,19 +5029,21 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Tea Stall is available here as a visible stall at Market.",
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
-          claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+          text: "Tea Stall now marks a visible stall at Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+          claimKinds: ["minor_poi_handle", "visible_target"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall is available here as a visible stall at Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall now marks a visible stall at Market.");
     for (const forbidden of [
       "target handle",
       "place handle",
+      "You stand",
+      "You are at",
       "route",
       "reachable",
       "travel",
@@ -5045,10 +5066,10 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Tea Stall is available here as a visible stall at Market.",
-        evidenceRefs: ["e1", "e3"],
-        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
-        claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+        text: "Tea Stall now marks a visible stall at Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+        claimKinds: ["minor_poi_handle", "visible_target"],
       }]),
     });
     expect(missingTexture.status).toBe("accepted");
@@ -5063,10 +5084,10 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Tea Stall is available here as a visible stall at Market.",
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
-          claimKinds: ["minor_poi_handle", "visible_target", "current_scene"],
+          text: "Tea Stall now marks a visible stall at Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+          claimKinds: ["minor_poi_handle", "visible_target"],
         },
       ]),
     });

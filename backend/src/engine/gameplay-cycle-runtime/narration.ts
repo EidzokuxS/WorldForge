@@ -653,6 +653,7 @@ function narrativeFactProseUse(
     case "handle_result":
     case "item_transfer_result":
     case "materialization_result":
+    case "place_handle_kind":
     case "route_status":
       return "state_value";
     case "current_place_after_movement":
@@ -902,6 +903,16 @@ function selectDialogueReplyFactRefs(move: CleanNarratorPageTaskMove): string[] 
   ]);
 }
 
+function selectMinorPoiHandleFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  return sentencePlanFactRefsByRole(move, [
+    "place_handle_label",
+    "place_handle_kind",
+    "current_scene_anchor",
+    "handle_result",
+    "minor_poi_operation",
+  ]);
+}
+
 function selectLocalObservationFactRefs(move: CleanNarratorPageTaskMove): string[] {
   const observedInventoryFactRefs = sentencePlanFactRefsByRole(move, ["observed_inventory_item_labels"]);
   if (observedInventoryFactRefs.length > 0) {
@@ -953,6 +964,10 @@ function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
 
   if (move.entryProseCues.includes("support_actor_materialization")) {
     return selectSupportActorPresenceFactRefs(move);
+  }
+
+  if (move.entryProseCues.includes("minor_poi_handle")) {
+    return selectMinorPoiHandleFactRefs(move);
   }
 
   if (move.entryProseCues.includes("local_observation") || move.entryProseCues.includes("bounded_visibility_negative")) {
@@ -1358,6 +1373,18 @@ function sentencePlanProseAssembly(
           closingFunction: "settle_outcome",
         };
       }
+      if (beatObjective === "render_minor_poi_handle") {
+        return {
+          perspective: "settled_result_present",
+          sentenceShape: "minor_poi_handle_line",
+          openingSource: "minor_poi_label",
+          verbEnergy: "mark_scene_handle",
+          detailRhythm: "minor_poi_with_kind_scene_anchor",
+          materialWeaveOrder: "minor_poi_label_kind_then_scene",
+          styleBudget: "minor_poi_cadence",
+          closingFunction: "settle_outcome",
+        };
+      }
       if (
         beatObjective === "render_local_observation"
         && proseMaterials.some((material) => material.proseUse === "label_anchor")
@@ -1470,6 +1497,13 @@ function sentencePlanLiteraryCue(
           styleLevers: ["support_actor_presence_focus", "accepted_label_anchor", "concrete_present_verb"],
         };
       }
+      if (beatObjective === "render_minor_poi_handle") {
+        return {
+          renderShape: "weave_minor_poi_scene_handle",
+          cadence: "minor_poi_handle_sentence",
+          styleLevers: ["minor_poi_focus", "accepted_label_anchor", "settled_state_focus", "concrete_present_verb"],
+        };
+      }
       if (
         beatObjective === "render_local_observation"
         && proseMaterials.some((material) => material.proseUse === "inventory_status")
@@ -1561,6 +1595,7 @@ function sentencePlanForMove(
       if (
         !coreProseCues.includes("item_state")
         && !coreProseCues.includes("elapsed_time")
+        && !coreProseCues.includes("minor_poi_handle")
         && !suppressRouteOptionsContextAnchor
       ) {
         pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
@@ -2479,7 +2514,7 @@ export function buildCleanNarrationSystemPrompt(
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns the selected public scene texture frame and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
     "Selected texture frame: when accepted scene_texture has multiple backend facts, the page task places the chosen page frame in textureCue.allowedTextureFactRefs and materialObligations for the texture sentence. Other accepted texture facts remain proof context, not default player-facing prose for this page.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
-    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. scene_custody_beat_line with item_then_custody_then_holder_scene uses the accepted item label as the sentence center, custody_change as the transfer spine, settled_custody/final_equip_state as the landing state, and current_scene_anchor as the placement token. scene_exit_choice_line with exits_then_costs uses accepted route labels as named scene exits, accepted route_origin as the placement token, and accepted route_choice_travel_costs as exact travel-cost material. support_actor_presence_line with actor_then_scene_with_role_context uses accepted visible_support_actor as the sentence center, anchor_scene as the exact placement token, support_role as identity context, and support_actor_presence as proof that the actor is in view. support_actor_presence_line with actor_then_visible_cue_then_scene uses accepted support_actor_visible_cue or support_actor_public_summary as visible detail material between the actor label and exact scene anchor. local_observation_line with observed_labels_then_scene uses accepted observed_entry_labels as the sentence center and anchor_scene as the exact placement token, phrasing visibility as 'in sight' or 'visible' without adding posture, search action, or actor action. Inventory local-observation steps use accepted local_observation_beat plus observed_inventory_item_labels as carried-item material, phrasing inventory as 'with you' rather than visibility.",
+    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. scene_custody_beat_line with item_then_custody_then_holder_scene uses the accepted item label as the sentence center, custody_change as the transfer spine, settled_custody/final_equip_state as the landing state, and current_scene_anchor as the placement token. scene_exit_choice_line with exits_then_costs uses accepted route labels as named scene exits, accepted route_origin as the placement token, and accepted route_choice_travel_costs as exact travel-cost material. support_actor_presence_line with actor_then_scene_with_role_context uses accepted visible_support_actor as the sentence center, anchor_scene as the exact placement token, support_role as identity context, and support_actor_presence as proof that the actor is in view. support_actor_presence_line with actor_then_visible_cue_then_scene uses accepted support_actor_visible_cue or support_actor_public_summary as visible detail material between the actor label and exact scene anchor. minor_poi_handle_line with minor_poi_label_kind_then_scene uses accepted place_handle_label as the sentence center, place_handle_kind and handle_result as the handle state, and current_scene_anchor as exact placement. local_observation_line with observed_labels_then_scene uses accepted observed_entry_labels as the sentence center and anchor_scene as the exact placement token, phrasing visibility as 'in sight' or 'visible' without adding posture, search action, or actor action. Inventory local-observation steps use accepted local_observation_beat plus observed_inventory_item_labels as carried-item material, phrasing inventory as 'with you' rather than visibility.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
