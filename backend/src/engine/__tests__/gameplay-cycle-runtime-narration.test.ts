@@ -1365,6 +1365,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        claimFocus: {
+          primaryClaimKinds: ["player_location_change", "elapsed_time"],
+          supportingClaimKinds: [],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "render_movement_arrival",
         proseMaterials: [
           {
@@ -1511,6 +1516,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        claimFocus: {
+          primaryClaimKinds: ["current_scene", "current_location"],
+          supportingClaimKinds: [],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "place_current_scene",
         proseMaterials: [
           {
@@ -1563,6 +1573,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e5"],
         preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+        claimFocus: {
+          primaryClaimKinds: ["dialogue_response"],
+          supportingClaimKinds: [],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "frame_dialogue_reply",
         proseMaterials: [
           {
@@ -1744,6 +1759,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+        claimFocus: {
+          primaryClaimKinds: ["scene_texture"],
+          supportingClaimKinds: ["current_scene", "current_location"],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "copy_scene_texture",
         proseMaterials: [
           {
@@ -1789,6 +1809,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+        claimFocus: {
+          primaryClaimKinds: ["current_scene", "current_location"],
+          supportingClaimKinds: ["scene_texture"],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "place_current_scene",
         proseMaterials: [
           {
@@ -1841,6 +1866,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        claimFocus: {
+          primaryClaimKinds: ["movement_option"],
+          supportingClaimKinds: [],
+          citationMode: "primary_claims_of_cited_sentence_plan_refs",
+        },
         beatObjective: "render_route_choices",
         proseMaterials: [
           {
@@ -1953,6 +1983,35 @@ describe("clean Stage 6 narration contracts", () => {
     expect(wrongSentencePlan.status).toBe("rejected");
     if (wrongSentencePlan.status !== "rejected") throw new Error("expected rejected");
     expect(wrongSentencePlan.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+
+    const wrongClaimFocus = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes at Market.",
+          evidenceRefs: ["e2", "e3"],
+          backendFactRefs: ["e2.f1", "e3.f1"],
+          claimKinds: ["scene_texture", "current_scene"],
+          pageMoveRefs: ["m1"],
+          sentencePlanRefs: ["s1"],
+        },
+        {
+          text: "North Hall is the one-minute route choice here.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["movement_option"],
+          pageMoveRefs: ["m2"],
+          sentencePlanRefs: ["s3"],
+        },
+      ]),
+    });
+
+    expect(wrongClaimFocus.status).toBe("rejected");
+    if (wrongClaimFocus.status !== "rejected") throw new Error("expected rejected");
+    expect(wrongClaimFocus.issues).toContainEqual(expect.objectContaining({
+      code: "sentence_plan_not_supported",
+      path: "sentences.0.claimKinds",
+    }));
   });
 
   it("uses clarification page plans without promoting scene context to a world event", () => {
@@ -4758,6 +4817,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("movement arrival");
     expect(buildCleanNarrationSystemPrompt()).toContain("item custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("dialogue reply");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Claim focus:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("claimFocus.primaryClaimKinds");
+    expect(buildCleanNarrationSystemPrompt()).toContain("supportingClaimKinds");
+    expect(buildCleanNarrationSystemPrompt()).toContain("combined primaryClaimKinds");
     expect(buildCleanNarrationSystemPrompt()).toContain("Fact use plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("factUses");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");

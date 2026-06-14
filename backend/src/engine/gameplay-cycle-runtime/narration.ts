@@ -645,6 +645,38 @@ function sentencePlanProseMaterials(
   });
 }
 
+function sentencePlanClaimFocus(
+  move: CleanNarratorPageTaskMove,
+  preferredBackendFactRefs: string[],
+  claimKindsByEntryRef: Map<string, CleanNarrationClaimKind[]>,
+  claimKindsByFactRef: Map<string, CleanNarrationClaimKind[]>,
+): CleanNarratorSentencePlanStep["claimFocus"] {
+  const primaryClaimKinds = uniqueStrings(preferredBackendFactRefs.flatMap((factRef) => {
+    const claimKinds = claimKindsByFactRef.get(factRef);
+    if (!claimKinds) {
+      throw new Error(`Narrative sentence plan requires accepted claimKinds for backend fact ${factRef}.`);
+    }
+    return claimKinds;
+  })) as CleanNarrationClaimKind[];
+  if (primaryClaimKinds.length === 0) {
+    throw new Error(`Narrative sentence plan requires primary claimKinds for move ${move.moveRef}.`);
+  }
+
+  const moveClaimKinds = uniqueStrings(move.entryRefs.flatMap((entryRef) => {
+    const claimKinds = claimKindsByEntryRef.get(entryRef);
+    if (!claimKinds) {
+      throw new Error(`Narrative sentence plan requires accepted claimKinds for entry ${entryRef}.`);
+    }
+    return claimKinds;
+  })) as CleanNarrationClaimKind[];
+  const primarySet = new Set(primaryClaimKinds);
+  return {
+    primaryClaimKinds,
+    supportingClaimKinds: moveClaimKinds.filter((claimKind) => !primarySet.has(claimKind)),
+    citationMode: "primary_claims_of_cited_sentence_plan_refs",
+  };
+}
+
 function sentencePlanTextureCue(
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
   proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
@@ -815,6 +847,8 @@ function sentencePlanLiteraryCue(
 function sentencePlanForMove(
   move: CleanNarratorPageTaskMove,
   sentenceIndex: number,
+  claimKindsByEntryRef: Map<string, CleanNarrationClaimKind[]>,
+  claimKindsByFactRef: Map<string, CleanNarrationClaimKind[]>,
 ): CleanNarratorSentencePlanDraft[] {
   const steps: CleanNarratorSentencePlanDraft[] = [];
   const pushPlan = (
@@ -831,6 +865,7 @@ function sentencePlanForMove(
       coverage,
       entryRefs: move.entryRefs,
       preferredBackendFactRefs,
+      claimFocus: sentencePlanClaimFocus(move, preferredBackendFactRefs, claimKindsByEntryRef, claimKindsByFactRef),
       beatObjective: sentencePlanBeatObjective(move, sentenceRole),
       proseMaterials,
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
@@ -1062,10 +1097,15 @@ function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
 ): CleanNarratorPromptInput["narrativePageTask"] {
-  const entriesByRef = new Map(
-    [...storyFrame.currentContext, ...storyFrame.turnEvents]
-      .map((entry) => [entry.ref, entry] as const),
-  );
+  const entries = [...storyFrame.currentContext, ...storyFrame.turnEvents];
+  const entriesByRef = new Map(entries.map((entry) => [entry.ref, entry] as const));
+  const claimKindsByEntryRef = new Map(entries.map((entry) => [entry.ref, entry.claimKinds] as const));
+  const claimKindsByFactRef = new Map<string, CleanNarrationClaimKind[]>();
+  for (const entry of entries) {
+    for (const factRef of entry.backendFactRefs) {
+      claimKindsByFactRef.set(factRef, entry.claimKinds);
+    }
+  }
   const backendFactsByRef = new Map(
     acceptedEvidence.flatMap((evidence) =>
       evidence.backendFacts.map((fact) => [fact.factRef, fact] as const)
@@ -1103,7 +1143,12 @@ function buildCleanNarrativePageTask(
   });
   const sentencePlanDrafts: CleanNarratorSentencePlanDraft[] = [];
   for (const move of moves) {
-    sentencePlanDrafts.push(...sentencePlanForMove(move, sentencePlanDrafts.length));
+    sentencePlanDrafts.push(...sentencePlanForMove(
+      move,
+      sentencePlanDrafts.length,
+      claimKindsByEntryRef,
+      claimKindsByFactRef,
+    ));
   }
   const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
   const pageArc = buildCleanNarrativePageArc(moves);
@@ -1225,6 +1270,7 @@ export function buildCleanNarrationSystemPrompt(
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of facts.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
+    "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, textureCue to decide whether this sentence owns texture, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
@@ -1471,6 +1517,26 @@ export function validateCleanNarrationCandidate(input: {
           message: "Narration sentence must cite at least one preferred backend fact from its sentence-plan refs.",
         });
       }
+      const sentencePlanPrimaryClaimKinds = new Set(citedSentencePlans.flatMap((step) =>
+        step?.claimFocus.primaryClaimKinds ?? []
+      ));
+      for (const claimKind of sentence.claimKinds) {
+        if (sentencePlansByRef.size > 0 && sentencePlanPrimaryClaimKinds.size > 0 && !sentencePlanPrimaryClaimKinds.has(claimKind)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.claimKinds`,
+            message: `Narration sentence declared claim kind ${claimKind} outside its cited sentence-plan claim focus.`,
+          });
+        }
+      }
+      const hasPrimaryClaimKind = sentence.claimKinds.some((claimKind) => sentencePlanPrimaryClaimKinds.has(claimKind));
+      if (sentencePlansByRef.size > 0 && sentencePlanPrimaryClaimKinds.size > 0 && !hasPrimaryClaimKind) {
+        issues.push({
+          code: "sentence_plan_not_supported",
+          path: `sentences.${index}.claimKinds`,
+          message: "Narration sentence must declare at least one primary claim kind from its cited sentence-plan refs.",
+        });
+      }
       sentence.sentencePlanRefs.forEach((ref) => {
         if (sentencePlansByRef.has(ref)) coveredSentencePlanRefs.add(ref);
       });
@@ -1594,6 +1660,7 @@ function narrationValidationRepairLines(
   )) {
     lines.push("Use only refs that appear in promptInput.acceptedEvidence, promptInput.narrativePageTask.moves, and promptInput.narrativePageTask.sentencePlan.");
     lines.push("Each accepted_evidence sentence must cite matching evidenceRefs, backendFactRefs, claimKinds, pageMoveRefs, and sentencePlanRefs from the same page-task step.");
+    lines.push("Set sentence claimKinds from claimFocus.primaryClaimKinds on the cited sentencePlanRefs; cite multiple sentencePlanRefs only when one sentence combines their planned roles.");
     lines.push("Cover every required moveRef and sentenceRef from promptInput.narrativePageTask.storyPageBrief.");
   }
   if (issues.some((issue) => issue.code === "text_mismatch")) {

@@ -2539,6 +2539,11 @@ const cleanNarratorSentencePlanStepSchema = z.object({
   coverage: z.enum(["required", "optional"]),
   entryRefs: z.array(shortText).min(1).max(24),
   preferredBackendFactRefs: z.array(shortText).min(1).max(24),
+  claimFocus: z.object({
+    primaryClaimKinds: z.array(cleanSettledClaimKindSchema).min(1).max(6),
+    supportingClaimKinds: z.array(cleanSettledClaimKindSchema).max(12),
+    citationMode: z.literal("primary_claims_of_cited_sentence_plan_refs"),
+  }).strict(),
   beatObjective: z.enum([
     "ask_clarification_question",
     "copy_scene_texture",
