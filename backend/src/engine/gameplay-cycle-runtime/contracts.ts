@@ -1118,6 +1118,41 @@ export const cleanStage4DialogueOutcomeKindSchema = z.enum([
   "other",
 ]);
 
+export const cleanSupportActorCuePlacementSchema = z.enum([
+  "at_scene_edge",
+  "beside_counter_or_stall",
+  "beside_mooring_or_railing",
+  "by_door_or_threshold",
+  "in_open_view",
+  "near_public_fixture",
+  "under_public_cover",
+]);
+
+export const cleanSupportActorCueBearingSchema = z.enum([
+  "hands_resting_visible",
+  "leaning_in_view",
+  "seated_in_view",
+  "standing_in_view",
+  "waiting_in_view",
+  "watching_the_scene",
+]);
+
+export const cleanSupportActorCueDetailSchema = z.enum([
+  "canvas_awning",
+  "market_basket",
+  "mooring_rope",
+  "plain_work_clothes",
+  "satchel_or_pouch",
+  "weathered_coat",
+  "wooden_counter",
+]);
+
+export const cleanSupportActorVisibleCueProfileSchema = z.object({
+  placement: cleanSupportActorCuePlacementSchema,
+  bearing: cleanSupportActorCueBearingSchema,
+  detail: cleanSupportActorCueDetailSchema.nullable(),
+}).strict();
+
 export const cleanStage4DialogueRequestEffectSchema = z.object({
   kind: z.literal("dialogue_record"),
   authorityKind: z.literal("existing_visible_actor"),
@@ -1163,8 +1198,8 @@ export const cleanStage4SupportActorCreateEffectSchema = z.object({
   roleKind: cleanSupportActorRoleKindSchema,
   roleLabel: shortText,
   publicPresentation: z.object({
-    publicSummary: z.string().trim().min(1).max(240),
-    visibleCue: z.string().trim().min(1).max(160).nullable(),
+    presentationMode: z.literal("visible_presence_only"),
+    visibleCueProfile: cleanSupportActorVisibleCueProfileSchema,
     voiceHint: z.string().trim().min(1).max(160).nullable(),
   }).strict(),
   identityBounds: z.object({
@@ -1197,6 +1232,7 @@ export const cleanStage4SupportActorMaterializationResultSchema = z.object({
   roleLabel: shortText,
   anchorSceneLabel: shortText,
   anchorLocationLabel: shortText,
+  presentationMode: z.literal("visible_presence_only"),
   publicSummary: z.string().trim().min(1).max(240),
   visibleCue: z.string().trim().min(1).max(160).nullable(),
   identityBounds: z.object({

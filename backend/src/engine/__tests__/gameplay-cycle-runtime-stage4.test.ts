@@ -447,8 +447,12 @@ function supportActorEffect(roleKind: "vendor" | "guide" = "vendor") {
     roleKind,
     roleLabel: roleKind,
     publicPresentation: {
-      publicSummary: `An ordinary local ${roleKind} is available in the market.`,
-      visibleCue: `The local ${roleKind} is close enough to be visible.`,
+      presentationMode: "visible_presence_only",
+      visibleCueProfile: {
+        placement: "beside_counter_or_stall",
+        bearing: "standing_in_view",
+        detail: "wooden_counter",
+      },
       voiceHint: null,
     },
     identityBounds: {
@@ -3310,8 +3314,12 @@ describe("clean Stage 4 executor DB contracts", () => {
         ...supportActorEffect("guide"),
         anchorRef: "The Copper Tap",
         publicPresentation: {
-          publicSummary: "An ordinary local guide is available in The Copper Tap.",
-          visibleCue: "The local guide is close enough to be visible in The Copper Tap.",
+          presentationMode: "visible_presence_only",
+          visibleCueProfile: {
+            placement: "in_open_view",
+            bearing: "standing_in_view",
+            detail: null,
+          },
           voiceHint: null,
         },
         reason: "The player requested an ordinary local guide in The Copper Tap.",

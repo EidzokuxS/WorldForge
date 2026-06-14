@@ -35,6 +35,7 @@ import {
 type Step = GmActionChecklist["steps"][number];
 type SupportActorCreateEffect = Extract<CleanStage4Request["effect"], { kind: "support_actor_create" }>;
 type SupportActorRoleKind = SupportActorCreateEffect["roleKind"];
+type SupportActorVisibleCueProfile = SupportActorCreateEffect["publicPresentation"]["visibleCueProfile"];
 type SupportActorMaterializationResult = NonNullable<CleanStage4Receipt["publicResult"]["supportActor"]>;
 type LocalConditionSetEffect = Extract<CleanStage4Request["effect"], { kind: "condition_set" }>;
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
@@ -2190,6 +2191,49 @@ function supportActorLabels(roleKind: SupportActorRoleKind): { actorLabel: strin
   return SUPPORT_ROLE_LABELS[roleKind];
 }
 
+const SUPPORT_CUE_PLACEMENTS: Record<SupportActorVisibleCueProfile["placement"], string> = {
+  at_scene_edge: "at the edge of the scene",
+  beside_counter_or_stall: "beside a counter or stall",
+  beside_mooring_or_railing: "beside a mooring line or rail",
+  by_door_or_threshold: "by a public doorway or threshold",
+  in_open_view: "in open view",
+  near_public_fixture: "near a public fixture",
+  under_public_cover: "under visible cover",
+};
+
+const SUPPORT_CUE_BEARINGS: Record<SupportActorVisibleCueProfile["bearing"], string> = {
+  hands_resting_visible: "is visible with both hands in sight",
+  leaning_in_view: "is visible in a relaxed posture",
+  seated_in_view: "is visible at rest",
+  standing_in_view: "is visible",
+  waiting_in_view: "is visible in place",
+  watching_the_scene: "is visible with attention on the scene",
+};
+
+const SUPPORT_CUE_DETAILS: Record<NonNullable<SupportActorVisibleCueProfile["detail"]>, string> = {
+  canvas_awning: "beneath canvas",
+  market_basket: "near a basket",
+  mooring_rope: "near a mooring rope",
+  plain_work_clothes: "in plain local clothes",
+  satchel_or_pouch: "with a small pouch visible",
+  weathered_coat: "in a weathered coat",
+  wooden_counter: "with worn wood nearby",
+};
+
+function renderSupportActorPublicPresentation(input: {
+  roleLabel: string;
+  sceneLabel: string;
+  profile: SupportActorVisibleCueProfile;
+}): { publicSummary: string; visibleCue: string } {
+  const placement = SUPPORT_CUE_PLACEMENTS[input.profile.placement];
+  const bearing = SUPPORT_CUE_BEARINGS[input.profile.bearing];
+  const detail = input.profile.detail ? `, ${SUPPORT_CUE_DETAILS[input.profile.detail]}` : "";
+  return {
+    publicSummary: `An ordinary local ${input.roleLabel} is visible ${placement} at ${input.sceneLabel}.`,
+    visibleCue: `A local ${input.roleLabel} ${bearing} ${placement}${detail}.`,
+  };
+}
+
 function safeParseStringArray(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
@@ -2408,6 +2452,11 @@ function supportActorTaskCard(input: {
       identityBounds: "temporary/current_scene/minor_support/reactive_only",
       stateAuthority: "backend_materialization_receipt_only",
     },
+    publicPresentationContract: {
+      presentationMode: "visible_presence_only",
+      visibleCueProfile: "choose placement, bearing, and optional detail enum slots; backend renders publicSummary and visibleCue strings from those slots",
+      gameplayOwnership: "dialogue, services, trade exchanges, work results, relationship changes, item state, route truth, future relevance, private knowledge, absence, and no-change require separate accepted evidence",
+    },
   };
 }
 
@@ -2418,6 +2467,10 @@ export function buildStage4SupportActorRequestSystemPrompt(): string {
     "This is not narration. It proposes one bounded ordinary current-scene support actor presentation for backend validation.",
     "Use Support actor task card as the job contract: roleKind, requestedRoleText, anchorRef, intendedUse, allowed evidence refs, and materialization authority.",
     "Use only ordinary local roles allowed by the schema and anchorRef must be the current SceneFrame scene ref.",
+    "Set publicPresentation.presentationMode to visible_presence_only.",
+    "Set publicPresentation.visibleCueProfile with enum slots for placement, bearing, and optional detail; backend renders publicSummary and visibleCue from those slots.",
+    "Use visibleCueProfile for static visible presence: placement, appearance, posture, clothing, carried object, or idle gesture already plausible from the current scene surface.",
+    "Keep service offers, prices, trades, active work results, conversations, claims about events, and future usefulness in separate receipt-owned evidence.",
     "Do not create named people, key NPCs, faction leaders, secret contacts, hidden actors, remote actors, family members, persistent actors, or campaign-critical roles.",
     "Do not include dialogue content, world facts, relationship changes, item state, route truth, future relevance, private knowledge, old tool ids, backend refs, or durable event claims.",
     "Set identityBounds exactly to temporary/current_scene/minor_support/reactive_only/mayBecomePersistentHere=false.",
@@ -2451,6 +2504,7 @@ function buildStage4SupportActorRepairPrompt(input: {
 }): string {
   return [
     "Repair the support_actor_create effect so it satisfies the clean P66 support actor contract.",
+    "Set publicPresentation.presentationMode to visible_presence_only and provide visibleCueProfile placement/bearing/detail enum slots; backend renders publicSummary/visibleCue strings.",
     "Do not add unsupported fields, old tool ids, backend refs, dialogue, world facts, relationships, item state, route truth, future relevance, private knowledge, or durable events.",
     "Validation issues:",
     JSON.stringify(input.issues, null, 2),
@@ -2531,8 +2585,12 @@ function placeholderSupportActorRequest(input: {
       roleKind: "helper",
       roleLabel: labels.roleLabel,
       publicPresentation: {
-        publicSummary: "No accepted support actor request was generated.",
-        visibleCue: null,
+        presentationMode: "visible_presence_only",
+        visibleCueProfile: {
+          placement: "in_open_view",
+          bearing: "standing_in_view",
+          detail: null,
+        },
         voiceHint: null,
       },
       identityBounds: {
@@ -3512,6 +3570,11 @@ function supportActorMaterializationResult(input: {
   roleLabel: string;
   frame: AuthoritativeSceneFrame;
 }): SupportActorMaterializationResult {
+  const presentation = renderSupportActorPublicPresentation({
+    roleLabel: input.roleLabel,
+    sceneLabel: input.frame.scene.currentScene.label,
+    profile: input.effect.publicPresentation.visibleCueProfile,
+  });
   return {
     type: "support_actor_materialization",
     resultKind: input.resultKind,
@@ -3521,8 +3584,9 @@ function supportActorMaterializationResult(input: {
     roleLabel: input.roleLabel,
     anchorSceneLabel: input.frame.scene.currentScene.label,
     anchorLocationLabel: input.frame.scene.currentLocation.label,
-    publicSummary: input.effect.publicPresentation.publicSummary,
-    visibleCue: input.effect.publicPresentation.visibleCue,
+    presentationMode: input.effect.publicPresentation.presentationMode,
+    publicSummary: presentation.publicSummary,
+    visibleCue: presentation.visibleCue,
     identityBounds: {
       tier: "temporary",
       persistence: "current_scene",
@@ -3770,6 +3834,11 @@ async function executeSupportActorCreate(input: {
         "minor-support",
         "reactive-only",
       ];
+      const presentation = renderSupportActorPublicPresentation({
+        roleLabel,
+        sceneLabel: input.frame.scene.currentScene.label,
+        profile: effect.publicPresentation.visibleCueProfile,
+      });
       const characterRecord = {
         identity: {
           id: actorId,
@@ -3779,7 +3848,7 @@ async function executeSupportActorCreate(input: {
           displayName: actorLabel,
           canonicalStatus: "original",
           baseFacts: {
-            biography: effect.publicPresentation.publicSummary,
+            biography: presentation.publicSummary,
             socialRole: [roleLabel],
             hardConstraints: [
               "Temporary current-scene support actor.",
@@ -3791,7 +3860,7 @@ async function executeSupportActorCreate(input: {
             pressureResponses: [],
             taboos: [],
             attachments: [],
-            selfImage: effect.publicPresentation.publicSummary,
+            selfImage: presentation.publicSummary,
           },
           liveDynamics: {
             attachments: [],
@@ -3814,9 +3883,9 @@ async function executeSupportActorCreate(input: {
           species: "",
           gender: "",
           ageText: "",
-          appearance: effect.publicPresentation.visibleCue ?? "",
+          appearance: presentation.visibleCue,
           backgroundSummary: "",
-          personaSummary: effect.publicPresentation.publicSummary,
+          personaSummary: presentation.publicSummary,
         },
         socialContext: {
           factionId: null,
@@ -3911,7 +3980,7 @@ async function executeSupportActorCreate(input: {
         actorId,
         input.frame.campaignId,
         actorLabel,
-        effect.publicPresentation.publicSummary,
+        presentation.publicSummary,
         JSON.stringify(characterRecord),
         JSON.stringify(tags),
         JSON.stringify(tags),

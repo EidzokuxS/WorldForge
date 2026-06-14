@@ -5616,8 +5616,12 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
       roleKind: "vendor" as const,
       roleLabel: "vendor",
       publicPresentation: {
-        publicSummary: "An ordinary local vendor is available in the market.",
-        visibleCue: "The local vendor is close enough to be visible.",
+        presentationMode: "visible_presence_only" as const,
+        visibleCueProfile: {
+          placement: "beside_counter_or_stall" as const,
+          bearing: "standing_in_view" as const,
+          detail: "wooden_counter" as const,
+        },
         voiceHint: null,
       },
       identityBounds: {
@@ -5661,10 +5665,7 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
       step: supportStep,
       candidate: {
         ...base,
-        publicPresentation: {
-          ...base.publicPresentation,
-          publicSummary: "Hidden Patron is available.",
-        },
+        reason: "Hidden Patron is available.",
       },
     }).status).toBe("rejected");
   });
@@ -6198,6 +6199,7 @@ describe("gameplay-cycle-runtime primitive 7 Stage 4 execution contracts", () =>
           roleLabel: "vendor",
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
+          presentationMode: "visible_presence_only",
           publicSummary: "An ordinary local vendor is available in the market.",
           visibleCue: null,
           identityBounds: {

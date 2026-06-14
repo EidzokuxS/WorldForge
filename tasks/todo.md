@@ -7699,3 +7699,36 @@ Session: `gm-v1-consequenc-slice`.
     - Proof: `output/clean-runtime-p286-support-cue-proof-20260614T124055Z/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput` and `validateCleanNarrationCandidate`; validation status was `accepted`.
     - Accepted proof narration: `Rain taps the brass gutters. At Market, Local Vendor glances up from a narrow plank counter.`
     - Verified: prose audit passed with 1 result, 16 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+
+- P287 Stage 6 support-presence cue live proof:
+  - Diagnosis:
+    - [x] P286 proved the typed Stage 6 contract can use accepted support actor cue/summary material in synthetic builder/validator proof.
+    - [x] Live proof is still required because Stage 4 can produce nullable `visibleCue`, and the actual player-facing page must demonstrate the end-to-end material flow.
+  - Plan:
+    - [x] Start an isolated clean-runtime backend on a fresh port and record logs under a P287 proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Run the same live action: `I ask a local vendor what changed today.`
+    - [x] Verify SSE runtime, accepted support actor receipt, support actor public presentation, settled evidence backend facts, actor persistence/visibility, old-store counts, and final player-facing narrative.
+    - [x] Confirm the support-presence beat uses backend-rendered accepted cue/summary material from a typed Stage 4 visible profile.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Record proof results and implement the typed owner fix after GitNexus impact.
+  - Success criteria:
+    - [x] Live narration keeps texture, support presence, and dialogue as separate playable beats.
+    - [x] The support actor receipt exposes public summary and visible cue as accepted facts for Stage 6.
+    - [x] The support-presence sentence reads as concrete scene prose grounded in accepted cue/summary material, not a dry visibility receipt.
+    - [x] No support-presence prose adds services, setup/trade/work actions, dialogue, relationship, hidden knowledge, movement, absence, or no-change.
+  - Review:
+    - Executed: diagnostic live proof `output/clean-runtime-p287-support-cue-live-20260614-154739` proved the P286 support cue path reached Stage 6, but the Stage 4 model-authored public presentation over-authorized `haggling`/prices as part of visible presence.
+    - Executed: prompt-only patched live proof `output/clean-runtime-p287-support-cue-live-patched-20260614-160036` reduced trade wording but still allowed active work prose (`sorting bundles`), proving the root problem was free public-presentation text rather than narrator complexity.
+    - Executed: Stage 4 support actor creation now requests typed `visibleCueProfile` enum slots and the backend renders `presentationMode=visible_presence_only`, `publicSummary`, and `visibleCue`; services, work, trades, and dialogue remain owned by separate accepted evidence.
+    - Executed: Stage 6 support-actor materialization now projects from accepted scene texture, support actor presence/cue, and terminal dialogue receipt as separate beats for this composed turn.
+    - Verified: GitNexus impact was LOW for the edited Stage 4 prompt/validation and Stage 6 support projection symbols; the new Stage 4 renderer was unindexed before analyze because it was introduced in this slice.
+    - Verified: focused clean-runtime suite passed with 379/379 tests across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only existing LF/CRLF warnings.
+    - Verified: final live proof artifact `output/clean-runtime-p287-support-cue-live-static-20260614-162906` cloned `p69-item-transfer-045651`, ran `I ask a local vendor what changed today.`, and settled through `gameplay-cycle-runtime`.
+    - Verified: final proof deltas were clean record +1, Stage 4 receipts +2, authority trace +1, worldVersion +1, worldTimeMinutes +0, and all old v2/saga/narrator/oracle/simulation stores stayed 0.
+    - Verified: final support actor receipt exposed `publicSummary=An ordinary local vendor is visible beside a counter or stall at Lowwater Bazaar.` and `visibleCue=A local vendor is visible beside a counter or stall, with worn wood nearby.`
+    - Verified: final player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor is visible beside a counter or stall, with worn wood nearby. Local Vendor says: "You picked a lively day to wander the stalls. The customs shed burnt through three audit seals by midday, and the Resonance Tower started broadcasting again around dusk yesterday."`
+    - Verified: prose audit passed for `output/clean-runtime-p287-support-cue-live-static-20260614-162906/prose-audit.json` with 1 result, 67 words, zero one-token output, zero `youOpening`, zero direct implied action, and all hit counters 0.

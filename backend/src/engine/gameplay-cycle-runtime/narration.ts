@@ -2979,6 +2979,17 @@ function renderDialogueProjection(evidence: AcceptedNarrationEvidence): string {
   );
 }
 
+function renderSceneTextureProjection(view: CleanNarratorView): string | null {
+  const texture = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("scene_texture")
+  );
+  const fact = texture?.backendFacts.find((entry) =>
+    entry.role === "scene_texture" && entry.value?.trim()
+  );
+  if (!fact?.value?.trim()) return null;
+  return `${trimSentencePeriod(fact.value)}.`;
+}
+
 function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
   const label = requireFactValueByRole(
     evidence,
@@ -3001,17 +3012,54 @@ function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
-  const presenceBeat = trimSentencePeriod(requireFactValueByRole(
+  requireFactValueByRole(
     evidence,
     "support_actor_presence",
     "Support-actor projection requires accepted Support actor presence value evidence.",
-  ));
-  return `${presenceBeat}.`;
+  );
+  const actorLabel = requireFactValueByRole(
+    evidence,
+    "visible_support_actor",
+    "Support-actor projection requires accepted visible support actor label evidence.",
+  );
+  const sceneLabel = requireFactValueByRole(
+    evidence,
+    "anchor_scene",
+    "Support-actor projection requires accepted scene anchor evidence.",
+  );
+  const cue = evidence.backendFacts.find((fact) =>
+    fact.role === "support_actor_visible_cue" && fact.value?.trim()
+  )?.value?.trim();
+  if (cue) {
+    const roleLabel = evidence.backendFacts.find((fact) =>
+      fact.role === "support_role" && fact.value?.trim()
+    )?.value?.trim().toLocaleLowerCase("en-US");
+    const trimmedCue = trimSentencePeriod(cue);
+    const genericPrefixes = roleLabel ? [`A local ${roleLabel} `, `A ${roleLabel} `] : [];
+    const matchedPrefix = genericPrefixes.find((prefix) =>
+      trimmedCue.toLocaleLowerCase("en-US").startsWith(prefix.toLocaleLowerCase("en-US"))
+    );
+    const cueRemainder = matchedPrefix ? trimmedCue.slice(matchedPrefix.length) : trimmedCue;
+    return `At ${sceneLabel}, ${actorLabel} ${cueRemainder}.`;
+  }
+  return `At ${sceneLabel}, ${actorLabel} is in view.`;
+}
+
+function renderSupportActorTurnProjection(view: CleanNarratorView, supportActor: AcceptedNarrationEvidence): string {
+  const dialogue = view.acceptedEvidence.find((evidence) =>
+    evidence.claimKinds.includes("dialogue_response")
+  );
+  return [
+    renderSceneTextureProjection(view),
+    renderSupportActorProjection(supportActor),
+    dialogue ? renderDialogueProjection(dialogue) : null,
+  ].filter((text): text is string => Boolean(text && normalizeText(text).length > 0)).join(" ");
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
+    || evidence.claimKinds.includes("support_actor_materialization")
   );
 }
 
@@ -3134,15 +3182,15 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     return renderMinorPoiProjection(minorPoiHandle);
   }
 
-  if (dialogue) {
-    return renderDialogueProjection(dialogue);
-  }
-
   const supportActor = view.acceptedEvidence.find((evidence) =>
     evidence.claimKinds.includes("support_actor_materialization")
   );
   if (supportActor) {
-    return renderSupportActorProjection(supportActor);
+    return renderSupportActorTurnProjection(view, supportActor);
+  }
+
+  if (dialogue) {
+    return renderDialogueProjection(dialogue);
   }
 
   const playerLocalCondition = view.acceptedEvidence.find((evidence) =>

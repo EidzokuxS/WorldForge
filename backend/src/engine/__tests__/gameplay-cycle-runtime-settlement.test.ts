@@ -1570,8 +1570,9 @@ describe("clean Stage 5 settlement contracts", () => {
           roleLabel: "vendor",
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
-          publicSummary: "A stall keeper at the market tending a table of small wares.",
-          visibleCue: "A vendor arranging goods on a narrow plank counter, glancing up at passing foot traffic.",
+          presentationMode: "visible_presence_only",
+          publicSummary: "An ordinary local vendor is visible beside a counter or stall at Market.",
+          visibleCue: "A local vendor is visible beside a counter or stall, with worn wood nearby.",
           identityBounds: {
             tier: "temporary",
             persistence: "current_scene",
@@ -1613,9 +1614,9 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(support?.backendFacts[3]?.value).toBe("Market");
     expect(support?.backendFacts[4]?.value).toBe("created");
     expect(support?.backendFacts[5]?.role).toBe("support_actor_visible_cue");
-    expect(support?.backendFacts[5]?.value).toBe("A vendor arranging goods on a narrow plank counter, glancing up at passing foot traffic.");
+    expect(support?.backendFacts[5]?.value).toBe("A local vendor is visible beside a counter or stall, with worn wood nearby.");
     expect(support?.backendFacts[6]?.role).toBe("support_actor_public_summary");
-    expect(support?.backendFacts[6]?.value).toBe("A stall keeper at the market tending a table of small wares.");
+    expect(support?.backendFacts[6]?.value).toBe("An ordinary local vendor is visible beside a counter or stall at Market.");
     expect(support?.limits.doesNotProve).toContain("dialogue content");
     expect(support?.limits.doesNotProve).toContain("NPC private knowledge");
     expect(support?.limits.doesNotProve).toContain("durable world fact");
@@ -1659,6 +1660,7 @@ describe("clean Stage 5 settlement contracts", () => {
           roleLabel: "vendor",
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
+          presentationMode: "visible_presence_only",
           publicSummary: "An ordinary local vendor is available in the market.",
           visibleCue: null,
           identityBounds: {
