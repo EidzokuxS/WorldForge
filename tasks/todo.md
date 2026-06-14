@@ -7271,3 +7271,27 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: literal scan for ` = /`, `.test(`, and `replace(` in `backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
     - Reviewed: GitNexus `detect_changes(scope=all)` reported MEDIUM scope limited to `buildCleanPageFocus`, `buildCleanNarrativePageTask`, `buildCleanNarrationSystemPrompt`, and four `runCleanNarration` page-task processes.
     - Executed: code commit `170f5842` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P270 Stage 6 playable choice presentation contract:
+  - Plan:
+    - [x] Inspect current worktree, handoff, lessons, recent proof narrations, and route-choice sentence/page-task contracts.
+    - [x] Run GitNexus impact before editing page-task/prompt symbols.
+    - [x] Add typed `choicePresentation` to `narrativePageTask` for route-option pages, derived from accepted route-choice fact roles and sentence refs.
+    - [x] Teach the prompt to present playable choices as an adventure handoff instead of a flat summary list, while preserving exact route labels/costs and accepted refs.
+    - [x] Update focused narration tests proving route-choice presentation for textured and single-choice pages.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, hygiene scans, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added typed `narrativePageTask.choicePresentation` with source move/sentence refs, exact route choices, route-origin anchor refs, anchor style, cost handling, closing style, and reader handoff.
+    - Executed: derived route-choice presentation from accepted `open_route_labels` / `route_choice_labels`, `route_origin`, and `route_choice_travel_costs` facts; no regex validator, banlist, or gameplay fallback was added.
+    - Executed: Stage 6 prompt now tells the narrator to preserve exact route labels, use route origin as a place-label anchor, reserve posture verbs for cited `player_local_condition` evidence, and close route-choice pages as adventure handoffs.
+    - Verified: first diagnostic live proof at `output/clean-runtime-p270-choice-presentation-live-20260614-095600` passed clean runtime truth but prose audit caught a route-options page posture phrase; the clone was discarded as diagnostic.
+    - Verified: fixed live proof at `output/clean-runtime-p270-choice-presentation-live-fixed-20260614-100020` cloned `p69-item-transfer-045651`, ran `What routes can I take from here?`, and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, `route_options` receipt accepted, clean record +1, receipt +1, chat +2, world clock/version/tick +0, trace +0, ledger +0, and all old stores at 0.
+    - Verified: fixed player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Eight routes fan out from Lowwater Bazaar, each a one-minute walk: Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins.`
+    - Verified: prose audit passed on the fixed proof artifact with 1 result, 89 words, zero hits, zero list-like starts, and zero `youOpening`.
+    - Verified: focused narration suite passed 104/104.
+    - Verified: expanded clean-runtime suite passed 372/372 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: literal scan for ` = /`, `.test(`, and `replace(` in `backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
+    - Reviewed: GitNexus impact for `buildCleanNarrativePageTask`, `buildCleanNarrationSystemPrompt`, and `sentencePlanProseAssembly` was LOW; final staged/all `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task processes, with line-shift touched symbols outside the actual changed helper body.
+    - Executed: code commit `51bc7d55` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
