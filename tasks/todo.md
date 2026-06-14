@@ -7548,3 +7548,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verification: `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p281-support-actor-presence-proof/prose-audit.json --fail-on-hits output/clean-runtime-p281-support-actor-presence-proof` counted 1 result, 16 words, and all hits 0.
     - Verification: diff-level runtime scan found no added `= /`, `.test(`, or `replace(` lines in `narration.ts`.
     - GitNexus: all-scope `detect_changes` reported LOW risk, 4 changed files, 10 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warning.
+
+- P282 Stage 6 composed support-actor dialogue page split plan:
+  - Diagnosis:
+    - [x] Reviewed accepted/proof P271-P281 outputs. Composed support+dialogue still reads as one receipt-shaped sentence: `A Local Vendor is in view here at Lowwater Bazaar, and the answer comes sharp: ...`
+    - [x] Chosen root owner: sentence planner for a `support_actor_materialization` + `dialogue_response` turn-event move. The page needs one support-presence sentence object and one dialogue sentence object, both citing their own accepted evidence.
+    - [x] GitNexus pre-edit impact: `sentencePlanForMove`, `selectTurnEventFactRefs`, `sentencePlanBeatObjective`, and `buildCleanNarrationSystemPrompt` are LOW risk; direct blast radius is `runCleanNarration`/page-task construction.
+  - Plan:
+    - [x] Split composed support+dialogue turn-event moves into two sentencePlan steps: support presence first, dialogue quote second.
+    - [x] Select support actor materials from support receipt refs and dialogue materials from dialogue receipt refs, so the dialogue step cannot consume support presence as its quote frame.
+    - [x] Update prompt contract to describe composed support+dialogue pages as texture -> support presence -> quote frame.
+    - [x] Add focused tests proving page task shape, accepted composed candidate, and rejection/absence of unsupported service/setup/work/action claims.
+    - [x] Verify with focused narration tests, typecheck, proof artifact, prose audit, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] Composed support+dialogue pages can render three short beats when texture exists: exact texture, support presence, exact quote frame.
+    - [x] Support presence and dialogue cite separate accepted evidence refs and backendFactRefs.
+    - [x] The support sentence adds no service/setup/trade/work/dialogue claims; the dialogue sentence preserves exact quote content and does not promote speaker claims to durable world truth.
+  - Review:
+    - Fix: composed `support_actor_materialization` + `dialogue_response` turn-event moves now emit two sentencePlan steps: `render_support_actor_presence` followed by `frame_dialogue_reply`.
+    - Fix: support presence selects only support receipt materials (`visible_support_actor`, `support_role`, `anchor_scene`, `support_actor_presence`), while dialogue selects only dialogue receipt materials (`speaker_label`, `dialogue_quote`, `dialogue_summary`).
+    - Fix: quote literary cues now belong to `frame_dialogue_reply`, so a support-presence sentence in a composed move cannot inherit the quote frame just because the same move also contains dialogue evidence.
+    - Proof: `output/clean-runtime-p282-support-dialogue-page-split-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput` and `validateCleanNarrationCandidate`; `turnStepObjectives` are `render_support_actor_presence` then `frame_dialogue_reply`.
+    - Accepted proof narration: `Rain taps the brass gutters. Local Vendor takes a visible place at Market as a vendor. Local Vendor answers: "The audit bell rang before dawn."`
+    - Verification: focused narration suite passed 111/111; expanded clean-runtime suite passed 379/379 across contracts, Stage 4, settlement, and narration; `npm --prefix backend run typecheck` passed; `git diff --check` passed with LF/CRLF warnings only.
+    - Verification: `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p282-support-dialogue-page-split-proof/prose-audit.json --fail-on-hits output/clean-runtime-p282-support-dialogue-page-split-proof` counted 1 result, 25 words, and all hits 0.
+    - Verification: diff-level runtime scan found no added `= /`, `.test(`, or `replace(` lines in `narration.ts`.
+    - GitNexus: all-scope `detect_changes` reported LOW risk, 3 changed files, 8 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warning.

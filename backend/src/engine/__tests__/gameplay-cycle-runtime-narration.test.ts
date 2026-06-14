@@ -825,6 +825,31 @@ function supportActorWithSceneTextureView(): CleanNarratorView {
   });
 }
 
+function supportActorWithDialogueAndSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...supportActorView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+      {
+        ref: "e4",
+        authority: "terminal_dialogue_receipt",
+        claimKinds: ["dialogue_response"],
+        text: 'Local Vendor says: "The audit bell rang before dawn."',
+        backendFacts: [
+          { factRef: "e4.f1", role: "speaker_label", value: "Local Vendor", text: "Speaker: Local Vendor.", exact: true },
+          { factRef: "e4.f2", role: "dialogue_quote", value: 'Local Vendor says: "The audit bell rang before dawn."', text: 'Local Vendor says: "The audit bell rang before dawn."', exact: true },
+          { factRef: "e4.f3", role: "dialogue_summary", value: "Local Vendor says the audit bell rang before dawn.", text: "Dialogue summary: Local Vendor says the audit bell rang before dawn.", exact: true },
+        ],
+        limits: {
+          proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+          doesNotProve: ["truth of speaker claim", "durable world fact", "NPC private knowledge beyond the utterance"],
+        },
+      },
+    ],
+  });
+}
+
 function playerLocalConditionWithSceneTextureView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
@@ -2473,6 +2498,24 @@ describe("clean Stage 6 narration contracts", () => {
       { factRef: "e1.f4", proseUse: "scene_anchor", materialText: "Market" },
       { factRef: "e1.f1", proseUse: "primary_beat", materialText: "Local Vendor is now in view at Market as a vendor." },
     ]);
+  });
+
+  it("splits composed support actor dialogue into presence and quote sentence plans", () => {
+    const promptInput = buildCleanNarratorPromptInput(supportActorWithDialogueAndSceneTextureView());
+    const turnSteps = promptInput.narrativePageTask.sentencePlan.filter((step) =>
+      step.sentenceRole === "turn_event_beat"
+    );
+
+    expect(turnSteps.map((step) => step.beatObjective)).toEqual([
+      "render_support_actor_presence",
+      "frame_dialogue_reply",
+    ]);
+    expect(turnSteps[0]?.preferredBackendFactRefs).toEqual(["e1.f2", "e1.f3", "e1.f4", "e1.f1"]);
+    expect(turnSteps[0]?.proseAssembly.sentenceShape).toBe("support_actor_presence_line");
+    expect(turnSteps[0]?.literaryCue.renderShape).toBe("weave_support_actor_scene_presence");
+    expect(turnSteps[1]?.preferredBackendFactRefs).toEqual(["e4.f1", "e4.f2", "e4.f3"]);
+    expect(turnSteps[1]?.proseAssembly.sentenceShape).toBe("quote_framed_beat");
+    expect(turnSteps[1]?.literaryCue.renderShape).toBe("frame_exact_quote");
   });
 
   it("uses backend fact roles instead of fact text shape for prompt shortlists", () => {
@@ -4251,6 +4294,53 @@ describe("clean Stage 6 narration contracts", () => {
     expect(laterTexture.status).toBe("accepted");
   });
 
+  it("uses separate support presence and dialogue beats for composed support_actor dialogue", async () => {
+    const view = supportActorWithDialogueAndSceneTextureView();
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Local Vendor takes a visible place at Market as a vendor.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1"],
+          claimKinds: ["visible_actor", "support_actor_materialization"],
+        },
+        {
+          text: 'Local Vendor answers: "The audit bell rang before dawn."',
+          evidenceRefs: ["e4"],
+          backendFactRefs: ["e4.f1", "e4.f2"],
+          claimKinds: ["dialogue_response"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Rain taps the brass gutters. Local Vendor takes a visible place at Market as a vendor. Local Vendor answers: "The audit bell rang before dawn."');
+    for (const forbidden of [
+      "has set up",
+      "set up",
+      "offers",
+      "service",
+      "trade",
+      "knows",
+      "future",
+      "relationship",
+      "route",
+      "movement",
+      "no change",
+      "nothing changed",
+    ]) {
+      expect(result.text).not.toContain(forbidden);
+    }
+  });
+
   it("renders Player local condition evidence without inventing HP, cover, combat, movement, or no-change", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For player_local_condition");
     const text = renderCleanAuthorityProjection(playerLocalConditionView());
@@ -5590,6 +5680,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("After one minute, North Hall takes your weight underfoot.");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example dialogue with texture:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Rain taps the brass gutters.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Composed support-dialogue surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line");
+    expect(buildCleanNarrationSystemPrompt()).toContain("quote frame");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
     expect(buildCleanNarrationSystemPrompt()).toContain("At Lowwater Bazaar, Anchor Chain Pylon and The Copper Tap are exits you can choose; each takes 1 minute.");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");

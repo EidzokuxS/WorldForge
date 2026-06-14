@@ -777,6 +777,23 @@ function isStandaloneElapsedTimeMove(move: CleanNarratorPageTaskMove): boolean {
     && !move.entryProseCues.includes("movement_result");
 }
 
+function selectSupportActorPresenceFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  return sentencePlanFactRefsByRole(move, [
+    "visible_support_actor",
+    "support_role",
+    "anchor_scene",
+    "support_actor_presence",
+  ]);
+}
+
+function selectDialogueReplyFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  return sentencePlanFactRefsByRole(move, [
+    "speaker_label",
+    "dialogue_quote",
+    "dialogue_summary",
+  ]);
+}
+
 function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
   if (isStandaloneElapsedTimeMove(move)) {
     const elapsedDurationFactRefs = sentencePlanPreferredFactRefs(move, ["time_value"]);
@@ -802,12 +819,7 @@ function selectTurnEventFactRefs(move: CleanNarratorPageTaskMove): string[] {
   }
 
   if (move.entryProseCues.includes("support_actor_materialization")) {
-    return sentencePlanFactRefsByRole(move, [
-      "visible_support_actor",
-      "support_role",
-      "anchor_scene",
-      "support_actor_presence",
-    ]);
+    return selectSupportActorPresenceFactRefs(move);
   }
 
   return sentencePlanPreferredFactRefs(move, [
@@ -1196,7 +1208,7 @@ function sentencePlanLiteraryCue(
           : ["route_exit_grouping", "accepted_label_anchor"],
       };
     case "turn_event_beat": {
-      if (sentencePlanHasProseUse(move, "exact_dialogue_quote")) {
+      if (beatObjective === "frame_dialogue_reply") {
         return {
           renderShape: "frame_exact_quote",
           cadence: "quote_framed_beat",
@@ -1249,10 +1261,11 @@ function sentencePlanForMove(
     sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
     coverage: CleanNarratorSentencePlanStep["coverage"],
     preferredBackendFactRefs: string[],
+    beatObjectiveOverride?: CleanNarratorSentencePlanStep["beatObjective"],
   ) => {
     if (preferredBackendFactRefs.length === 0) return;
     const proseMaterials = sentencePlanProseMaterials(move, preferredBackendFactRefs);
-    const beatObjective = sentencePlanBeatObjective(move, sentenceRole);
+    const beatObjective = beatObjectiveOverride ?? sentencePlanBeatObjective(move, sentenceRole);
     const materialObligations = sentencePlanMaterialObligations(proseMaterials);
     steps.push({
       sentenceRef: `s${sentenceIndex + steps.length + 1}`,
@@ -1283,7 +1296,25 @@ function sentencePlanForMove(
       }
       break;
     case "render_authoritative_turn_event":
-      pushPlan("turn_event_beat", move.coverage, selectTurnEventFactRefs(move));
+      if (
+        move.entryProseCues.includes("support_actor_materialization")
+        && move.entryProseCues.includes("dialogue_response")
+      ) {
+        pushPlan(
+          "turn_event_beat",
+          move.coverage,
+          selectSupportActorPresenceFactRefs(move),
+          "render_support_actor_presence",
+        );
+        pushPlan(
+          "turn_event_beat",
+          move.coverage,
+          selectDialogueReplyFactRefs(move),
+          "frame_dialogue_reply",
+        );
+      } else {
+        pushPlan("turn_event_beat", move.coverage, selectTurnEventFactRefs(move));
+      }
       break;
     case "leave_playable_next_action_handle":
       pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
@@ -2168,6 +2199,7 @@ export function buildCleanNarrationSystemPrompt(
     "Use grounded variety: choose the sentence opening from proseAssembly.openingSource, adventureCue.subjectFocus, and adventureCue.verbFrame; vary sentence shape through proseAssembly.sentenceShape, detailRhythm, materialWeaveOrder, and styleBudget while keeping refs unchanged.",
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different adventureCue subject/verb pairings across nearby turns.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
+    "Composed support-dialogue surface: when one page has support_actor_materialization and dialogue_response, use separate sentencePlan steps. First land the accepted support actor as a support_actor_presence_line from support actor materials; then frame the accepted dialogue_quote from dialogue materials. The support sentence owns presence only, and the dialogue sentence owns the visible utterance only.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
     "Item-state surface: for item_state, use the item custody sentence plan as a scene-custody task card. Make the item label the sentence center, phrase from backendFacts with roles `custody_change`, `settled_custody`, `target_label`, `final_equip_state`, and `current_scene_anchor`, preserve the source endpoint inside custody_change, and land the custody state inside the exact scene token. The item sentence may weave custody and scene anchor into one beat; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
     "Item-state grammar: scene_custody_beat_line with land_scene_custody lands ownership and equip state through item-owned custody verbs such as passes, settles with, rests with, is carried by, is held by, or remains with the exact target label. Source and target labels are custody endpoints; the scene anchor is a placement token. Handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
@@ -2183,7 +2215,7 @@ export function buildCleanNarrationSystemPrompt(
     "Oracle-outcome surface: for oracle_outcome, turn the cited selected visible outcome meaning into a concrete player-facing story beat. Keep the sentence grounded in the cited oracle_outcome backend fact and its evidence limits. Movement, route status, item state, dialogue, discovery, condition, world truth, absence, and private knowledge enter the story through their own accepted evidence entries.",
     "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite sentencePlanRefs from promptInput.narrativePageTask.sentencePlan plus evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation, composed item_state plus dialogue_response, and composed support_actor_materialization plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
