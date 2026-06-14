@@ -7462,3 +7462,20 @@ Session: `gm-v1-consequenc-slice`.
     - Accepted narration: `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. The Brass Tube passes from Mira Voss to Guide, and now rests carried by Guide at Lowwater Bazaar.` It cites accepted texture plus item custody material and avoids the diagnostic posture/handling/restaging leak.
     - Verification: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (106/106), `npm --prefix backend run typecheck`, and `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p277-item-state-live-fixed-r2-20260614-125930/prose-audit.json --fail-on-hits output/clean-runtime-p277-item-state-live-fixed-r2-20260614-125930` (all hits 0).
     - GitNexus: direct impact checks for edited Stage 6 symbols were LOW; `detect_changes(scope=all/staged)` reported MEDIUM risk from the shared `runCleanNarration` flow, 5 changed files, 11 touched symbols, and one affected process, with no HIGH/CRITICAL warning.
+
+- P278 Stage 6 texture-frame variation plan:
+  - Plan:
+    - [x] Treat the P270-P277 prose rollup as diagnostic evidence: truth-leak hits are zero, but exact accepted texture frames repeat across clean turns.
+    - [x] Inspect the current Stage 6 texture selection contract and identify the smallest typed owner for per-page texture variation.
+    - [x] Run GitNexus impact before editing the target Stage 6 selection symbols.
+    - [x] Replace fixed frame-role texture choice with deterministic accepted-fact rotation that keeps each texture sentence copied from one accepted `scene_texture` fact and leaves reserve texture facts as proof context.
+    - [x] Update focused narration tests so route/detail/social pages still cite legal accepted texture facts while different page identities can select different accepted frames.
+    - [x] Verify with focused tests, typecheck, prose audit/live proof where useful, GitNexus detect, commit/push/index.
+  - Review:
+    - Diagnosis: `output/clean-runtime-p270-p277-prose-audit-rollup.json` reported all leak/stock hits at 0, but repeated exact accepted texture frames: `Courier satchels...` 3 times and `Wooden platforms...` 2 times.
+    - Fix: Stage 6 texture selection now derives a primary page cue from typed `CleanNarratorProseCue` values and selects one accepted `scene_texture` backend fact by page identity: spatial pages keep the first frame, elapsed-time pages use the last frame, and item/device/detail pages use the middle detail frame when available.
+    - Contract: selected texture remains an exact accepted fact copied into the `exact_context_texture` sentence; unselected texture facts remain accepted proof context and do not become player-facing prose by default.
+    - Proof: rebuilt the real P277 item-state narrator view through the new page task at `output/clean-runtime-p278-item-state-texture-rotation-proof`; old selected texture was `e2.f3` (`Courier satchels...`), new selected texture is `e2.f2` (`Dockworkers unload cargo...`), and the candidate validated as accepted.
+    - Accepted proof narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. The Brass Tube passes from Mira Voss to Guide, and now rests carried by Guide at Lowwater Bazaar.`
+    - Verification: focused route/time/item/social texture-selection coverage in `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 107/107; `npm --prefix backend run typecheck` passed; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p278-item-state-texture-rotation-proof/prose-audit.json --fail-on-hits output/clean-runtime-p278-item-state-texture-rotation-proof` counted 1 result, 35 words, and all hits 0.
+    - GitNexus: `detect_changes(scope=all/staged)` reported LOW risk, 3 changed files, 5 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warnings.

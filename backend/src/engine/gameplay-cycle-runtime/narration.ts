@@ -671,6 +671,64 @@ function pageTextureFrameRole(
   return "spatial_frame";
 }
 
+function pageTexturePrimaryCue(
+  coreProseCues: readonly CleanNarratorProseCue[],
+): CleanNarratorProseCue | null {
+  for (const cue of [
+    "device_surface_observation",
+    "elapsed_time",
+    "item_state",
+    "minor_poi_handle",
+    "player_local_condition",
+    "dialogue_response",
+    "local_observation",
+    "support_actor_materialization",
+    "route_options",
+    "route_status",
+  ] as const satisfies readonly CleanNarratorProseCue[]) {
+    if (coreProseCues.includes(cue)) return cue;
+  }
+  return null;
+}
+
+function selectTextureFrameIndex(
+  coreProseCues: readonly CleanNarratorProseCue[],
+  textureFactCount: number,
+): number {
+  if (textureFactCount <= 1) return 0;
+  const lastIndex = textureFactCount - 1;
+  const middleIndex = Math.min(1, lastIndex);
+  const frameRole = pageTextureFrameRole(coreProseCues);
+  const primaryCue = pageTexturePrimaryCue(coreProseCues);
+
+  if (frameRole === "spatial_frame") return 0;
+  if (frameRole === "social_frame") {
+    if (
+      primaryCue === "dialogue_response"
+      || primaryCue === "support_actor_materialization"
+    ) {
+      return middleIndex;
+    }
+    if (primaryCue === "local_observation") return lastIndex;
+    return middleIndex;
+  }
+
+  switch (primaryCue) {
+    case "elapsed_time":
+      return lastIndex;
+    case "item_state":
+      return middleIndex;
+    case "device_surface_observation":
+      return middleIndex;
+    case "minor_poi_handle":
+      return middleIndex;
+    case "player_local_condition":
+      return textureFactCount > 2 ? 0 : lastIndex;
+    default:
+      return lastIndex;
+  }
+}
+
 function selectFrameTextureFactRefs(
   move: CleanNarratorPageTaskMove,
   coreProseCues: readonly CleanNarratorProseCue[],
@@ -678,10 +736,7 @@ function selectFrameTextureFactRefs(
   const textureFactRefs = sentencePlanPreferredFactRefs(move, ["exact_texture_sentence"]);
   if (textureFactRefs.length <= 1) return textureFactRefs;
 
-  const frameRole = pageTextureFrameRole(coreProseCues);
-  if (frameRole === "detail_frame") return [textureFactRefs[textureFactRefs.length - 1]!];
-  if (frameRole === "social_frame") return [textureFactRefs[Math.min(1, textureFactRefs.length - 1)]!];
-  return [textureFactRefs[0]!];
+  return [textureFactRefs[selectTextureFrameIndex(coreProseCues, textureFactRefs.length)]!];
 }
 
 function isStandaloneElapsedTimeMove(move: CleanNarratorPageTaskMove): boolean {

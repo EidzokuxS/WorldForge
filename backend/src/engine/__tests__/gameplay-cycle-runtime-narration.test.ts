@@ -415,6 +415,54 @@ function sceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"]
   };
 }
 
+function threeFrameSceneTextureEvidence(ref = "e2"): CleanNarratorView["acceptedEvidence"][number] {
+  return {
+    ref,
+    authority: "scene_frame_snapshot",
+    claimKinds: ["scene_texture"],
+    text: "Current scene texture: Canvas awnings hang over the market lanes. Rain taps the brass gutters. Lantern smoke gathers under the bridge.",
+    backendFacts: [
+      {
+        factRef: `${ref}.f1`,
+        role: "scene_texture",
+        value: "Canvas awnings hang over the market lanes",
+        text: "Scene texture: Canvas awnings hang over the market lanes.",
+        exact: true,
+      },
+      {
+        factRef: `${ref}.f2`,
+        role: "scene_texture",
+        value: "Rain taps the brass gutters",
+        text: "Scene texture: Rain taps the brass gutters.",
+        exact: true,
+      },
+      {
+        factRef: `${ref}.f3`,
+        role: "scene_texture",
+        value: "Lantern smoke gathers under the bridge",
+        text: "Scene texture: Lantern smoke gathers under the bridge.",
+        exact: true,
+      },
+    ],
+    limits: {
+      proves: ["public current-scene description texture"],
+      doesNotProve: ["route truth", "movement", "actor presence", "NPC action", "item state", "discovery", "absence", "no-change"],
+    },
+  };
+}
+
+function replaceAcceptedEvidence(
+  view: CleanNarratorView,
+  replacement: CleanNarratorView["acceptedEvidence"][number],
+): CleanNarratorView {
+  return {
+    ...view,
+    acceptedEvidence: view.acceptedEvidence.map((evidence) =>
+      evidence.ref === replacement.ref ? replacement : evidence
+    ),
+  };
+}
+
 function currentSceneAnchorEvidence(ref = "e3"): CleanNarratorView["acceptedEvidence"][number] {
   return {
     ref,
@@ -2586,6 +2634,55 @@ describe("clean Stage 6 narration contracts", () => {
       "Canvas awnings hang over the market lanes",
       "Rain taps the brass gutters",
     ]);
+  });
+
+  it("rotates selected scene_texture frames by page cue while preserving accepted fact refs", () => {
+    const routePrompt = buildCleanNarratorPromptInput(replaceAcceptedEvidence(
+      routeOptionsWithSceneTextureView(),
+      threeFrameSceneTextureEvidence("e2"),
+    ));
+    const timePrompt = buildCleanNarratorPromptInput(replaceAcceptedEvidence(
+      timeWithSceneTextureView(),
+      threeFrameSceneTextureEvidence("e2"),
+    ));
+    const itemPrompt = buildCleanNarratorPromptInput(replaceAcceptedEvidence(
+      itemStateWithSceneTextureView(),
+      threeFrameSceneTextureEvidence("e2"),
+    ));
+    const socialPrompt = buildCleanNarratorPromptInput(replaceAcceptedEvidence(
+      supportActorWithSceneTextureView(),
+      threeFrameSceneTextureEvidence("e2"),
+    ));
+
+    const selectedTextureRefs = (promptInput: ReturnType<typeof buildCleanNarratorPromptInput>) =>
+      promptInput.narrativePageTask.sentencePlan
+        .filter((step) => step.sentenceRole === "exact_context_texture")
+        .map((step) => ({
+          preferredBackendFactRefs: step.preferredBackendFactRefs,
+          allowedTextureFactRefs: step.textureCue.allowedTextureFactRefs,
+          materialTexts: step.proseMaterials.map((material) => material.materialText),
+        }));
+
+    expect(selectedTextureRefs(routePrompt)).toEqual([{
+      preferredBackendFactRefs: ["e2.f1"],
+      allowedTextureFactRefs: ["e2.f1"],
+      materialTexts: ["Canvas awnings hang over the market lanes"],
+    }]);
+    expect(selectedTextureRefs(timePrompt)).toEqual([{
+      preferredBackendFactRefs: ["e2.f3"],
+      allowedTextureFactRefs: ["e2.f3"],
+      materialTexts: ["Lantern smoke gathers under the bridge"],
+    }]);
+    expect(selectedTextureRefs(itemPrompt)).toEqual([{
+      preferredBackendFactRefs: ["e2.f2"],
+      allowedTextureFactRefs: ["e2.f2"],
+      materialTexts: ["Rain taps the brass gutters"],
+    }]);
+    expect(selectedTextureRefs(socialPrompt)).toEqual([{
+      preferredBackendFactRefs: ["e2.f2"],
+      allowedTextureFactRefs: ["e2.f2"],
+      materialTexts: ["Rain taps the brass gutters"],
+    }]);
   });
 
   it("lets item_state carry its own scene token instead of adding a standalone player-placement sentence", () => {
