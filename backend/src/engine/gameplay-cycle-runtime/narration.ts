@@ -355,9 +355,40 @@ function directSceneTexturePromptEvidence(evidence: AcceptedNarrationEvidence): 
     : limitPromptEvidenceFacts(evidence);
 }
 
-function directSceneSnapshotPromptEvidence(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence | null {
+function acceptedLabelList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(";")
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+}
+
+function factLabelsOverlap(
+  fact: AcceptedNarrationBackendFact,
+  labels: ReadonlySet<string>,
+): boolean {
+  return acceptedLabelList(fact.value).some((label) => labels.has(label));
+}
+
+function directSceneSnapshotPromptEvidence(
+  evidence: AcceptedNarrationEvidence,
+  options: { routeLabels: ReadonlySet<string> } = { routeLabels: new Set() },
+): AcceptedNarrationEvidence | null {
   if (evidence.claimKinds.includes("scene_texture")) {
     return directSceneTexturePromptEvidence(evidence);
+  }
+  if (evidence.claimKinds.includes("visible_target") && options.routeLabels.size > 0) {
+    const surfaceFacts = evidence.backendFacts.filter((fact) =>
+      fact.role === "visible_actor_target_labels"
+      || fact.role === "visible_item_target_labels"
+      || (
+        (fact.role === "visible_place_handle_target_labels" || fact.role === "visible_location_target_labels")
+        && !factLabelsOverlap(fact, options.routeLabels)
+      )
+    );
+    return surfaceFacts.length > 0
+      ? limitPromptEvidenceToFacts(evidence, surfaceFacts)
+      : null;
   }
   if (evidence.claimKinds.includes("inventory_status")) {
     const inventoryFacts = evidence.backendFacts.filter((fact) =>
@@ -385,8 +416,12 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
     return view.acceptedEvidence.map(limitPromptEvidenceFacts);
   }
   if (hasOnlySceneFrameSnapshotEvidence(view)) {
+    const routeLabels = new Set(view.acceptedEvidence
+      .flatMap((evidence) => evidence.backendFacts)
+      .filter((fact) => fact.role === "route_choice_labels" || fact.role === "open_route_labels")
+      .flatMap((fact) => acceptedLabelList(fact.value)));
     return view.acceptedEvidence
-      .map(directSceneSnapshotPromptEvidence)
+      .map((evidence) => directSceneSnapshotPromptEvidence(evidence, { routeLabels }))
       .filter((evidence): evidence is AcceptedNarrationEvidence => evidence !== null);
   }
 

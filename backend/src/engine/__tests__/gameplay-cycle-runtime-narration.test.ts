@@ -2623,6 +2623,9 @@ describe("clean Stage 6 narration contracts", () => {
       evidence.authority === "scene_frame_snapshot"
       && evidence.claimKinds.includes("inventory_status")
     );
+    const visibleTargetEvidence = promptInput.acceptedEvidence.find((evidence) =>
+      evidence.ref === "e3"
+    );
 
     expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
     expect(promptInput.acceptedEvidence.some((evidence) =>
@@ -2635,6 +2638,8 @@ describe("clean Stage 6 narration contracts", () => {
       ["inventory_status_beat", "You have Courier satchel with you."],
       ["inventory_labels", "Courier satchel"],
     ]);
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).toEqual(["e3.f2"]);
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.role)).toEqual(["visible_place_handle_target_labels"]);
     const routeChoiceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
       && step.beatObjective === "render_route_choices"
@@ -4292,6 +4297,19 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses model-authored literary narration for overlapping direct scene targets", async () => {
     const view = sceneFrameSnapshotWithOverlappingTargetsView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const visibleTargetEvidence = promptInput.acceptedEvidence.find((evidence) =>
+      evidence.ref === "e4"
+    );
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).toEqual(["e4.f2", "e4.f3", "e4.f4"]);
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.role)).toEqual([
+      "visible_actor_target_labels",
+      "visible_item_target_labels",
+      "visible_place_handle_target_labels",
+    ]);
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).not.toContain("e4.f1");
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).not.toContain("e4.f5");
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,

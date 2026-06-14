@@ -8124,3 +8124,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p302-object-look-context-live-20260614-231000/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 1 touched indexed symbol, 3 changed files, and no affected processes.
     - Verified commit/push/index: code commit `824e6f47` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
+
+- P303 Stage 6 direct-scene visible-target ownership:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p303-prose-scan-20260614-233000` shows `I look around.` settling through clean runtime, but the surface sentence can still repeat route/location labels before the route handoff: `Guide is in view at Lowwater Bazaar, and you can see Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, and Silt Warrens from here.`
+    - [x] Root owner is Stage 6 prompt evidence selection: the sentence plan already prefers only `Guide` refs for the surface sentence, but the prompt still includes a broad `visible_target` aggregate/location entry whose labels overlap the route-owned `movement_option` entry.
+  - Plan:
+    - [x] Run GitNexus impact for `directSceneSnapshotPromptEvidence` before editing.
+    - [x] For pure direct-scene pages with route evidence, limit visible-target prompt evidence to actor/item target facts and keep route/location labels in the movement-option entry.
+    - [x] Update focused narration tests so direct-scene surface prompt evidence no longer exposes route-overlapping target aggregates while route handoff preserves every route label.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live direct-look proof, and prose audit.
+    - [x] Run GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I look around.` keeps visible actor material separate from route labels.
+    - [x] Exact accepted route labels remain present in the route handoff sentence.
+    - [x] Narration adds no movement, arrival, route safety, hidden-route, discovery, item handling/readiness, NPC action, absence/no-change, private fact, or extra world truth.
+  - Review:
+    - Executed: pure direct-scene prompt evidence now derives route labels from typed `route_choice_labels` / `open_route_labels`, removes broad `visible_target_labels`, keeps actor/item target facts, and keeps place/location target facts only when their labels do not overlap route-owned labels.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 115/115 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 386/386 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p303-direct-look-visible-target-live-20260614-234000`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, legacy runtime stores stayed 0, visible-target prompt facts were actor-owned, Guide sentence carried no route labels, and accepted text was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in sight at Lowwater Bazaar. Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from here.`
+    - Verified prose audit `output/clean-runtime-p303-direct-look-visible-target-live-20260614-234000/prose-audit.json`: one narrative, 65 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus impact: `directSceneSnapshotPromptEvidence` LOW, no upstream affected processes; `selectPromptAcceptedEvidence` LOW, direct caller `buildCleanNarratorPromptInput`, affected process `runCleanNarration`.
+    - Verified GitNexus all-scope `detect_changes`: MEDIUM scope summary, 2 touched indexed symbols, 3 changed files, affected process family `runCleanNarration`, and no HIGH/CRITICAL impact results.
