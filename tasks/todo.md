@@ -7522,3 +7522,29 @@ Session: `gm-v1-consequenc-slice`.
     - Fix: route-choice validation now preserves exact accepted labels and supplied cost text for sentences that declare/cite route-choice material, without adding semantic string-ban scanning.
     - Proof: `output/clean-runtime-p280-route-options-scene-exit-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput`, `validateCleanNarrationCandidate`, and `renderCleanAuthorityProjection`; projection and accepted candidate both use the scene-exit handoff sentence above.
     - Verification so far: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 108/108; `npm --prefix backend run typecheck` passed; `git diff --check` passed with LF/CRLF warnings only; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p280-route-options-scene-exit-proof/prose-audit.json --fail-on-hits output/clean-runtime-p280-route-options-scene-exit-proof` counted 1 result, 33 words, and all hits 0.
+
+- P281 Stage 6 support-actor scene-presence beat plan:
+  - Diagnosis:
+    - [x] Reviewed P270-P280 player-facing outputs. Leak/stock counters are clean, but support actor presence still reads as receipt-shaped prose: `You stand at Lowwater Bazaar, and Local Vendor is now in view nearby as a vendor.`
+    - [x] Chosen root owner: support-actor sentence task card. Accepted evidence already owns actor label, ordinary role, scene anchor, and presence; Stage 6 needs a positive scene-presence beat instead of copying `support_actor_presence`.
+    - [x] GitNexus pre-edit impact: `selectTurnEventFactRefs`, `sentencePlanAdventureSubjectFocus`, `sentencePlanAdventureVerbFrame`, `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, `buildCleanNarrationSystemPrompt`, and `renderSupportActorProjection` are LOW risk; direct blast radius is `runCleanNarration`/authority projection.
+  - Plan:
+    - [x] Select support-actor turn-event materials from `visible_support_actor`, `support_role`, `anchor_scene`, and `support_actor_presence`.
+    - [x] Add typed support-presence cues in the sentence plan schema and narration task card.
+    - [x] Update the Stage 6 prompt so support actor prose lands as a scene-presence beat from accepted materials, while services, setup, work actions, dialogue, relationship, private knowledge, route truth, item state, absence, and no-change remain separate accepted evidence.
+    - [x] Update focused narration tests to prove the new task-card fields, model-accepted support presence prose, deterministic projection, and forbidden unsupported claims.
+    - [x] Verify with focused narration tests, typecheck, proof artifact, prose audit, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] Textured support-actor pages can read as compact in-world presence beats, not `is now in view` receipts.
+    - [x] Actor label, role label, and scene anchor remain exact when used.
+    - [x] No support-actor prose adds setup, service availability, work action, trade behavior, dialogue, relationship, hidden knowledge, movement, absence, or no-change without separate accepted evidence.
+  - Review:
+    - Fix: Stage 6 support_actor_materialization sentence plans now emit a scene-presence task card: `visible_support_actor`, `support_role`, `anchor_scene`, and `support_actor_presence` become the core materials for `support_actor_presence_line`.
+    - Fix: the schema/prompt now expose positive support-presence cues: `visible_support_actor`, `land_support_presence`, `support_actor_presence_line`, `visible_support_actor_label`, `place_presence`, `actor_role_with_scene_anchor`, `actor_then_role_then_scene`, `support_presence_cadence`, and `weave_support_actor_scene_presence`.
+    - Contract: `support_actor_presence` remains proof material; model-authored prose phrases from actor label, ordinary role, and exact scene anchor. Deterministic no-texture projection still copies accepted presence evidence.
+    - Proof: `output/clean-runtime-p281-support-actor-presence-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput`, `validateCleanNarrationCandidate`, and `renderCleanAuthorityProjection`.
+    - Accepted proof narration: `Rain taps the brass gutters. Local Vendor takes a visible place at Market as a vendor.`
+    - Verification: focused narration suite passed 109/109; expanded clean-runtime suite passed 377/377 across contracts, Stage 4, settlement, and narration; `npm --prefix backend run typecheck` passed; `git diff --check` passed with LF/CRLF warnings only.
+    - Verification: `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p281-support-actor-presence-proof/prose-audit.json --fail-on-hits output/clean-runtime-p281-support-actor-presence-proof` counted 1 result, 16 words, and all hits 0.
+    - Verification: diff-level runtime scan found no added `= /`, `.test(`, or `replace(` lines in `narration.ts`.
+    - GitNexus: all-scope `detect_changes` reported LOW risk, 4 changed files, 10 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warning.

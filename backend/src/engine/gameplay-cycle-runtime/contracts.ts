@@ -2614,6 +2614,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "playable_route_choices",
       "player_scene_position",
       "settled_result_material",
+      "visible_support_actor",
       "visible_speaker",
     ]),
     verbFrame: z.enum([
@@ -2623,6 +2624,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "land_settled_result",
       "land_item_custody",
       "land_scene_custody",
+      "land_support_presence",
       "mark_elapsed_time",
       "mark_elapsed_time_pressure",
       "offer_scene_exits",
@@ -2658,6 +2660,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "scene_anchor_line",
       "scene_custody_beat_line",
       "scene_exit_choice_line",
+      "support_actor_presence_line",
     ]),
     openingSource: z.enum([
       "accepted_question",
@@ -2668,6 +2671,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "playable_route_label",
       "preserved_label_anchor",
       "route_exit_label",
+      "visible_support_actor_label",
       "visible_speaker_label",
     ]),
     verbEnergy: z.enum([
@@ -2680,6 +2684,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "mark_time",
       "offer_choice",
       "offer_scene_exit",
+      "place_presence",
       "pressure_time",
     ]),
     detailRhythm: z.enum([
@@ -2689,6 +2694,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "exit_group_with_cost",
       "item_custody_with_holder",
       "item_custody_with_scene_anchor",
+      "actor_role_with_scene_anchor",
       "scene_anchor_tokens",
       "single_core_material",
       "time_with_scene_anchor",
@@ -2700,6 +2706,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "exits_only",
       "exits_then_costs",
       "item_then_custody_then_holder_scene",
+      "actor_then_role_then_scene",
       "result_only",
       "result_then_preserved_tokens",
       "scene_anchor_only",
@@ -2720,6 +2727,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "scene_exit_handoff_cadence",
       "scene_anchor_cadence",
       "scene_custody_cadence",
+      "support_presence_cadence",
     ]),
     closingFunction: z.enum([
       "offer_next_action",
@@ -2762,6 +2770,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "mark_elapsed_time_pressure_clock_beat",
       "place_player_in_context",
       "weave_item_custody_scene_beat",
+      "weave_support_actor_scene_presence",
     ]),
     cadence: z.enum([
       "clock_beat_sentence",
@@ -2773,6 +2782,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "quote_framed_beat",
       "scene_custody_beat_sentence",
       "scene_exit_choice_sentence",
+      "support_presence_beat_sentence",
     ]),
     styleLevers: z.array(z.enum([
       "accepted_label_anchor",
@@ -2784,6 +2794,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "item_custody_focus",
       "route_exit_grouping",
       "settled_state_focus",
+      "support_actor_presence_focus",
       "visible_speaker_frame",
     ])).min(1).max(4),
   }).strict(),
