@@ -7665,3 +7665,37 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `db-proof.json` passed with no issues; `supportSegment` was `Local Vendor takes a place in view at Lowwater Bazaar. Local Vendor says: "` and `duplicateRoleTerms` was empty.
     - Verified: prose audit passed after adding the audit-compatible `turn-001/result.json`; total 1 result, 73 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
     - Executed: clean backend process and port owner were stopped; port `31749` returned free.
+
+- P286 Stage 6 support-presence cue material:
+  - Diagnosis:
+    - [x] P285 proved the duplicate role phrase is gone in live clean runtime.
+    - [x] The accepted support-presence sentence still reads as a dry visibility receipt: `A Local Vendor takes a place in view at Lowwater Bazaar.`
+    - [x] Stage 4 already accepts richer public support material (`publicSummary` and nullable `visibleCue`), but settlement/narration do not expose it as typed Stage 6 prose material.
+    - [x] Root owner: support actor settlement evidence and support-presence sentence task. The fix is to pass accepted cue/summary as positive material, not to add string bans or fallback rewrites.
+  - Plan:
+    - [x] Inspect support actor evidence assembly, prompt fact selection, sentence plan, prompt contract, and focused narration tests.
+    - [x] Run GitNexus impact for `stage4Evidence`, `buildCleanNarrationSystemPrompt`, `sentencePlanProseAssembly`, `selectSupportActorPresenceFactRefs`, and `narrativeFactProseUse`.
+    - [x] Add typed backend fact roles for support actor public summary and visible cue, sourced only from accepted support actor receipt public presentation.
+    - [x] Include those facts in support-presence sentence materials so the model can write a concrete in-scene presence line from accepted cue/summary plus exact actor and scene labels.
+    - [x] Update the support-presence prose assembly/prompt to prefer cue-backed presence detail while preserving exact actor label, exact scene anchor, and role-as-context behavior.
+    - [x] Add/adjust focused tests proving the sentence plan carries cue/summary materials and accepts a more atmospheric support line without adding service, trade, work action, dialogue, movement, relationship, private knowledge, absence, or no-change.
+    - [x] Verify with focused narration tests, expanded clean-runtime tests if contract scope requires it, typecheck, proof/audit, GitNexus detect, commit/push/index.
+  - Success criteria:
+    - [x] A support actor receipt with `visibleCue` exposes that cue as cited `proseMaterials` for `render_support_actor_presence`.
+    - [x] The accepted support line can read like concrete adventure prose, e.g. `At Market, Local Vendor glances up from a narrow plank counter.` when those details are accepted.
+    - [x] Actor label and scene anchor remain exact.
+    - [x] Cue/summary materials do not authorize dialogue, services, setup/trade/work action, relationship, hidden knowledge, movement, absence, or no-change.
+  - Review:
+    - Executed: Stage 4 support actor settlement evidence now emits typed `support_actor_visible_cue` and `support_actor_public_summary` backend facts from the accepted public support actor result.
+    - Executed: Stage 6 support actor fact selection now carries actor label, scene anchor, visible cue, public summary, role context, and presence proof into `render_support_actor_presence`.
+    - Executed: support-presence sentence assembly now switches to `actor_visible_cue_with_scene_role_context` and `actor_then_visible_cue_then_scene` when cue/summary material is present.
+    - Executed: prompt contract now directs the narrator to use one cited visible detail from cue/summary while preserving exact actor label and scene anchor and keeping dialogue/services/setup/work/trade/relationship/private knowledge/movement/absence/no-change outside this evidence.
+    - Verified: GitNexus impact before editing was LOW for `stage4Evidence`, `buildCleanNarrationSystemPrompt`, `sentencePlanProseAssembly`, `selectSupportActorPresenceFactRefs`, and `narrativeFactProseUse`.
+    - Verified: focused narration+settlement suite passed 132/132.
+    - Verified: expanded clean-runtime suite passed 379/379 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with LF/CRLF warnings only.
+    - Verified: GitNexus `detect_changes(scope=all)` reported low risk, 8 touched symbols, 6 changed files, and 0 affected execution flows.
+    - Proof: `output/clean-runtime-p286-support-cue-proof-20260614T124055Z/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput` and `validateCleanNarrationCandidate`; validation status was `accepted`.
+    - Accepted proof narration: `Rain taps the brass gutters. At Market, Local Vendor glances up from a narrow plank counter.`
+    - Verified: prose audit passed with 1 result, 16 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.

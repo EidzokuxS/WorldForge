@@ -1093,6 +1093,17 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const evidenceId = nextEvidenceId(evidence);
       const supportActor = receipt.publicResult.supportActor;
       const presenceText = `${supportActor.actorLabel} is now in view at ${supportActor.anchorSceneLabel} as a ${supportActor.roleLabel}.`;
+      const supportFacts = boundedBackendFacts([
+        fact(evidenceId, 1, "support_actor_presence", presenceText, presenceText),
+        fact(evidenceId, 2, "visible_support_actor", `Visible person now in view: ${supportActor.actorLabel}.`, supportActor.actorLabel),
+        fact(evidenceId, 3, "support_role", `Ordinary scene role: ${supportActor.roleLabel}.`, supportActor.roleLabel),
+        fact(evidenceId, 4, "anchor_scene", `Scene anchor: ${supportActor.anchorSceneLabel}.`, supportActor.anchorSceneLabel),
+        fact(evidenceId, 5, "materialization_result", `Presence result: ${supportActor.resultKind}.`, supportActor.resultKind),
+        ...(supportActor.visibleCue
+          ? [fact(evidenceId, 6, "support_actor_visible_cue", `Visible support cue: ${supportActor.visibleCue}`, supportActor.visibleCue)]
+          : []),
+        fact(evidenceId, supportActor.visibleCue ? 7 : 6, "support_actor_public_summary", `Support actor public summary: ${supportActor.publicSummary}`, supportActor.publicSummary),
+      ]);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -1101,13 +1112,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         claimKinds: ["visible_actor", "support_actor_materialization"],
         text: presenceText,
         visibleRefs: receipt.publicResult.visibleRefs,
-        backendFacts: [
-          fact(evidenceId, 1, "support_actor_presence", presenceText, presenceText),
-          fact(evidenceId, 2, "visible_support_actor", `Visible person now in view: ${supportActor.actorLabel}.`, supportActor.actorLabel),
-          fact(evidenceId, 3, "support_role", `Ordinary scene role: ${supportActor.roleLabel}.`, supportActor.roleLabel),
-          fact(evidenceId, 4, "anchor_scene", `Scene anchor: ${supportActor.anchorSceneLabel}.`, supportActor.anchorSceneLabel),
-          fact(evidenceId, 5, "materialization_result", `Presence result: ${supportActor.resultKind}.`, supportActor.resultKind),
-        ],
+        backendFacts: supportFacts,
         limits: {
           proves: [
             "visible current-scene person label",
