@@ -2619,6 +2619,7 @@ export const cleanNarrationSentenceSchema = z.object({
   backendFactRefs: z.array(shortText).max(12),
   claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
   pageMoveRefs: z.array(shortText).max(4).default([]),
+  sentencePlanRefs: z.array(shortText).max(4).default([]),
   auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),
 }).strict();
 

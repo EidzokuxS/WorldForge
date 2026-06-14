@@ -44,6 +44,20 @@ function pageMoveRefsForSentence(
     .map((move) => move.moveRef);
 }
 
+function sentencePlanRefsForSentence(
+  view: CleanNarratorView,
+  evidenceRefs: readonly string[],
+  backendFactRefs: readonly string[],
+): string[] {
+  const sentencePlan = buildCleanNarratorPromptInput(view).narrativePageTask.sentencePlan;
+  const preferredMatches = sentencePlan
+    .filter((step) => backendFactRefs.some((ref) => step.preferredBackendFactRefs.includes(ref)));
+  const matches = preferredMatches.length > 0
+    ? preferredMatches
+    : sentencePlan.filter((step) => evidenceRefs.some((ref) => step.entryRefs.includes(ref)));
+  return matches.map((step) => step.sentenceRef);
+}
+
 function promptBackendFactsForRefs(
   promptInput: ReturnType<typeof buildCleanNarratorPromptInput>,
   refs: readonly string[],
@@ -113,6 +127,7 @@ function movementCandidate(
       backendFactRefs,
       claimKinds: ["player_location_change", "elapsed_time"],
       pageMoveRefs: pageMoveRefsForSentence(view, evidenceRefs, backendFactRefs),
+      sentencePlanRefs: sentencePlanRefsForSentence(view, evidenceRefs, backendFactRefs),
       auditStepIds: [],
     }],
     finalText: text,
@@ -127,6 +142,7 @@ function acceptedCandidate(
     backendFactRefs: string[];
     claimKinds: NarrationClaimKind[];
     pageMoveRefs?: string[];
+    sentencePlanRefs?: string[];
   }>,
 ): CleanNarrationCandidate {
   return {
@@ -142,6 +158,8 @@ function acceptedCandidate(
       claimKinds: sentence.claimKinds,
       pageMoveRefs: sentence.pageMoveRefs
         ?? pageMoveRefsForSentence(view, sentence.evidenceRefs, sentence.backendFactRefs),
+      sentencePlanRefs: sentence.sentencePlanRefs
+        ?? sentencePlanRefsForSentence(view, sentence.evidenceRefs, sentence.backendFactRefs),
       auditStepIds: [],
     })),
     finalText: sentences.map((sentence) => sentence.text).join(" "),
@@ -1572,6 +1590,7 @@ describe("clean Stage 6 narration contracts", () => {
       },
     ]);
     expect(validCandidate.sentences.map((sentence) => sentence.pageMoveRefs)).toEqual([["m1"], ["m2"]]);
+    expect(validCandidate.sentences.map((sentence) => sentence.sentencePlanRefs)).toEqual([["s1"], ["s3"]]);
     expect(validateCleanNarrationCandidate({ view, candidate: validCandidate }).status).toBe("accepted");
 
     const wrongMove = validateCleanNarrationCandidate({
@@ -1588,6 +1607,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(wrongMove.status).toBe("rejected");
     if (wrongMove.status !== "rejected") throw new Error("expected rejected");
     expect(wrongMove.issues.some((issue) => issue.code === "page_move_not_supported")).toBe(true);
+
+    const wrongSentencePlan = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the one-minute route choice here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+        pageMoveRefs: ["m2"],
+        sentencePlanRefs: ["s1"],
+      }]),
+    });
+
+    expect(wrongSentencePlan.status).toBe("rejected");
+    if (wrongSentencePlan.status !== "rejected") throw new Error("expected rejected");
+    expect(wrongSentencePlan.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
   });
 
   it("uses clarification page plans without promoting scene context to a world event", () => {
@@ -4569,6 +4604,7 @@ describe("clean Stage 6 narration contracts", () => {
             backendFactRefs: ["e1.f1"],
             claimKinds: ["visible_fact"],
             pageMoveRefs: ["m1"],
+            sentencePlanRefs: sentencePlanRefsForSentence(modelNarrationView(), ["e1"], ["e1.f1"]),
             auditStepIds: [],
           }],
           finalText: "Guide stands nearby.",
@@ -4632,6 +4668,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Sentence plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlanRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredBackendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");

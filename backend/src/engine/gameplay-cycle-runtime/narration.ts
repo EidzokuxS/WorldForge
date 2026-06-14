@@ -25,6 +25,7 @@ export interface CleanNarrationValidationIssue {
     | "private_term"
     | "prose_quality"
     | "schema_invalid"
+    | "sentence_plan_not_supported"
     | "text_mismatch";
   path: string;
   message: string;
@@ -1669,7 +1670,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
-    "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, and moveRef to set pageMoveRefs on the matching output sentence.",
+    "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
@@ -1707,7 +1708,7 @@ export function buildCleanNarrationSystemPrompt(
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. With scene_texture evidence, put one exact scene_texture sentence beside the device-surface beat; when several texture facts exist, device_surface_observation uses a later texture fact than the first. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
     "Oracle-outcome surface: for oracle_outcome, turn the cited selected visible outcome meaning into a concrete player-facing story beat. Keep the sentence grounded in the cited oracle_outcome backend fact and its evidence limits. Movement, route status, item state, dialogue, discovery, condition, world truth, absence, and private knowledge enter the story through their own accepted evidence entries.",
     "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use the first accepted scene_texture fact as its own exact sentence when scene_texture exists, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory labels the player has, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
-    "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
+    "Sentence contract: accepted_evidence sentences cite sentencePlanRefs from promptInput.narrativePageTask.sentencePlan plus evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
     "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation and composed item_state plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
@@ -1787,9 +1788,15 @@ export function validateCleanNarrationCandidate(input: {
 
   const promptInput = buildCleanNarratorPromptInput(input.view);
   const pageMovesByRef = new Map(promptInput.narrativePageTask.moves.map((move) => [move.moveRef, move]));
+  const sentencePlansByRef = new Map(promptInput.narrativePageTask.sentencePlan.map((step, index) => [
+    step.sentenceRef,
+    { ...step, order: index },
+  ]));
   const coveredPageMoveRefs = new Set<string>();
+  const coveredSentencePlanRefs = new Set<string>();
   const evidenceByRef = new Map(input.view.acceptedEvidence.map((evidence) => [evidence.ref, evidence]));
   const auditByStepId = new Map(input.view.stepAuditForGrounding.map((step) => [step.stepId, step]));
+  let lastSentencePlanOrder = -1;
 
   candidate.sentences.forEach((sentence, index) => {
     if (sentence.kind === "accepted_evidence") {
@@ -1798,12 +1805,13 @@ export function validateCleanNarrationCandidate(input: {
         || sentence.backendFactRefs.length === 0
         || sentence.claimKinds.length === 0
         || sentence.pageMoveRefs.length === 0
+        || (sentencePlansByRef.size > 0 && sentence.sentencePlanRefs.length === 0)
         || sentence.auditStepIds.length > 0
       ) {
         issues.push({
           code: "fact_not_supported",
           path: `sentences.${index}`,
-          message: "accepted_evidence sentences must cite evidence refs, backend facts, claim kinds, and page moves only.",
+          message: "accepted_evidence sentences must cite evidence refs, backend facts, claim kinds, page moves, and sentence-plan refs only.",
         });
       }
 
@@ -1839,6 +1847,71 @@ export function validateCleanNarrationCandidate(input: {
       }
       sentence.pageMoveRefs.forEach((ref) => {
         if (pageMovesByRef.has(ref)) coveredPageMoveRefs.add(ref);
+      });
+
+      const citedSentencePlans = sentence.sentencePlanRefs.map((ref) => sentencePlansByRef.get(ref));
+      if (citedSentencePlans.some((step) => !step)) {
+        issues.push({
+          code: "sentence_plan_not_supported",
+          path: `sentences.${index}.sentencePlanRefs`,
+          message: "Narration sentence cited a sentence-plan ref not present in promptInput.narrativePageTask.sentencePlan.",
+        });
+      }
+      const sentencePlanMoveRefs = new Set(citedSentencePlans.flatMap((step) =>
+        step ? [step.moveRef] : []
+      ));
+      for (const pageMoveRef of sentence.pageMoveRefs) {
+        if (sentencePlansByRef.size > 0 && !sentencePlanMoveRefs.has(pageMoveRef)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.sentencePlanRefs`,
+            message: `Narration sentence cited page move ${pageMoveRef} without a matching sentence-plan ref.`,
+          });
+        }
+      }
+      for (const step of citedSentencePlans) {
+        if (!step) continue;
+        if (!sentence.pageMoveRefs.includes(step.moveRef)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.sentencePlanRefs`,
+            message: `Narration sentence-plan ref ${step.sentenceRef} belongs to page move ${step.moveRef}, which the sentence did not cite.`,
+          });
+        }
+        if (step.order < lastSentencePlanOrder) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.sentencePlanRefs`,
+            message: "Narration sentence-plan refs must follow promptInput.narrativePageTask.sentencePlan order.",
+          });
+        }
+        lastSentencePlanOrder = Math.max(lastSentencePlanOrder, step.order);
+      }
+      const sentencePlanEntryRefs = new Set(citedSentencePlans.flatMap((step) =>
+        step?.entryRefs ?? []
+      ));
+      for (const evidenceRef of sentence.evidenceRefs) {
+        if (sentencePlansByRef.size > 0 && !sentencePlanEntryRefs.has(evidenceRef)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.sentencePlanRefs`,
+            message: `Narration sentence cited evidence ${evidenceRef} outside its sentence-plan refs.`,
+          });
+        }
+      }
+      const sentencePlanPreferredFactRefs = new Set(citedSentencePlans.flatMap((step) =>
+        step?.preferredBackendFactRefs ?? []
+      ));
+      const hasPreferredFactAnchor = sentence.backendFactRefs.some((ref) => sentencePlanPreferredFactRefs.has(ref));
+      if (sentencePlansByRef.size > 0 && sentencePlanPreferredFactRefs.size > 0 && !hasPreferredFactAnchor) {
+        issues.push({
+          code: "sentence_plan_not_supported",
+          path: `sentences.${index}.sentencePlanRefs`,
+          message: "Narration sentence must cite at least one preferred backend fact from its sentence-plan refs.",
+        });
+      }
+      sentence.sentencePlanRefs.forEach((ref) => {
+        if (sentencePlansByRef.has(ref)) coveredSentencePlanRefs.add(ref);
       });
 
       const citedEvidence = sentence.evidenceRefs.map((ref) => evidenceByRef.get(ref));
@@ -1878,11 +1951,12 @@ export function validateCleanNarrationCandidate(input: {
         || sentence.backendFactRefs.length > 0
         || sentence.claimKinds.length > 0
         || sentence.pageMoveRefs.length > 0
+        || sentence.sentencePlanRefs.length > 0
       ) {
         issues.push({
           code: "audit_misuse",
           path: `sentences.${index}`,
-          message: "audit_notice sentences must cite only failed/skipped audit step ids and no world claim or page move fields.",
+          message: "audit_notice sentences must cite only failed/skipped audit step ids and no world claim, page move, or sentence-plan fields.",
         });
       }
       for (const stepId of sentence.auditStepIds) {
@@ -1906,6 +1980,18 @@ export function validateCleanNarrationCandidate(input: {
       code: "page_move_not_supported",
       path: "sentences",
       message: `Narration candidate did not cover page moves: ${missingPageMoveRefs.join(", ")}.`,
+    });
+  }
+
+  const missingSentencePlanRefs = promptInput.narrativePageTask.sentencePlan
+    .filter((step) => step.coverage === "required")
+    .map((step) => step.sentenceRef)
+    .filter((sentenceRef) => !coveredSentencePlanRefs.has(sentenceRef));
+  if (missingSentencePlanRefs.length > 0) {
+    issues.push({
+      code: "sentence_plan_not_supported",
+      path: "sentences",
+      message: `Narration candidate did not cover sentence-plan refs: ${missingSentencePlanRefs.join(", ")}.`,
     });
   }
 
