@@ -3373,7 +3373,7 @@ describe("clean Stage 6 narration contracts", () => {
       .toThrow("Support-actor projection requires accepted Support actor presence value evidence.");
 
     expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "place_handle_label")))
-      .toBe("At Market, Tea Stall is now visible as a stall.");
+      .toBe("Tea Stall marks a visible point at Market.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(minorPoiHandleView(), "place_handle_kind")))
       .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
   });
@@ -5096,12 +5096,24 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
     const text = renderCleanAuthorityProjection(minorPoiHandleView());
 
-    expect(text).toBe("At Market, Tea Stall is now visible as a stall.");
+    expect(text).toBe("Tea Stall marks a visible point at Market.");
+    const lowerCaseLabelView = minorPoiHandleView();
+    lowerCaseLabelView.acceptedEvidence[0] = {
+      ...lowerCaseLabelView.acceptedEvidence[0]!,
+      backendFacts: lowerCaseLabelView.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "place_handle_label"
+          ? { ...fact, value: "tea stall", text: "Scene point label: tea stall." }
+          : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(lowerCaseLabelView))
+      .toBe("A tea stall marks a visible point at Market.");
     for (const forbidden of [
       "Visible current-scene",
       "Place handle",
       "Current scene anchor",
       "Handle result",
+      "visible as a",
       "target handle",
       "place handle",
       "route",
@@ -5148,12 +5160,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("At Market, Tea Stall is now visible as a stall.");
+    expect(result.text).toBe("Tea Stall marks a visible point at Market.");
     for (const forbidden of [
       "Visible current-scene",
       "Place handle",
       "Current scene anchor",
       "Handle result",
+      "visible as a",
       "target handle",
       "place handle",
       "route",
@@ -5164,7 +5177,6 @@ describe("clean Stage 6 narration contracts", () => {
       "sign says",
       "nothing changed",
       "no change",
-      "marks a visible",
     ]) {
       expect(result.text).not.toContain(forbidden);
     }
@@ -5200,10 +5212,11 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Tea Stall is now visible as a stall.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Tea Stall marks a visible point at Market.");
     for (const forbidden of [
       "target handle",
       "place handle",
+      "visible as a",
       "You stand",
       "You are at",
       "route",
@@ -5218,7 +5231,6 @@ describe("clean Stage 6 narration contracts", () => {
       "world fact",
       "no change",
       "nothing changed",
-      "marks a visible",
     ]) {
       expect(result.text).not.toContain(forbidden);
     }
@@ -5260,7 +5272,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, Tea Stall is now visible as a stall.",
+        text: "Tea Stall marks a visible point at Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
         claimKinds: ["minor_poi_handle", "visible_target"],
@@ -5278,7 +5290,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Tea Stall is now visible as a stall.",
+          text: "Tea Stall marks a visible point at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
           claimKinds: ["minor_poi_handle", "visible_target"],

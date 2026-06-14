@@ -8480,3 +8480,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p315-support-cue-live-20260615-022618/prose-audit.json`: one narrative, 54 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 1 touched indexed owner, 4 changed files, and 0 affected execution flows.
     - Verified implementation commit: `ece6c2ed` recorded the P315 code/tests/proof notes.
+
+- P316 clean minor-POI deterministic prose:
+  - Diagnosis:
+    - [x] Standalone minor-POI narration still uses deterministic renderer output `At <scene>, <label> is now visible as a <kind>.`, producing dry lines such as `At Lowwater Bazaar, tea stall is now visible as a stall.`
+    - [x] Root owner is `renderMinorPoiProjection()` in Stage 6 deterministic authority projection for standalone minor-POI evidence.
+  - Plan:
+    - [x] Run GitNexus impact for `renderMinorPoiProjection`.
+    - [x] Replace the deterministic minor-POI surface with ordinary scene-point prose from accepted label/kind/result/scene values.
+    - [x] Update narration tests to protect the positive surface and the no-service/no-route/no-location contract.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live minor-POI proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Standalone minor-POI output no longer says `visible as a <kind>`.
+    - [x] Output still proves only an accepted visible current-scene point/meeting spot; it does not add services, inventory, route truth, movement, location reveal, readable text, business facts, discovery, absence, or no-change.
+    - [x] The fix changes typed deterministic rendering, not regex cleanup, banlist validation, or gameplay fallback.
+  - Review:
+    - Executed: `renderMinorPoiProjection()` now renders created minor-POI evidence as `<label> marks a visible point at <scene>.` when the accepted label already carries the place kind, and as `<label> marks a visible <kind> at <scene>.` when the kind adds useful scene noun material.
+    - Executed: lower-case ordinary place labels get a sentence subject article (`A tea stall...`) while proper labels such as `Tea Stall` remain unchanged.
+    - Executed: reused minor-POI evidence renders as `<label> remains marked as a ... at <scene>.`, keeping the result state without no-change wording.
+    - Verified GitNexus impact before edits: `renderMinorPoiProjection` returned LOW risk; direct caller `renderMinorPoiTurnProjection`, affected process family `runCleanNarration` / `renderCleanAuthorityProjection`.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 118/118 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 392/392 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p316-minor-poi-live-20260615-024328`: clean runtime settled one accepted `minor_poi_create`, wrote one clean turn record, inserted one active `tea_stall` minor POI row, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, kept old saga/narrator/v2 stores at 0, and stopped backend port 31816 after proof.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. A tea stall marks a visible point at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p316-minor-poi-live-20260615-024328/prose-audit.json`: one narrative, 29 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 3 touched indexed symbols, 3 changed files, and 0 affected execution flows.

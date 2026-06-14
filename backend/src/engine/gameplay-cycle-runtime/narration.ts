@@ -3544,6 +3544,42 @@ function renderSceneTextureProjection(view: CleanNarratorView): string | null {
   return `${trimSentencePeriod(fact.value)}.`;
 }
 
+function minorPoiKindPhrase(kind: string): string {
+  switch (kind) {
+    case "notice_board":
+      return "notice board";
+    case "other_place":
+      return "point";
+    case "signage":
+      return "sign";
+    default:
+      return kind;
+  }
+}
+
+function minorPoiVisibleNoun(input: { label: string; kind: string }): string {
+  const kindPhrase = minorPoiKindPhrase(input.kind);
+  if (kindPhrase === "point") return "visible point";
+  const normalizedLabel = normalizeText(input.label).toLocaleLowerCase("en-US");
+  const normalizedKind = normalizeText(kindPhrase).toLocaleLowerCase("en-US");
+  return normalizedKind.length > 0 && normalizedLabel.includes(normalizedKind)
+    ? "visible point"
+    : `visible ${kindPhrase}`;
+}
+
+function minorPoiSentenceSubject(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return label;
+  const lower = trimmed.toLocaleLowerCase("en-US");
+  if (lower.startsWith("a ") || lower.startsWith("an ") || lower.startsWith("the ")) {
+    return trimmed;
+  }
+  const first = trimmed.charAt(0);
+  const startsWithLowercaseLetter = first === first.toLocaleLowerCase("en-US")
+    && first !== first.toLocaleUpperCase("en-US");
+  return startsWithLowercaseLetter ? `A ${trimmed}` : trimmed;
+}
+
 function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
   const label = requireFactValueByRole(
     evidence,
@@ -3565,8 +3601,10 @@ function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
     "current_scene_anchor",
     "Minor-POI projection requires accepted Current scene anchor value evidence.",
   );
-  if (result === "reused") return `At ${scene}, ${label} remains visible as a ${kind}.`;
-  if (result === "created") return `At ${scene}, ${label} is now visible as a ${kind}.`;
+  const subject = minorPoiSentenceSubject(label);
+  const visibleNoun = minorPoiVisibleNoun({ label, kind });
+  if (result === "reused") return `${subject} remains marked as a ${visibleNoun} at ${scene}.`;
+  if (result === "created") return `${subject} marks a ${visibleNoun} at ${scene}.`;
   throw new Error("Minor-POI projection requires accepted Handle result value evidence.");
 }
 
