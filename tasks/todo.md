@@ -7763,3 +7763,36 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: live proof deltas were chat +2, clean record +1, Stage4 scene observation receipt +1, authority traces +0, clock ledger +0, and all old v2/saga/narrator/oracle/simulation stores 0.
     - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in view at Lowwater Bazaar, where visible exits are Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins. You have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.`
     - Verified: proof summary passed with exact inventory status present and no handling/readiness hits; prose audit passed with 64 words, zero one-token output, zero `youOpening`, and all hit counters 0.
+
+- P289 Stage 6 direct-scene route handoff:
+  - Diagnosis:
+    - [x] P288 fixed inventory truth, but live prose still read like a status surface because direct-scene prompt material mixed raw route/target/inventory refs into one broad next-action sentence.
+    - [x] Root problem was prompt shape, not narration difficulty: Stage 6 needs compressed scene context plus owned route/inventory sentence roles, then the model can write the story page normally.
+    - [x] Runtime validation must protect schema/refs/typed ownership; prose quality belongs in the positive sentence plan, prompt task card, and audit proof.
+  - Plan:
+    - [x] Run GitNexus impact for the direct-scene prompt/page-task owner symbols before editing.
+    - [x] Compress `scene_frame_snapshot` prompt evidence to canonical scene texture, inventory status, and route labels instead of raw duplicate fact bundles.
+    - [x] Treat direct `scene_observation_receipt` as current scene context for Stage 6 broad-look pages.
+    - [x] Split direct-scene sentence plan into surface context, inventory custody/status, and route handoff beats.
+    - [x] Change inventory prose material from exact-copy to phrase-from-material so the narrator can write natural custody prose from typed facts.
+    - [x] Update tests away from exact inventory-string rejection and toward typed ownership: accepted inventory phrase, rejected inventory-as-visible-target claim.
+    - [x] Verify focused tests, expanded tests, typecheck, live proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live broad-look narration reads as a compact adventure orientation page with a route handoff, not a raw `where visible exits are` status line.
+    - [x] Inventory item labels and route labels remain exact.
+    - [x] Inventory remains custody/status only; no item handling/readiness/use is accepted as proof.
+    - [x] Direct scene look-around has no mutation, no old runtime stores, and no Stage4 receipt requirement when settlement kind is `direct_scene`.
+  - Review:
+    - Executed: prompt evidence now narrows direct-scene snapshots to first selected texture fact, inventory status beat, and route origin/choice/open labels.
+    - Executed: `scene_observation_receipt` is placed in `storyFrame.currentContext` for broad-look narration rather than treated as a turn event.
+    - Executed: direct-scene page task now separates surface/context refs, inventory-status refs, and route-choice refs into distinct sentence-plan beats.
+    - Executed: inventory status material uses `phrase_from_material`; tests now prove natural inventory custody phrasing is accepted while unsupported `visible_target` ownership is rejected.
+    - Verified: GitNexus impact before editing was LOW for the direct-scene narration owner symbols changed in this slice, including `selectRouteChoiceFactRefs`, `selectPromptAcceptedEvidence`, `buildCleanNarratorStoryFrame`, `buildCleanNarrationSystemPrompt`, `sentencePlanForMove`, and `validateCleanNarrationCandidate`.
+    - Verified: focused narration suite passed 112/112.
+    - Verified: expanded clean-runtime suite passed 617/617 across contracts, settlement, narration, visible narration guards, grounding guards, tool contracts, and empty-narration integration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only LF/CRLF warnings.
+    - Verified: live proof artifact `output/clean-runtime-p289-direct-scene-route-spine-live-accepted-20260614-182526` cloned `p69-item-transfer-045651`, ran `I look around.`, and settled through `gameplay-cycle-runtime`.
+    - Verified: proof summary passed with chat +2, clean record +1, Stage4 receipts +0 for direct scene, authority trace +0, clock ledger +0, worldVersion/time/tick +0, all old v2/saga/narrator/oracle/simulation stores 0, all inventory labels present, all route labels present, no old route surface hits, and no handling/readiness hits.
+    - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You stand at Lowwater Bazaar with Guide in view, and Courier satchel, Sealed lacquer message tube, and Brass Tube on hand. From Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose.`
+    - Verified: prose audit passed for `output/clean-runtime-p289-direct-scene-route-spine-live-accepted-20260614-182526/prose-audit.json` with 1 result, 69 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.

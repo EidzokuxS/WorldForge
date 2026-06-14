@@ -331,13 +331,78 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   };
 }
 
+function limitPromptEvidenceToFacts(
+  evidence: AcceptedNarrationEvidence,
+  backendFacts: AcceptedNarrationBackendFact[],
+): AcceptedNarrationEvidence {
+  const promptFacts = uniqueFactsByRef(backendFacts).map(promptSafeBackendFact);
+  const text = promptFacts
+    .map((fact) => fact.value?.trim() || fact.text.trim())
+    .filter((value) => value.length > 0)
+    .join(" ");
+  return {
+    ...evidence,
+    text: text.length > 0 ? normalizeText(text) : evidence.text,
+    backendFacts: promptFacts,
+  };
+}
+
+function directSceneTexturePromptEvidence(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence {
+  const textureFact = evidence.backendFacts.find((fact) => fact.role === "scene_texture");
+  return textureFact
+    ? limitPromptEvidenceToFacts(evidence, [textureFact])
+    : limitPromptEvidenceFacts(evidence);
+}
+
+function directSceneSnapshotPromptEvidence(evidence: AcceptedNarrationEvidence): AcceptedNarrationEvidence | null {
+  if (evidence.claimKinds.includes("scene_texture")) {
+    return directSceneTexturePromptEvidence(evidence);
+  }
+  if (evidence.claimKinds.includes("inventory_status")) {
+    const inventoryStatusFact = evidence.backendFacts.find((fact) => fact.role === "inventory_status_beat");
+    return inventoryStatusFact
+      ? limitPromptEvidenceToFacts(evidence, [inventoryStatusFact])
+      : limitPromptEvidenceFacts(evidence);
+  }
+  if (evidence.claimKinds.includes("movement_option")) {
+    const routeFacts = evidence.backendFacts.filter((fact) =>
+      fact.role === "route_origin"
+      || fact.role === "route_choice_labels"
+      || fact.role === "open_route_labels"
+    );
+    return routeFacts.length > 0
+      ? limitPromptEvidenceToFacts(evidence, routeFacts)
+      : limitPromptEvidenceFacts(evidence);
+  }
+  return limitPromptEvidenceFacts(evidence);
+}
+
 function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarrationEvidence[] {
-  if (!isLiteraryNarrationCandidateExpected(view) || hasOnlySceneFrameSnapshotEvidence(view)) {
+  if (!isLiteraryNarrationCandidateExpected(view)) {
     return view.acceptedEvidence.map(limitPromptEvidenceFacts);
+  }
+  if (hasOnlySceneFrameSnapshotEvidence(view)) {
+    return view.acceptedEvidence
+      .map(directSceneSnapshotPromptEvidence)
+      .filter((evidence): evidence is AcceptedNarrationEvidence => evidence !== null);
   }
 
   const terminalEvidence = view.acceptedEvidence.filter(isLiteraryTerminalEvidence);
   if (terminalEvidence.length === 0) return view.acceptedEvidence.map(limitPromptEvidenceFacts);
+
+  const directSceneReceipt = terminalEvidence.find((evidence) =>
+    evidence.authority === "scene_observation_receipt"
+  );
+  if (directSceneReceipt) {
+    const sceneTexture = view.acceptedEvidence.find((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      && evidence.claimKinds.includes("scene_texture")
+    );
+    return [
+      ...(sceneTexture ? [directSceneTexturePromptEvidence(sceneTexture)] : []),
+      limitPromptEvidenceFacts(directSceneReceipt),
+    ];
+  }
 
   const sceneAnchors = view.acceptedEvidence.filter((evidence) =>
     evidence.authority === "scene_frame_snapshot"
@@ -494,10 +559,16 @@ function buildCleanNarratorStoryFrame(
   acceptedEvidence: AcceptedNarrationEvidence[],
 ): CleanNarratorPromptInput["storyFrame"] {
   const currentContext = acceptedEvidence
-    .filter((evidence) => evidence.authority === "scene_frame_snapshot")
+    .filter((evidence) =>
+      evidence.authority === "scene_frame_snapshot"
+      || evidence.authority === "scene_observation_receipt"
+    )
     .map(cleanNarratorStoryFrameEntry);
   const turnEvents = acceptedEvidence
-    .filter((evidence) => evidence.authority !== "scene_frame_snapshot")
+    .filter((evidence) =>
+      evidence.authority !== "scene_frame_snapshot"
+      && evidence.authority !== "scene_observation_receipt"
+    )
     .map(cleanNarratorStoryFrameEntry);
 
   return {
@@ -630,12 +701,12 @@ function sentencePlanFactRefsByRole(
 
 function selectRouteChoiceFactRefs(move: CleanNarratorPageTaskMove): string[] {
   const openLabelFactRefs = sentencePlanFactRefsByRole(move, ["open_route_labels"]);
-  const routeLabelFactRefs = openLabelFactRefs.length > 0
-    ? openLabelFactRefs
-    : sentencePlanFactRefsByRole(move, ["route_choice_labels"]);
+  const routeLabelFactRefs = sentencePlanFactRefsByRole(move, ["route_choice_labels"]);
   return uniqueStrings([
+    ...sentencePlanFactRefsByRole(move, ["route_choices_beat"]),
     ...sentencePlanFactRefsByRole(move, ["route_origin"]),
     ...routeLabelFactRefs,
+    ...openLabelFactRefs,
     ...sentencePlanFactRefsByRole(move, ["route_choice_travel_costs"]),
   ]);
 }
@@ -652,24 +723,37 @@ function moveHasDirectSceneSurfaceFacts(move: CleanNarratorPageTaskMove): boolea
   );
 }
 
+function moveUsesDirectSceneSurface(move: CleanNarratorPageTaskMove): boolean {
+  return move.entryProseCues.includes("direct_scene_snapshot") || moveHasDirectSceneSurfaceFacts(move);
+}
+
+function selectDirectSceneSurfaceFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  if (!moveUsesDirectSceneSurface(move)) return [];
+  const routeOwnedRoles = new Set<AcceptedNarrationBackendFactRole>([
+    "closed_route_labels",
+    "open_route_labels",
+    "route_choice_labels",
+    "route_choice_travel_costs",
+    "route_choices_beat",
+    "route_origin",
+  ]);
+  return move.factUses
+    .filter((factUse) => factUse.proseUse === "scene_anchor" || factUse.proseUse === "label_anchor")
+    .flatMap((factUse) => {
+      const fact = move.usableFacts.find((entry) => entry.factRef === factUse.factRef);
+      const role = fact?.role;
+      return !role || role === "inventory_labels" || routeOwnedRoles.has(role)
+        ? []
+        : [factUse.factRef];
+    });
+}
+
 function selectPlayableNextActionFactRefs(move: CleanNarratorPageTaskMove): string[] {
-  if (move.entryProseCues.includes("direct_scene_snapshot") || moveHasDirectSceneSurfaceFacts(move)) {
-    const directSceneSurfaceRefs = move.factUses
-      .filter((factUse) => factUse.proseUse === "scene_anchor" || factUse.proseUse === "label_anchor")
-      .flatMap((factUse) => {
-        const fact = move.usableFacts.find((entry) => entry.factRef === factUse.factRef);
-        return fact?.role === "inventory_labels" ? [] : [factUse.factRef];
-      });
-    return uniqueStrings([
-      ...directSceneSurfaceRefs,
-      ...selectRouteChoiceFactRefs(move),
-    ]);
-  }
   return selectRouteChoiceFactRefs(move);
 }
 
 function selectDirectSceneInventoryStatusFactRefs(move: CleanNarratorPageTaskMove): string[] {
-  if (!move.entryProseCues.includes("direct_scene_snapshot") && !moveHasDirectSceneSurfaceFacts(move)) {
+  if (!moveUsesDirectSceneSurface(move)) {
     return [];
   }
   return sentencePlanFactRefsByRole(move, ["inventory_status_beat"]);
@@ -869,8 +953,9 @@ function sentencePlanMaterialCopyMode(
   switch (proseUse) {
     case "exact_dialogue_quote":
     case "exact_texture_sentence":
-    case "inventory_status":
       return "copy_exact";
+    case "inventory_status":
+      return "phrase_from_material";
     case "label_anchor":
     case "route_choice":
     case "scene_anchor":
@@ -991,6 +1076,9 @@ function sentencePlanAdventureSubjectFocus(
   if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
     return "settled_result_material";
   }
+  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
+    return "player_scene_position";
+  }
   if (sentenceRole === "next_action_handle") return "playable_route_choices";
   if (beatObjective === "render_elapsed_time") return "elapsed_time_value";
   if (beatObjective === "render_item_custody") return "item_custody_state";
@@ -1011,6 +1099,9 @@ function sentencePlanAdventureVerbFrame(
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
   if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
     return "land_settled_result";
+  }
+  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
+    return "place_player_in_scene";
   }
   if (sentenceRole === "next_action_handle") return "offer_scene_exits";
   if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
@@ -1145,6 +1236,18 @@ function sentencePlanProseAssembly(
           closingFunction: "orient_context",
         };
       }
+      if (beatObjective === "render_direct_scene_snapshot") {
+        return {
+          perspective: "second_person_present",
+          sentenceShape: "scene_anchor_line",
+          openingSource: "preserved_label_anchor",
+          verbEnergy: "concrete_present",
+          detailRhythm: "scene_anchor_tokens",
+          materialWeaveOrder: "scene_anchor_only",
+          styleBudget: "scene_anchor_cadence",
+          closingFunction: "orient_context",
+        };
+      }
       const carriesCost = proseMaterials.some((material) => material.proseUse === "time_value");
       return {
         perspective: "playable_choice_present",
@@ -1255,6 +1358,13 @@ function sentencePlanLiteraryCue(
           renderShape: "land_settled_turn_result",
           cadence: "compact_present_beat",
           styleLevers: ["settled_state_focus", "accepted_label_anchor"],
+        };
+      }
+      if (beatObjective === "render_direct_scene_snapshot") {
+        return {
+          renderShape: "place_player_in_context",
+          cadence: "compact_present_beat",
+          styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
         };
       }
       return {
@@ -1389,13 +1499,23 @@ function sentencePlanForMove(
       }
       break;
     case "leave_playable_next_action_handle":
-      pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
-      pushPlan(
-        "next_action_handle",
-        move.coverage,
-        selectDirectSceneInventoryStatusFactRefs(move),
-        "render_direct_scene_snapshot",
-      );
+      if (moveUsesDirectSceneSurface(move)) {
+        pushPlan(
+          "next_action_handle",
+          move.coverage,
+          selectDirectSceneSurfaceFactRefs(move),
+          "render_direct_scene_snapshot",
+        );
+        pushPlan(
+          "next_action_handle",
+          move.coverage,
+          selectDirectSceneInventoryStatusFactRefs(move),
+          "render_direct_scene_snapshot",
+        );
+        pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
+      } else {
+        pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
+      }
       break;
   }
   return steps;
@@ -2297,9 +2417,9 @@ export function buildCleanNarrationSystemPrompt(
     "Minor-POI surface: for minor_poi_handle, translate the accepted POI label, kind, result, and exact scene anchor into ordinary player-facing scene prose: '<label> is now a visible <kind> here', '<label> marks a meeting spot at <scene>', or '<label> remains a marked <kind> in <scene>'. Keep handle-related contract vocabulary in citation metadata; player-facing text uses ordinary scene nouns such as stall, counter, bench, sign, doorway, workstation, marked point, or meeting spot. If sentencePlan supplies a texture sentence, keep texture there and keep the POI beat on label/kind/scene materials. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. If sentencePlan supplies a texture sentence, keep texture there and keep the device beat on device/facet materials. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
     "Oracle-outcome surface: for oracle_outcome, turn the cited selected visible outcome meaning into a concrete player-facing story beat. Keep the sentence grounded in the cited oracle_outcome backend fact and its evidence limits. Movement, route status, item state, dialogue, discovery, condition, world truth, absence, and private knowledge enter the story through their own accepted evidence entries.",
-    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory_status custody/status material copied exactly, visible target labels, and route-choice labels/costs when present. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Inventory labels name items; inventory_status states only that the item is with the player. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
+    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory_status custody/status material, visible target labels, and route-choice labels/costs when present. When one next_action_handle step contains route_choice material and surface label_anchor material, route-choice refs own the scene-exit handoff spine and surface refs supply placement or visible-context material. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Inventory labels name items; inventory_status states only that the item is with the player. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite sentencePlanRefs from promptInput.narrativePageTask.sentencePlan plus evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-3 for direct scene observation, composed item_state plus dialogue_response, and composed support_actor_materialization plus dialogue_response.",
+    "Literary sentence object budget: use 1-3 sentence objects total, or 1-4 for direct scene observation. Use 1 object for a label-only simple item transfer, movement, time passage, route status, local observation, or device-surface result; use 2 objects when item_state, dialogue_response, movement, elapsed_time, route_options, or device_surface_observation cite scene_texture; use 2-4 for direct scene observation, and 2-3 for composed item_state plus dialogue_response or composed support_actor_materialization plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -2530,21 +2650,6 @@ export function validateCleanNarrationCandidate(input: {
           path: `sentences.${index}.backendFactRefs`,
           message: "Narration sentence must cite at least one core material backend fact from its cited sentence-plan refs.",
         });
-      }
-      const exactInventoryStatusMaterials = citedSentencePlans.flatMap((step) =>
-        step?.proseMaterials.filter((material) =>
-          material.proseUse === "inventory_status"
-          && sentence.backendFactRefs.includes(material.factRef)
-        ) ?? []
-      );
-      for (const material of exactInventoryStatusMaterials) {
-        if (!sentence.text.includes(material.materialText)) {
-          issues.push({
-            code: "sentence_plan_not_supported",
-            path: `sentences.${index}.text`,
-            message: `Narration sentence must copy accepted inventory status material ${material.factRef}: ${material.materialText}`,
-          });
-        }
       }
       const sentencePlanPrimaryClaimKinds = new Set(citedSentencePlans.flatMap((step) =>
         step?.claimFocus.primaryClaimKinds ?? []
