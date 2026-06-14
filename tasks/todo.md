@@ -7972,3 +7972,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: object-look accepted local observation evidence has claimKinds `["local_observation","inventory_status"]`, text `You have Brass Tube with you.`, and proves `matching current inventory entries`.
     - Verified: minor-POI live narrative was `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. A tea stall marks a visible point at Lowwater Bazaar.`
     - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 15 touched indexed symbols, 11 changed files, and 0 affected execution flows.
+
+- P297 Stage 6 route-check context ownership:
+  - Diagnosis:
+    - [x] Fresh prose-gap scan `output/clean-runtime-p297-prose-gap-scan-20260614-211200` showed route mechanics settling correctly, but route-check narration still emits a standalone placement line: `You stand at Lowwater Bazaar. Anchor Chain Pylon lies open from here.`
+    - [x] Root owner is Stage 6 page planning for `render_route_status`: the accepted current-scene anchor should support the route-status answer sentence, not become a separate player-placement sentence when texture already opens the page.
+  - Plan:
+    - [x] Run GitNexus impact for route-status sentence-plan/page-owner symbols before editing.
+    - [x] Suppress standalone `context_anchor` for route-status event pages when route status owns the scene anchor.
+    - [x] Add focused narration test proving texture + route-status produces no standalone `You stand/You are at` sentence while preserving exact route label/status/scene material.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live route-check proof, GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `Is the route to Anchor Chain Pylon open?` has no standalone placement sentence.
+    - [x] Exact route label, accepted status, and scene anchor remain grounded in accepted evidence.
+    - [x] Narration adds no movement, arrival, safety, hidden-route, discovery, absence/no-change, item, NPC, or world-truth claim.
+  - Review:
+    - Executed: `establish_playable_context` no longer plans a standalone optional `context_anchor` sentence when the page core cue is `route_status`.
+    - Executed: focused route-status prompt test now proves textured route-status pages have only texture frame sentence `s1` and route-status core sentence `s2`.
+    - Verified: GitNexus impact before editing was LOW for `sentencePlanForMove`; direct caller `buildCleanNarrativePageTask`, process `runCleanNarration`.
+    - Verified: focused narration suite passed 115/115.
+    - Verified: expanded clean-runtime slice passed 386/386 across contracts, Stage4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Executed: diagnostic scan artifact `output/clean-runtime-p297-prose-gap-scan-20260614-211200` identified the live gap before the fix.
+    - Executed: accepted live proof artifact `output/clean-runtime-p297-route-status-context-live-20260614-211500` cloned `p69-item-transfer-045651`, ran `Is the route to Anchor Chain Pylon open?`, and stopped backend port 31771 after proof.
+    - Verified: accepted live narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From here, the path to Anchor Chain Pylon lies open.`
+    - Verified: live proof passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, `settlementKind=stage4_execution`, accepted `route_check_receipt`, legacy store counts 0, exact `route_label=Anchor Chain Pylon`, and `route_status=connected`.
+    - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 1 touched indexed symbol, 3 changed files, and 0 affected execution flows.

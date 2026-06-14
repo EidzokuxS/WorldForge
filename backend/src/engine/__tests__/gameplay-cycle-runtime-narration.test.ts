@@ -2312,8 +2312,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: ["m2"],
       frameMoveRefs: ["m1"],
-      coreSentenceRefs: ["s3"],
-      frameSentenceRefs: ["s1", "s2"],
+      coreSentenceRefs: ["s2"],
+      frameSentenceRefs: ["s1"],
       preferredFrameSentenceRefs: ["s1"],
       emphasis: "settled_turn_event",
       frameSelection: "prefer_texture_frame",
@@ -3085,6 +3085,8 @@ describe("clean Stage 6 narration contracts", () => {
   it("uses model-authored literary narration for route_status with snapshot context", async () => {
     const view = routeWithSceneFrameSnapshotView();
     const promptInput = buildCleanNarratorPromptInput(view);
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) => step.sentenceRole === "context_anchor"))
+      .toBe(false);
     const routeStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.beatObjective === "render_route_status"
     );

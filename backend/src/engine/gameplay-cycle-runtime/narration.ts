@@ -1595,6 +1595,7 @@ function sentencePlanForMove(
       if (
         !coreProseCues.includes("item_state")
         && !coreProseCues.includes("elapsed_time")
+        && !coreProseCues.includes("route_status")
         && !coreProseCues.includes("minor_poi_handle")
         && !suppressRouteOptionsContextAnchor
       ) {
