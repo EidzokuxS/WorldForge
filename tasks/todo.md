@@ -6942,3 +6942,21 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with no affected processes.
     - Executed: code commit `dedfdd5a` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P253 Stage 6 sentence flow cues:
+  - Plan:
+    - [x] Run GitNexus impact before editing sentence-plan builder and prompt wording.
+    - [x] Add typed `flowCue` data to `narrativePageTask.sentencePlan[]` describing page position, transition role, and player-facing effect.
+    - [x] Derive flow cues from ordered sentence roles, not prose text.
+    - [x] Keep flow cues advisory and truth-bounded through existing page arc, sentence refs, move refs, prose materials, and accepted evidence.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, and route-options expose coherent flow cues.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: each `narrativePageTask.sentencePlan[]` step now carries `flowCue` with page position, transition role, and reader effect.
+    - Executed: flow cues are derived from ordered sentence roles, producing single settled beats, opening context, continuation context, closing playable handles, and accepted clarification/question effects without prose scanning.
+    - Executed: system prompt now tells the narrator to use `flowCue` to connect sentence objects as opening, continuation, closing, or single-beat page flow.
+    - Executed: focused movement, dialogue-with-context, and route-options tests prove flow cue shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `38fcf23f` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
