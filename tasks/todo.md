@@ -6870,3 +6870,20 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `6b0cd08b` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P249 Stage 6 sentence-plan proof refs:
+  - Plan:
+    - [x] Run GitNexus impact before editing candidate validation and prompt wording.
+    - [x] Add `sentencePlanRefs` to each narration sentence so output can cite the intended sentence-object plan.
+    - [x] Enforce `sentencePlanRefs` structurally against `narrativePageTask.sentencePlan`: known refs, matching page move, entry refs, and preferred backend fact refs.
+    - [x] Update focused narration tests proving valid movement/route outputs cite sentence-plan refs and invalid refs/facts fail structurally.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `validateCleanNarrationCandidate` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: `CleanNarrationSentence` now carries `sentencePlanRefs`, and accepted-evidence sentences structurally cite the sentence-object plan when one exists.
+    - Executed: validation now checks sentence-plan refs against known sentence refs, matching page moves, sentence-plan entry refs, required sentence-plan coverage, and at least one preferred backend fact anchor.
+    - Executed: system prompt now tells the narrator to set `sentencePlanRefs` from `promptInput.narrativePageTask.sentencePlan[].sentenceRef`.
+    - Executed: focused route/page-plan tests prove valid `s1`/`s3` coverage and reject a sentence that cites route facts through the wrong sentence-plan ref.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope with no affected processes.
+    - Executed: code commit `fc2713e4` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
