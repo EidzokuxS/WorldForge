@@ -1374,6 +1374,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(handle?.backendFacts[0]?.value).toBe("Visible current-scene point marked: Tea Stall.");
     expect(handle?.backendFacts[1]?.value).toBe("Tea Stall");
     expect(handle?.backendFacts[2]?.value).toBe("stall");
+    expect(handle?.backendFacts[3]?.value).toBe("Market");
     expect(handle?.backendFacts[4]?.value).toBe("created");
     expect(handle?.limits.doesNotProve).toEqual(expect.arrayContaining([
       "services or inventory",

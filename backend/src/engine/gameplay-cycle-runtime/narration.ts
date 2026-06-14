@@ -3560,9 +3560,24 @@ function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
     "handle_result",
     "Minor-POI projection requires accepted Handle result value evidence.",
   );
-  if (result === "reused") return `${label} remains available here as a visible ${kind}.`;
-  if (result === "created") return `${label} is now available here as a visible ${kind}.`;
+  const scene = requireFactValueByRole(
+    evidence,
+    "current_scene_anchor",
+    "Minor-POI projection requires accepted Current scene anchor value evidence.",
+  );
+  if (result === "reused") return `At ${scene}, ${label} remains visible as a ${kind}.`;
+  if (result === "created") return `At ${scene}, ${label} is now visible as a ${kind}.`;
   throw new Error("Minor-POI projection requires accepted Handle result value evidence.");
+}
+
+function renderMinorPoiTurnProjection(
+  view: CleanNarratorView,
+  evidence: AcceptedNarrationEvidence,
+): string {
+  return [
+    renderSceneTextureProjection(view),
+    renderMinorPoiProjection(evidence),
+  ].filter((text): text is string => Boolean(text && normalizeText(text).length > 0)).join(" ");
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
@@ -3623,12 +3638,19 @@ function isStandaloneElapsedTimeView(view: CleanNarratorView): boolean {
     && !terminalEvidence[0]!.claimKinds.includes("player_location_change");
 }
 
+function isStandaloneMinorPoiView(view: CleanNarratorView): boolean {
+  const terminalEvidence = view.acceptedEvidence.filter(isLiteraryTerminalEvidence);
+  return terminalEvidence.length === 1
+    && terminalEvidence[0]!.claimKinds.includes("minor_poi_handle");
+}
+
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
     || evidence.claimKinds.includes("support_actor_materialization")
   ) || isStandalonePlayerLocalConditionView(view)
-    || isStandaloneElapsedTimeView(view);
+    || isStandaloneElapsedTimeView(view)
+    || isStandaloneMinorPoiView(view);
 }
 
 export function renderCleanAuthorityProjection(view: CleanNarratorView): string {
@@ -3747,7 +3769,7 @@ export function renderCleanAuthorityProjection(view: CleanNarratorView): string 
     evidence.claimKinds.includes("minor_poi_handle")
   );
   if (minorPoiHandle) {
-    return renderMinorPoiProjection(minorPoiHandle);
+    return renderMinorPoiTurnProjection(view, minorPoiHandle);
   }
 
   const supportActor = view.acceptedEvidence.find((evidence) =>

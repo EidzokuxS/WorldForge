@@ -8394,3 +8394,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Five minutes pass.`
     - Verified prose audit `output/clean-runtime-p312-elapsed-live-r2-20260615-020000/prose-audit.json`: one narrative, 22 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified implementation commit: `c34aab59` recorded the P312 code/tests/proof notes.
+
+- P313 Stage 6 standalone minor-POI owner:
+  - Diagnosis:
+    - [x] Fresh post-P312 context still shows the minor-POI probe rendering as model-shaped handle prose: `A tea stall near the walkway now marks a visible stall at Lowwater Bazaar.`
+    - [x] Root owner is split across settlement and Stage 6 routing: the receipt has accepted label/kind/result and scene-anchor text, but `current_scene_anchor` lacks a value and standalone `minor_poi_handle` still routes through model narration.
+  - Plan:
+    - [x] Run GitNexus impact for `stage4Evidence`, `renderMinorPoiProjection`, and `needsDeterministicAuthorityProjection` before editing.
+    - [x] Store accepted `current_scene_anchor` value on minor-POI evidence.
+    - [x] Route standalone `minor_poi_handle` terminal receipts through primary deterministic authority projection.
+    - [x] Render accepted scene texture plus ordinary scene-point prose from label/kind/result/scene anchor.
+    - [x] Keep composed minor-POI plus another terminal receipt on the model-authored route.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live minor-POI proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I mark a tea stall near the walkway as a place to meet.` settles through clean runtime and no longer renders `marks a visible stall`.
+    - [x] Final narration stays inside accepted scene texture plus accepted POI label/kind/result/scene anchor; no route truth, movement destination, service/business fact, sign text, discovery/search result, NPC truth, inventory, absence/no-change, private fact, or extra world truth.
+    - [x] The fix is a primary typed owner route, not a regex cleanup and not a gameplay fallback.
+  - Review:
+    - Executed: minor-POI settlement evidence now stores `current_scene_anchor` as a value-bearing backend fact, so Stage 6 can render the exact accepted scene token without parsing citation text.
+    - Executed: standalone `minor_poi_handle` receipts now use deterministic authority projection with accepted scene texture plus accepted label/kind/result/scene anchor.
+    - Executed: composed minor-POI plus another terminal receipt remains model-authored, so deterministic projection cannot drop another accepted beat.
+    - Verified focused settlement/narration tests: 141/141 passed.
+    - Verified expanded clean-runtime slice: 391/391 passed across contracts, Stage 4, settlement, and narration.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p313-minor-poi-live-20260615-020500`: clean runtime settled one accepted `minor_poi_create` receipt, wrote one clean turn record, one clean Stage 4 receipt, one active minor POI row, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, and kept old saga/narrator/v2 stores at 0.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, tea stall is now visible as a stall.`
+    - Verified prose audit `output/clean-runtime-p313-minor-poi-live-20260615-020500/prose-audit.json`: one narrative, 30 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.

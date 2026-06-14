@@ -1407,7 +1407,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           fact(evidenceId, 1, "minor_poi_operation", operationText, operationText),
           fact(evidenceId, 2, "place_handle_label", `Scene point label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
           fact(evidenceId, 3, "place_handle_kind", `Scene point kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
-          fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`),
+          fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`, minorPoi.anchorSceneLabel),
           fact(evidenceId, 5, "handle_result", `Scene point result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
           fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene point for reference only; movement uses separate route evidence."),
         ],
