@@ -7634,3 +7634,34 @@ Session: `gm-v1-consequenc-slice`.
     - Proof: `output/clean-runtime-p284-support-role-context-proof/turn-001/result.json` was generated through current `buildCleanNarratorPromptInput` and `validateCleanNarrationCandidate`; support step carries `actor_presence_with_scene_role_context` and `actor_then_scene_with_role_context`.
     - Accepted proof narration: `Rain taps the brass gutters. Local Vendor takes a visible place at Market.`
     - Verified: prose audit passed with 1 result, 13 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+
+- P285 Stage 6 support-role repetition live proof:
+  - Diagnosis:
+    - [x] P283 proved live support+dialogue turns now split texture, support presence, and dialogue quote into separate beats.
+    - [x] P283 also exposed a prose polish defect: the support line repeated the role noun after the actor label (`A Local Vendor ... a vendor among the stalls`).
+    - [x] P284 changed the typed support-presence sentence contract so role is context, while synthetic proof accepted `Local Vendor takes a visible place at Market.` without duplicate role phrasing.
+  - Plan:
+    - [x] Start an isolated clean-runtime backend on a fresh port and record logs under a P285 proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Run the same live action: `I ask a local vendor what changed today.`
+    - [x] Verify SSE runtime, accepted support actor receipt, accepted dialogue receipt, refreshed-frame dialogue boundary, actor persistence/visibility, old-store counts, Brass Tube custody, and player-facing narrative.
+    - [x] Confirm the support-presence segment no longer repeats the role noun as `as a vendor` or `a vendor among...`.
+    - [x] Run prose audit on the P285 proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] If proof exposes a root prose/truth gap, run GitNexus impact for the owner symbols before editing; otherwise record proof results and commit/push/index the journal.
+  - Success criteria:
+    - [x] Live narration keeps texture, support presence, and dialogue as separate playable beats.
+    - [x] The exact accepted quote appears verbatim.
+    - [x] The support-presence beat uses actor label and scene anchor without duplicate role phrasing.
+    - [x] No support-presence prose adds service/setup/trade/work/dialogue/relationship/private knowledge/movement/absence/no-change claims.
+  - Review:
+    - Executed: first P285 attempt under `output/clean-runtime-p285-support-role-live-20260614-151338` was invalid as clean-runtime evidence because the backend was started without `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true`; it produced old `/action` events, `settled_turn_packets=1`, `narrator_attempts=1`, and no clean Stage 4 receipts.
+    - Executed: reran the same proof on an isolated clean backend on port `31749` with `WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN=true` and `WORLDFORGE_GAMEPLAY_CYCLE_V2=false`; artifacts are under `output/clean-runtime-p285-support-role-live-clean-20260614-152015`.
+    - Executed: fresh clean-start clone `clean-runtime-p285-support-role-live-clean-20260614-152015` was created from `p69-item-transfer-045651`, loaded through the clean backend, and then used for the live action `I ask a local vendor what changed today.`
+    - Verified: SSE `done` reported `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, clean record +1, Stage 4 receipts +2, authority trace +1, worldVersion `0 -> 1`, world time/current tick `0/0`, and old v2/saga/narrator/oracle/simulation stores all 0.
+    - Verified: accepted receipts were `support_actor_create` followed by `dialogue_record`; the dialogue receipt used a refreshed frame with base worldVersion 1 and preserved the exact quoted speech in the final narration.
+    - Verified: `Local Vendor` persisted into the post-turn frame beside `Guide`; `Brass Tube` custody stayed with `Mira Voss` as `carried`.
+    - Verified: live player-facing narration split texture, support presence, and quote beats: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. A Local Vendor takes a place in view at Lowwater Bazaar. Local Vendor says: "What changed today? Word is the auditors sent a sealed tube down the chain before midday — first official courier run in months. Beyond that, the usual: more foot traffic than yesterday, and the dam road's been quieter since the last tremor."`
+    - Verified: `db-proof.json` passed with no issues; `supportSegment` was `Local Vendor takes a place in view at Lowwater Bazaar. Local Vendor says: "` and `duplicateRoleTerms` was empty.
+    - Verified: prose audit passed after adding the audit-compatible `turn-001/result.json`; total 1 result, 73 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+    - Executed: clean backend process and port owner were stopped; port `31749` returned free.
