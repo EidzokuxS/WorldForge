@@ -7206,3 +7206,22 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus impact for page-task and story-page helpers was LOW; all-scope/staged `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
     - Executed: code commit `919f4850` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P267 Stage 6 known internal token leak contract:
+  - Plan:
+    - [x] Run GitNexus impact before editing Stage 6 validation/helpers.
+    - [x] Replace regex-based backend/old-runtime leak detection with exact known internal tokens derived from `CleanNarratorView` and prompt-owned citation ids.
+    - [x] Remove local regex whitespace/period normalization in `narration.ts` where simple string operations preserve the same behavior.
+    - [x] Update focused narration tests to prove exact prompt-owned internal token leaks are rejected and unrelated text is not guessed by masks.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: removed the remaining regex-based backend/old-runtime leak masks from Stage 6 narration validation.
+    - Executed: `leakageIssues` now rejects only exact prompt-owned internal tokens such as packet/campaign/turn ids, prompt/task version ids, backend fact refs, and audit step ids; private sidecar terms remain exact sidecar-token checks.
+    - Executed: replaced local regex whitespace normalization and trailing-period trimming in `narration.ts` with explicit string operations.
+    - Verified: `rg -n "= /|\\.test\\(|replace\\(/" backend/src/engine/gameplay-cycle-runtime/narration.ts` returned no matches.
+    - Verified: focused narration suite passed 102/102.
+    - Verified: expanded clean-runtime suite passed 370/370 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Reviewed: GitNexus `detect_changes` reported HIGH because it mapped `normalizeText` to `renderCleanAuthorityProjection` and line-shift/touched symbols to `runCleanNarration`; diff/context review showed real edits limited to leak validation, text normalization, and tests, with both affected flows covered by the executed suites.
+    - Executed: code commit `d5d97e90` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
