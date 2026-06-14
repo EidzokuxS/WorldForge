@@ -7891,7 +7891,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Update focused narration tests so route-options without accepted cost text is rejected and route-options with shared cost text is accepted.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live route-options proof, and prose audit.
     - [x] Run GitNexus scope before commit.
-    - [ ] Commit/push/index.
+    - [x] Commit/push/index.
   - Success criteria:
     - [x] Live `What routes can I take from here?` settles through clean runtime with no restore.
     - [x] Exact route labels and accepted shared cost `1 minute` remain present.
@@ -7911,3 +7911,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: rebuilt choice presentation carried `sourceSentenceRefs=["s2"]`, `choiceCount=8`, `sharedCostText="1 minute"`, `sharedCostFactRef="e7.f6"`, and `costHandling="preserve_shared_cost"`.
     - Verified: prose audit passed for the live artifact with 1 narrative, 52 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
     - Verified: GitNexus all-scope `detect_changes` reported MEDIUM risk, 6 touched indexed symbols, 4 changed files, and 5 affected clean narration/projection execution flows.
+    - Executed: committed and pushed `481c6143 Preserve route option shared costs`, then refreshed GitNexus with `npx gitnexus analyze --embeddings`.
