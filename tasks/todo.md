@@ -7186,3 +7186,23 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` was LOW; all-scope/staged `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
     - Executed: code commit `4a5eb004` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P266 Stage 6 page variation plan:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Add page-level `pageVariation` to `narrativePageTask`.
+    - [x] Derive opening rotation, cadence target, diction palette, and variation boundary from `pagePerformance` plus sentence roles/materials.
+    - [x] Teach the prompt to use `pageVariation` for varied text-RPG page rhythm without adding facts.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added page-level `pageVariation` with opening rotation, cadence target, diction palette, and a literal syntax-only variation boundary.
+    - Executed: derived page variation from `pagePerformance`, sentence roles, and typed prose materials so prose variety is a page-plan concern rather than generated-text policing.
+    - Executed: promoted audit-only pages to explicit typed page arc/performance/variation values instead of letting them inherit a settled-result page shape.
+    - Executed: Stage 6 prompt now tells the narrator to use `pageVariation` for varied text-RPG syntax, cadence, and diction while staying inside cited `proseMaterials`.
+    - Verified: focused narration suite passed 100/100 after the audit-only page correction.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus impact for page-task and story-page helpers was LOW; all-scope/staged `detect_changes` reported MEDIUM scope limited to `runCleanNarration` page-task flows.
+    - Executed: code commit `919f4850` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
