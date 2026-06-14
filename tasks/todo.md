@@ -7129,3 +7129,22 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `git diff --check` passed.
     - Verified: GitNexus impact for `sentencePlanForMove` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
     - Executed: code commit `eb729a81` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
+
+- P263 Stage 6 prose assembly weave order:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Extend sentence-level `proseAssembly` with typed `materialWeaveOrder`.
+    - [x] Derive weave order from sentence role, beat objective, prose materials, and material obligations.
+    - [x] Teach the prompt to use `materialWeaveOrder` with `materialObligations` when phrasing accepted materials.
+    - [x] Update focused narration tests proving movement, dialogue/context, route options, and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: extended sentence-level `proseAssembly` with `materialWeaveOrder` so the narrator receives typed material ordering for question, texture, scene anchor, result, quote, and choice sentences.
+    - Executed: derived weave order from sentence role, beat objective, `proseMaterials`, and `materialObligations`; no prose-string policing, regex gates, or gameplay substitutions were added.
+    - Executed: Stage 6 prompt now tells the narrator to use `materialWeaveOrder` as part of the sentence construction contract while keeping refs unchanged.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus impact for `sentencePlanProseAssembly` and `buildCleanNarrationSystemPrompt` was LOW; all-scope and staged `detect_changes` reported LOW scope and 0 affected execution flows.
+    - Executed: code commit `de800886` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
