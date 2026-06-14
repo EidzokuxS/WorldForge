@@ -7879,3 +7879,35 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: rebuilt prompt input carried local-observation preferred refs `["e7.f4","e7.f6"]`, prose materials `label_anchor` and `scene_anchor`, and proseAssembly `local_observation_line` / `observed_labels_then_scene`.
     - Verified: prose audit passed for the live artifact with 1 narrative, 28 words, zero one-token output, zero list-like starts, and zero hits.
     - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 9 touched indexed symbols, 5 changed files, and 0 affected execution flows.
+
+- P293 Stage 6 route-options shared-cost proof text:
+  - Diagnosis:
+    - [x] Fresh probe batch `output/clean-runtime-p293-prose-gap-probes-20260614-192516` showed `What routes can I take from here?` restores the turn before response.
+    - [x] Runtime log root cause: `CleanNarrationValidationError: Route-choice narration must preserve accepted route cost 1 minute.`
+    - [x] Route mechanics and receipt ownership are not the failing layer; Stage 6 route-choice task data exposes per-route cost material but not a compact shared-cost field, so the model can satisfy label refs while omitting the accepted shared cost.
+  - Plan:
+    - [x] Run GitNexus impact for route-choice presentation/prompt/repair/validation owner symbols before editing.
+    - [x] Add compact shared route-cost fields to typed `choicePresentation` and prompt/repair feedback.
+    - [x] Update focused narration tests so route-options without accepted cost text is rejected and route-options with shared cost text is accepted.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live route-options proof, and prose audit.
+    - [x] Run GitNexus scope before commit.
+    - [ ] Commit/push/index.
+  - Success criteria:
+    - [x] Live `What routes can I take from here?` settles through clean runtime with no restore.
+    - [x] Exact route labels and accepted shared cost `1 minute` remain present.
+    - [x] No movement, arrival, route safety, hidden-route, no-change, player posture, or current-scene change is added.
+  - Review:
+    - Executed: `choicePresentation` now exposes `sharedCostText` and `sharedCostFactRef` when every accepted route choice has the same compact cost.
+    - Executed: route-choice prompt and validation retry feedback name `sharedCostText` as the exact material for `costHandling=preserve_shared_cost`.
+    - Executed: route-options receipt pages suppress the standalone scene-anchor sentence only when the route option comes from a turn-event receipt; direct-scene snapshots keep their scene-anchor contract.
+    - Verified: focused narration suite passed 114/114.
+    - Verified: expanded clean-runtime suite passed 382/382 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only existing LF/CRLF warnings.
+    - Executed: diagnostic artifact `output/clean-runtime-p293-route-options-live-fixed-20260614-194600` intentionally failed proof because backend was started without clean runtime flags, proving the harness catches legacy `/action` stores and dry route prose.
+    - Executed: accepted live proof artifact `output/clean-runtime-p293-route-options-live-clean-20260614-195200` cloned `p69-item-transfer-045651`, ran `What routes can I take from here?`, and stopped backend port `31762` after proof.
+    - Verified: live narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.`
+    - Verified: live proof passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `route_options` receipt, clean record +1, Stage 4 receipt +1, authority traces +0, clock ledger +0, worldVersion/time/tick unchanged, and old runtime stores at 0.
+    - Verified: rebuilt choice presentation carried `sourceSentenceRefs=["s2"]`, `choiceCount=8`, `sharedCostText="1 minute"`, `sharedCostFactRef="e7.f6"`, and `costHandling="preserve_shared_cost"`.
+    - Verified: prose audit passed for the live artifact with 1 narrative, 52 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+    - Verified: GitNexus all-scope `detect_changes` reported MEDIUM risk, 6 touched indexed symbols, 4 changed files, and 5 affected clean narration/projection execution flows.

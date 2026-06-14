@@ -1487,6 +1487,7 @@ function sentencePlanForMove(
   claimKindsByFactRef: Map<string, CleanNarrationClaimKind[]>,
   entryRefsByFactRef: Map<string, string[]>,
   coreProseCues: readonly CleanNarratorProseCue[],
+  suppressRouteOptionsContextAnchor: boolean,
 ): CleanNarratorSentencePlanDraft[] {
   const steps: CleanNarratorSentencePlanDraft[] = [];
   const pushPlan = (
@@ -1537,7 +1538,11 @@ function sentencePlanForMove(
       break;
     case "establish_playable_context":
       pushPlan("exact_context_texture", move.coverage, selectFrameTextureFactRefs(move, coreProseCues));
-      if (!coreProseCues.includes("item_state") && !coreProseCues.includes("elapsed_time")) {
+      if (
+        !coreProseCues.includes("item_state")
+        && !coreProseCues.includes("elapsed_time")
+        && !suppressRouteOptionsContextAnchor
+      ) {
         pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
       }
       break;
@@ -2157,6 +2162,8 @@ function buildCleanChoicePresentation(
       sourceSentenceRefs: [],
       choices: [],
       choiceCount: 0,
+      sharedCostText: null,
+      sharedCostFactRef: null,
       anchorFactRefs: [],
       anchorStyle: "choice_labels_only",
       labelHandling: "preserve_route_labels_verbatim",
@@ -2186,12 +2193,17 @@ function buildCleanChoicePresentation(
     };
   });
   const mode = choicePresentationMode(choices.length);
+  const choiceCosts = choices.map((choice) => choice.costText).filter((cost): cost is string => cost !== null);
+  const sharedCosts = choiceCosts.length === choices.length ? uniqueStrings(choiceCosts) : [];
+  const sharedCostText = sharedCosts.length === 1 ? sharedCosts[0]! : null;
   return {
     mode,
     sourceMoveRefs,
     sourceSentenceRefs,
     choices,
     choiceCount: choices.length,
+    sharedCostText,
+    sharedCostFactRef: sharedCostText && costFact ? costFact.factRef : null,
     anchorFactRefs: originFact?.value ? [originFact.factRef] : [],
     anchorStyle: originFact?.value ? "route_origin_place_label" : "choice_labels_only",
     labelHandling: "preserve_route_labels_verbatim",
@@ -2276,6 +2288,9 @@ function buildCleanNarrativePageTask(
   const coreProseCues = uniqueStrings(moves
     .filter((move) => move.coverage === "required")
     .flatMap((move) => move.entryProseCues)) as CleanNarratorProseCue[];
+  const hasRouteOptionsTurnEvent = storyFrame.turnEvents.some((entry) => entry.proseCue === "route_options");
+  const suppressRouteOptionsContextAnchor = hasRouteOptionsTurnEvent
+    && coreProseCues.includes("route_options");
   for (const move of moves) {
     sentencePlanDrafts.push(...sentencePlanForMove(
       move,
@@ -2284,6 +2299,7 @@ function buildCleanNarrativePageTask(
       claimKindsByFactRef,
       entryRefsByFactRef,
       coreProseCues,
+      suppressRouteOptionsContextAnchor,
     ));
   }
   const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
@@ -2430,7 +2446,7 @@ export function buildCleanNarrationSystemPrompt(
     "Page performance: promptInput.narrativePageTask.pagePerformance names openingBeat, pageMotion, continuityMaterial, closingBeat, and readerHandoff. Use it to connect sentencePlan steps into one text-RPG page: start from the opening material, carry continuity material through the page motion, and land the reader handoff while preserving sentence refs and evidence refs.",
     "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, cadenceTarget, dictionPalette, and variationBoundary. Use it to vary syntax, cadence, and RPG diction across pages while staying inside cited proseMaterials; variationBoundary=vary_syntax_only_inside_cited_material means style changes the phrasing path, not the facts.",
     "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs, frameMoveRefs/frameSentenceRefs, preferredFrameSentenceRefs, emphasis, frameSelection, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. When preferredFrameSentenceRefs is nonempty, use those frame sentence refs before the core; other frame refs are support material and may be omitted. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
-    "Choice presentation: promptInput.narrativePageTask.choicePresentation names sourceMoveRefs/sourceSentenceRefs, exact route choices, anchorStyle, cost handling, closingStyle, and readerHandoff for playable route-choice pages. Use choices as scene exits the reader can choose from accepted route evidence: preserve route labels verbatim, mention shared or per-route costs only when present in choicePresentation, anchor through route origin as a place label when anchorStyle=route_origin_place_label, reserve posture verbs for cited player_local_condition evidence, and close as an adventure handoff with the named exits carrying the next move.",
+    "Choice presentation: promptInput.narrativePageTask.choicePresentation names sourceMoveRefs/sourceSentenceRefs, exact route choices, sharedCostText/sharedCostFactRef, anchorStyle, cost handling, closingStyle, and readerHandoff for playable route-choice pages. Use choices as scene exits the reader can choose from accepted route evidence: preserve route labels verbatim; when costHandling=preserve_shared_cost, include sharedCostText exactly once in the route-choice sentence, such as 'each takes <sharedCostText>' or 'each <sharedCostText> away'; when costHandling=preserve_per_route_costs, include each choice costText beside its label; anchor through route origin as a place label when anchorStyle=route_origin_place_label; reserve posture verbs for cited player_local_condition evidence; close as an adventure handoff with the named exits carrying the next move.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",
@@ -2866,7 +2882,7 @@ function summarizeNarrationValidationIssues(issues: readonly CleanNarrationValid
 }
 
 function narrationValidationRepairLines(
-  _view: CleanNarratorView,
+  view: CleanNarratorView,
   issues: readonly CleanNarrationValidationIssue[],
 ): string[] {
   const lines: string[] = [];
@@ -2879,11 +2895,16 @@ function narrationValidationRepairLines(
     || issue.code === "page_move_not_supported"
     || issue.code === "sentence_plan_not_supported"
   )) {
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const choicePresentation = promptInput.narrativePageTask.choicePresentation;
     lines.push("Use only refs that appear in promptInput.acceptedEvidence, promptInput.narrativePageTask.moves, and promptInput.narrativePageTask.sentencePlan.");
     lines.push("Each accepted_evidence sentence must cite matching evidenceRefs, backendFactRefs, claimKinds, pageMoveRefs, and sentencePlanRefs from the same page-task step.");
     lines.push("Set sentence claimKinds from claimFocus.primaryClaimKinds on the cited sentencePlanRefs; cite multiple sentencePlanRefs only when one sentence combines their planned roles.");
     lines.push("Set backendFactRefs from materialObligations.allowedMaterialFactRefs on the cited sentencePlanRefs and include at least one coreMaterialFactRefs value.");
     lines.push("Cover every required moveRef and sentenceRef from promptInput.narrativePageTask.storyPageBrief.");
+    if (choicePresentation.costHandling === "preserve_shared_cost" && choicePresentation.sharedCostText) {
+      lines.push(`For the route-choice sentence, include the exact sharedCostText ${choicePresentation.sharedCostText} from promptInput.narrativePageTask.choicePresentation.`);
+    }
   }
   if (issues.some((issue) => issue.code === "text_mismatch")) {
     lines.push("Set finalText to the sentence texts joined with one space.");

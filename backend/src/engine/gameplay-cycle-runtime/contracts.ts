@@ -3016,6 +3016,8 @@ const cleanNarratorChoicePresentationSchema = z.object({
     costFactRef: shortText.nullable(),
   }).strict()).max(24),
   choiceCount: z.number().int().min(0).max(24),
+  sharedCostText: shortText.nullable(),
+  sharedCostFactRef: shortText.nullable(),
   anchorFactRefs: z.array(shortText).max(4),
   anchorStyle: z.enum([
     "choice_labels_only",

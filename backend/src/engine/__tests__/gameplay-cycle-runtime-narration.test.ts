@@ -1518,6 +1518,8 @@ describe("clean Stage 6 narration contracts", () => {
         sourceSentenceRefs: [],
         choices: [],
         choiceCount: 0,
+        sharedCostText: null,
+        sharedCostFactRef: null,
         anchorFactRefs: [],
         anchorStyle: "choice_labels_only",
         labelHandling: "preserve_route_labels_verbatim",
@@ -1983,8 +1985,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: ["m2"],
       frameMoveRefs: ["m1"],
-      coreSentenceRefs: ["s3"],
-      frameSentenceRefs: ["s1", "s2"],
+      coreSentenceRefs: ["s2"],
+      frameSentenceRefs: ["s1"],
       preferredFrameSentenceRefs: ["s1"],
       emphasis: "playable_next_action",
       frameSelection: "prefer_texture_frame",
@@ -1994,7 +1996,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.narrativePageTask.choicePresentation).toEqual({
       mode: "single_route",
       sourceMoveRefs: ["m2"],
-      sourceSentenceRefs: ["s3"],
+      sourceSentenceRefs: ["s2"],
       choices: [{
         label: "North Hall",
         labelFactRef: "e1.f4",
@@ -2002,6 +2004,8 @@ describe("clean Stage 6 narration contracts", () => {
         costFactRef: "e1.f6",
       }],
       choiceCount: 1,
+      sharedCostText: "1 minute",
+      sharedCostFactRef: "e1.f6",
       anchorFactRefs: ["e1.f2"],
       anchorStyle: "route_origin_place_label",
       labelHandling: "preserve_route_labels_verbatim",
@@ -2018,8 +2022,8 @@ describe("clean Stage 6 narration contracts", () => {
       closingInstruction: "close_on_playable_handle",
       requiredMoveRefs: ["m2"],
       optionalMoveRefs: ["m1"],
-      requiredSentenceRefs: ["s3"],
-      optionalSentenceRefs: ["s1", "s2"],
+      requiredSentenceRefs: ["s2"],
+      optionalSentenceRefs: ["s1"],
     });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
@@ -2130,81 +2134,6 @@ describe("clean Stage 6 narration contracts", () => {
       },
       {
         sentenceRef: "s2",
-        moveRef: "m1",
-        sentenceRole: "context_anchor",
-        coverage: "optional",
-        entryRefs: ["e3"],
-        preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
-        claimFocus: {
-          primaryClaimKinds: ["current_scene", "current_location"],
-          supportingClaimKinds: ["scene_texture"],
-          citationMode: "primary_claims_of_cited_sentence_plan_refs",
-        },
-        beatObjective: "place_current_scene",
-        proseMaterials: [
-          {
-            factRef: "e3.f1",
-            proseUse: "scene_anchor",
-            materialText: "You are at Market.",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-          {
-            factRef: "e3.f2",
-            proseUse: "scene_anchor",
-            materialText: "Market",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-          {
-            factRef: "e3.f3",
-            proseUse: "scene_anchor",
-            materialText: "Market",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-        ],
-        materialObligations: {
-          allowedMaterialFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
-          coreMaterialFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
-          exactCopyFactRefs: [],
-          preserveTokenFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
-          phraseFromMaterialFactRefs: [],
-          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
-        },
-        textureCue: {
-          mode: "omit_texture_in_this_sentence",
-          playerFacingUse: "none",
-          allowedTextureFactRefs: [],
-        },
-        adventureCue: {
-          subjectFocus: "player_scene_position",
-          verbFrame: "place_player_in_scene",
-          detailPalette: ["accepted_labels"],
-        },
-        proseAssembly: {
-          perspective: "second_person_present",
-          sentenceShape: "scene_anchor_line",
-          openingSource: "preserved_label_anchor",
-          verbEnergy: "concrete_present",
-          detailRhythm: "scene_anchor_tokens",
-          materialWeaveOrder: "scene_anchor_only",
-          styleBudget: "scene_anchor_cadence",
-          closingFunction: "orient_context",
-        },
-        literaryCue: {
-          renderShape: "place_player_in_context",
-          cadence: "compact_present_beat",
-          styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
-        },
-        flowCue: {
-          pagePosition: "continuation",
-          transitionRole: "context_setup",
-          readerEffect: "carry_forward_context",
-        },
-      },
-      {
-        sentenceRef: "s3",
         moveRef: "m2",
         sentenceRole: "next_action_handle",
         coverage: "required",
@@ -2324,6 +2253,8 @@ describe("clean Stage 6 narration contracts", () => {
         costFactRef: "e1.f6",
       })),
       choiceCount: 8,
+      sharedCostText: "1 minute",
+      sharedCostFactRef: "e1.f6",
       anchorFactRefs: ["e1.f2"],
       anchorStyle: "route_origin_place_label",
       labelHandling: "preserve_route_labels_verbatim",
@@ -2370,7 +2301,7 @@ describe("clean Stage 6 narration contracts", () => {
       },
     ]);
     expect(validCandidate.sentences.map((sentence) => sentence.pageMoveRefs)).toEqual([["m1"], ["m2"]]);
-    expect(validCandidate.sentences.map((sentence) => sentence.sentencePlanRefs)).toEqual([["s1"], ["s3"]]);
+    expect(validCandidate.sentences.map((sentence) => sentence.sentencePlanRefs)).toEqual([["s1"], ["s2"]]);
     expect(validateCleanNarrationCandidate({ view, candidate: validCandidate }).status).toBe("accepted");
 
     const wrongMove = validateCleanNarrationCandidate({
@@ -3747,6 +3678,33 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
+  it("preserves route-options shared route cost in validation retry feedback", async () => {
+    const view = routeOptionsManyView();
+    const prompts: string[] = [];
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async ({ prompt }) => {
+        prompts.push(prompt);
+        return acceptedCandidate(view, [{
+          text: prompts.length === 1
+            ? "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose."
+            : "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
+          claimKinds: ["movement_option"],
+        }]);
+      },
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("sharedCostText 1 minute");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe(
+      "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+    );
+  });
+
   it("uses model-authored route-options prose when accepted scene_texture is available", async () => {
     const view = routeOptionsWithSceneTextureView();
     const result = await runCleanNarration({
@@ -4089,7 +4047,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose.",
+          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f2", "e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4098,13 +4056,13 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
 
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose.",
+        text: "At Market, Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.",
         evidenceRefs: ["e1", "e2", "e3", "e4"],
         backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f2", "e4.f3", "e4.f4"],
         claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
