@@ -8186,7 +8186,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Change item custody sentence-plan assembly so endpoint labels/state drive prose while custody facts prove the transfer.
     - [x] Update focused narration tests for endpoint-driven item custody prose.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live item-transfer proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] Live item transfer settles through clean runtime and reads as an item custody scene beat driven by custody endpoints.
     - [x] Exact item, source, target, final equip state, and scene anchor remain preserved.
@@ -8200,3 +8200,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prompt contract: item_state prompt facts include `settled_custody`, `custody_change`, `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`; sentence plan prefers endpoint/state/scene refs before custody proof and uses `item_source_target_state_scene_then_custody_proof`.
     - Verified prose audit `output/clean-runtime-p305-item-transfer-endpoint-live-20260614-234006/prose-audit.json`: one narrative, 31 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope summary, 5 touched narration symbols, 4 changed files, and no affected processes.
+    - Verified commit/push/index: code commit `b40d575d` pushed to `develop`, then `npx gitnexus analyze --embeddings` completed successfully.
