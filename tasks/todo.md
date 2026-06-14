@@ -6803,3 +6803,20 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 99 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported LOW scope and affected processes 0.
     - Executed: code commit `0fa81d7c` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P245 Stage 6 sentence page-move proof contract:
+  - Plan:
+    - [x] Run GitNexus impact before editing page task builder, candidate contract checker, and system prompt wording.
+    - [x] Give every `narrativePageTask.moves[]` entry a stable `moveRef`.
+    - [x] Add sentence-level `pageMoveRefs` to `CleanNarrationCandidate` so model output proves which writer move each accepted sentence covers.
+    - [x] Check `pageMoveRefs` structurally against page task moves, entry refs, and allowed backend fact refs, with no prose text scanning.
+    - [x] Update focused narration tests proving valid movement/route candidates cite page moves and unsupported page-move refs fail.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask`, `validateCleanNarrationCandidate`, and `buildCleanNarrationSystemPrompt` reported LOW scope; `CleanNarrationValidationIssue` impact reported LOW.
+    - Executed: `narrativePageTask.moves[]` now carries `moveRef` and `coverage`, with context moves optional and authoritative turn/route-only moves required.
+    - Executed: `CleanNarrationCandidate.sentences[]` now carries `pageMoveRefs`; accepted evidence sentences are checked against page task entry refs and allowed backend fact refs instead of prose text.
+    - Executed: route/page-move tests prove valid `m1`/`m2` coverage and reject a sentence that cites route facts through a context move.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `d24110f8` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
