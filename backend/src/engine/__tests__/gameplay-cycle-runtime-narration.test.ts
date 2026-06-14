@@ -1401,6 +1401,14 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+          coreMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+          exactCopyFactRefs: [],
+          preserveTokenFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          phraseFromMaterialFactRefs: ["e1.f1"],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
@@ -1545,6 +1553,14 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+          coreMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+          exactCopyFactRefs: [],
+          preserveTokenFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+          phraseFromMaterialFactRefs: [],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
@@ -1572,7 +1588,7 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceRole: "turn_event_beat",
         coverage: "required",
         entryRefs: ["e5"],
-        preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+        preferredBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
         claimFocus: {
           primaryClaimKinds: ["dialogue_response"],
           supportingClaimKinds: [],
@@ -1594,7 +1610,22 @@ describe("clean Stage 6 narration contracts", () => {
             materialTextSource: "accepted_value",
             copyMode: "copy_exact",
           },
+          {
+            factRef: "e5.f3",
+            proseUse: "supporting_detail",
+            materialText: "Dialogue summary: Guide says the north stairs flooded before dawn.",
+            materialTextSource: "accepted_text",
+            copyMode: "phrase_from_material",
+          },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+          coreMaterialFactRefs: ["e5.f1", "e5.f2"],
+          exactCopyFactRefs: ["e5.f2"],
+          preserveTokenFactRefs: ["e5.f1"],
+          phraseFromMaterialFactRefs: ["e5.f3"],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
@@ -1603,7 +1634,7 @@ describe("clean Stage 6 narration contracts", () => {
         adventureCue: {
           subjectFocus: "visible_speaker",
           verbFrame: "frame_exact_utterance",
-          detailPalette: ["accepted_labels", "accepted_quote"],
+          detailPalette: ["accepted_labels", "accepted_quote", "accepted_primary_beat"],
         },
         literaryCue: {
           renderShape: "frame_exact_quote",
@@ -1781,6 +1812,14 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "copy_exact",
           },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e2.f1", "e2.f2"],
+          coreMaterialFactRefs: ["e2.f1", "e2.f2"],
+          exactCopyFactRefs: ["e2.f1", "e2.f2"],
+          preserveTokenFactRefs: [],
+          phraseFromMaterialFactRefs: [],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "copy_exact_texture_sentence",
           playerFacingUse: "standalone_context_sentence",
@@ -1838,6 +1877,14 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+          coreMaterialFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+          exactCopyFactRefs: [],
+          preserveTokenFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+          phraseFromMaterialFactRefs: [],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
@@ -1865,7 +1912,7 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceRole: "next_action_handle",
         coverage: "required",
         entryRefs: ["e1"],
-        preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
         claimFocus: {
           primaryClaimKinds: ["movement_option"],
           supportingClaimKinds: [],
@@ -1879,6 +1926,13 @@ describe("clean Stage 6 narration contracts", () => {
             materialText: "From Market, visible route choices are North Hall (1 minute).",
             materialTextSource: "accepted_value",
             copyMode: "phrase_from_material",
+          },
+          {
+            factRef: "e1.f2",
+            proseUse: "scene_anchor",
+            materialText: "Market",
+            materialTextSource: "accepted_value",
+            copyMode: "preserve_token",
           },
           {
             factRef: "e1.f3",
@@ -1909,6 +1963,14 @@ describe("clean Stage 6 narration contracts", () => {
             copyMode: "preserve_token",
           },
         ],
+        materialObligations: {
+          allowedMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+          coreMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+          exactCopyFactRefs: [],
+          preserveTokenFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+          phraseFromMaterialFactRefs: ["e1.f1"],
+          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+        },
         textureCue: {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
@@ -1917,7 +1979,7 @@ describe("clean Stage 6 narration contracts", () => {
         adventureCue: {
           subjectFocus: "playable_route_choices",
           verbFrame: "offer_playable_choices",
-          detailPalette: ["accepted_primary_beat", "accepted_route_choices", "accepted_time"],
+          detailPalette: ["accepted_primary_beat", "accepted_labels", "accepted_route_choices", "accepted_time"],
         },
         literaryCue: {
           renderShape: "leave_playable_choice_handle",
@@ -2011,6 +2073,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(wrongClaimFocus.issues).toContainEqual(expect.objectContaining({
       code: "sentence_plan_not_supported",
       path: "sentences.0.claimKinds",
+    }));
+    expect(wrongClaimFocus.issues).toContainEqual(expect.objectContaining({
+      code: "sentence_plan_not_supported",
+      path: "sentences.0.backendFactRefs",
     }));
   });
 
@@ -4832,6 +4898,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Prose materials:");
     expect(buildCleanNarrationSystemPrompt()).toContain("proseMaterials");
     expect(buildCleanNarrationSystemPrompt()).toContain("copyMode");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Material obligations:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("allowedMaterialFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("coreMaterialFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("exactCopyFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserveTokenFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phraseFromMaterialFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Flow cues:");
     expect(buildCleanNarrationSystemPrompt()).toContain("flowCue.pagePosition");
     expect(buildCleanNarrationSystemPrompt()).toContain("Literary cues:");

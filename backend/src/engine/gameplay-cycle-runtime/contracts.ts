@@ -2585,6 +2585,14 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "preserve_token",
     ]),
   }).strict()).min(1).max(24),
+  materialObligations: z.object({
+    allowedMaterialFactRefs: z.array(shortText).min(1).max(24),
+    coreMaterialFactRefs: z.array(shortText).min(1).max(24),
+    exactCopyFactRefs: z.array(shortText).max(12),
+    preserveTokenFactRefs: z.array(shortText).max(16),
+    phraseFromMaterialFactRefs: z.array(shortText).max(16),
+    citationMode: z.literal("cite_only_material_fact_refs_from_cited_sentence_plan_refs"),
+  }).strict(),
   textureCue: z.object({
     mode: z.enum([
       "copy_exact_texture_sentence",

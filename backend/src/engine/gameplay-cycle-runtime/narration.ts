@@ -645,6 +645,29 @@ function sentencePlanProseMaterials(
   });
 }
 
+function sentencePlanMaterialObligations(
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["materialObligations"] {
+  const allowedMaterialFactRefs = proseMaterials.map((material) => material.factRef);
+  const coreMaterialFactRefs = proseMaterials
+    .filter((material) => material.proseUse !== "supporting_detail")
+    .map((material) => material.factRef);
+  return {
+    allowedMaterialFactRefs,
+    coreMaterialFactRefs: coreMaterialFactRefs.length > 0 ? coreMaterialFactRefs : allowedMaterialFactRefs,
+    exactCopyFactRefs: proseMaterials
+      .filter((material) => material.copyMode === "copy_exact")
+      .map((material) => material.factRef),
+    preserveTokenFactRefs: proseMaterials
+      .filter((material) => material.copyMode === "preserve_token")
+      .map((material) => material.factRef),
+    phraseFromMaterialFactRefs: proseMaterials
+      .filter((material) => material.copyMode === "phrase_from_material")
+      .map((material) => material.factRef),
+    citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
+  };
+}
+
 function sentencePlanClaimFocus(
   move: CleanNarratorPageTaskMove,
   preferredBackendFactRefs: string[],
@@ -868,6 +891,7 @@ function sentencePlanForMove(
       claimFocus: sentencePlanClaimFocus(move, preferredBackendFactRefs, claimKindsByEntryRef, claimKindsByFactRef),
       beatObjective: sentencePlanBeatObjective(move, sentenceRole),
       proseMaterials,
+      materialObligations: sentencePlanMaterialObligations(proseMaterials),
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
       adventureCue: sentencePlanAdventureCue(sentenceRole, proseMaterials),
       literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
@@ -889,14 +913,18 @@ function sentencePlanForMove(
         "state_value",
         "time_value",
         "label_anchor",
+        "scene_anchor",
+        "supporting_detail",
       ]));
       break;
     case "leave_playable_next_action_handle":
       pushPlan("next_action_handle", move.coverage, sentencePlanPreferredFactRefs(move, [
         "primary_beat",
+        "scene_anchor",
         "route_choice",
         "time_value",
         "label_anchor",
+        "supporting_detail",
       ]));
       break;
   }
@@ -1274,6 +1302,7 @@ export function buildCleanNarrationSystemPrompt(
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, textureCue to decide whether this sentence owns texture, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
     "Prose materials: each sentencePlan step includes proseMaterials derived from accepted backend facts. Use materialText as the sentence's concrete raw material, materialTextSource as provenance, proseUse as purpose, and copyMode to know whether to copy exact text, preserve a token, or phrase from the material. Do not use backend-style role labels as player-facing prose.",
+    "Material obligations: each sentencePlan step carries materialObligations. Cite backendFactRefs only from allowedMaterialFactRefs on the cited sentencePlanRefs, include at least one coreMaterialFactRefs value, copy exactCopyFactRefs materials exactly when used, preserve labels/time/state from preserveTokenFactRefs, and phrase phraseFromMaterialFactRefs into natural adventure prose.",
     "Flow cues: each sentencePlan step includes flowCue.pagePosition, flowCue.transitionRole, and flowCue.readerEffect. Use flowCue to connect sentence objects as opening, continuation, closing, or single-beat page flow while preserving the cited refs for every claim.",
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns public scene texture and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
@@ -1517,6 +1546,29 @@ export function validateCleanNarrationCandidate(input: {
           message: "Narration sentence must cite at least one preferred backend fact from its sentence-plan refs.",
         });
       }
+      const sentencePlanAllowedMaterialFactRefs = new Set(citedSentencePlans.flatMap((step) =>
+        step?.materialObligations.allowedMaterialFactRefs ?? []
+      ));
+      for (const factRef of sentence.backendFactRefs) {
+        if (sentencePlansByRef.size > 0 && sentencePlanAllowedMaterialFactRefs.size > 0 && !sentencePlanAllowedMaterialFactRefs.has(factRef)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.backendFactRefs`,
+            message: `Narration sentence cited backend fact ${factRef} outside its cited sentence-plan material obligations.`,
+          });
+        }
+      }
+      const sentencePlanCoreMaterialFactRefs = new Set(citedSentencePlans.flatMap((step) =>
+        step?.materialObligations.coreMaterialFactRefs ?? []
+      ));
+      const hasCoreMaterialFact = sentence.backendFactRefs.some((factRef) => sentencePlanCoreMaterialFactRefs.has(factRef));
+      if (sentencePlansByRef.size > 0 && sentencePlanCoreMaterialFactRefs.size > 0 && !hasCoreMaterialFact) {
+        issues.push({
+          code: "sentence_plan_not_supported",
+          path: `sentences.${index}.backendFactRefs`,
+          message: "Narration sentence must cite at least one core material backend fact from its cited sentence-plan refs.",
+        });
+      }
       const sentencePlanPrimaryClaimKinds = new Set(citedSentencePlans.flatMap((step) =>
         step?.claimFocus.primaryClaimKinds ?? []
       ));
@@ -1661,6 +1713,7 @@ function narrationValidationRepairLines(
     lines.push("Use only refs that appear in promptInput.acceptedEvidence, promptInput.narrativePageTask.moves, and promptInput.narrativePageTask.sentencePlan.");
     lines.push("Each accepted_evidence sentence must cite matching evidenceRefs, backendFactRefs, claimKinds, pageMoveRefs, and sentencePlanRefs from the same page-task step.");
     lines.push("Set sentence claimKinds from claimFocus.primaryClaimKinds on the cited sentencePlanRefs; cite multiple sentencePlanRefs only when one sentence combines their planned roles.");
+    lines.push("Set backendFactRefs from materialObligations.allowedMaterialFactRefs on the cited sentencePlanRefs and include at least one coreMaterialFactRefs value.");
     lines.push("Cover every required moveRef and sentenceRef from promptInput.narrativePageTask.storyPageBrief.");
   }
   if (issues.some((issue) => issue.code === "text_mismatch")) {
