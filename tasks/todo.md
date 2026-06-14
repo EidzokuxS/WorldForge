@@ -8024,3 +8024,29 @@ Session: `gm-v1-consequenc-slice`.
     - Live narrative: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You stand at Lowwater Bazaar. Among everything visible at Lowwater Bazaar, Violet Astrolabe does not appear.`
     - Verified GitNexus impact: `localObservationStoryBeat` LOW, `selectLocalObservationFactRefs` LOW.
     - Verified GitNexus all-scope `detect_changes`: LOW risk, 3 touched indexed symbols, 6 changed files, 0 affected execution flows.
+
+- P299 Stage 4 support-actor presence prose:
+  - Diagnosis:
+    - [x] Fresh gap scan still shows support-actor narration as a dry presence report: `At Lowwater Bazaar, Local Dockhand is visible beside a mooring line or rail, in plain local clothes.`
+    - [x] Root owner is Stage 4 public presentation: support-actor visible cues are born as `is visible ...` changelog phrases before Stage 6 sees them.
+  - Plan:
+    - [x] Use the existing GitNexus LOW impact result for `renderSupportActorPublicPresentation` before editing.
+    - [x] Change support-actor visible cue rendering to use bounded posture/presence verbs from the accepted cue profile.
+    - [x] Update focused Stage 4, Settlement, and Narration tests to prove the new typed cue/presence wording.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live support-actor proof, prose audit, and GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I flag down a dockhand.` settles through clean runtime with no restore.
+    - [x] The narrative centers the support actor as a current-scene person with a bounded visible posture/detail, not a surface-status report.
+    - [x] Narration adds no dialogue, services, trade/work behavior, item state, route truth, movement, absence, or no-change.
+  - Review:
+    - Changed `renderSupportActorPublicPresentation` so accepted visible cue profiles render bounded verbs such as `stands`, `waits in place`, `leans in a relaxed posture`, and `sits at rest` instead of pre-baked `is visible ...` status text.
+    - Verified focused Stage 4 + Settlement + Narration tests: 177/177 passed.
+    - Verified expanded clean-runtime slice: 386/386 passed across contracts, Stage 4, settlement, and narration.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live artifact `output/clean-runtime-p299-support-actor-presence-live-clean-20260614-215500`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, accepted `support_actor_create`, support NPC persisted in the player's exact current scene, and legacy runtime stores all stayed 0.
+    - Live narrative: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Dockhand stands beside a mooring line or rail, in plain local clothes.`
+    - Verified prose audit `output/clean-runtime-p299-support-actor-presence-live-clean-20260614-215500/prose-audit.json`: one narrative, 35 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+    - Diagnostic note: `output/clean-runtime-p299-support-actor-presence-live-clean-20260614-214800` proved the runtime behavior but failed a stale harness assertion that expected a hard-coded fixture location id; the accepted proof uses the authoritative player scene id from the cloned DB.
+    - Verified GitNexus impact for `renderSupportActorPublicPresentation`: LOW risk, direct callers `supportActorMaterializationResult` and `executeSupportActorCreate`, affected processes `executeSupportActorCreate` and `runCleanStage4Execution`.
+    - Verified GitNexus all-scope `detect_changes`: LOW risk, 1 touched indexed symbol, 5 changed files, 0 affected execution flows.

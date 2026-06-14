@@ -2202,12 +2202,12 @@ const SUPPORT_CUE_PLACEMENTS: Record<SupportActorVisibleCueProfile["placement"],
 };
 
 const SUPPORT_CUE_BEARINGS: Record<SupportActorVisibleCueProfile["bearing"], string> = {
-  hands_resting_visible: "is visible with both hands in sight",
-  leaning_in_view: "is visible in a relaxed posture",
-  seated_in_view: "is visible at rest",
-  standing_in_view: "is visible",
-  waiting_in_view: "is visible in place",
-  watching_the_scene: "is visible with attention on the scene",
+  hands_resting_visible: "keeps both hands in sight",
+  leaning_in_view: "leans in a relaxed posture",
+  seated_in_view: "sits at rest",
+  standing_in_view: "stands",
+  waiting_in_view: "waits in place",
+  watching_the_scene: "looks on",
 };
 
 const SUPPORT_CUE_DETAILS: Record<NonNullable<SupportActorVisibleCueProfile["detail"]>, string> = {
@@ -2229,7 +2229,7 @@ function renderSupportActorPublicPresentation(input: {
   const bearing = SUPPORT_CUE_BEARINGS[input.profile.bearing];
   const detail = input.profile.detail ? `, ${SUPPORT_CUE_DETAILS[input.profile.detail]}` : "";
   return {
-    publicSummary: `An ordinary local ${input.roleLabel} is visible ${placement} at ${input.sceneLabel}.`,
+    publicSummary: `An ordinary local ${input.roleLabel} ${bearing} ${placement} at ${input.sceneLabel}.`,
     visibleCue: `A local ${input.roleLabel} ${bearing} ${placement}${detail}.`,
   };
 }
