@@ -1134,6 +1134,49 @@ function positiveLocalObservationWithSceneTextureView(): CleanNarratorView {
   });
 }
 
+function visibleActorLocalObservationWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      {
+        ref: "e1",
+        authority: "local_observation_receipt",
+        claimKinds: ["local_observation"],
+        text: "Guide is in view here.",
+        backendFacts: [
+          { factRef: "e1.f1", role: "local_observation_beat", value: "Guide is in view here.", text: "Local observation beat: Guide is in view here.", exact: true },
+          { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible actors.", exact: true },
+          { factRef: "e1.f3", role: "observation_query", text: "Observation query: visible people nearby.", exact: true },
+          { factRef: "e1.f4", role: "observed_entry_labels", value: "Guide", text: "Observed entry labels: Guide.", exact: true },
+          { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible actor Guide.", exact: true },
+          { factRef: "e1.f6", role: "anchor_scene", value: "Lowwater Bazaar", text: "Anchor scene: Lowwater Bazaar.", exact: true },
+          { factRef: "e1.f7", role: "anchor_location", value: "Lowwater Bazaar", text: "Anchor location: Lowwater Bazaar.", exact: true },
+        ],
+        limits: {
+          proves: ["matching current visible entries"],
+          doesNotProve: [
+            "hidden discovery",
+            "concealed or thorough search result",
+            "private facts",
+            "broad absence",
+            "offscreen facts",
+            "future non-discoverability",
+            "item use or effects",
+            "item state change",
+            "phone or device status",
+            "route truth beyond route option/check receipts",
+            "location reveal",
+            "world fact",
+            "dialogue content",
+            "mutation",
+            "no-change",
+          ],
+        },
+      },
+      sceneTextureEvidence("e2"),
+    ],
+  });
+}
+
 function sceneObservationReceiptView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [
@@ -5075,44 +5118,31 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("uses model-authored positive local_observation prose without texture", async () => {
     const view = positiveLocalObservationView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const observationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_local_observation"
+    );
+
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f4", "e1.f6"]);
+    expect(observationStep?.proseAssembly.sentenceShape).toBe("local_observation_line");
+    expect(observationStep?.proseAssembly.materialWeaveOrder).toBe("observed_labels_then_scene");
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "The central telegraph desk is in view here.",
+        text: "The central telegraph desk is visible at Market.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+        backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
 
     expect(result.source).toBe("model");
     expect(result.text).toBe(
-      "The central telegraph desk is in view here.",
+      "The central telegraph desk is visible at Market.",
     );
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
-
-    const postureDrift = validateCleanNarrationCandidate({
-      view,
-      candidate: acceptedCandidate(view, [{
-        text: "You stand in Market and scan the central telegraph desk.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
-        claimKinds: ["local_observation", "visible_target"],
-      }]),
-    });
-    expect(postureDrift.status).toBe("accepted");
-
-    const surfaceTextureDrift = validateCleanNarrationCandidate({
-      view,
-      candidate: acceptedCandidate(view, [{
-        text: "The Lowwater Bazaar stretches around you, its current scene and place. Among the visible actors here, a Guide stands present.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
-        claimKinds: ["local_observation", "visible_target"],
-      }]),
-    });
-    expect(surfaceTextureDrift.status).toBe("accepted");
   });
 
   it("uses model-authored bounded negative local_observation prose without texture", async () => {
@@ -5150,16 +5180,16 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "The central telegraph desk is in view here.",
+          text: "The central telegraph desk is visible at Market.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+          backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation", "visible_target"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. The central telegraph desk is in view here.");
+    expect(result.text).toBe("Rain taps the brass gutters. The central telegraph desk is visible at Market.");
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
 
     const selectedTextureRepeated = validateCleanNarrationCandidate({
@@ -5172,9 +5202,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "The central telegraph desk is in view here.",
+          text: "The central telegraph desk is visible at Market.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+          backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation", "visible_target"],
         },
       ]),
@@ -5184,9 +5214,9 @@ describe("clean Stage 6 narration contracts", () => {
     const omittedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "The central telegraph desk is in view here.",
+        text: "The central telegraph desk is visible at Market.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+        backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -5195,9 +5225,9 @@ describe("clean Stage 6 narration contracts", () => {
     const uncitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Market stalls surround you while central telegraph desk is in view here.",
+        text: "The central telegraph desk is visible at Market.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+        backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
       }]),
     });
@@ -5206,13 +5236,52 @@ describe("clean Stage 6 narration contracts", () => {
     const reserveCitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Market stalls surround you while the central telegraph desk is in view here.",
+        text: "Market stalls surround the central telegraph desk.",
         evidenceRefs: ["e1", "e2"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5", "e2.f1"],
+        backendFactRefs: ["e1.f4", "e1.f6", "e2.f1"],
         claimKinds: ["local_observation", "visible_target", "scene_texture"],
       }]),
     });
     expect(reserveCitedTexture.status).toBe("rejected");
+  });
+
+  it("shapes visible-actor local_observation as an observation beat with texture", async () => {
+    const view = visibleActorLocalObservationWithSceneTextureView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const observationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_local_observation"
+    );
+
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f4", "e1.f6"]);
+    expect(observationStep?.adventureCue.subjectFocus).toBe("observed_visible_entries");
+    expect(observationStep?.adventureCue.verbFrame).toBe("land_visible_observation");
+    expect(observationStep?.proseAssembly.sentenceShape).toBe("local_observation_line");
+    expect(observationStep?.literaryCue.renderShape).toBe("land_visible_observation");
+
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Guide is in sight at Lowwater Bazaar.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f4", "e1.f6"],
+          claimKinds: ["local_observation"],
+        },
+      ]),
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Guide is in sight at Lowwater Bazaar.");
+    for (const internalToken of ["SceneFrame", "worldVersion", "surface entry", "visible actor", "route", "Brass Tube", "no change"]) {
+      expect(result.text).not.toContain(internalToken);
+    }
   });
 
   it("uses model-authored local_observation movement-option prose without hidden placeholders", async () => {
@@ -5229,8 +5298,8 @@ describe("clean Stage 6 narration contracts", () => {
           { factRef: "e1.f3", text: "Observation query: visible routes and local targets.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },
           { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.", exact: true },
-          { factRef: "e1.f6", text: "Anchor scene: Market.", exact: true },
-          { factRef: "e1.f7", text: "Anchor location: Market.", exact: true },
+          { factRef: "e1.f6", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
+          { factRef: "e1.f7", role: "anchor_location", value: "Market", text: "Anchor location: Market.", exact: true },
         ],
         limits: {
           proves: ["matching exposed current SceneFrame observation surface entries"],
@@ -5245,9 +5314,9 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => {
         modelCalls += 1;
         return acceptedCandidate(view, [{
-          text: "North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are in view as route choices here.",
+          text: "At Market, North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are visible route choices.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+          backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation"],
         }]);
       },
@@ -5255,7 +5324,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are in view as route choices here.");
+    expect(result.text).toBe("At Market, North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, The Copper Tap, and Upper Dam Ruins are visible route choices.");
     expect(result.text).toContain("The Copper Tap");
     expect(result.text).toContain("Upper Dam Ruins");
     expect(result.text).not.toContain("[hidden]");
@@ -5266,9 +5335,9 @@ describe("clean Stage 6 narration contracts", () => {
     const missingObservedLabel = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, and The Copper Tap are in view as route choices here.",
+        text: "At Market, North Hall, East Gate, South Dock, West Yard, Bell Tower, Lantern Row, and The Copper Tap are visible route choices.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f4", "e1.f5"],
+        backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation"],
       }]),
     });
@@ -5892,8 +5961,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");
-    expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("observed_entry_labels plus anchor_scene");
+    expect(buildCleanNarrationSystemPrompt()).toContain("local_observation_line with observed_labels_then_scene");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, surface-kind wording, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line with actor_then_scene_with_role_context");

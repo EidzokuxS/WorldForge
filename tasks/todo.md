@@ -7850,3 +7850,32 @@ Session: `gm-v1-consequenc-slice`.
     - Accepted live narration: `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Five minutes press around Lowwater Bazaar.`
     - Verified: proof summary passed with chat +2, clean record +1, Stage4 `time_advance` receipt +1, authority trace +1, clock ledger +1, worldVersion/time/tick +1/+5/+5, old v2/saga/narrator/oracle/simulation stores 0, `contextAnchorCount=0`, and elapsed sentence material `5 minutes` + `Lowwater Bazaar`.
     - Verified: prose audit passed for `output/clean-runtime-p291-elapsed-context-live-20260614-185700/prose-audit.json` with 1 result, 27 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+
+- P292 Stage 6 visible-actor local observation prose:
+  - Diagnosis:
+    - [x] Probe batch `output/clean-runtime-p291-prose-gap-probes-20260614-184749` showed `Who is visible nearby?` still narrates as `Lowwater Bazaar holds steady underfoot, and Guide is in view here.`
+    - [x] Root owner is the Stage 6 `local_observation` sentence plan: accepted `observed_entry_labels`, `observed_entry_surfaces`, and `anchor_scene` should form a dedicated observation beat instead of a generic result line.
+  - Plan:
+    - [x] Run GitNexus impact for local-observation sentence/prompt owner symbols before editing.
+    - [x] Add a dedicated local-observation fact selector and prose assembly/literary cue for visible actor observations using existing accepted backend fact roles.
+    - [x] Update focused tests so visible-actor local observation with texture reads as a scene observation beat, while preserving exact actor and scene labels and adding no posture, search action, dialogue, private facts, absence/no-change, route, item, or movement.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live visible-actors proof, and prose audit.
+    - [x] Run GitNexus scope before commit.
+  - Success criteria:
+    - [x] Live `Who is visible nearby?` narration has no generic `is in view here` / placement-status line.
+    - [x] Exact visible actor label and scene label remain present when cited.
+    - [x] No player scanning/searching posture, actor action, dialogue, relationship, private knowledge, route, item, movement, absence, no-change, or new world truth is added.
+  - Review:
+    - Executed: Stage 6 now selects `observed_entry_labels` plus `anchor_scene` for local-observation turn-event refs and gives `render_local_observation` a typed sentence plan: `observed_visible_entries`, `land_visible_observation`, `local_observation_line`, and `observed_labels_then_scene`.
+    - Executed: focused tests prove visible-actor local observation with texture can render as `Rain taps the brass gutters. Guide is in sight at Lowwater Bazaar.` while citing only accepted texture, observed label, and scene-anchor facts.
+    - Verified: focused narration suite passed 113/113.
+    - Verified: expanded clean-runtime suite passed 381/381 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only existing LF/CRLF warnings.
+    - Verified: diff scan over the changed runtime/test files found no newly added regex/`replace` runtime lines.
+    - Executed: live proof artifact `output/clean-runtime-p292-visible-actors-live-20260614-191658` cloned `p69-item-transfer-045651`, ran `Who is visible nearby?`, and stopped backend port `31758` after proof.
+    - Verified: live narrative was `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Guide is in sight at Lowwater Bazaar.`
+    - Verified: live proof passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, accepted `local_observation` receipt, matched `visible_actor` label `Guide`, clean record +1, Stage 4 receipt +1, authority traces +0, clock ledger +0, worldVersion/time/tick unchanged, and old runtime stores at 0.
+    - Verified: rebuilt prompt input carried local-observation preferred refs `["e7.f4","e7.f6"]`, prose materials `label_anchor` and `scene_anchor`, and proseAssembly `local_observation_line` / `observed_labels_then_scene`.
+    - Verified: prose audit passed for the live artifact with 1 narrative, 28 words, zero one-token output, zero list-like starts, and zero hits.
+    - Verified: GitNexus all-scope `detect_changes` reported LOW risk, 9 touched indexed symbols, 5 changed files, and 0 affected execution flows.
