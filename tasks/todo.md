@@ -8050,3 +8050,27 @@ Session: `gm-v1-consequenc-slice`.
     - Diagnostic note: `output/clean-runtime-p299-support-actor-presence-live-clean-20260614-214800` proved the runtime behavior but failed a stale harness assertion that expected a hard-coded fixture location id; the accepted proof uses the authoritative player scene id from the cloned DB.
     - Verified GitNexus impact for `renderSupportActorPublicPresentation`: LOW risk, direct callers `supportActorMaterializationResult` and `executeSupportActorCreate`, affected processes `executeSupportActorCreate` and `runCleanStage4Execution`.
     - Verified GitNexus all-scope `detect_changes`: LOW risk, 1 touched indexed symbol, 5 changed files, 0 affected execution flows.
+
+- P300 Stage 6 direct-scene route handoff prose:
+  - Diagnosis:
+    - [x] Fresh diagnostic artifact `output/clean-runtime-p300-direct-look-diagnostic-20260614-220900` shows `I look around.` settling correctly through clean runtime, but broad-look prose still closes as a route report: `From Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose.`
+    - [x] Root owner is Stage 6 direct-scene page task assembly: direct-scene route handoff reuses ordinary route-options sentence shape, so a broad look reads like route listing UI instead of a playable adventure page.
+  - Plan:
+    - [x] Run GitNexus impact for the direct-scene page-task owner symbols before editing.
+    - [x] Give direct-scene route handoff its own positive sentence-object assembly/literary cue.
+    - [x] Update focused narration tests to prove direct-scene route handoff is distinct from route-options report wording while preserving exact route labels and costs.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live direct-look proof, prose audit, and GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I look around.` settles through clean runtime with no restore.
+    - [x] The direct-scene route sentence reads as a scene handoff while preserving every accepted route label.
+    - [x] Narration adds no movement, arrival, route safety, hidden-route, discovery, item handling/readiness, NPC action, absence, no-change, private fact, or world truth.
+  - Review:
+    - Executed: GitNexus impact was LOW for `sentencePlanProseAssembly`, `sentencePlanLiteraryCue`, `buildCleanNarrationSystemPrompt`, `selectDirectSceneInventoryStatusFactRefs`, `directSceneSnapshotPromptEvidence`, `sentencePlanForMove`, `selectCurrentSceneLabelAnchor`, and `validateCleanNarrationCandidate`; direct affected process remained `runCleanNarration`.
+    - Implemented: direct-scene surface, inventory status, and route handoff now receive separate sentence-object cues; route handoff uses `scene_exit_choice_line` / `leave_scene_exit_handoff`, and inventory status carries label anchors beside the accepted custody/status beat.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 115/115 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts --run` -> 386/386 passed.
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live artifact `output/clean-runtime-p300-direct-look-handoff-live-clean-r2-20260614-221500`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, all accepted route labels present, old route-report opener/predicate absent, inventory labels present, and legacy runtime stores all stayed 0.
+    - Verified prose audit `output/clean-runtime-p300-direct-look-handoff-live-clean-r2-20260614-221500/prose-audit.json`: one narrative, 66 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: MEDIUM scope summary, 7 touched indexed symbols, 3 changed files, one affected process (`runCleanNarration`), with no HIGH/CRITICAL impact results.

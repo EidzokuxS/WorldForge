@@ -2633,6 +2633,7 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
     expect(inventoryEvidence?.backendFacts.map((fact) => [fact.role, fact.text])).toEqual([
       ["inventory_status_beat", "You have Courier satchel with you."],
+      ["inventory_labels", "Courier satchel"],
     ]);
     const routeChoiceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
@@ -2641,21 +2642,48 @@ describe("clean Stage 6 narration contracts", () => {
     expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e4.f2", "e4.f3", "e4.f4"]);
     expect(routeChoiceStep?.proseAssembly).toMatchObject({
       sentenceShape: "scene_exit_choice_line",
-      openingSource: "route_exit_label",
-      verbEnergy: "offer_scene_exit",
+      openingSource: "playable_route_label",
+      verbEnergy: "offer_choice",
       materialWeaveOrder: "exits_only",
+    });
+    expect(routeChoiceStep?.literaryCue).toMatchObject({
+      renderShape: "leave_scene_exit_handoff",
+      cadence: "scene_exit_choice_sentence",
+      styleLevers: ["route_exit_grouping", "accepted_label_anchor", "concrete_present_verb"],
     });
     expect(routeChoiceStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
       "scene_anchor",
       "route_choice",
       "route_choice",
     ]);
+    const directSceneSurfaceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "next_action_handle"
+      && step.beatObjective === "render_direct_scene_snapshot"
+      && step.proseMaterials.some((material) => material.factRef === "e3.f1")
+    );
+    expect(directSceneSurfaceStep?.proseAssembly).toMatchObject({
+      sentenceShape: "local_observation_line",
+      openingSource: "observed_visible_label",
+      verbEnergy: "land_visible_observation",
+      materialWeaveOrder: "observed_labels_then_scene",
+    });
+    expect(directSceneSurfaceStep?.literaryCue).toMatchObject({
+      renderShape: "land_visible_observation",
+      cadence: "local_observation_beat_sentence",
+      styleLevers: ["local_observation_focus", "accepted_label_anchor", "concrete_present_verb"],
+    });
     const inventoryStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
       && step.proseMaterials.some((material) => material.factRef === "e2.f1")
     );
-    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f1"]);
+    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f1", "e2.f2"]);
     expect(inventoryStatusStep?.beatObjective).toBe("render_direct_scene_snapshot");
+    expect(inventoryStatusStep?.proseAssembly).toMatchObject({
+      sentenceShape: "result_beat_line",
+      verbEnergy: "concrete_present",
+      materialWeaveOrder: "result_then_preserved_tokens",
+      styleBudget: "result_with_anchor_cadence",
+    });
     expect(inventoryStatusStep?.proseMaterials).toEqual(expect.arrayContaining([
       expect.objectContaining({
         factRef: "e2.f1",
@@ -2663,9 +2691,16 @@ describe("clean Stage 6 narration contracts", () => {
         materialText: "You have Courier satchel with you.",
         copyMode: "phrase_from_material",
       }),
+      expect.objectContaining({
+        factRef: "e2.f2",
+        proseUse: "label_anchor",
+        materialText: "Courier satchel",
+        copyMode: "preserve_token",
+      }),
     ]));
     expect(inventoryStatusStep?.materialObligations.exactCopyFactRefs).toEqual([]);
     expect(inventoryStatusStep?.materialObligations.phraseFromMaterialFactRefs).toEqual(["e2.f1"]);
+    expect(inventoryStatusStep?.materialObligations.preserveTokenFactRefs).toEqual(["e2.f2"]);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
       "Market",
       "North Hall",
