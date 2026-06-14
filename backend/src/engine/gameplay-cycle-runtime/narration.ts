@@ -929,7 +929,7 @@ function sentencePlanAdventureVerbFrame(
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
   if (sentenceRole === "next_action_handle") return "offer_playable_choices";
   if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
-  if (beatObjective === "render_item_custody") return "land_item_custody";
+  if (beatObjective === "render_item_custody") return "land_scene_custody";
   if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
     return "frame_exact_utterance";
   }
@@ -1084,12 +1084,12 @@ function sentencePlanProseAssembly(
       if (beatObjective === "render_item_custody") {
         return {
           perspective: "settled_result_present",
-          sentenceShape: "item_custody_line",
+          sentenceShape: "scene_custody_beat_line",
           openingSource: "item_label_or_custody_state",
           verbEnergy: "land_custody",
-          detailRhythm: "item_custody_with_holder",
-          materialWeaveOrder: "custody_then_holder",
-          styleBudget: "item_custody_cadence",
+          detailRhythm: "item_custody_with_scene_anchor",
+          materialWeaveOrder: "item_then_custody_then_holder_scene",
+          styleBudget: "scene_custody_cadence",
           closingFunction: "settle_outcome",
         };
       }
@@ -1156,9 +1156,9 @@ function sentencePlanLiteraryCue(
       }
       if (beatObjective === "render_item_custody") {
         return {
-          renderShape: "land_item_custody",
-          cadence: "custody_beat_sentence",
-          styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus"],
+          renderShape: "weave_item_custody_scene_beat",
+          cadence: "scene_custody_beat_sentence",
+          styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus", "custody_endpoint_rotation"],
         };
       }
       const styleLevers: CleanNarratorSentencePlanStep["literaryCue"]["styleLevers"] = ["concrete_present_verb"];
@@ -2088,7 +2088,7 @@ export function buildCleanNarrationSystemPrompt(
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns the selected public scene texture frame and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
     "Selected texture frame: when accepted scene_texture has multiple backend facts, the page task places the chosen page frame in textureCue.allowedTextureFactRefs and materialObligations for the texture sentence. Other accepted texture facts remain proof context, not default player-facing prose for this page.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
-    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'.",
+    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. scene_custody_beat_line with item_then_custody_then_holder_scene uses the accepted item label as the sentence center, custody_change as the transfer spine, settled_custody/final_equip_state as the landing state, and current_scene_anchor as the placement token.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
@@ -2113,8 +2113,8 @@ export function buildCleanNarrationSystemPrompt(
     "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different adventureCue subject/verb pairings across nearby turns.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
-    "Item-state surface: for item_state, use the item custody sentence plan as a custody-state task card. Make the item label or settled custody state the grammatical center, phrase from backendFacts with roles `settled_custody` and `custody_change`, preserve the source endpoint inside custody_change plus item/target/final state labels, and keep the item sentence on item/custody materials. The item sentence may use the scene token already present in custody/settled-custody material; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
-    "Item-state grammar: item_custody_line with land_custody lands ownership and equip state through item-owned custody verbs such as passes, rests with, is carried by, is held by, or remains at the exact target label. Source and target labels are custody endpoints; handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
+    "Item-state surface: for item_state, use the item custody sentence plan as a scene-custody task card. Make the item label the sentence center, phrase from backendFacts with roles `custody_change`, `settled_custody`, `target_label`, `final_equip_state`, and `current_scene_anchor`, preserve the source endpoint inside custody_change, and land the custody state inside the exact scene token. The item sentence may weave custody and scene anchor into one beat; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
+    "Item-state grammar: scene_custody_beat_line with land_scene_custody lands ownership and equip state through item-owned custody verbs such as passes, settles with, rests with, is carried by, is held by, or remains with the exact target label. Source and target labels are custody endpoints; the scene anchor is a placement token. Handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
     "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> gather at <scene>', '<time> settle over <scene>', or '<time> press around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
     "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
@@ -2139,7 +2139,7 @@ export function buildCleanNarrationSystemPrompt(
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
     "For support_actor_materialization, express the accepted `support_actor_presence` beat.",
     "For player_local_condition, express the accepted Player current-scene posture or readiness condition operation.",
-    "For item_state, express the accepted item custody, location, or equip-state operation as a single item_custody_line custody/state beat.",
+    "For item_state, express the accepted item custody, location, or equip-state operation as a single scene_custody_beat_line centered on the item label, custody endpoints, holder/equip-state, and exact scene anchor.",
     "For minor_poi_handle, express the accepted visible current-scene place label and kind as an ordinary scene point or meeting spot.",
     "For local_observation, express the accepted current visible observation result; for bounded_visibility_negative, express that current visible entries showed no matching visible result.",
     "For device_surface_observation, express the accepted modeled public device surface facets or the bounded current visible device-surface result.",

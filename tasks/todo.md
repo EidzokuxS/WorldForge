@@ -7479,3 +7479,21 @@ Session: `gm-v1-consequenc-slice`.
     - Accepted proof narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. The Brass Tube passes from Mira Voss to Guide, and now rests carried by Guide at Lowwater Bazaar.`
     - Verification: focused route/time/item/social texture-selection coverage in `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 107/107; `npm --prefix backend run typecheck` passed; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p278-item-state-texture-rotation-proof/prose-audit.json --fail-on-hits output/clean-runtime-p278-item-state-texture-rotation-proof` counted 1 result, 35 words, and all hits 0.
     - GitNexus: `detect_changes(scope=all/staged)` reported LOW risk, 3 changed files, 5 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warnings.
+
+- P279 Stage 6 item-custody scene-beat prose plan:
+  - Plan:
+    - [x] Treat the P270-P278 rollup as diagnostic evidence: leakage is clean, but item-state pages still repeat the same receipt-shaped custody sentence.
+    - [x] Inspect the item_state sentence task-card and identify the smallest positive typed owner for a less changelog-like custody beat.
+    - [x] Run GitNexus impact before editing Stage 6 prompt/contract symbols.
+    - [x] Extend item_state sentencePlan proseAssembly/literaryCue enums so custody lines are explicitly `scene_custody_beat` pages built from item label, custody change, holder/equip-state, and scene anchor.
+    - [x] Update Stage 6 prompt wording to tell the narrator how to compose the custody beat from accepted materials without adding handling, consent, reaction, route, discovery, absence, no-change, or dialogue.
+    - [x] Add focused tests proving the new typed task card is emitted and accepts a richer item custody sentence cited only to accepted item refs.
+    - [x] Verify with focused tests, typecheck, diff hygiene, GitNexus detect, commit/push/index.
+  - Review:
+    - Diagnosis: `output/clean-runtime-p270-p278-prose-audit-rollup.json` kept all leak/stock hits at 0, but repeated the item custody sentence `The Brass Tube passes from Mira Voss to Guide, and now rests carried by Guide at Lowwater Bazaar.` across P277/P278 proof evidence.
+    - Fix: Stage 6 item_state sentence plans now emit a positive scene-custody task card: `land_scene_custody`, `scene_custody_beat_line`, `item_custody_with_scene_anchor`, `item_then_custody_then_holder_scene`, `scene_custody_cadence`, and `weave_item_custody_scene_beat`.
+    - Contract: the item sentence remains cited only to accepted item_state backend facts (`custody_change`, `settled_custody`, item label, target label, final equip state, and current scene anchor). Scene texture stays in the separate selected texture sentence.
+    - Proof: `output/clean-runtime-p279-item-custody-scene-beat-proof` rebuilt the real P277 narrator view and verified the new task-card fields before validating a candidate with ordinary Stage 6 validation.
+    - Accepted proof narration: `Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. The Brass Tube passes from Mira Voss to Guide and settles carried with Guide at Lowwater Bazaar.`
+    - Verification so far: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 108/108; `npm --prefix backend run typecheck` passed; `node scripts/audit-clean-runtime-prose.mjs --out output/clean-runtime-p279-item-custody-scene-beat-proof/prose-audit.json --fail-on-hits output/clean-runtime-p279-item-custody-scene-beat-proof` counted 1 result, 34 words, and all hits 0.
+    - GitNexus: `detect_changes(scope=all/staged)` reported LOW risk, 4 changed files, 4 touched symbols, 0 affected execution flows, and no HIGH/CRITICAL warnings.

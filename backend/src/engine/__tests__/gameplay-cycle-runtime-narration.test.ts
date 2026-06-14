@@ -2439,20 +2439,20 @@ describe("clean Stage 6 narration contracts", () => {
       beatObjective: "render_item_custody",
       adventureCue: {
         subjectFocus: "item_custody_state",
-        verbFrame: "land_item_custody",
+        verbFrame: "land_scene_custody",
       },
       proseAssembly: {
-        sentenceShape: "item_custody_line",
+        sentenceShape: "scene_custody_beat_line",
         openingSource: "item_label_or_custody_state",
         verbEnergy: "land_custody",
-        detailRhythm: "item_custody_with_holder",
-        materialWeaveOrder: "custody_then_holder",
-        styleBudget: "item_custody_cadence",
+        detailRhythm: "item_custody_with_scene_anchor",
+        materialWeaveOrder: "item_then_custody_then_holder_scene",
+        styleBudget: "scene_custody_cadence",
       },
       literaryCue: {
-        renderShape: "land_item_custody",
-        cadence: "custody_beat_sentence",
-        styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus"],
+        renderShape: "weave_item_custody_scene_beat",
+        cadence: "scene_custody_beat_sentence",
+        styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus", "custody_endpoint_rotation"],
       },
     });
   });
@@ -4406,6 +4406,30 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
+  it("accepts scene-custody item_state prose from the typed custody task card", () => {
+    const view = itemStateView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const itemStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_item_custody"
+    );
+
+    expect(itemStep?.proseAssembly.sentenceShape).toBe("scene_custody_beat_line");
+    expect(itemStep?.proseAssembly.materialWeaveOrder).toBe("item_then_custody_then_holder_scene");
+    expect(itemStep?.literaryCue.renderShape).toBe("weave_item_custody_scene_beat");
+
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The Brass Tube passes from Player to Guide and settles carried with Guide at Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
+        claimKinds: ["item_state"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
   it("uses accepted scene_texture for item_state prose when texture is available", async () => {
     const view = itemStateWithSceneTextureView();
     const result = await runCleanNarration({
@@ -5537,10 +5561,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a custody-state task card");
-    expect(buildCleanNarrationSystemPrompt()).toContain("phrase from backendFacts with roles `settled_custody` and `custody_change`");
+    expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase from backendFacts with roles `custody_change`, `settled_custody`, `target_label`, `final_equip_state`, and `current_scene_anchor`");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("item_custody_line with land_custody");
+    expect(buildCleanNarrationSystemPrompt()).toContain("scene_custody_beat_line with land_scene_custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through item-owned custody verbs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted `travel_beat` value as the turn event");
