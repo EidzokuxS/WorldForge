@@ -7374,3 +7374,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: player-facing narrative stayed presence-only: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You stand at Lowwater Bazaar, and Local Vendor is now in view nearby as a vendor.`
     - Verified: `db-proof.json` passed all assertions, including old-store zeros, support actor receipt authority, post-frame actor visibility, unchanged `Brass Tube` custody with `Mira Voss` as `carried`, and absence of setup/service/action prose.
     - Verified: prose audit passed with 1 result, 73 words, zero hits, zero list-like starts, and zero `youOpening`.
+
+- P274 Stage 6 composed support-actor dialogue live proof:
+  - Plan:
+    - [x] Confirm current worktree is clean after P273 and identify the next composed narration risk.
+    - [x] Inspect support actor + dependent dialogue GM Read, checklist, Stage 4 refresh, settlement, and narration ownership.
+    - [x] Choose one action that requires a current-scene support actor and a visible response from that actor in the same turn.
+    - [x] Start an isolated clean-runtime backend on a fresh port and record PID/logs under a proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Inspect the clone's current SceneFrame/DB before sending the action.
+    - [x] Run one Codex-chosen composed `support_actor_create` + `dialogue_record` `/api/chat/action` turn.
+    - [x] Verify SSE runtime, accepted support actor receipt, accepted terminal dialogue receipt, actor persistence/visibility, authority trace/world-version deltas, old-store counts, and player-facing narrative.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Fix typed Stage 6 contract if proof exposes a root prose/truth gap; otherwise record proof results and commit/push/index the journal.
+  - Review:
+    - Executed: inspected current support actor + dependent dialogue contracts. GM Read sets `ordinary_support_actor_needed` with `supportActorNeed.intendedUse=dialogue_requested_but_not_yet_recorded`; Checklist emits `support_actor_create` followed by dependent `dialogue_record`; Stage 4 refreshes the authoritative SceneFrame after the support receipt before recording the dialogue.
+    - Executed: started isolated clean-runtime backend on port `31745` with PID `45428`, then stopped it after proof; final port check returned no rows.
+    - Executed: created fresh clean-start clone `clean-runtime-p274-support-dialogue-live-20260614-112811` from source `p69-item-transfer-045651`.
+    - Verified: pre-frame had `support_actor_create` and `dialogue_record` allowed, only `Guide` visible as an actor, clean counts at 0, and old runtime stores at 0.
+    - Verified: live proof artifact `output/clean-runtime-p274-support-dialogue-live-20260614-112811` ran `I ask a local vendor what changed today.` and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, clean record +1, Stage 4 receipts +2, authority trace +1, worldVersion +1, world time/tick +0, clock ledger +0, and all old stores at 0.
+    - Verified: receipts were accepted in order: `support_actor_create` using `support_actor_materialization_receipt`, then `dialogue_record` using `terminal_dialogue_receipt` / `may_quote_visible_dialogue_response`.
+    - Verified: dependent dialogue used refreshed frame/worldVersion 1 and a different frame id from the support actor receipt; dialogue speaker was materialized `Local Vendor` with `claimStatus=visible_speaker_response_only`.
+    - Verified: support NPC row persisted with broad/exact current-scene coordinates, authority trace pointed to the NPC and support receipt, and rebuilt post-frame exposed `Local Vendor` in actors, actor targets, and citable refs.
+    - Verified: accepted support evidence carried `support_actor_presence`; accepted dialogue evidence carried the exact quoted speech, and the final narrative included that quote exactly.
+    - Verified: player-facing narrative was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. A Local Vendor is in view here at Lowwater Bazaar, and the answer comes sharp: "Today? The harbormaster's men swept through the stalls at dawn, checking seals and counting goods. They say a new charter audit is coming from the Spire — so half the vendors here are packing up rather than risk a fine."`
+    - Verified: `db-proof.json` passed all assertions, including old-store zeros, receipt order, refreshed-frame dialogue boundary, post-frame actor visibility, unchanged `Brass Tube` custody with `Mira Voss` as `carried`, and absence of setup/service/debug prose outside the accepted quote.
+    - Verified: prose audit passed with 1 result, 112 words, zero hits, zero list-like starts, and zero `youOpening`.
+    - Executed: no code patch was needed for this slice; P273's `support_actor_presence` primary beat also held in the composed support+dialogue path.
