@@ -2490,6 +2490,7 @@ const cleanNarratorStoryFrameSchema = z.object({
 }).strict();
 
 const cleanNarratorPageTaskMoveSchema = z.object({
+  moveRef: shortText,
   step: z.enum([
     "ask_clarification",
     "open_with_context",
@@ -2503,6 +2504,7 @@ const cleanNarratorPageTaskMoveSchema = z.object({
     "render_authoritative_turn_event",
     "leave_playable_next_action_handle",
   ]),
+  coverage: z.enum(["required", "optional"]),
   allowedBackendFactRefs: z.array(shortText).min(1).max(192),
 }).strict();
 
@@ -2583,6 +2585,7 @@ export const cleanNarrationSentenceSchema = z.object({
   evidenceRefs: z.array(shortText).max(12),
   backendFactRefs: z.array(shortText).max(12),
   claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
+  pageMoveRefs: z.array(shortText).max(4).default([]),
   auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),
 }).strict();
 

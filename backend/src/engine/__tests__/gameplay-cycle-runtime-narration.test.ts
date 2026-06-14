@@ -31,6 +31,19 @@ const provider: ProviderConfig = {
 
 type NarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
 
+function pageMoveRefsForSentence(
+  view: CleanNarratorView,
+  evidenceRefs: readonly string[],
+  backendFactRefs: readonly string[],
+): string[] {
+  return buildCleanNarratorPromptInput(view).narrativePageTask.moves
+    .filter((move) =>
+      evidenceRefs.some((ref) => move.entryRefs.includes(ref))
+      || backendFactRefs.some((ref) => move.allowedBackendFactRefs.includes(ref))
+    )
+    .map((move) => move.moveRef);
+}
+
 function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarratorView {
   return {
     version: "gameplay-runtime.narrator-view.v1",
@@ -72,7 +85,12 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
   };
 }
 
-function movementCandidate(text = "After one minute, you reach North Hall."): CleanNarrationCandidate {
+function movementCandidate(
+  text = "After one minute, you reach North Hall.",
+  view = movementView(),
+): CleanNarrationCandidate {
+  const evidenceRefs = ["e1"];
+  const backendFactRefs = ["e1.f1", "e1.f2", "e1.f3", "e1.f4"];
   return {
     version: "gameplay-runtime.clean-narration-candidate.v1",
     packetId: "cgpacket_test",
@@ -81,9 +99,10 @@ function movementCandidate(text = "After one minute, you reach North Hall."): Cl
     sentences: [{
       kind: "accepted_evidence",
       text,
-      evidenceRefs: ["e1"],
-      backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+      evidenceRefs,
+      backendFactRefs,
       claimKinds: ["player_location_change", "elapsed_time"],
+      pageMoveRefs: pageMoveRefsForSentence(view, evidenceRefs, backendFactRefs),
       auditStepIds: [],
     }],
     finalText: text,
@@ -97,6 +116,7 @@ function acceptedCandidate(
     evidenceRefs: string[];
     backendFactRefs: string[];
     claimKinds: NarrationClaimKind[];
+    pageMoveRefs?: string[];
   }>,
 ): CleanNarrationCandidate {
   return {
@@ -110,6 +130,8 @@ function acceptedCandidate(
       evidenceRefs: sentence.evidenceRefs,
       backendFactRefs: sentence.backendFactRefs,
       claimKinds: sentence.claimKinds,
+      pageMoveRefs: sentence.pageMoveRefs
+        ?? pageMoveRefsForSentence(view, sentence.evidenceRefs, sentence.backendFactRefs),
       auditStepIds: [],
     })),
     finalText: sentences.map((sentence) => sentence.text).join(" "),
@@ -1275,9 +1297,11 @@ describe("clean Stage 6 narration contracts", () => {
       pageGoal: "turn_changelog_to_grounded_text_rpg_page",
       truthBoundary: "accepted_evidence_only",
       moves: [{
+        moveRef: "m1",
         step: "narrate_turn_event",
         entryRefs: ["e1"],
         proseMove: "render_authoritative_turn_event",
+        coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
       }],
     });
@@ -1314,15 +1338,19 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
+        moveRef: "m1",
         step: "open_with_context",
         entryRefs: ["e1"],
         proseMove: "establish_playable_context",
+        coverage: "optional",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
       },
       {
+        moveRef: "m2",
         step: "narrate_turn_event",
         entryRefs: ["e5"],
         proseMove: "render_authoritative_turn_event",
+        coverage: "required",
         allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
       },
     ]);
@@ -1399,18 +1427,57 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
+        moveRef: "m1",
         step: "open_with_context",
         entryRefs: ["e2", "e3"],
         proseMove: "establish_playable_context",
+        coverage: "optional",
         allowedBackendFactRefs: ["e2.f1", "e2.f2", "e3.f1", "e3.f2", "e3.f3"],
       },
       {
+        moveRef: "m2",
         step: "close_with_next_action_context",
         entryRefs: ["e1"],
         proseMove: "leave_playable_next_action_handle",
+        coverage: "required",
         allowedBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
       },
     ]);
+  });
+
+  it("checks narration sentence page-move refs against the narrative page task", () => {
+    const view = routeOptionsWithSceneTextureView();
+    const validCandidate = acceptedCandidate(view, [
+      {
+        text: "Canvas awnings hang over the market lanes.",
+        evidenceRefs: ["e2"],
+        backendFactRefs: ["e2.f1"],
+        claimKinds: ["scene_texture"],
+      },
+      {
+        text: "North Hall is the one-minute route choice here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+      },
+    ]);
+    expect(validCandidate.sentences.map((sentence) => sentence.pageMoveRefs)).toEqual([["m1"], ["m2"]]);
+    expect(validateCleanNarrationCandidate({ view, candidate: validCandidate }).status).toBe("accepted");
+
+    const wrongMove = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the one-minute route choice here.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1"],
+        claimKinds: ["movement_option"],
+        pageMoveRefs: ["m1"],
+      }]),
+    });
+
+    expect(wrongMove.status).toBe("rejected");
+    if (wrongMove.status !== "rejected") throw new Error("expected rejected");
+    expect(wrongMove.issues.some((issue) => issue.code === "page_move_not_supported")).toBe(true);
   });
 
   it("uses clarification page plans without promoting scene context to a world event", () => {
@@ -3406,7 +3473,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => acceptedCandidate(view, [{
         text: "The Brass Tube leaves your hand and settles with Guide, carried openly in Market.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6", "e1.f7"],
+        backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f6"],
         claimKinds: ["item_state"],
       }]),
     });
@@ -3497,7 +3564,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "The Brass Tube passes from you to Guide and rides in his keeping at Market.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5", "e1.f7"],
+          backendFactRefs: ["e1.f2", "e1.f4", "e1.f5"],
           claimKinds: ["item_state"],
         },
         {
@@ -4270,7 +4337,7 @@ describe("clean Stage 6 narration contracts", () => {
       candidate: acceptedCandidate(view, [{
         text: "Operation: give_to_visible_actor. Target: Guide. Final equip state: carried. Current scene anchor: Market. Item transfer result: transferred_to_actor.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
         claimKinds: ["item_state"],
       }]),
     });
@@ -4391,6 +4458,7 @@ describe("clean Stage 6 narration contracts", () => {
             evidenceRefs: ["e1"],
             backendFactRefs: ["e1.f1"],
             claimKinds: ["visible_fact"],
+            pageMoveRefs: ["m1"],
             auditStepIds: [],
           }],
           finalText: "Guide stands nearby.",
@@ -4449,6 +4517,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");

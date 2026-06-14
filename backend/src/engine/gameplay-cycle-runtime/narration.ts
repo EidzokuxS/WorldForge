@@ -21,6 +21,7 @@ export interface CleanNarrationValidationIssue {
     | "language_mismatch"
     | "linkage_mismatch"
     | "old_runtime_marker"
+    | "page_move_not_supported"
     | "private_term"
     | "prose_quality"
     | "schema_invalid"
@@ -539,6 +540,15 @@ function narrativePageProseMove(step: CleanNarratorPagePlanStep["step"]): CleanN
   }
 }
 
+function narrativePageMoveCoverage(
+  step: CleanNarratorPagePlanStep["step"],
+  hasAuthoritativeTurnMove: boolean,
+): CleanNarratorPageTaskMove["coverage"] {
+  if (step === "open_with_context") return "optional";
+  if (step === "close_with_next_action_context" && hasAuthoritativeTurnMove) return "optional";
+  return "required";
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
 ): CleanNarratorPromptInput["narrativePageTask"] {
@@ -546,16 +556,21 @@ function buildCleanNarrativePageTask(
     [...storyFrame.currentContext, ...storyFrame.turnEvents]
       .map((entry) => [entry.ref, entry] as const),
   );
+  const hasAuthoritativeTurnMove = storyFrame.pagePlan.steps.some((step) =>
+    step.step === "ask_clarification" || step.step === "narrate_turn_event"
+  );
   return {
     version: "gameplay-runtime.clean-narrator-page-task.v1",
     source: "derived_from_story_frame_page_plan",
     referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
     pageGoal: "turn_changelog_to_grounded_text_rpg_page",
     truthBoundary: "accepted_evidence_only",
-    moves: storyFrame.pagePlan.steps.map((step) => ({
+    moves: storyFrame.pagePlan.steps.map((step, index) => ({
+      moveRef: `m${index + 1}`,
       step: step.step,
       entryRefs: step.entryRefs,
       proseMove: narrativePageProseMove(step.step),
+      coverage: narrativePageMoveCoverage(step.step, hasAuthoritativeTurnMove),
       allowedBackendFactRefs: uniqueStrings(step.entryRefs.flatMap((ref) =>
         entriesByRef.get(ref)?.backendFactRefs ?? []
       )),
@@ -1494,6 +1509,7 @@ export function buildCleanNarrationSystemPrompt(
     "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
     "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material only from its allowedBackendFactRefs plus the cited accepted evidence.",
+    "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
     "Truthful flourish: spend style budget on cadence, syntax, sensory angle, and sentence rhythm from accepted facts. Every flourish must remain a phrasing choice over cited evidence, not a new event, state, route, item ownership, NPC action, discovery, absence, private fact, or world truth.",
@@ -1608,6 +1624,9 @@ export function validateCleanNarrationCandidate(input: {
     });
   }
 
+  const promptInput = buildCleanNarratorPromptInput(input.view);
+  const pageMovesByRef = new Map(promptInput.narrativePageTask.moves.map((move) => [move.moveRef, move]));
+  const coveredPageMoveRefs = new Set<string>();
   const evidenceByRef = new Map(input.view.acceptedEvidence.map((evidence) => [evidence.ref, evidence]));
   const auditByStepId = new Map(input.view.stepAuditForGrounding.map((step) => [step.stepId, step]));
 
@@ -1617,14 +1636,49 @@ export function validateCleanNarrationCandidate(input: {
         sentence.evidenceRefs.length === 0
         || sentence.backendFactRefs.length === 0
         || sentence.claimKinds.length === 0
+        || sentence.pageMoveRefs.length === 0
         || sentence.auditStepIds.length > 0
       ) {
         issues.push({
           code: "fact_not_supported",
           path: `sentences.${index}`,
-          message: "accepted_evidence sentences must cite evidence refs, backend facts, and claim kinds only.",
+          message: "accepted_evidence sentences must cite evidence refs, backend facts, claim kinds, and page moves only.",
         });
       }
+
+      const citedPageMoves = sentence.pageMoveRefs.map((ref) => pageMovesByRef.get(ref));
+      if (citedPageMoves.some((move) => !move)) {
+        issues.push({
+          code: "page_move_not_supported",
+          path: `sentences.${index}.pageMoveRefs`,
+          message: "Narration sentence cited a page move not present in promptInput.narrativePageTask.",
+        });
+      }
+      const pageMoveEntryRefs = new Set(citedPageMoves.flatMap((move) => move?.entryRefs ?? []));
+      for (const evidenceRef of sentence.evidenceRefs) {
+        if (!pageMoveEntryRefs.has(evidenceRef)) {
+          issues.push({
+            code: "page_move_not_supported",
+            path: `sentences.${index}.pageMoveRefs`,
+            message: `Narration sentence cited evidence ${evidenceRef} outside its page moves.`,
+          });
+        }
+      }
+      const pageMoveBackendFactRefs = new Set(citedPageMoves.flatMap((move) =>
+        move?.allowedBackendFactRefs ?? []
+      ));
+      for (const factRef of sentence.backendFactRefs) {
+        if (!pageMoveBackendFactRefs.has(factRef)) {
+          issues.push({
+            code: "page_move_not_supported",
+            path: `sentences.${index}.pageMoveRefs`,
+            message: `Narration sentence cited backend fact ${factRef} outside its page moves.`,
+          });
+        }
+      }
+      sentence.pageMoveRefs.forEach((ref) => {
+        if (pageMovesByRef.has(ref)) coveredPageMoveRefs.add(ref);
+      });
 
       const citedEvidence = sentence.evidenceRefs.map((ref) => evidenceByRef.get(ref));
       if (citedEvidence.some((evidence) => !evidence)) {
@@ -1662,11 +1716,12 @@ export function validateCleanNarrationCandidate(input: {
         || sentence.evidenceRefs.length > 0
         || sentence.backendFactRefs.length > 0
         || sentence.claimKinds.length > 0
+        || sentence.pageMoveRefs.length > 0
       ) {
         issues.push({
           code: "audit_misuse",
           path: `sentences.${index}`,
-          message: "audit_notice sentences must cite only failed/skipped audit step ids and no world claim fields.",
+          message: "audit_notice sentences must cite only failed/skipped audit step ids and no world claim or page move fields.",
         });
       }
       for (const stepId of sentence.auditStepIds) {
@@ -1680,6 +1735,18 @@ export function validateCleanNarrationCandidate(input: {
       }
     }
   });
+
+  const missingPageMoveRefs = promptInput.narrativePageTask.moves
+    .filter((move) => move.coverage === "required")
+    .map((move) => move.moveRef)
+    .filter((moveRef) => !coveredPageMoveRefs.has(moveRef));
+  if (missingPageMoveRefs.length > 0) {
+    issues.push({
+      code: "page_move_not_supported",
+      path: "sentences",
+      message: `Narration candidate did not cover page moves: ${missingPageMoveRefs.join(", ")}.`,
+    });
+  }
 
   if (normalizeText(candidate.finalText).length === 0) {
     issues.push({
