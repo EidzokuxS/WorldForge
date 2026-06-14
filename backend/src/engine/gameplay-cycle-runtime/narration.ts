@@ -233,6 +233,7 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
   }
   if (evidence.claimKinds.includes("support_actor_materialization")) {
     return preferredPromptFactsByRole(evidence, [
+      "support_actor_presence",
       "visible_support_actor",
       "support_role",
       "anchor_scene",
@@ -317,6 +318,7 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   assertLocalObservationStoryEvidence(evidence);
   assertDeviceSurfaceStoryEvidence(evidence);
   assertSceneBeatStoryEvidence(evidence);
+  assertSupportActorStoryEvidence(evidence);
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   const backendFacts = evidence.backendFacts.length <= maxFacts
     ? evidence.backendFacts
@@ -545,6 +547,7 @@ function narrativeFactProseUse(
     case "oracle_selected_meaning":
     case "player_condition_operation":
     case "minor_poi_operation":
+    case "support_actor_presence":
     case "custody_change":
     case "settled_custody":
     case "visible_scene_facts":
@@ -1886,7 +1889,7 @@ export function buildCleanNarrationSystemPrompt(
     "Route-status surface: for route_status, render accepted Route beat as the turn event, with Route label and Route status as proof details. Scene labels are placement tokens only here; ambient nouns such as stalls, crowds, traffic, smoke, water, sound, smell, light, or weather require exact accepted backendFacts. Do not describe the player moving, arriving, walking, traveling, or changing current scene.",
     "Route-options surface: for movement_option and route_options_receipt, render accepted Route choices beat as the turn event, with Route choice labels, Open route labels, Closed route labels, and Route choice travel costs as proof details. If sentencePlan supplies a texture sentence, keep texture there and keep the route-choice beat focused on playable labels/costs. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
     "Local-observation surface: for local_observation, phrase only the accepted current visible observation entries. If sentencePlan supplies a texture sentence, keep texture there; otherwise omit texture and use direct label shapes such as '<label> is in view here.' or '<labels> are in view here.' For player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts; bounded_visibility_negative may only say the checked visible entries showed no matching visible result.",
-    "Support-actor surface: for support_actor_materialization, phrase only the accepted visible support actor label, ordinary support role, materialization result, and exact scene anchor. If sentencePlan supplies a texture sentence, keep texture there and keep the presence beat on actor/role/scene materials. Dialogue, services, actor actions, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, and no-change require separate accepted evidence.",
+    "Support-actor surface: for support_actor_materialization, render the backendFact role `support_actor_presence` value as the turn event. That value owns actor label, exact scene anchor, and ordinary role. Presence verbs include 'is in view', 'is present', 'stands nearby', or 'waits nearby'. Treat role labels as identity nouns. If sentencePlan supplies a texture sentence, keep texture there and keep the presence beat on the `support_actor_presence` fact. Separate accepted evidence owns dialogue, services, setup/work actions, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, and no-change.",
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. If sentencePlan supplies a texture sentence, keep texture there and keep the condition beat on condition/scene materials. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
     "Minor-POI surface: for minor_poi_handle, translate the accepted POI label, kind, result, and exact scene anchor into ordinary player-facing scene prose: '<label> is now a visible <kind> here', '<label> marks a meeting spot at <scene>', or '<label> remains a marked <kind> in <scene>'. Keep handle-related contract vocabulary in citation metadata; player-facing text uses ordinary scene nouns such as stall, counter, bench, sign, doorway, workstation, marked point, or meeting spot. If sentencePlan supplies a texture sentence, keep texture there and keep the POI beat on label/kind/scene materials. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, phrase only the accepted requested device label, requested public surface facets, modeled public surface facts, or bounded no-requested-surface result. For device_surface_unavailable/no_requested_surface, use bounded wording like '<device>'s visible surface shows no requested <facet display>.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. If sentencePlan supplies a texture sentence, keep texture there and keep the device beat on device/facet materials. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
@@ -1903,7 +1906,7 @@ export function buildCleanNarrationSystemPrompt(
     "For oracle_outcome, express only the selected visible outcome meaning.",
     "For standalone elapsed_time, express the accepted elapsed time fact.",
     "For dialogue_response, express that the visible speaker responded and include the accepted quote or summary as utterance evidence.",
-    "For support_actor_materialization, express the accepted visible temporary support actor or role now present in the current scene.",
+    "For support_actor_materialization, express the accepted `support_actor_presence` beat.",
     "For player_local_condition, express the accepted Player current-scene posture or readiness condition operation.",
     "For item_state, express the accepted item custody, location, or equip-state operation as a single custody/state beat.",
     "For minor_poi_handle, express the accepted visible current-scene place label and kind as an ordinary scene point or meeting spot.",
@@ -2384,6 +2387,13 @@ function assertSceneBeatStoryEvidence(evidence: AcceptedNarrationEvidence): void
   }
 }
 
+function assertSupportActorStoryEvidence(evidence: AcceptedNarrationEvidence): void {
+  if (evidence.authority !== "support_actor_materialization_receipt") return;
+  if (!evidence.backendFacts.some((fact) => fact.role === "support_actor_presence" && fact.value?.trim())) {
+    throw new Error("Support-actor prompt input requires accepted Support actor presence value evidence.");
+  }
+}
+
 function requireFactValueByRole(
   evidence: AcceptedNarrationEvidence,
   role: AcceptedNarrationBackendFactRole,
@@ -2583,22 +2593,12 @@ function renderMinorPoiProjection(evidence: AcceptedNarrationEvidence): string {
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
-  const actor = requireFactValueByRole(
+  const presenceBeat = trimSentencePeriod(requireFactValueByRole(
     evidence,
-    "visible_support_actor",
-    "Support-actor projection requires accepted Visible support actor value evidence.",
-  );
-  const role = requireFactValueByRole(
-    evidence,
-    "support_role",
-    "Support-actor projection requires accepted Support role value evidence.",
-  );
-  const scene = requireFactValueByRole(
-    evidence,
-    "anchor_scene",
-    "Support-actor projection requires accepted Anchor scene value evidence.",
-  );
-  return `${actor} is present in ${scene} as a ${role}.`;
+    "support_actor_presence",
+    "Support-actor projection requires accepted Support actor presence value evidence.",
+  ));
+  return `${presenceBeat}.`;
 }
 
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {

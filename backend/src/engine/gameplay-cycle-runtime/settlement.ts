@@ -1092,25 +1092,27 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "support_actor_materialization_receipt" && receipt.publicResult.supportActor) {
       const evidenceId = nextEvidenceId(evidence);
       const supportActor = receipt.publicResult.supportActor;
+      const presenceText = `${supportActor.actorLabel} is now in view at ${supportActor.anchorSceneLabel} as a ${supportActor.roleLabel}.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
         sourceRef: receipt.receiptId,
         authority: "support_actor_materialization_receipt",
         claimKinds: ["visible_actor", "support_actor_materialization"],
-        text: `${supportActor.actorLabel} is visible as a ${supportActor.roleLabel} in ${supportActor.anchorSceneLabel}.`,
+        text: presenceText,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "visible_support_actor", `Visible support actor: ${supportActor.actorLabel}.`, supportActor.actorLabel),
-          fact(evidenceId, 2, "support_role", `Support role: ${supportActor.roleLabel}.`, supportActor.roleLabel),
-          fact(evidenceId, 3, "anchor_scene", `Anchor scene: ${supportActor.anchorSceneLabel}.`, supportActor.anchorSceneLabel),
-          fact(evidenceId, 4, "materialization_result", `Materialization result: ${supportActor.resultKind}.`),
+          fact(evidenceId, 1, "support_actor_presence", presenceText, presenceText),
+          fact(evidenceId, 2, "visible_support_actor", `Visible person now in view: ${supportActor.actorLabel}.`, supportActor.actorLabel),
+          fact(evidenceId, 3, "support_role", `Ordinary scene role: ${supportActor.roleLabel}.`, supportActor.roleLabel),
+          fact(evidenceId, 4, "anchor_scene", `Scene anchor: ${supportActor.anchorSceneLabel}.`, supportActor.anchorSceneLabel),
+          fact(evidenceId, 5, "materialization_result", `Presence result: ${supportActor.resultKind}.`, supportActor.resultKind),
         ],
         limits: {
           proves: [
-            "visible temporary support actor label",
-            "ordinary support role",
-            "current-scene materialization or reuse",
+            "visible current-scene person label",
+            "ordinary scene role",
+            "current-scene presence or reuse",
           ],
           doesNotProve: SUPPORT_ACTOR_DOES_NOT_PROVE,
         },

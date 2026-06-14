@@ -2264,6 +2264,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "settled_custody",
   "source_label",
   "speaker_label",
+  "support_actor_presence",
   "support_role",
   "target_label",
   "time_beat",

@@ -7345,3 +7345,32 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `db-proof.json` passed all assertions, including player-facing minor-POI evidence text and absence of `target handle`/`place handle`/receipt/debug terms in narration.
     - Verified: prose audit passed with 1 result, 69 words, zero hits, zero list-like starts, and zero `youOpening`.
     - Reviewed: GitNexus all-scope and staged `detect_changes` reported LOW risk, changed symbols limited to `buildCleanNarrationSystemPrompt`, `renderMinorPoiProjection`, and `stage4Evidence`, with 0 affected execution flows.
+
+- P273 Stage 6 support-actor materialization live proof:
+  - Plan:
+    - [x] Confirm current worktree is clean and inspect support-actor GM Read, checklist, Stage4, settlement, and narration ownership.
+    - [x] Choose a presence-only support actor action from the existing contract: `I look for a local vendor in the market.`
+    - [x] Start an isolated clean-runtime backend on a fresh port and record PID/logs under a proof root.
+    - [x] Create a fresh clean-start clone from `p69-item-transfer-045651`.
+    - [x] Inspect the clone's current SceneFrame/DB before sending the action.
+    - [x] Run one Codex-chosen `ordinary_support_actor_needed` / `support_actor_create` turn.
+    - [x] Verify SSE runtime, accepted `support_actor_create` receipt, actor persistence/visibility, authority trace/world-version deltas, old-store counts, and player-facing narrative.
+    - [x] Run prose audit on the proof artifact.
+    - [x] Stop only the backend process started for this proof.
+    - [x] Fix typed Stage 6 contract if proof exposes a root prose/truth gap; otherwise record proof results and commit/push/index the journal.
+  - Review:
+    - Executed: diagnostic live proof `output/clean-runtime-p273-support-actor-live-20260614-103616` passed clean gameplay truth but exposed unsupported setup/service wording: `A Local Vendor has set up as a vendor here.`
+    - Executed: first fixed proof `output/clean-runtime-p273-support-actor-live-fixed-20260614-110847` confirmed the DB truth stayed clean, then exposed the remaining root prompt-data gap: Stage 6 could still infer service wording from the role label and produced `open for trade as a vendor`.
+    - Executed: fixed the root cause at typed evidence/page-task boundaries: support-actor settlement now emits `support_actor_presence` as the primary player-facing beat, prompt fact-use treats it as `primary_beat`, prompt input requires that fact for support-actor evidence, and deterministic projection consumes the same fact.
+    - Verified: GitNexus impact was LOW for `stage4Evidence`, `buildCleanNarrationSystemPrompt`, `renderSupportActorProjection`, `assertCleanSettledTurnPacket`, `narrativeFactProseUse`, `preferredPromptFacts`, and `limitPromptEvidenceFacts`.
+    - Verified: focused narration+settlement suite passed 125/125.
+    - Verified: expanded clean-runtime suite passed 372/372 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Executed: accepted live proof `output/clean-runtime-p273-support-actor-live-accepted-20260614-112016` on backend port `31744`/PID `66260`, then stopped it; final port check returned no rows.
+    - Verified: accepted clone `clean-runtime-p273-support-actor-live-accepted-20260614-112016` ran `I look for a local vendor in the market.` and passed with `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, accepted `support_actor_create` receipt, clean record +1, receipt +1, authority trace +1, NPC row +1, worldVersion +1, world time/tick +0, clock ledger +0, and all old stores at 0.
+    - Verified: support NPC row persisted with both broad `current_location_id` and exact `current_scene_location_id` matching the receipt anchors, and rebuilt post-frame exposed `Local Vendor` in actors, actor targets, and citable refs.
+    - Verified: accepted evidence `e9.f1` is `support_actor_presence` with value `Local Vendor is now in view at Lowwater Bazaar as a vendor.`
+    - Verified: player-facing narrative stayed presence-only: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Dockworkers unload cargo while representatives from signal-house families shout bids for night courier contracts across the water. Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. You stand at Lowwater Bazaar, and Local Vendor is now in view nearby as a vendor.`
+    - Verified: `db-proof.json` passed all assertions, including old-store zeros, support actor receipt authority, post-frame actor visibility, unchanged `Brass Tube` custody with `Mira Voss` as `carried`, and absence of setup/service/action prose.
+    - Verified: prose audit passed with 1 result, 73 words, zero hits, zero list-like starts, and zero `youOpening`.

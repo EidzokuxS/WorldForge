@@ -1604,10 +1604,14 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const support = packet.acceptedEvidence.find((entry) => entry.authority === "support_actor_materialization_receipt");
     expect(support?.claimKinds).toEqual(["visible_actor", "support_actor_materialization"]);
-    expect(support?.backendFacts[0]?.text).toBe("Visible support actor: Local Vendor.");
-    expect(support?.backendFacts[0]?.value).toBe("Local Vendor");
-    expect(support?.backendFacts[1]?.value).toBe("vendor");
-    expect(support?.backendFacts[2]?.value).toBe("Market");
+    expect(support?.text).toBe("Local Vendor is now in view at Market as a vendor.");
+    expect(support?.backendFacts[0]?.role).toBe("support_actor_presence");
+    expect(support?.backendFacts[0]?.value).toBe("Local Vendor is now in view at Market as a vendor.");
+    expect(support?.backendFacts[1]?.text).toBe("Visible person now in view: Local Vendor.");
+    expect(support?.backendFacts[1]?.value).toBe("Local Vendor");
+    expect(support?.backendFacts[2]?.value).toBe("vendor");
+    expect(support?.backendFacts[3]?.value).toBe("Market");
+    expect(support?.backendFacts[4]?.value).toBe("created");
     expect(support?.limits.doesNotProve).toContain("dialogue content");
     expect(support?.limits.doesNotProve).toContain("NPC private knowledge");
     expect(support?.limits.doesNotProve).toContain("durable world fact");

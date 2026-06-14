@@ -698,15 +698,16 @@ function supportActorView(): CleanNarratorView {
       ref: "e1",
       authority: "support_actor_materialization_receipt",
       claimKinds: ["visible_actor", "support_actor_materialization"],
-      text: "Local Vendor is visible as a vendor in Market.",
+      text: "Local Vendor is now in view at Market as a vendor.",
       backendFacts: [
-        { factRef: "e1.f1", role: "visible_support_actor", value: "Local Vendor", text: "Visible support actor: Local Vendor.", exact: true },
-        { factRef: "e1.f2", role: "support_role", value: "vendor", text: "Support role: vendor.", exact: true },
-        { factRef: "e1.f3", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f4", role: "materialization_result", text: "Materialization result: created.", exact: true },
+        { factRef: "e1.f1", role: "support_actor_presence", value: "Local Vendor is now in view at Market as a vendor.", text: "Local Vendor is now in view at Market as a vendor.", exact: true },
+        { factRef: "e1.f2", role: "visible_support_actor", value: "Local Vendor", text: "Visible person now in view: Local Vendor.", exact: true },
+        { factRef: "e1.f3", role: "support_role", value: "vendor", text: "Ordinary scene role: vendor.", exact: true },
+        { factRef: "e1.f4", role: "anchor_scene", value: "Market", text: "Scene anchor: Market.", exact: true },
+        { factRef: "e1.f5", role: "materialization_result", value: "created", text: "Presence result: created.", exact: true },
       ],
       limits: {
-        proves: ["visible temporary support actor label", "ordinary support role", "current-scene materialization or reuse"],
+        proves: ["visible current-scene person label", "ordinary scene role", "current-scene presence or reuse"],
         doesNotProve: ["dialogue content", "NPC private knowledge", "relationship change", "future relevance", "durable world fact"],
       },
     }],
@@ -2936,10 +2937,10 @@ describe("clean Stage 6 narration contracts", () => {
       "player_condition_operation",
     ))).toThrow("Player-local-condition projection requires accepted Player condition operation value evidence.");
 
-    expect(renderCleanAuthorityProjection(withOpaqueFactText(supportActorView(), "visible_support_actor")))
-      .toBe("Local Vendor is present in Market as a vendor.");
-    expect(() => renderCleanAuthorityProjection(withoutFactValue(supportActorView(), "visible_support_actor")))
-      .toThrow("Support-actor projection requires accepted Visible support actor value evidence.");
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(supportActorView(), "support_actor_presence")))
+      .toBe("Local Vendor is now in view at Market as a vendor.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(supportActorView(), "support_actor_presence")))
+      .toThrow("Support-actor projection requires accepted Support actor presence value evidence.");
 
     expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "place_handle_label")))
       .toBe("Tea Stall is now available here as a visible stall.");
@@ -2980,11 +2981,11 @@ describe("clean Stage 6 narration contracts", () => {
     supportActor.acceptedEvidence[0] = {
       ...supportActor.acceptedEvidence[0]!,
       backendFacts: supportActor.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        fact.role !== "visible_support_actor"
+        fact.role !== "support_actor_presence"
       ),
     };
     expect(() => renderCleanAuthorityProjection(supportActor))
-      .toThrow("Support-actor projection requires accepted Visible support actor value evidence.");
+      .toThrow("Support-actor projection requires accepted Support actor presence value evidence.");
 
     const condition = playerLocalConditionView();
     condition.acceptedEvidence[0] = {
@@ -3549,9 +3550,9 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [{
-          text: "Local Vendor is present as a vendor at Market.",
+          text: "Local Vendor is now in view at Market as a vendor.",
           evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
         }]);
       },
@@ -3559,7 +3560,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Local Vendor is present as a vendor at Market.");
+    expect(result.text).toBe("Local Vendor is now in view at Market as a vendor.");
   });
 
   it("accepts direct-scene implied action at runtime without prose-quality repair", async () => {
@@ -3883,8 +3884,26 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
     const text = renderCleanAuthorityProjection(supportActorView());
 
-    expect(text).toBe("Local Vendor is present in Market as a vendor.");
-    expect(text).not.toMatch(/\bVisible support actor|Support role|Anchor scene|Materialization result|says|offers|knows|service|future\b/iu);
+    expect(text).toBe("Local Vendor is now in view at Market as a vendor.");
+    for (const forbidden of [
+      "Visible support actor",
+      "Visible person now in view",
+      "Support role",
+      "Ordinary scene role",
+      "Anchor scene",
+      "Scene anchor",
+      "Materialization result",
+      "Presence result",
+      "has set up",
+      "set up",
+      "says",
+      "offers",
+      "knows",
+      "service",
+      "future",
+    ]) {
+      expect(text).not.toContain(forbidden);
+    }
 
     const inventedDialogue = validateCleanNarrationCandidate({
       view: supportActorView(),
@@ -3912,16 +3931,38 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "At Market, Local Vendor is visible as a vendor.",
+        text: "At Market, Local Vendor is now in view as a vendor.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5"],
         claimKinds: ["visible_actor", "support_actor_materialization"],
       }]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Local Vendor is visible as a vendor.");
-    expect(result.text).not.toMatch(/\b(Visible support actor|Support role|Anchor scene|Materialization result|says|offers|knows|service|future|route|movement|no change|nothing changed)\b/iu);
+    expect(result.text).toBe("At Market, Local Vendor is now in view as a vendor.");
+    for (const forbidden of [
+      "Visible support actor",
+      "Visible person now in view",
+      "Support role",
+      "Ordinary scene role",
+      "Anchor scene",
+      "Scene anchor",
+      "Materialization result",
+      "Presence result",
+      "has set up",
+      "set up",
+      "says",
+      "offers",
+      "knows",
+      "service",
+      "future",
+      "route",
+      "movement",
+      "no change",
+      "nothing changed",
+    ]) {
+      expect(result.text).not.toContain(forbidden);
+    }
   });
 
   it("uses accepted scene_texture for support_actor_materialization prose when texture is available", async () => {
@@ -3937,17 +3978,32 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Local Vendor is present as a vendor at Market.",
+          text: "Local Vendor is now in view at Market as a vendor.",
           evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is present as a vendor at Market.");
-    expect(result.text).not.toMatch(/\b(says|offers|service|knows|future|relationship|route|movement|no change|nothing changed)\b/iu);
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor is now in view at Market as a vendor.");
+    for (const forbidden of [
+      "has set up",
+      "set up",
+      "says",
+      "offers",
+      "service",
+      "knows",
+      "future",
+      "relationship",
+      "route",
+      "movement",
+      "no change",
+      "nothing changed",
+    ]) {
+      expect(result.text).not.toContain(forbidden);
+    }
   });
 
   it("accepts support_actor_materialization prose with structurally cited texture choices", () => {
@@ -3955,9 +4011,9 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Local Vendor is present as a vendor at Market.",
+        text: "Local Vendor is now in view at Market as a vendor.",
         evidenceRefs: ["e1", "e3"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
         claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
       }]),
     });
@@ -3973,9 +4029,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Local Vendor is present as a vendor at Market.",
+          text: "Local Vendor is now in view at Market as a vendor.",
           evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e3.f1"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
         },
       ]),
@@ -5317,7 +5373,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("is in view here");
     expect(buildCleanNarrationSystemPrompt()).toContain("player posture, motion, grip, search action, surface-kind wording, and ambient setting detail require exact accepted backendFacts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the presence beat on actor/role/scene materials");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render the backendFact role `support_actor_presence` value as the turn event");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the condition beat on condition/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
