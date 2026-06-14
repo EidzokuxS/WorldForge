@@ -219,6 +219,16 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
   });
 }
 
+function routeWithSceneTextureView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [
+      ...routeView().acceptedEvidence,
+      sceneTextureEvidence("e2"),
+      currentSceneAnchorEvidence("e3"),
+    ],
+  });
+}
+
 function timeView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -1360,7 +1370,9 @@ describe("clean Stage 6 narration contracts", () => {
         frameMoveRefs: [],
         coreSentenceRefs: ["s1"],
         frameSentenceRefs: [],
+        preferredFrameSentenceRefs: [],
         emphasis: "settled_turn_event",
+        frameSelection: "no_frame",
         coreFrameRelationship: "result_stands_alone",
         contextUse: "none",
       },
@@ -1520,7 +1532,9 @@ describe("clean Stage 6 narration contracts", () => {
       frameMoveRefs: ["m1"],
       coreSentenceRefs: ["s2"],
       frameSentenceRefs: ["s1"],
+      preferredFrameSentenceRefs: ["s1"],
       emphasis: "settled_turn_event",
+      frameSelection: "prefer_scene_anchor_frame",
       coreFrameRelationship: "context_frames_result",
       contextUse: "orient_before_core",
     });
@@ -1822,7 +1836,9 @@ describe("clean Stage 6 narration contracts", () => {
       frameMoveRefs: ["m1"],
       coreSentenceRefs: ["s3"],
       frameSentenceRefs: ["s1", "s2"],
+      preferredFrameSentenceRefs: ["s1"],
       emphasis: "playable_next_action",
+      frameSelection: "prefer_texture_frame",
       coreFrameRelationship: "context_frames_choices",
       contextUse: "texture_before_core",
     });
@@ -2124,6 +2140,26 @@ describe("clean Stage 6 narration contracts", () => {
         },
       },
     ]);
+  });
+
+  it("prefers texture frame over scene-anchor support for textured route-status pages", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeWithSceneTextureView());
+
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "open_with_context", entryRefs: ["e2", "e3"] },
+      { step: "narrate_turn_event", entryRefs: ["e1"] },
+    ]);
+    expect(promptInput.narrativePageTask.pageFocus).toEqual({
+      coreMoveRefs: ["m2"],
+      frameMoveRefs: ["m1"],
+      coreSentenceRefs: ["s3"],
+      frameSentenceRefs: ["s1", "s2"],
+      preferredFrameSentenceRefs: ["s1"],
+      emphasis: "settled_turn_event",
+      frameSelection: "prefer_texture_frame",
+      coreFrameRelationship: "context_frames_result",
+      contextUse: "texture_before_core",
+    });
   });
 
   it("checks narration sentence page-move refs against the narrative page task", () => {
@@ -4802,7 +4838,9 @@ describe("clean Stage 6 narration contracts", () => {
       frameMoveRefs: [],
       coreSentenceRefs: [],
       frameSentenceRefs: [],
+      preferredFrameSentenceRefs: [],
       emphasis: "audit_notice",
+      frameSelection: "audit_notice_only",
       coreFrameRelationship: "audit_notice_only",
       contextUse: "audit_only",
     });
@@ -5067,6 +5105,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("coreMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("coreSentenceRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("frameMoveRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preferredFrameSentenceRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("frameSelection");
     expect(buildCleanNarrationSystemPrompt()).toContain("coreFrameRelationship");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");

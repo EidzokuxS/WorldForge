@@ -1470,11 +1470,40 @@ function pageFocusContextUse(
   return "none";
 }
 
+function pageFocusPreferredFrameSentenceRefs(
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): string[] {
+  const optionalTextureRefs = sentencePlan
+    .filter((step) => step.coverage === "optional" && step.sentenceRole === "exact_context_texture")
+    .map((step) => step.sentenceRef);
+  if (optionalTextureRefs.length > 0) return optionalTextureRefs;
+
+  return sentencePlan
+    .filter((step) => step.coverage === "optional" && step.sentenceRole === "context_anchor")
+    .map((step) => step.sentenceRef);
+}
+
+function pageFocusFrameSelection(
+  pageArc: CleanNarratorPageArc,
+  preferredFrameSentenceRefs: readonly string[],
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorPageFocus["frameSelection"] {
+  if (pageArc.arcShape === "audit_notice_only") return "audit_notice_only";
+  if (preferredFrameSentenceRefs.length === 0) return "no_frame";
+  const preferred = new Set(preferredFrameSentenceRefs);
+  return sentencePlan.some((step) =>
+    preferred.has(step.sentenceRef) && step.sentenceRole === "exact_context_texture"
+  )
+    ? "prefer_texture_frame"
+    : "prefer_scene_anchor_frame";
+}
+
 function buildCleanPageFocus(
   pageArc: CleanNarratorPageArc,
   moves: CleanNarratorPageTaskMove[],
   sentencePlan: CleanNarratorSentencePlanStep[],
 ): CleanNarratorPageFocus {
+  const preferredFrameSentenceRefs = pageFocusPreferredFrameSentenceRefs(sentencePlan);
   return {
     coreMoveRefs: moves
       .filter((move) => move.coverage === "required")
@@ -1488,7 +1517,9 @@ function buildCleanPageFocus(
     frameSentenceRefs: sentencePlan
       .filter((step) => step.coverage === "optional")
       .map((step) => step.sentenceRef),
+    preferredFrameSentenceRefs,
     emphasis: pageFocusEmphasis(pageArc),
+    frameSelection: pageFocusFrameSelection(pageArc, preferredFrameSentenceRefs, sentencePlan),
     coreFrameRelationship: pageFocusCoreFrameRelationship(pageArc),
     contextUse: pageFocusContextUse(pageArc, sentencePlan),
   };
@@ -1693,7 +1724,7 @@ export function buildCleanNarrationSystemPrompt(
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of facts.",
     "Page performance: promptInput.narrativePageTask.pagePerformance names openingBeat, pageMotion, continuityMaterial, closingBeat, and readerHandoff. Use it to connect sentencePlan steps into one text-RPG page: start from the opening material, carry continuity material through the page motion, and land the reader handoff while preserving sentence refs and evidence refs.",
     "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, cadenceTarget, dictionPalette, and variationBoundary. Use it to vary syntax, cadence, and RPG diction across pages while staying inside cited proseMaterials; variationBoundary=vary_syntax_only_inside_cited_material means style changes the phrasing path, not the facts.",
-    "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs and frameMoveRefs/frameSentenceRefs, plus emphasis, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
+    "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs, frameMoveRefs/frameSentenceRefs, preferredFrameSentenceRefs, emphasis, frameSelection, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. When preferredFrameSentenceRefs is nonempty, use those frame sentence refs before the core; other frame refs are support material and may be omitted. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",

@@ -2856,11 +2856,18 @@ const cleanNarratorPageFocusSchema = z.object({
   frameMoveRefs: z.array(shortText).max(4),
   coreSentenceRefs: z.array(shortText).max(6),
   frameSentenceRefs: z.array(shortText).max(6),
+  preferredFrameSentenceRefs: z.array(shortText).max(6),
   emphasis: z.enum([
     "accepted_clarification",
     "audit_notice",
     "playable_next_action",
     "settled_turn_event",
+  ]),
+  frameSelection: z.enum([
+    "audit_notice_only",
+    "no_frame",
+    "prefer_scene_anchor_frame",
+    "prefer_texture_frame",
   ]),
   coreFrameRelationship: z.enum([
     "audit_notice_only",
