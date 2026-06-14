@@ -1419,6 +1419,14 @@ describe("clean Stage 6 narration contracts", () => {
           verbFrame: "land_settled_result",
           detailPalette: ["accepted_primary_beat", "accepted_labels", "accepted_time"],
         },
+        proseAssembly: {
+          perspective: "settled_result_present",
+          sentenceShape: "result_beat_line",
+          openingSource: "core_material_subject",
+          verbEnergy: "land_result",
+          detailRhythm: "core_with_preserved_tokens",
+          closingFunction: "settle_outcome",
+        },
         literaryCue: {
           renderShape: "land_settled_turn_result",
           cadence: "compact_present_beat",
@@ -1571,6 +1579,14 @@ describe("clean Stage 6 narration contracts", () => {
           verbFrame: "place_player_in_scene",
           detailPalette: ["accepted_labels"],
         },
+        proseAssembly: {
+          perspective: "second_person_present",
+          sentenceShape: "scene_anchor_line",
+          openingSource: "preserved_label_anchor",
+          verbEnergy: "concrete_present",
+          detailRhythm: "scene_anchor_tokens",
+          closingFunction: "orient_context",
+        },
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1635,6 +1651,14 @@ describe("clean Stage 6 narration contracts", () => {
           subjectFocus: "visible_speaker",
           verbFrame: "frame_exact_utterance",
           detailPalette: ["accepted_labels", "accepted_quote", "accepted_primary_beat"],
+        },
+        proseAssembly: {
+          perspective: "visible_speaker_present",
+          sentenceShape: "quote_framed_beat",
+          openingSource: "visible_speaker_label",
+          verbEnergy: "frame_speech",
+          detailRhythm: "exact_quote_with_frame",
+          closingFunction: "settle_outcome",
         },
         literaryCue: {
           renderShape: "frame_exact_quote",
@@ -1830,6 +1854,14 @@ describe("clean Stage 6 narration contracts", () => {
           verbFrame: "copy_visible_texture",
           detailPalette: ["accepted_texture"],
         },
+        proseAssembly: {
+          perspective: "environment_present",
+          sentenceShape: "exact_texture_line",
+          openingSource: "accepted_texture_material",
+          verbEnergy: "copy_exact",
+          detailRhythm: "texture_line",
+          closingFunction: "orient_context",
+        },
         literaryCue: {
           renderShape: "copy_exact_context_texture",
           cadence: "exact_short_sentence",
@@ -1894,6 +1926,14 @@ describe("clean Stage 6 narration contracts", () => {
           subjectFocus: "player_scene_position",
           verbFrame: "place_player_in_scene",
           detailPalette: ["accepted_labels"],
+        },
+        proseAssembly: {
+          perspective: "second_person_present",
+          sentenceShape: "scene_anchor_line",
+          openingSource: "preserved_label_anchor",
+          verbEnergy: "concrete_present",
+          detailRhythm: "scene_anchor_tokens",
+          closingFunction: "orient_context",
         },
         literaryCue: {
           renderShape: "place_player_in_context",
@@ -1980,6 +2020,14 @@ describe("clean Stage 6 narration contracts", () => {
           subjectFocus: "playable_route_choices",
           verbFrame: "offer_playable_choices",
           detailPalette: ["accepted_primary_beat", "accepted_labels", "accepted_route_choices", "accepted_time"],
+        },
+        proseAssembly: {
+          perspective: "playable_choice_present",
+          sentenceShape: "choice_handle_line",
+          openingSource: "playable_route_label",
+          verbEnergy: "offer_choice",
+          detailRhythm: "choice_group_with_cost",
+          closingFunction: "offer_next_action",
         },
         literaryCue: {
           renderShape: "leave_playable_choice_handle",
@@ -4915,6 +4963,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.subjectFocus");
     expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.verbFrame");
     expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.detailPalette");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Prose assembly:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("proseAssembly.perspective");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentenceShape");
+    expect(buildCleanNarrationSystemPrompt()).toContain("openingSource");
+    expect(buildCleanNarrationSystemPrompt()).toContain("verbEnergy");
+    expect(buildCleanNarrationSystemPrompt()).toContain("detailRhythm");
+    expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
     expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
