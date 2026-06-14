@@ -8074,3 +8074,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live artifact `output/clean-runtime-p300-direct-look-handoff-live-clean-r2-20260614-221500`: `runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=false`, all accepted route labels present, old route-report opener/predicate absent, inventory labels present, and legacy runtime stores all stayed 0.
     - Verified prose audit `output/clean-runtime-p300-direct-look-handoff-live-clean-r2-20260614-221500/prose-audit.json`: one narrative, 66 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope summary, 7 touched indexed symbols, 3 changed files, one affected process (`runCleanNarration`), with no HIGH/CRITICAL impact results.
+
+- P301 Stage 6 direct-scene surface/route ownership:
+  - Diagnosis:
+    - [x] Fresh live scan `output/clean-runtime-p301-prose-gap-scan-20260614-222500` shows `I look around.` settling through clean runtime, but direct-scene surface prose can still merge route labels into the visible-target sentence before repeating them as exits: `You stand at Lowwater Bazaar, where Guide is in view along with Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, and Silt Warrens.`
+    - [x] Root owner is Stage 6 direct-scene surface fact selection: route/place target labels are valid gameplay labels, but on a broad-look page their sentence ownership belongs to the route handoff, while the surface observation sentence should center visible actors and non-route local targets.
+  - Plan:
+    - [x] Inspect direct-scene accepted evidence roles from the fresh scan record.
+    - [x] Run GitNexus impact for the direct-scene surface fact-selection/page-task owner before editing.
+    - [x] Move route-like visible target roles out of the direct-scene surface sentence when route handoff owns accepted route labels.
+    - [x] Update focused narration tests so route/location target labels remain available to route handoff but stay out of the surface observation sentence.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live direct-look proof, prose audit, and GitNexus scope.
+    - [x] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I look around.` keeps Guide/non-route local targets in the surface sentence and route labels in the exit handoff.
+    - [x] Exact accepted route labels remain present once in the route handoff material path.
+    - [x] Narration adds no movement, arrival, route safety, hidden-route, discovery, item handling/readiness, NPC action, absence/no-change, private fact, or world truth.
+  - Review:
+    - Executed: inspected P301 scan record roles; `visible_target_labels` aggregated Guide with route/place handles, while specific `visible_actor_target_labels`, `visible_item_target_labels`, `visible_place_handle_target_labels`, inventory roles, and route roles already existed as typed material.
+    - Executed: changed Stage 6 direct-scene sentence ownership so surface selection uses specific actor/item/place-handle roles, inventory uses its own labels-first custody beat, and direct-scene route handoff uses only route label refs.
+    - Executed: aligned `choicePresentation` with sentence-plan material refs so direct-scene route handoff exposes `choice_labels_only` instead of route-origin anchoring when the route sentence lacks route_origin material.
+    - Verified: GitNexus impact was LOW for `selectDirectSceneSurfaceFactRefs`, `moveHasDirectSceneSurfaceFacts`, `selectPlayableNextActionFactRefs`, `buildCleanChoicePresentation`, `selectDirectSceneInventoryStatusFactRefs`, `sentencePlanForMove`, `validateCleanNarrationCandidate`, `narrationValidationRepairLines`, and `buildCleanNarrationSystemPrompt`.
+    - Verified: focused narration suite passed 115/115; expanded clean-runtime suite passed 386/386 across contracts, Stage 4, settlement, and narration; `npm --prefix backend run typecheck` passed.
+    - Verified: live proof `output/clean-runtime-p301-direct-scene-surface-route-live-20260614-223000` r8 settled through `gameplay-cycle-runtime`, left `mutationApplied=false`, kept legacy runtime tables at 0, and produced separated texture/surface/inventory/route sentences.
+    - Verified: accepted r8 text was `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in sight at Lowwater Bazaar. Courier satchel, Sealed lacquer message tube, and Brass Tube are with you. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from here.`
+    - Verified: prose audit passed for the proof artifact with 1 narrative, 65 words, zero receipt/debug/enum/surface/list/digest/old-formula hits, zero `youOpening`, and zero list-like starts.

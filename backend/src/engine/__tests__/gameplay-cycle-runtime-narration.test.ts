@@ -2639,7 +2639,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.sentenceRole === "next_action_handle"
       && step.beatObjective === "render_route_choices"
     );
-    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e4.f2", "e4.f3", "e4.f4"]);
+    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e4.f3", "e4.f4"]);
     expect(routeChoiceStep?.proseAssembly).toMatchObject({
       sentenceShape: "scene_exit_choice_line",
       openingSource: "playable_route_label",
@@ -2652,15 +2652,18 @@ describe("clean Stage 6 narration contracts", () => {
       styleLevers: ["route_exit_grouping", "accepted_label_anchor", "concrete_present_verb"],
     });
     expect(routeChoiceStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
-      "scene_anchor",
       "route_choice",
       "route_choice",
     ]);
+    expect(promptInput.narrativePageTask.choicePresentation.anchorStyle).toBe("choice_labels_only");
+    expect(promptInput.narrativePageTask.choicePresentation.anchorFactRefs).toEqual([]);
     const directSceneSurfaceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
       && step.beatObjective === "render_direct_scene_snapshot"
-      && step.proseMaterials.some((material) => material.factRef === "e3.f1")
+      && step.proseMaterials.some((material) => material.factRef === "e3.f2")
     );
+    expect(directSceneSurfaceStep?.preferredBackendFactRefs).toEqual(["e3.f2"]);
+    expect(directSceneSurfaceStep?.preferredBackendFactRefs).not.toContain("e3.f1");
     expect(directSceneSurfaceStep?.proseAssembly).toMatchObject({
       sentenceShape: "local_observation_line",
       openingSource: "observed_visible_label",
@@ -2676,7 +2679,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.sentenceRole === "next_action_handle"
       && step.proseMaterials.some((material) => material.factRef === "e2.f1")
     );
-    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f1", "e2.f2"]);
+    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f2", "e2.f1"]);
     expect(inventoryStatusStep?.beatObjective).toBe("render_direct_scene_snapshot");
     expect(inventoryStatusStep?.proseAssembly).toMatchObject({
       sentenceShape: "result_beat_line",
@@ -2726,7 +2729,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.sentenceRole === "next_action_handle"
       && step.beatObjective === "render_route_choices"
     );
-    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e5.f6", "e5.f7"]);
+    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e5.f7"]);
 
     const inventoryStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
@@ -4050,9 +4053,9 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["inventory_status"],
           },
           {
-            text: "At Market, North Hall is the exit you can choose.",
+            text: "North Hall is the exit you can choose.",
             evidenceRefs: ["e5"],
-            backendFactRefs: ["e5.f2", "e5.f3", "e5.f4"],
+            backendFactRefs: ["e5.f3", "e5.f4"],
             claimKinds: ["movement_option"],
           },
         ]);
@@ -4061,7 +4064,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is in view, with Brass Tube and Notice Board visible nearby. You have Courier satchel with you. At Market, North Hall is the exit you can choose.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is in view, with Brass Tube and Notice Board visible nearby. You have Courier satchel with you. North Hall is the exit you can choose.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -4112,7 +4115,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Notice Board is visible.",
           evidenceRefs: ["e3"],
-          backendFactRefs: ["e3.f1"],
+          backendFactRefs: ["e3.f2"],
           claimKinds: ["visible_target"],
         },
         {
@@ -4122,28 +4125,71 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the exit you can choose.",
           evidenceRefs: ["e4"],
-          backendFactRefs: ["e4.f2", "e4.f3", "e4.f4"],
+          backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
         },
       ]),
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. You have Courier satchel with you. North Hall is the exit you can choose.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
 
     const missingTexture = validateCleanNarrationCandidate({
       view,
-      candidate: acceptedCandidate(view, [{
-        text: "At Market, Notice Board is visible. You have Courier satchel with you. At Market, North Hall is the exit you can choose; it takes 1 minute.",
-        evidenceRefs: ["e1", "e2", "e3", "e4"],
-        backendFactRefs: ["e1.f1", "e2.f1", "e3.f1", "e4.f2", "e4.f3", "e4.f4"],
-        claimKinds: ["current_scene", "inventory_status", "visible_target", "movement_option"],
-      }]),
+      candidate: acceptedCandidate(view, [
+        {
+          text: "At Market, Notice Board is visible.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f2", "e3.f2"],
+          claimKinds: ["current_scene", "visible_target"],
+        },
+        {
+          text: "Courier satchel is with you.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1", "e2.f2"],
+          claimKinds: ["inventory_status"],
+        },
+        {
+          text: "North Hall is the exit you can choose.",
+          evidenceRefs: ["e4"],
+          backendFactRefs: ["e4.f3", "e4.f4"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
     });
-    expect(missingTexture.status).toBe("accepted");
+    expect(missingTexture.status).toBe("rejected");
+    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTexture.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+
+    const mergedSurfaceInventory = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Notice Board is visible and Courier satchel is with you.",
+          evidenceRefs: ["e2", "e3"],
+          backendFactRefs: ["e2.f1", "e2.f2", "e3.f2"],
+          claimKinds: ["inventory_status", "visible_target"],
+        },
+        {
+          text: "North Hall is the exit you can choose.",
+          evidenceRefs: ["e4"],
+          backendFactRefs: ["e4.f3", "e4.f4"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+    expect(mergedSurfaceInventory.status).toBe("rejected");
+    if (mergedSurfaceInventory.status !== "rejected") throw new Error("expected rejected");
+    expect(mergedSurfaceInventory.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
 
     const inventoryPhrase = validateCleanNarrationCandidate({
       view,
@@ -4155,10 +4201,41 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Notice Board is visible.",
-          evidenceRefs: ["e1", "e3"],
-          backendFactRefs: ["e1.f1", "e3.f1"],
-          claimKinds: ["current_scene", "visible_target"],
+          text: "Notice Board is visible.",
+          evidenceRefs: ["e3"],
+          backendFactRefs: ["e3.f2"],
+          claimKinds: ["visible_target"],
+        },
+        {
+          text: "Courier satchel is with you.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["inventory_status"],
+        },
+        {
+          text: "North Hall is the exit you can choose.",
+          evidenceRefs: ["e4"],
+          backendFactRefs: ["e4.f3", "e4.f4"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
+    });
+    expect(inventoryPhrase.status).toBe("accepted");
+
+    const sceneAnchorRouteHandoff = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Canvas awnings hang over the market lanes.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f1"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Notice Board is visible.",
+          evidenceRefs: ["e3"],
+          backendFactRefs: ["e3.f2"],
+          claimKinds: ["visible_target"],
         },
         {
           text: "Courier satchel is with you.",
@@ -4169,12 +4246,14 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "At Market, North Hall is the exit you can choose.",
           evidenceRefs: ["e4"],
-          backendFactRefs: ["e4.f2", "e4.f3", "e4.f4"],
+          backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
         },
       ]),
     });
-    expect(inventoryPhrase.status).toBe("accepted");
+    expect(sceneAnchorRouteHandoff.status).toBe("rejected");
+    if (sceneAnchorRouteHandoff.status !== "rejected") throw new Error("expected rejected");
+    expect(sceneAnchorRouteHandoff.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
 
     const conflatedInventoryAsVisibleTarget = validateCleanNarrationCandidate({
       view,
@@ -4188,7 +4267,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "At Market, Notice Board and Courier satchel are visible.",
           evidenceRefs: ["e1", "e2", "e3"],
-          backendFactRefs: ["e1.f1", "e2.f1", "e3.f1"],
+          backendFactRefs: ["e1.f2", "e2.f1", "e3.f2"],
           claimKinds: ["current_scene", "inventory_status", "visible_target"],
         },
       ]),
@@ -4220,7 +4299,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Guide is here, with Brass Tube and Notice Board visible.",
           evidenceRefs: ["e2", "e4"],
-          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4", "e4.f5"],
+          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
         },
         {
@@ -4230,9 +4309,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose.",
+          text: "North Hall is the exit you can choose.",
           evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f2", "e5.f3", "e5.f4"],
+          backendFactRefs: ["e5.f3", "e5.f4"],
           claimKinds: ["movement_option"],
         },
       ]),
@@ -4263,7 +4342,7 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Guide is here, with Brass Tube and Notice Board visible.",
           evidenceRefs: ["e2", "e4"],
-          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4", "e4.f5"],
+          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
         },
         {
@@ -4273,9 +4352,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose.",
+          text: "North Hall is the exit you can choose.",
           evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f2", "e5.f3", "e5.f4"],
+          backendFactRefs: ["e5.f3", "e5.f4"],
           claimKinds: ["movement_option"],
         },
       ]),
@@ -5462,28 +5541,56 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => {
         modelCalls += 1;
-        return acceptedCandidate(view, [{
-          text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
-          evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
-          claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
-        }]);
+        return acceptedCandidate(view, [
+          {
+            text: "At Market, Guide is in view.",
+            evidenceRefs: ["e5"],
+            backendFactRefs: ["e5.f2", "e5.f4"],
+            claimKinds: ["current_scene", "visible_actor"],
+          },
+          {
+            text: "Courier satchel is with you.",
+            evidenceRefs: ["e5"],
+            backendFactRefs: ["e5.f5"],
+            claimKinds: ["inventory_status"],
+          },
+          {
+            text: "North Hall is an exit you can choose.",
+            evidenceRefs: ["e5"],
+            backendFactRefs: ["e5.f7"],
+            claimKinds: ["movement_option"],
+          },
+        ]);
       },
     });
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.");
+    expect(result.text).toBe("At Market, Guide is in view. Courier satchel is with you. North Hall is an exit you can choose.");
     expect(result.text).not.toMatch(/\b(Current scene is|Visible actor:|Inventory item:|Movement option:|backend|receipt|nothing changed|no change)\b/iu);
 
     const inventoryPhrase = validateCleanNarrationCandidate({
       view,
-      candidate: acceptedCandidate(view, [{
-        text: "At Market, Guide is in view, Courier satchel stays with you, and North Hall is an exit you can choose.",
-        evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
-        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
-      }]),
+      candidate: acceptedCandidate(view, [
+        {
+          text: "At Market, Guide is in view.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f2", "e5.f4"],
+          claimKinds: ["current_scene", "visible_actor"],
+        },
+        {
+          text: "Courier satchel stays with you.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f5"],
+          claimKinds: ["inventory_status"],
+        },
+        {
+          text: "North Hall is an exit you can choose.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f7"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
     });
     expect(inventoryPhrase.status).toBe("accepted");
 
@@ -5505,12 +5612,26 @@ describe("clean Stage 6 narration contracts", () => {
     const texturedView = sceneObservationReceiptWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view: texturedView,
-      candidate: acceptedCandidate(texturedView, [{
-        text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
-        evidenceRefs: ["e5"],
-        backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
-        claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
-      }]),
+      candidate: acceptedCandidate(texturedView, [
+        {
+          text: "At Market, Guide is in view.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f2", "e5.f4"],
+          claimKinds: ["current_scene", "visible_actor"],
+        },
+        {
+          text: "Courier satchel is with you.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f5"],
+          claimKinds: ["inventory_status"],
+        },
+        {
+          text: "North Hall is an exit you can choose.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f7"],
+          claimKinds: ["movement_option"],
+        },
+      ]),
     });
     expect(missingTexture.status).toBe("accepted");
 
@@ -5525,15 +5646,27 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.",
+          text: "At Market, Guide is in view.",
           evidenceRefs: ["e5"],
-          backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
-          claimKinds: ["current_scene", "visible_actor", "inventory_status", "movement_option"],
+          backendFactRefs: ["e5.f2", "e5.f4"],
+          claimKinds: ["current_scene", "visible_actor"],
+        },
+        {
+          text: "Courier satchel is with you.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f5"],
+          claimKinds: ["inventory_status"],
+        },
+        {
+          text: "North Hall is an exit you can choose.",
+          evidenceRefs: ["e5"],
+          backendFactRefs: ["e5.f7"],
+          claimKinds: ["movement_option"],
         },
       ]),
     });
     expect(texturedResult.source).toBe("model");
-    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view, and North Hall is an exit you can choose. You have Courier satchel with you.");
+    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view. Courier satchel is with you. North Hall is an exit you can choose.");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {
