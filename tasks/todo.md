@@ -6852,3 +6852,21 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
     - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
     - Executed: code commit `4d711aa0` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P248 Stage 6 narrative sentence plan:
+  - Plan:
+    - [x] Run GitNexus impact before editing page task builder and prompt wording.
+    - [x] Add ordered `sentencePlan` to `narrativePageTask`, derived from page moves and accepted fact-use roles.
+    - [x] Express sentence roles as typed page roles such as context texture, turn beat, next-action handle, and clarification.
+    - [x] Keep sentence plan truth-bounded through move refs, entry refs, preferred backend fact refs, and coverage.
+    - [x] Update focused narration tests proving movement, dialogue-with-context, and route-options page tasks expose the intended sentence plan.
+    - [x] Run focused narration tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Inspected: GitNexus impact for `buildCleanNarrativePageTask` and `buildCleanNarrationSystemPrompt` reported LOW scope; direct flow remains `runCleanNarration`.
+    - Executed: `narrativePageTask` now carries ordered `sentencePlan` steps with sentence refs, move refs, sentence roles, coverage, entry refs, and preferred backend fact refs.
+    - Executed: sentence roles distinguish clarification questions, exact context texture, context anchors, authoritative turn beats, and playable next-action handles from typed fact-use roles.
+    - Executed: the system prompt now names `sentencePlan` as the intended sentence-object order and tells the narrator to bind output `pageMoveRefs` to the matching move.
+    - Executed: focused movement, dialogue-with-context, and route-options prompt-input tests prove the intended sentence plan shape.
+    - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests and `npm --prefix backend run typecheck` passed.
+    - Inspected: GitNexus all-scope and staged `detect_changes` reported MEDIUM scope, affected only `runCleanNarration` page-task flows.
+    - Executed: code commit `6b0cd08b` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
