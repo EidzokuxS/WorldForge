@@ -8267,7 +8267,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Make model-generation `actionInterpretation.method` optional while canonical `GmRead` stores omitted method as `null`.
     - [x] Add contract coverage for generated visible-actor observation without `method`.
     - [x] Run focused GM-read/runtime tests, full clean-runtime slice, typecheck, live visible-actors proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] `Who is visible nearby?` settles through clean runtime instead of restoring pre-turn state.
     - [x] Accepted GM-read/action checklist/stage4 evidence keeps method absence as `null`, with no invented action method.
@@ -8282,3 +8282,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live P308 proof inside `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000`: `visible-actors` settled through `gameplay-cycle-runtime`, applied no mutation, kept old runtime stores zero, accepted `local_observation` evidence for Guide, and rendered `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Guide is in sight at Lowwater Bazaar.`
     - Verified focused visible-actors prose audit `output/clean-runtime-p308-prose-scan-after-method-fix-20260615-003000/visible-actors-prose-audit.json`: one narrative, 28 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Diagnostic for next slice: the same after-fix scan exposed a separate `player-condition` narration validation failure after settlement: sentence 1 cited current-scene evidence outside its page move/sentence-plan refs. Treat this as P309, separate from the GM-read nullable-method contract.
+    - Verified commit/push: code commit `b708ca6e` pushed to `develop`.
