@@ -2120,9 +2120,9 @@ describe("clean Stage 5 settlement contracts", () => {
       "route_options_receipt",
     ]);
     const elapsed = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("elapsed_time"));
-    expect(elapsed?.text).toBe("Five minutes pass.");
+    expect(elapsed?.text).toBe("Five minutes slip by.");
     expect(elapsed?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Time beat: Five minutes pass.",
+      "Time beat: Five minutes slip by.",
       "Elapsed time: 5 minutes.",
     ]);
     expect(elapsed?.backendFacts.find((entry) => entry.role === "elapsed_time")?.value).toBe("5 minutes");

@@ -3308,12 +3308,29 @@ function englishList(values: readonly string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
-function renderElapsedTimeProjection(_view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
+function currentSceneProjectionLabel(view: CleanNarratorView): string | null {
+  for (const evidence of view.acceptedEvidence) {
+    if (
+      !evidence.claimKinds.includes("current_scene")
+      && !evidence.claimKinds.includes("current_location")
+    ) {
+      continue;
+    }
+    const sceneLabel = optionalFactValueByRole(evidence, "scene_label")
+      ?? optionalFactValueByRole(evidence, "place_label");
+    if (sceneLabel) return sceneLabel;
+  }
+  return null;
+}
+
+function renderElapsedTimeProjection(view: CleanNarratorView, evidence: AcceptedNarrationEvidence): string {
   const timeBeat = trimSentencePeriod(requireFactValueByRole(
     evidence,
     "time_beat",
     "Elapsed-time projection requires accepted Time beat value evidence.",
   ));
+  const sceneLabel = currentSceneProjectionLabel(view);
+  if (sceneLabel) return `${timeBeat} at ${sceneLabel}.`;
   return `${timeBeat}.`;
 }
 

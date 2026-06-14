@@ -246,9 +246,9 @@ function timeView(): CleanNarratorView {
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["elapsed_time"],
-      text: "Five minutes pass.",
+      text: "Five minutes slip by.",
       backendFacts: [
-        { factRef: "e1.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
+        { factRef: "e1.f1", role: "time_beat", value: "Five minutes slip by.", text: "Time beat: Five minutes slip by.", exact: true },
         { factRef: "e1.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
       ],
       limits: {
@@ -303,9 +303,9 @@ function timeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "Five minutes pass.",
+        text: "Five minutes slip by.",
         backendFacts: [
-          { factRef: "e5.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "Five minutes slip by.", text: "Time beat: Five minutes slip by.", exact: true },
           { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -349,9 +349,9 @@ function timeWithSceneTextureView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "Five minutes pass.",
+        text: "Five minutes slip by.",
         backendFacts: [
-          { factRef: "e5.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "Five minutes slip by.", text: "Time beat: Five minutes slip by.", exact: true },
           { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -3177,7 +3177,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("projects P64 elapsed-time evidence without no-change claims", () => {
     const text = renderCleanAuthorityProjection(timeView());
 
-    expect(text).toBe("Five minutes pass.");
+    expect(text).toBe("Five minutes slip by.");
     expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
   });
 
@@ -3221,7 +3221,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "time_beat" ? { ...fact, text: "Opaque accepted time fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(elapsed)).toBe("Five minutes pass.");
+    expect(renderCleanAuthorityProjection(elapsed)).toBe("Five minutes slip by.");
 
     const elapsedMissingValue = timeView();
     elapsedMissingValue.acceptedEvidence[0] = {
@@ -3551,7 +3551,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes slip by at Market.");
     expect(result.text).not.toContain("World clock");
     expect(result.text).not.toContain("minute(s)");
     expect(result.text).not.toContain("backend");
@@ -3963,7 +3963,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(0);
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes slip by at Market.");
   });
 
   it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {
@@ -6077,7 +6077,7 @@ describe("clean Stage 6 narration contracts", () => {
     const elapsedDigest = validateCleanNarrationCandidate({
       view: timeView(),
       candidate: acceptedCandidate(timeView(), [{
-        text: "Five minutes pass.",
+        text: "Five minutes slip by.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2"],
         claimKinds: ["elapsed_time"],

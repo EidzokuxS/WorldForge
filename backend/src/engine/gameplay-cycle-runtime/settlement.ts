@@ -967,8 +967,8 @@ function elapsedDurationValue(elapsedMinutes: number): string {
 function elapsedTimeBeat(elapsedMinutes: number): string {
   const unit = elapsedMinutes === 1 ? "minute" : "minutes";
   const duration = `${ELAPSED_MINUTE_WORDS.get(elapsedMinutes) ?? elapsedMinutes} ${unit}`;
-  const verb = elapsedMinutes === 1 ? "passes" : "pass";
-  return `${duration} ${verb}.`;
+  const verb = elapsedMinutes === 1 ? "slips" : "slip";
+  return `${duration} ${verb} by.`;
 }
 
 function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: CleanSettledEvidence[]): void {

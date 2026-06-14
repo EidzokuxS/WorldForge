@@ -8507,3 +8507,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p316-minor-poi-live-20260615-024328/prose-audit.json`: one narrative, 29 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 3 touched indexed symbols, 3 changed files, and 0 affected execution flows.
     - Verified implementation commit: `eeb20d5f` recorded the P316 code/tests/proof notes.
+
+- P317 clean elapsed-time deterministic prose:
+  - Diagnosis:
+    - [x] Standalone elapsed-time narration still renders accepted `time_beat` as the dry clock line `Five minutes pass.`
+    - [x] Root owner is typed elapsed-time story material: settlement emits the `time_beat`, and `renderElapsedTimeProjection()` copies it without using the accepted current-scene anchor already present in the narrator view.
+  - Plan:
+    - [x] Run GitNexus impact for the elapsed-time settlement/projection owner symbols before code edits.
+    - [x] Make the accepted clock beat prose-ready while preserving clock-only authority.
+    - [x] Let deterministic elapsed-time projection weave accepted duration/clock beat with accepted scene label when present.
+    - [x] Update focused settlement/narration tests for the positive surface and no-route/no-change/no-world-fact contract.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live elapsed-time proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live elapsed-time output reads as a scene clock beat rather than `Five minutes pass.`
+    - [x] Output proves only elapsed clock time at the accepted current scene; it does not add waiting results, visible change, inactivity/no-change, movement, route truth, item state, dialogue, NPC action, private fact, discovery, absence, or extra world truth.
+    - [x] The fix changes typed settlement/projection material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Executed: settlement `elapsedTimeBeat()` now emits prose-ready clock beats such as `Five minutes slip by.` while preserving typed `elapsed_time = 5 minutes`.
+    - Executed: `renderElapsedTimeProjection()` now uses accepted current-scene/current-location evidence to render standalone elapsed-time as `Five minutes slip by at <scene>.`; without an accepted scene label it keeps the receipt-owned clock beat.
+    - Verified GitNexus impacts before edits: `renderElapsedTimeProjection`, `renderElapsedTimeTurnProjection`, `elapsedTimeBeat`, and `stage4Evidence` all returned LOW risk; direct runtime process family is `runCleanNarration` / `renderCleanAuthorityProjection` for projection and `buildCleanSettledTurnPacket` for settlement.
+    - Verified focused settlement/narration suites: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 141/141 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 392/392 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p317-elapsed-live-20260615-025305`: clean runtime settled one accepted `time_advance`, wrote one clean turn record and one clean Stage 4 receipt, advanced clock/version from `0/0/0` to `1/5/5`, wrote one clock ledger row, kept old saga/narrator/v2 stores at 0, and stopped backend port 31817 after proof.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Five minutes slip by at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p317-elapsed-live-20260615-025305/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 4 touched indexed symbols, 5 changed files, and one affected `renderCleanAuthorityProjection -> normalizeText` process; no HIGH/CRITICAL warnings.
