@@ -8451,3 +8451,5 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor stands beside a counter or stall, with worn wood nearby. Local Vendor says: "Right here, then. I'll stand where you can see me — no sudden moves."`
     - Verified accepted dialogue receipt quote and summary answer the placement request instead of offering vendor service/trade.
     - Verified prose audit `output/clean-runtime-p314-support-dialogue-live-20260615-021636/prose-audit.json`: one narrative, 51 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed owners, 5 changed files, and no affected processes.
+    - Verified implementation commit: `59fca80f` recorded the P314 code/tests/proof notes.
