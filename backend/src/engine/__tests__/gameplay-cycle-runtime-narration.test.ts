@@ -36,7 +36,14 @@ function pageMoveRefsForSentence(
   evidenceRefs: readonly string[],
   backendFactRefs: readonly string[],
 ): string[] {
-  return buildCleanNarratorPromptInput(view).narrativePageTask.moves
+  const promptInput = buildCleanNarratorPromptInput(view);
+  const sentencePlanRefs = sentencePlanRefsForSentence(view, evidenceRefs, backendFactRefs);
+  const planOwnedMoveRefs = promptInput.narrativePageTask.sentencePlan
+    .filter((step) => sentencePlanRefs.includes(step.sentenceRef))
+    .map((step) => step.moveRef);
+  if (planOwnedMoveRefs.length > 0) return Array.from(new Set(planOwnedMoveRefs));
+
+  return promptInput.narrativePageTask.moves
     .filter((move) =>
       evidenceRefs.some((ref) => move.entryRefs.includes(ref))
       || backendFactRefs.some((ref) => move.allowedBackendFactRefs.includes(ref))
@@ -2693,6 +2700,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(claimKinds).not.toContain("visible_actor");
     expect(claimKinds).not.toContain("visible_target");
     expect(claimKinds).not.toContain("movement_option");
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
+      step.sentenceRole === "context_anchor"
+    )).toBe(false);
     const elapsedStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.beatObjective === "render_elapsed_time"
     );
@@ -2743,9 +2753,13 @@ describe("clean Stage 6 narration contracts", () => {
     const elapsedStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.beatObjective === "render_elapsed_time"
     );
+    const contextAnchorStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "context_anchor"
+    );
 
     expect(textureStep?.preferredBackendFactRefs).toEqual(["e2.f2"]);
     expect(textureStep?.materialObligations.coreMaterialFactRefs).toEqual(["e2.f2"]);
+    expect(contextAnchorStep).toBeUndefined();
     expect(elapsedStep?.preferredBackendFactRefs).toEqual(["e5.f2", "e3.f2"]);
     expect(elapsedStep?.materialObligations.coreMaterialFactRefs).toEqual(["e5.f2", "e3.f2"]);
     expect(elapsedStep?.proseMaterials.map((material) => material.materialText)).toEqual(["5 minutes", "Market"]);

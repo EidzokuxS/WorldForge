@@ -1492,7 +1492,7 @@ function sentencePlanForMove(
       break;
     case "establish_playable_context":
       pushPlan("exact_context_texture", move.coverage, selectFrameTextureFactRefs(move, coreProseCues));
-      if (!coreProseCues.includes("item_state")) {
+      if (!coreProseCues.includes("item_state") && !coreProseCues.includes("elapsed_time")) {
         pushPlan("context_anchor", "optional", sentencePlanPreferredFactRefs(move, ["scene_anchor"]));
       }
       break;

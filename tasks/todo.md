@@ -7824,3 +7824,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: live proof artifact `output/clean-runtime-p290-route-status-live-accepted-20260614-184158` cloned `p69-item-transfer-045651`, ran `Is the route to Anchor Chain Pylon open?`, and settled through `gameplay-cycle-runtime` with `mutationApplied=false`.
     - Accepted live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. From here, the path to Anchor Chain Pylon lies open.`
     - Verified: prose audit passed for `output/clean-runtime-p290-route-status-live-accepted-20260614-184158/prose-audit.json` with 1 result, 29 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
+
+- P291 Stage 6 elapsed-time context weaving:
+  - Diagnosis:
+    - [x] Probe batch `output/clean-runtime-p291-prose-gap-probes-20260614-184749` showed item-transfer and visible-actors prose are currently acceptable, but standalone time passage with context still emits a dry placement sentence: `You are at Lowwater Bazaar. 5 minutes settle over Lowwater Bazaar.`
+    - [x] Root owner is the Stage 6 page/sentence plan for standalone `elapsed_time`: scene anchor material should feed the clock beat, not become its own player-facing context line when a texture sentence is already present.
+  - Plan:
+    - [x] Run GitNexus impact for elapsed-time page/sentence owner symbols before editing.
+    - [x] Adjust standalone elapsed-time page planning so scene anchors are supporting material for `render_elapsed_time` and do not force a separate `context_anchor` sentence when texture already opens the page.
+    - [x] Update focused tests to prove texture + elapsed_time + scene anchor produce two sentence objects: texture and pressure clock beat.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live time-passage proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live time-passage narration has no standalone `You are at <scene>.` placement sentence.
+    - [x] Exact elapsed duration and scene label remain present when cited.
+    - [x] No visible change, inactivity, waiting result, no-change, movement, route, item, NPC, or world-truth claims are added.
+  - Review:
+    - Executed: standalone `elapsed_time` pages now omit the separate optional `context_anchor` sentence when a required elapsed-time event owns the page, while the elapsed event move still owns the scene-anchor material.
+    - Executed: narration test helper now derives `pageMoveRefs` from sentence-plan ownership before broad move-material matching, so tests cite the move that owns the planned sentence.
+    - Verified: GitNexus impact before editing was LOW for `sentencePlanForMove`, `buildCleanNarrativePageTask`, and `pageFocusPreferredFrameSentenceRefs`.
+    - Verified: focused narration suite passed 112/112.
+    - Verified: expanded clean-runtime suite passed 617/617 across contracts, settlement, narration, visible narration guards, grounding guards, tool contracts, and empty-narration integration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed with only LF/CRLF warnings.
+    - Verified: live proof artifact `output/clean-runtime-p291-elapsed-context-live-20260614-185700` cloned `p69-item-transfer-045651`, ran `I wait five minutes.`, and settled through `gameplay-cycle-runtime`.
+    - Accepted live narration: `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Five minutes press around Lowwater Bazaar.`
+    - Verified: proof summary passed with chat +2, clean record +1, Stage4 `time_advance` receipt +1, authority trace +1, clock ledger +1, worldVersion/time/tick +1/+5/+5, old v2/saga/narrator/oracle/simulation stores 0, `contextAnchorCount=0`, and elapsed sentence material `5 minutes` + `Lowwater Bazaar`.
+    - Verified: prose audit passed for `output/clean-runtime-p291-elapsed-context-live-20260614-185700/prose-audit.json` with 1 result, 27 words, zero one-token output, zero list-like starts, zero `youOpening`, and all hit counters 0.
