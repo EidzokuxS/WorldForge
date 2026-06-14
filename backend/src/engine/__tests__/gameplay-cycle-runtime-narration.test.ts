@@ -1426,6 +1426,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "land_result",
           detailRhythm: "core_with_preserved_tokens",
           materialWeaveOrder: "result_then_preserved_tokens",
+          styleBudget: "result_with_anchor_cadence",
           closingFunction: "settle_outcome",
         },
         literaryCue: {
@@ -1587,6 +1588,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "concrete_present",
           detailRhythm: "scene_anchor_tokens",
           materialWeaveOrder: "scene_anchor_only",
+          styleBudget: "scene_anchor_cadence",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -1661,6 +1663,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "frame_speech",
           detailRhythm: "exact_quote_with_frame",
           materialWeaveOrder: "speaker_then_quote",
+          styleBudget: "quote_frame_cadence",
           closingFunction: "settle_outcome",
         },
         literaryCue: {
@@ -1864,6 +1867,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "copy_exact",
           detailRhythm: "texture_line",
           materialWeaveOrder: "texture_exact_only",
+          styleBudget: "exact_texture_atmosphere",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -1938,6 +1942,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "concrete_present",
           detailRhythm: "scene_anchor_tokens",
           materialWeaveOrder: "scene_anchor_only",
+          styleBudget: "scene_anchor_cadence",
           closingFunction: "orient_context",
         },
         literaryCue: {
@@ -2033,6 +2038,7 @@ describe("clean Stage 6 narration contracts", () => {
           verbEnergy: "offer_choice",
           detailRhythm: "choice_group_with_cost",
           materialWeaveOrder: "choices_then_costs",
+          styleBudget: "route_choice_readability",
           closingFunction: "offer_next_action",
         },
         literaryCue: {
@@ -4976,13 +4982,14 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("verbEnergy");
     expect(buildCleanNarrationSystemPrompt()).toContain("detailRhythm");
     expect(buildCleanNarrationSystemPrompt()).toContain("materialWeaveOrder");
+    expect(buildCleanNarrationSystemPrompt()).toContain("styleBudget");
     expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
     expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish must remain a phrasing choice over cited evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish remains a phrasing choice over cited evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
     expect(buildCleanNarrationSystemPrompt()).toContain("roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values");

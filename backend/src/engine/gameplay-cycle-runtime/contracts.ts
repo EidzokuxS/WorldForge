@@ -2684,6 +2684,15 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "speaker_then_quote",
       "texture_exact_only",
     ]),
+    styleBudget: z.enum([
+      "direct_question_clarity",
+      "exact_texture_atmosphere",
+      "quote_frame_cadence",
+      "result_beat_cadence",
+      "result_with_anchor_cadence",
+      "route_choice_readability",
+      "scene_anchor_cadence",
+    ]),
     closingFunction: z.enum([
       "offer_next_action",
       "orient_context",
