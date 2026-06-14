@@ -7032,3 +7032,21 @@ Session: `gm-v1-consequenc-slice`.
     - Verified: `npm --prefix backend run typecheck` passed.
     - Verified: `git diff --check` passed and `rg` found no first/later texture-selection strings in runtime/contracts.
     - Verified: GitNexus all-scope `detect_changes` reported low risk and 0 affected execution flows.
+
+- P258 Stage 6 sentence adventure cues:
+  - Plan:
+    - [x] Run GitNexus impact before editing prompt/page-task symbols.
+    - [x] Add a typed sentence-level adventure cue with subject focus, verb frame, and detail palette.
+    - [x] Derive the cue from sentence role and accepted prose materials, not generated text.
+    - [x] Teach the prompt to use adventure cues as the positive prose method for RPG scene beats.
+    - [x] Update focused narration tests proving the cue shape and prompt wording.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: added `adventureCue` to `cleanNarratorSentencePlanStepSchema` with subject focus, verb frame, and accepted detail palette.
+    - Executed: derived adventure cues from sentence roles and `proseMaterials.proseUse`, so the prose method comes from accepted material ownership rather than generated text.
+    - Executed: Stage 6 prompt now tells the narrator to use `adventureCue.subjectFocus`, `adventureCue.verbFrame`, and `adventureCue.detailPalette` as the sentence's RPG scene-beat method.
+    - Verified: focused narration suite passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed.
+    - Verified: GitNexus all-scope `detect_changes` reported low risk and 0 affected execution flows.
