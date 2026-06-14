@@ -1399,6 +1399,11 @@ describe("clean Stage 6 narration contracts", () => {
           playerFacingUse: "none",
           allowedTextureFactRefs: [],
         },
+        adventureCue: {
+          subjectFocus: "settled_result_material",
+          verbFrame: "land_settled_result",
+          detailPalette: ["accepted_primary_beat", "accepted_labels", "accepted_time"],
+        },
         literaryCue: {
           renderShape: "land_settled_turn_result",
           cadence: "compact_present_beat",
@@ -1530,6 +1535,11 @@ describe("clean Stage 6 narration contracts", () => {
           playerFacingUse: "none",
           allowedTextureFactRefs: [],
         },
+        adventureCue: {
+          subjectFocus: "player_scene_position",
+          verbFrame: "place_player_in_scene",
+          detailPalette: ["accepted_labels"],
+        },
         literaryCue: {
           renderShape: "place_player_in_context",
           cadence: "compact_present_beat",
@@ -1568,6 +1578,11 @@ describe("clean Stage 6 narration contracts", () => {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
           allowedTextureFactRefs: [],
+        },
+        adventureCue: {
+          subjectFocus: "visible_speaker",
+          verbFrame: "frame_exact_utterance",
+          detailPalette: ["accepted_labels", "accepted_quote"],
         },
         literaryCue: {
           renderShape: "frame_exact_quote",
@@ -1742,6 +1757,11 @@ describe("clean Stage 6 narration contracts", () => {
           playerFacingUse: "standalone_context_sentence",
           allowedTextureFactRefs: ["e2.f1", "e2.f2"],
         },
+        adventureCue: {
+          subjectFocus: "accepted_texture",
+          verbFrame: "copy_visible_texture",
+          detailPalette: ["accepted_texture"],
+        },
         literaryCue: {
           renderShape: "copy_exact_context_texture",
           cadence: "exact_short_sentence",
@@ -1787,6 +1807,11 @@ describe("clean Stage 6 narration contracts", () => {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
           allowedTextureFactRefs: [],
+        },
+        adventureCue: {
+          subjectFocus: "player_scene_position",
+          verbFrame: "place_player_in_scene",
+          detailPalette: ["accepted_labels"],
         },
         literaryCue: {
           renderShape: "place_player_in_context",
@@ -1847,6 +1872,11 @@ describe("clean Stage 6 narration contracts", () => {
           mode: "omit_texture_in_this_sentence",
           playerFacingUse: "none",
           allowedTextureFactRefs: [],
+        },
+        adventureCue: {
+          subjectFocus: "playable_route_choices",
+          verbFrame: "offer_playable_choices",
+          detailPalette: ["accepted_primary_beat", "accepted_route_choices", "accepted_time"],
         },
         literaryCue: {
           renderShape: "leave_playable_choice_handle",
@@ -4729,6 +4759,11 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Texture cues:");
     expect(buildCleanNarrationSystemPrompt()).toContain("mode=copy_exact_texture_sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("mode=omit_texture_in_this_sentence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Adventure cues:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.subjectFocus");
+    expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.verbFrame");
+    expect(buildCleanNarrationSystemPrompt()).toContain("adventureCue.detailPalette");
+    expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");

@@ -666,6 +666,73 @@ function sentencePlanTextureCue(
   };
 }
 
+function sentencePlanAdventureSubjectFocus(
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["adventureCue"]["subjectFocus"] {
+  if (sentenceRole === "clarification_question") return "accepted_question";
+  if (sentenceRole === "exact_context_texture") return "accepted_texture";
+  if (sentenceRole === "context_anchor") return "player_scene_position";
+  if (sentenceRole === "next_action_handle") return "playable_route_choices";
+  if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
+    return "visible_speaker";
+  }
+  return "settled_result_material";
+}
+
+function sentencePlanAdventureVerbFrame(
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["adventureCue"]["verbFrame"] {
+  if (sentenceRole === "clarification_question") return "ask_direct_question";
+  if (sentenceRole === "exact_context_texture") return "copy_visible_texture";
+  if (sentenceRole === "context_anchor") return "place_player_in_scene";
+  if (sentenceRole === "next_action_handle") return "offer_playable_choices";
+  if (proseMaterials.some((material) => material.proseUse === "exact_dialogue_quote")) {
+    return "frame_exact_utterance";
+  }
+  return "land_settled_result";
+}
+
+function sentencePlanAdventureDetailPalette(
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["adventureCue"]["detailPalette"] {
+  const palette = uniqueStrings(proseMaterials.map((material) => {
+    switch (material.proseUse) {
+      case "exact_dialogue_quote":
+        return "accepted_quote";
+      case "exact_texture_sentence":
+        return "accepted_texture";
+      case "label_anchor":
+      case "scene_anchor":
+        return "accepted_labels";
+      case "primary_beat":
+      case "supporting_detail":
+        return "accepted_primary_beat";
+      case "route_choice":
+        return "accepted_route_choices";
+      case "state_value":
+        return "accepted_state";
+      case "time_value":
+        return "accepted_time";
+    }
+  }));
+  return palette.length > 0
+    ? palette as CleanNarratorSentencePlanStep["adventureCue"]["detailPalette"]
+    : ["accepted_primary_beat"];
+}
+
+function sentencePlanAdventureCue(
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["adventureCue"] {
+  return {
+    subjectFocus: sentencePlanAdventureSubjectFocus(sentenceRole, proseMaterials),
+    verbFrame: sentencePlanAdventureVerbFrame(sentenceRole, proseMaterials),
+    detailPalette: sentencePlanAdventureDetailPalette(proseMaterials),
+  };
+}
+
 function sentencePlanLiteraryCue(
   move: CleanNarratorPageTaskMove,
   sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
@@ -739,6 +806,7 @@ function sentencePlanForMove(
       preferredBackendFactRefs,
       proseMaterials,
       textureCue: sentencePlanTextureCue(sentenceRole, proseMaterials),
+      adventureCue: sentencePlanAdventureCue(sentenceRole, proseMaterials),
       literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
     });
   };
@@ -1129,6 +1197,7 @@ export function buildCleanNarrationSystemPrompt(
     "Flow cues: each sentencePlan step includes flowCue.pagePosition, flowCue.transitionRole, and flowCue.readerEffect. Use flowCue to connect sentence objects as opening, continuation, closing, or single-beat page flow while preserving the cited refs for every claim.",
     "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns public scene texture and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; they never authorize new setting detail.",
+    "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
@@ -1149,8 +1218,8 @@ export function buildCleanNarrationSystemPrompt(
     "Scene-texture exactness: when textureCue.mode is copy_exact_texture_sentence, set sentence.text to one exact contiguous accepted scene-texture material from textureCue.allowedTextureFactRefs, with the matching backendFactRefs for that clause.",
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label require accepted observation backendFacts naming those nouns.",
     "World texture: favor visible pressure, timing, sound, touch, posture, and object handling over summary labels when those details are accepted evidence.",
-    "Use grounded variety: choose a direct scene opening that fits the claim, vary sentence shape, and avoid echoing prior phrasing when the facts allow another clean wording.",
-    "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different sentence shapes across nearby turns.",
+    "Use grounded variety: choose the sentence opening from adventureCue.subjectFocus and adventureCue.verbFrame, vary sentence shape, and avoid echoing prior phrasing when the same detailPalette can support another clean wording.",
+    "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different adventureCue subject/verb pairings across nearby turns.",
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
     "Item-state surface: for item_state, phrase the accepted custody/location/equip-state operation, source/item/target values, final equip state value, and exact scene-anchor value. Prefer backendFacts with roles `custody_change` and `settled_custody` as the prose beat; use the `item_transfer_result` value as a proof detail. If sentencePlan supplies a texture sentence, keep texture in that sentence and keep the custody/state beat on item materials. Extra handling gestures, readiness, reaction, consent, inspection, use, or dialogue require their own accepted evidence.",

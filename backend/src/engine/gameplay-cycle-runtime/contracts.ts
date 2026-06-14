@@ -2570,6 +2570,34 @@ const cleanNarratorSentencePlanStepSchema = z.object({
     ]),
     allowedTextureFactRefs: z.array(shortText).max(12),
   }).strict(),
+  adventureCue: z.object({
+    subjectFocus: z.enum([
+      "accepted_question",
+      "accepted_texture",
+      "playable_route_choices",
+      "player_scene_position",
+      "settled_result_material",
+      "visible_speaker",
+    ]),
+    verbFrame: z.enum([
+      "ask_direct_question",
+      "copy_visible_texture",
+      "frame_exact_utterance",
+      "land_settled_result",
+      "offer_playable_choices",
+      "place_player_in_scene",
+    ]),
+    detailPalette: z.array(z.enum([
+      "accepted_labels",
+      "accepted_primary_beat",
+      "accepted_question",
+      "accepted_quote",
+      "accepted_route_choices",
+      "accepted_state",
+      "accepted_texture",
+      "accepted_time",
+    ])).min(1).max(8),
+  }).strict(),
   flowCue: z.object({
     pagePosition: z.enum([
       "closing",
