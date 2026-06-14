@@ -8294,7 +8294,7 @@ Session: `gm-v1-consequenc-slice`.
     - [x] Keep composed `player_local_condition` plus another terminal receipt on the model-authored route so deterministic projection cannot drop the second accepted beat.
     - [x] Update focused narration tests so standalone player-local-condition receipts prove the model generator is not called.
     - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, live player-condition proof, prose audit, and GitNexus scope.
-    - [ ] Commit/push/index if proof passes.
+    - [x] Commit/push/index if proof passes.
   - Success criteria:
     - [x] `I crouch down beside the market walkway and keep my hands visible.` settles through clean runtime and produces a final narrative.
     - [x] Narration stays inside accepted scene texture plus `player_condition_operation`; it adds no unsupported current-scene sentence, route truth, item state, movement, dialogue, HP/combat, absence, or no-change claim.
@@ -8310,3 +8310,4 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Player is crouched.`
     - Verified prose audit `output/clean-runtime-p309-player-condition-final-live-clean-20260615-004800/prose-audit.json`: one narrative, 22 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 3 touched narration symbols, 3 changed files, and one affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`.
+    - Verified commit/push/index: code commit `a1e049cc` pushed to `develop`, then `npx gitnexus analyze --embeddings` exited 0 and reported the repository indexed successfully despite repeated LadybugDB lock/vector warnings.
