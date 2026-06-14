@@ -8453,3 +8453,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p314-support-dialogue-live-20260615-021636/prose-audit.json`: one narrative, 51 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed owners, 5 changed files, and no affected processes.
     - Verified implementation commit: `59fca80f` recorded the P314 code/tests/proof notes.
+
+- P315 clean support-actor visible cue prose material:
+  - Diagnosis:
+    - [x] Fresh support actor proof after P314 has truthful dialogue but still renders the materialization beat as dry cue text: `At Lowwater Bazaar, Local Vendor stands beside a counter or stall, with worn wood nearby.`
+    - [x] Root owner is Stage 4 backend presentation material, not Stage 6 wording: `renderSupportActorPublicPresentation()` maps accepted enum slots into `support_actor_visible_cue` / `support_actor_public_summary`, and deterministic Stage 6 copies that accepted material.
+  - Plan:
+    - [x] Run GitNexus impact for `renderSupportActorPublicPresentation`, `supportActorMaterializationResult`, and `executeSupportActorCreate`.
+    - [x] Make support actor placement/detail fragments prose-ready while staying inside accepted visible cue enum slots.
+    - [x] Update focused Stage 4, settlement, and narration expectations for the new support actor cue material.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live support actor materialization no longer prints `counter or stall` / `worn wood nearby`.
+    - [x] Accepted support actor prose remains only visible presence/presentation material; no service/trade, work result, dialogue content, route truth, item state, movement, relationship, private knowledge, durable world fact, absence, or no-change.
+    - [x] The fix changes typed backend presentation material, not regex cleanup, banlist validation, or gameplay fallback.
+  - Review:
+    - Executed: `renderSupportActorPublicPresentation()` now renders accepted placement/detail slots as prose-ready cue material: `beside the stall boards` plus `against worn counter boards`.
+    - Executed: support actor `publicSummary` now includes accepted detail material when a visible cue detail slot is present, so both support actor presentation facts carry the same bounded visible detail.
+    - Verified GitNexus impacts before edits: `renderSupportActorPublicPresentation`, `supportActorMaterializationResult`, and `executeSupportActorCreate` all returned LOW risk; direct path is support actor materialization into `runCleanStage4Execution`.
+    - Verified focused Stage 4/settlement/narration suites: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 180/180 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 392/392 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p315-support-cue-live-20260615-022618`: clean runtime settled one accepted `support_actor_create` and one accepted `dialogue_record`, created temporary `Local Vendor`, advanced `worldVersion 0 -> 1`, kept world time/current tick at `0`, kept old saga/narrator/v2 stores at 0, and stopped backend port 31794 after proof.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. At Lowwater Bazaar, Local Vendor stands beside the stall boards, against worn counter boards. Local Vendor says: "Right here, then. I'll stand where you've got a clear view—no tricks, no slipping off between the stalls."`
+    - Verified accepted support actor facts: `support_actor_visible_cue = A local vendor stands beside the stall boards, against worn counter boards.` and `support_actor_public_summary = An ordinary local vendor stands beside the stall boards at Lowwater Bazaar, against worn counter boards.`
+    - Verified prose audit `output/clean-runtime-p315-support-cue-live-20260615-022618/prose-audit.json`: one narrative, 54 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.

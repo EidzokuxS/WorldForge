@@ -2193,7 +2193,7 @@ function supportActorLabels(roleKind: SupportActorRoleKind): { actorLabel: strin
 
 const SUPPORT_CUE_PLACEMENTS: Record<SupportActorVisibleCueProfile["placement"], string> = {
   at_scene_edge: "at the edge of the scene",
-  beside_counter_or_stall: "beside a counter or stall",
+  beside_counter_or_stall: "beside the stall boards",
   beside_mooring_or_railing: "beside a mooring line or rail",
   by_door_or_threshold: "by a public doorway or threshold",
   in_open_view: "in open view",
@@ -2217,7 +2217,7 @@ const SUPPORT_CUE_DETAILS: Record<NonNullable<SupportActorVisibleCueProfile["det
   plain_work_clothes: "in plain local clothes",
   satchel_or_pouch: "with a small pouch visible",
   weathered_coat: "in a weathered coat",
-  wooden_counter: "with worn wood nearby",
+  wooden_counter: "against worn counter boards",
 };
 
 function renderSupportActorPublicPresentation(input: {
@@ -2229,7 +2229,7 @@ function renderSupportActorPublicPresentation(input: {
   const bearing = SUPPORT_CUE_BEARINGS[input.profile.bearing];
   const detail = input.profile.detail ? `, ${SUPPORT_CUE_DETAILS[input.profile.detail]}` : "";
   return {
-    publicSummary: `An ordinary local ${input.roleLabel} ${bearing} ${placement} at ${input.sceneLabel}.`,
+    publicSummary: `An ordinary local ${input.roleLabel} ${bearing} ${placement} at ${input.sceneLabel}${detail}.`,
     visibleCue: `A local ${input.roleLabel} ${bearing} ${placement}${detail}.`,
   };
 }
