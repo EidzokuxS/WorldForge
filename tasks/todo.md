@@ -8364,3 +8364,32 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. You crouch at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p311-player-condition-live-20260615-021500/prose-audit.json`: one narrative, 24 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified commit/push/index: P311 implementation commit `cab399a8` recorded code/tests/proof; final record commit pushed to `develop`; GitNexus re-indexed final HEAD with embeddings.
+
+- P312 Stage 6 standalone elapsed-time owner:
+  - Diagnosis:
+    - [x] Fresh post-P311 scan `output/clean-runtime-p312-prose-scan-20260615-023000` settled 13/13 probes through clean runtime and passed the current prose audit.
+    - [x] The elapsed-time probe still rendered awkward model-shaped prose: `Five minutes gather at Lowwater Bazaar.`
+    - [x] Root owner is Stage 6 routing: settlement already owns accepted `time_beat` / `elapsed_time` facts, and `renderElapsedTimeProjection()` can copy that receipt, but standalone elapsed-time plus scene texture still routes to the model.
+  - Plan:
+    - [x] Run GitNexus impact for `needsDeterministicAuthorityProjection`, `renderElapsedTimeProjection`, and `renderCleanAuthorityProjection` before editing.
+    - [x] Route standalone `elapsed_time` terminal receipts through primary deterministic authority projection.
+    - [x] Preserve accepted `scene_texture` as an optional preceding sentence, then copy the accepted `time_beat`.
+    - [x] Keep composed elapsed-time plus another terminal receipt on the model-authored route so projection cannot drop a second accepted beat.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live elapsed-time proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `I wait five minutes.` settles through clean runtime and no longer renders `Five minutes gather at Lowwater Bazaar.`
+    - [x] Final narration stays inside accepted scene texture plus accepted `time_beat`; no waiting result, visible change, inactivity claim, no-change claim, movement, item state, dialogue, route truth, NPC action, private fact, or extra world truth.
+    - [x] The fix is a primary typed owner route, not a regex cleanup and not a gameplay fallback.
+  - Review:
+    - Executed: standalone `elapsed_time` terminal receipts now use deterministic authority projection, including an accepted scene texture sentence when present and the accepted `time_beat` as the clock beat.
+    - Executed: composed elapsed-time plus another terminal receipt remains model-authored, so deterministic projection cannot silently drop a second accepted turn event.
+    - Executed: settlement now owns prose-ready short elapsed-time beats such as `Five minutes pass.` while keeping the typed duration fact as `5 minutes`.
+    - Executed: removed the awkward `<time> gather at <scene>` prompt example from Stage 6 elapsed-time task language.
+    - Verified GitNexus impacts before edits: `needsDeterministicAuthorityProjection`, `renderElapsedTimeProjection`, `renderCleanAuthorityProjection`, `buildCleanNarrationSystemPrompt`, `stage4Evidence`, and `buildCleanSettledTurnPacket` all returned LOW risk.
+    - Verified focused settlement/narration tests: 140/140 passed.
+    - Verified expanded clean-runtime slice: 390/390 passed across contracts, Stage 4, settlement, and narration.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p312-elapsed-live-r2-20260615-020000`: clean runtime settled one accepted `time_advance` receipt for `I wait five minutes.`, advanced world clock/version from `0/0` to `1/5`, wrote one clean turn record and one clean Stage 4 receipt, kept old saga/narrator/v2 stores at 0, and appended two chat messages.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Five minutes pass.`
+    - Verified prose audit `output/clean-runtime-p312-elapsed-live-r2-20260615-020000/prose-audit.json`: one narrative, 22 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.

@@ -246,9 +246,9 @@ function timeView(): CleanNarratorView {
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["elapsed_time"],
-      text: "5 minutes pass.",
+      text: "Five minutes pass.",
       backendFacts: [
-        { factRef: "e1.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
+        { factRef: "e1.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
         { factRef: "e1.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
       ],
       limits: {
@@ -303,9 +303,9 @@ function timeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "5 minutes pass.",
+        text: "Five minutes pass.",
         backendFacts: [
-          { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
           { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -349,9 +349,9 @@ function timeWithSceneTextureView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_mutation_receipt",
         claimKinds: ["elapsed_time"],
-        text: "5 minutes pass.",
+        text: "Five minutes pass.",
         backendFacts: [
-          { factRef: "e5.f1", role: "time_beat", value: "5 minutes pass.", text: "Time beat: 5 minutes pass.", exact: true },
+          { factRef: "e5.f1", role: "time_beat", value: "Five minutes pass.", text: "Time beat: Five minutes pass.", exact: true },
           { factRef: "e5.f2", role: "elapsed_time", value: "5 minutes", text: "Elapsed time: 5 minutes.", exact: true },
         ],
         limits: {
@@ -3177,7 +3177,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("projects P64 elapsed-time evidence without no-change claims", () => {
     const text = renderCleanAuthorityProjection(timeView());
 
-    expect(text).toBe("5 minutes pass.");
+    expect(text).toBe("Five minutes pass.");
     expect(text).not.toMatch(/World clock|minute\(s\)|backend|receipt|nothing changed|nothing happened|no visible changes|everything stayed/iu);
   });
 
@@ -3221,7 +3221,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "time_beat" ? { ...fact, text: "Opaque accepted time fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(elapsed)).toBe("5 minutes pass.");
+    expect(renderCleanAuthorityProjection(elapsed)).toBe("Five minutes pass.");
 
     const elapsedMissingValue = timeView();
     elapsedMissingValue.acceptedEvidence[0] = {
@@ -3540,30 +3540,58 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("uses model-authored literary narration for standalone elapsed-time turns with snapshot context", async () => {
+  it("uses deterministic elapsed-time prose with accepted scene_texture when texture is available", async () => {
     const view = timeWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(view, [
-        {
-          text: "Rain taps the brass gutters.",
-          evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f2"],
-          claimKinds: ["scene_texture"],
-        },
-        {
-          text: "Five minutes gather at Market.",
-          evidenceRefs: ["e5", "e3"],
-          backendFactRefs: ["e5.f2", "e3.f2"],
-          claimKinds: ["elapsed_time", "current_scene"],
-        },
-      ]),
+      generateCandidate: async () => {
+        throw new Error("model generator should not be called for standalone elapsed_time");
+      },
     });
 
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Five minutes gather at Market.");
-    expect(result.text).not.toMatch(/\b(World clock|minute\(s\)|backend|receipt|remains?|still|inventory|visible routes|nothing changed|no change)\b/iu);
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass.");
+    expect(result.text).not.toContain("World clock");
+    expect(result.text).not.toContain("minute(s)");
+    expect(result.text).not.toContain("backend");
+    expect(result.text).not.toContain("receipt");
+    expect(result.text).not.toContain("inventory");
+    expect(result.text).not.toContain("visible routes");
+    expect(result.text).not.toContain("nothing changed");
+    expect(result.text).not.toContain("no change");
+    expect(result.text).not.toContain("gather at");
+  });
+
+  it("keeps composed elapsed_time plus dialogue on the model-authored route", async () => {
+    const view = movementView({
+      acceptedEvidence: [
+        ...timeWithSceneTextureView().acceptedEvidence,
+        {
+          ref: "e6",
+          authority: "terminal_dialogue_receipt",
+          claimKinds: ["dialogue_response"],
+          text: 'Guide says: "The north stairs flooded before dawn."',
+          backendFacts: [
+            { factRef: "e6.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
+            { factRef: "e6.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+            { factRef: "e6.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
+          ],
+          limits: {
+            proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
+            doesNotProve: ["truth of speaker claim", "durable world fact", "movement", "item state"],
+          },
+        },
+      ],
+    });
+
+    await expect(runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => {
+        throw new Error("model route reached for composed elapsed_time");
+      },
+    })).rejects.toThrow("model route reached for composed elapsed_time");
   });
 
   it("accepts standalone elapsed-time prose with the selected texture frame", () => {
@@ -3578,7 +3606,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes gather at Market.",
+          text: "Five minutes settle over Market.",
           evidenceRefs: ["e5", "e3"],
           backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
@@ -3598,7 +3626,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes gather at Market.",
+          text: "Five minutes settle over Market.",
           evidenceRefs: ["e5", "e3"],
           backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
@@ -3627,7 +3655,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Five minutes gather at Market.",
+          text: "Five minutes settle over Market.",
           evidenceRefs: ["e5", "e3"],
           backendFactRefs: ["e5.f2", "e3.f2"],
           claimKinds: ["elapsed_time", "current_scene"],
@@ -3921,34 +3949,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Market stalls surround you while North Hall is the exit you can choose; it takes 1 minute.");
   });
 
-  it("accepts selected scene_texture in standalone elapsed-time runtime prose without prose-quality repair", async () => {
+  it("projects standalone elapsed-time runtime prose before model generation or prose repair", async () => {
     const view = timeWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async (request) => {
+      generateCandidate: async () => {
         attempts += 1;
-        return acceptedCandidate(view, [
-          {
-            text: "Rain taps the brass gutters.",
-            evidenceRefs: ["e2"],
-            backendFactRefs: ["e2.f2"],
-            claimKinds: ["scene_texture"],
-          },
-          {
-            text: "Five minutes gather at Market.",
-            evidenceRefs: ["e5", "e3"],
-            backendFactRefs: ["e5.f2", "e3.f2"],
-            claimKinds: ["elapsed_time", "current_scene"],
-          },
-        ]);
+        throw new Error("model generator should not be called for standalone elapsed_time");
       },
     });
 
-    expect(attempts).toBe(1);
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Five minutes gather at Market.");
+    expect(attempts).toBe(0);
+    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes pass.");
   });
 
   it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {

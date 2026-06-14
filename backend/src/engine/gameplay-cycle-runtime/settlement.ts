@@ -944,6 +944,33 @@ function clarificationEvidence(input: {
   });
 }
 
+const ELAPSED_MINUTE_WORDS = new Map<number, string>([
+  [1, "One"],
+  [2, "Two"],
+  [3, "Three"],
+  [4, "Four"],
+  [5, "Five"],
+  [6, "Six"],
+  [7, "Seven"],
+  [8, "Eight"],
+  [9, "Nine"],
+  [10, "Ten"],
+  [11, "Eleven"],
+  [12, "Twelve"],
+]);
+
+function elapsedDurationValue(elapsedMinutes: number): string {
+  const unit = elapsedMinutes === 1 ? "minute" : "minutes";
+  return `${elapsedMinutes} ${unit}`;
+}
+
+function elapsedTimeBeat(elapsedMinutes: number): string {
+  const unit = elapsedMinutes === 1 ? "minute" : "minutes";
+  const duration = `${ELAPSED_MINUTE_WORDS.get(elapsedMinutes) ?? elapsedMinutes} ${unit}`;
+  const verb = elapsedMinutes === 1 ? "passes" : "pass";
+  return `${duration} ${verb}.`;
+}
+
 function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: CleanSettledEvidence[]): void {
   for (const receipt of stage4Execution.receipts) {
     if (receipt.status !== "accepted") continue;
@@ -1398,11 +1425,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "terminal_mutation_receipt" && receipt.publicResult.timeAdvance) {
       const evidenceId = nextEvidenceId(evidence);
       const time = receipt.publicResult.timeAdvance;
-      const elapsedUnit = time.elapsedMinutes === 1 ? "minute" : "minutes";
-      const elapsedDuration = `${time.elapsedMinutes} ${elapsedUnit}`;
-      const timeBeat = time.elapsedMinutes === 1
-        ? `${elapsedDuration} passes.`
-        : `${elapsedDuration} pass.`;
+      const elapsedDuration = elapsedDurationValue(time.elapsedMinutes);
+      const timeBeat = elapsedTimeBeat(time.elapsedMinutes);
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
