@@ -634,6 +634,65 @@ function sentencePlanPreferredFactRefs(
     .map((factUse) => factUse.factRef);
 }
 
+function sentencePlanHasProseUse(
+  move: CleanNarratorPageTaskMove,
+  proseUse: CleanNarratorFactUse["proseUse"],
+): boolean {
+  return move.factUses.some((factUse) => factUse.proseUse === proseUse);
+}
+
+function sentencePlanLiteraryCue(
+  move: CleanNarratorPageTaskMove,
+  sentenceRole: CleanNarratorSentencePlanStep["sentenceRole"],
+): CleanNarratorSentencePlanStep["literaryCue"] {
+  switch (sentenceRole) {
+    case "clarification_question":
+      return {
+        renderShape: "ask_accepted_clarification",
+        cadence: "direct_question",
+        styleLevers: ["accepted_label_anchor"],
+      };
+    case "exact_context_texture":
+      return {
+        renderShape: "copy_exact_context_texture",
+        cadence: "exact_short_sentence",
+        styleLevers: ["accepted_texture_only"],
+      };
+    case "context_anchor":
+      return {
+        renderShape: "place_player_in_context",
+        cadence: "compact_present_beat",
+        styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
+      };
+    case "next_action_handle":
+      return {
+        renderShape: "leave_playable_choice_handle",
+        cadence: "choice_handle_sentence",
+        styleLevers: sentencePlanHasProseUse(move, "time_value")
+          ? ["playable_choice_grouping", "accepted_label_anchor", "elapsed_time_pressure"]
+          : ["playable_choice_grouping", "accepted_label_anchor"],
+      };
+    case "turn_event_beat": {
+      if (sentencePlanHasProseUse(move, "exact_dialogue_quote")) {
+        return {
+          renderShape: "frame_exact_quote",
+          cadence: "quote_framed_beat",
+          styleLevers: ["visible_speaker_frame", "accepted_label_anchor"],
+        };
+      }
+      const styleLevers: CleanNarratorSentencePlanStep["literaryCue"]["styleLevers"] = ["concrete_present_verb"];
+      if (sentencePlanHasProseUse(move, "time_value")) styleLevers.push("elapsed_time_pressure");
+      if (sentencePlanHasProseUse(move, "state_value")) styleLevers.push("settled_state_focus");
+      if (sentencePlanHasProseUse(move, "label_anchor")) styleLevers.push("accepted_label_anchor");
+      return {
+        renderShape: "land_settled_turn_result",
+        cadence: "compact_present_beat",
+        styleLevers,
+      };
+    }
+  }
+}
+
 function sentencePlanForMove(
   move: CleanNarratorPageTaskMove,
   sentenceIndex: number,
@@ -652,6 +711,7 @@ function sentencePlanForMove(
       coverage,
       entryRefs: move.entryRefs,
       preferredBackendFactRefs,
+      literaryCue: sentencePlanLiteraryCue(move, sentenceRole),
     });
   };
 
@@ -1671,6 +1731,7 @@ export function buildCleanNarrationSystemPrompt(
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Fact use plan: each page move's factUses tells how usableFacts enter prose. primary_beat drives the sentence, exact_texture_sentence and exact_dialogue_quote copy accepted values exactly when cited, label_anchor and scene_anchor preserve names/placement, time_value and route_choice carry playable quantities/options, state_value carries settled state, and supporting_detail stays supporting material.",
     "Sentence plan: promptInput.narrativePageTask.sentencePlan gives the intended sentence-object order. Use sentenceRole to shape each sentence, preferredBackendFactRefs to pick the core material, sentenceRef to set sentencePlanRefs, and moveRef to set pageMoveRefs on the matching output sentence.",
+    "Literary cues: each sentencePlan step includes literaryCue.renderShape, literaryCue.cadence, and literaryCue.styleLevers. Use these as the prose method for that sentence: concrete verb choice, accepted label anchoring, visible speaker frame, elapsed-time pressure, exact texture copying, or playable choice grouping. Cues shape language only; they never authorize facts beyond the step's refs.",
     "Page move proof: every accepted_evidence sentence must include pageMoveRefs from promptInput.narrativePageTask.moves[].moveRef. A sentence may cite only evidenceRefs from those moves' entryRefs and backendFactRefs from those moves' allowedBackendFactRefs. Cover required page moves; optional context moves are used when their entryRefs appear in prose.",
     "Default literary profile: use Zetta Micro 1.1.3 as the primary prose reference and FF5 Micro as the secondary reference. Aim for compact adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, and a playable final handle.",
     "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",

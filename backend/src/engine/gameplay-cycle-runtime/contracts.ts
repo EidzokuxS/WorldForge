@@ -2538,6 +2538,32 @@ const cleanNarratorSentencePlanStepSchema = z.object({
   coverage: z.enum(["required", "optional"]),
   entryRefs: z.array(shortText).min(1).max(24),
   preferredBackendFactRefs: z.array(shortText).min(1).max(24),
+  literaryCue: z.object({
+    renderShape: z.enum([
+      "ask_accepted_clarification",
+      "copy_exact_context_texture",
+      "frame_exact_quote",
+      "land_settled_turn_result",
+      "leave_playable_choice_handle",
+      "place_player_in_context",
+    ]),
+    cadence: z.enum([
+      "choice_handle_sentence",
+      "compact_present_beat",
+      "direct_question",
+      "exact_short_sentence",
+      "quote_framed_beat",
+    ]),
+    styleLevers: z.array(z.enum([
+      "accepted_label_anchor",
+      "accepted_texture_only",
+      "concrete_present_verb",
+      "elapsed_time_pressure",
+      "playable_choice_grouping",
+      "settled_state_focus",
+      "visible_speaker_frame",
+    ])).min(1).max(4),
+  }).strict(),
 }).strict();
 
 const cleanNarratorPageTaskSchema = z.object({

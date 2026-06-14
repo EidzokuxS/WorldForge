@@ -1346,6 +1346,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        literaryCue: {
+          renderShape: "land_settled_turn_result",
+          cadence: "compact_present_beat",
+          styleLevers: ["concrete_present_verb", "elapsed_time_pressure", "accepted_label_anchor"],
+        },
       }],
     });
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
@@ -1421,6 +1426,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
+        literaryCue: {
+          renderShape: "place_player_in_context",
+          cadence: "compact_present_beat",
+          styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
+        },
       },
       {
         sentenceRef: "s2",
@@ -1429,6 +1439,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e5"],
         preferredBackendFactRefs: ["e5.f1", "e5.f2"],
+        literaryCue: {
+          renderShape: "frame_exact_quote",
+          cadence: "quote_framed_beat",
+          styleLevers: ["visible_speaker_frame", "accepted_label_anchor"],
+        },
       },
     ]);
   });
@@ -1553,6 +1568,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e2.f1", "e2.f2"],
+        literaryCue: {
+          renderShape: "copy_exact_context_texture",
+          cadence: "exact_short_sentence",
+          styleLevers: ["accepted_texture_only"],
+        },
       },
       {
         sentenceRef: "s2",
@@ -1561,6 +1581,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "optional",
         entryRefs: ["e2", "e3"],
         preferredBackendFactRefs: ["e3.f1", "e3.f2", "e3.f3"],
+        literaryCue: {
+          renderShape: "place_player_in_context",
+          cadence: "compact_present_beat",
+          styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
+        },
       },
       {
         sentenceRef: "s3",
@@ -1569,6 +1594,11 @@ describe("clean Stage 6 narration contracts", () => {
         coverage: "required",
         entryRefs: ["e1"],
         preferredBackendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        literaryCue: {
+          renderShape: "leave_playable_choice_handle",
+          cadence: "choice_handle_sentence",
+          styleLevers: ["playable_choice_grouping", "accepted_label_anchor", "elapsed_time_pressure"],
+        },
       },
     ]);
   });
@@ -4670,6 +4700,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlanRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Literary cues:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("literaryCue.renderShape");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
