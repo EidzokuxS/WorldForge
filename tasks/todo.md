@@ -8311,3 +8311,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p309-player-condition-final-live-clean-20260615-004800/prose-audit.json`: one narrative, 22 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 3 touched narration symbols, 3 changed files, and one affected process limited to `RenderCleanAuthorityProjection -> NormalizeText`.
     - Verified commit/push/index: code commit `a1e049cc` pushed to `develop`, then `npx gitnexus analyze --embeddings` exited 0 and reported the repository indexed successfully despite repeated LadybugDB lock/vector warnings.
+
+- P310 Stage 6 inventory local-observation prose:
+  - Diagnosis:
+    - [x] Fresh post-P309 scan `output/clean-runtime-p310-fresh-prose-scan-20260615-010000` settled 13/13 probes through clean runtime.
+    - [x] Inventory/object local observations still read as UI-summary receipt prose: `You have Courier satchel, Sealed lacquer message tube, and Brass Tube with you.` and `You have Brass Tube with you.`
+    - [x] Root owner is the accepted local-observation material: `localObservationStoryBeat()` emits `You have ... with you`, and the Stage 6 local-observation prompt explicitly repeats that shape for `observed_inventory_item_labels`.
+  - Plan:
+    - [x] Run GitNexus impact for `localObservationStoryBeat`, `selectLocalObservationFactRefs`, and `buildCleanNarrationSystemPrompt` before editing.
+    - [x] Change inventory local-observation story beats to item-label-centered with-player state.
+    - [x] Update Stage 6 prompt/task language so inventory local-observation uses item labels as sentence subject.
+    - [x] Update focused settlement/narration tests for inventory observation prose.
+    - [x] Fix the adjacent typed GM Read generation contract for omitted `list_surface.localObservationNeed.queryText` by canonicalizing it from `SceneFrame.playerAction` before strict validation.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live inventory/object proof, prose audit, and GitNexus scope.
+    - [ ] Commit/push/index if proof passes.
+  - Success criteria:
+    - [x] Live `What am I carrying?` and `Look at the Brass Tube.` settle through clean runtime with item-centered with-player prose.
+    - [x] Accepted item labels remain exact and complete.
+    - [x] Narration adds no item inspection result, item use/effect, equip-state change, grip/readiness, discovery, absence/no-change, route truth, movement, dialogue, private fact, or extra world truth.
+  - Review:
+    - Executed: focused contracts suite passed 211/211 after adding the omitted-queryText canonicalization test.
+    - Executed: expanded clean-runtime slice passed 389/389 across contracts, Stage 4, settlement, and narration.
+    - Executed: `npm --prefix backend run typecheck` passed.
+    - Executed: final live proof artifact `output/clean-runtime-p310-inventory-localobs-final-r2-20260615-011200` cloned fresh zero-turn campaigns from `p69-item-transfer-045651` and ran `What am I carrying?` plus `Look at the Brass Tube.` through clean backend port `31787`.
+    - Verified: both probes settled through `gameplay-cycle-runtime`, produced `chatHistory +2`, `clean_gameplay_turn_records +1`, one accepted `local_observation` receipt, `mutationApplied=false`, world version/time/tick unchanged, and legacy runtime stores stayed 0.
+    - Verified: inventory queryText canonicalized to `What am I carrying?`; object queryText stayed `Brass Tube`.
+    - Verified: accepted local-observation beats were `Courier satchel, Sealed lacquer message tube, and Brass Tube are with you.` and `Brass Tube is with you.`, and both narratives included those exact sentences with no `You have`.
+    - Verified prose audit `output/clean-runtime-p310-inventory-localobs-final-r2-20260615-011200/prose-audit.json`: 2 narratives, average 29.5 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.

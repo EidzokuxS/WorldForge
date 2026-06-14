@@ -1184,9 +1184,9 @@ function inventoryLocalObservationWithSceneTextureView(): CleanNarratorView {
         ref: "e1",
         authority: "local_observation_receipt",
         claimKinds: ["local_observation"],
-        text: "You have Courier satchel and Brass Tube with you.",
+        text: "Courier satchel and Brass Tube are with you.",
         backendFacts: [
-          { factRef: "e1.f1", role: "local_observation_beat", value: "You have Courier satchel and Brass Tube with you.", text: "Local observation beat: You have Courier satchel and Brass Tube with you.", exact: true },
+          { factRef: "e1.f1", role: "local_observation_beat", value: "Courier satchel and Brass Tube are with you.", text: "Local observation beat: Courier satchel and Brass Tube are with you.", exact: true },
           { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: inventory items.", exact: true },
           { factRef: "e1.f3", role: "observation_query", text: "Observation query: What am I carrying?.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "Courier satchel; Brass Tube", text: "Observed entry labels: Courier satchel; Brass Tube.", exact: true },

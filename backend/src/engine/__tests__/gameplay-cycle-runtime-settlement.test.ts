@@ -1567,10 +1567,10 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "inventory_status"]);
-    expect(observation?.text).toBe("You have Courier satchel and Brass Tube with you.");
+    expect(observation?.text).toBe("Courier satchel and Brass Tube are with you.");
     expect(observation?.backendFacts).toHaveLength(8);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: You have Courier satchel and Brass Tube with you.",
+      "Local observation beat: Courier satchel and Brass Tube are with you.",
       "Searched visible surfaces: inventory items.",
       "Observation query: What am I carrying?.",
       "Observed entry labels: Courier satchel; Brass Tube.",
@@ -1581,7 +1581,7 @@ describe("clean Stage 5 settlement contracts", () => {
     ]);
     expect(observation?.backendFacts.find((entry) => entry.role === "observed_inventory_item_labels")?.value)
       .toBe("Courier satchel; Brass Tube");
-    expect(observation?.backendFacts[0]?.value).toBe("You have Courier satchel and Brass Tube with you.");
+    expect(observation?.backendFacts[0]?.value).toBe("Courier satchel and Brass Tube are with you.");
     expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
     expect(observation?.text).not.toContain("in sight");
     expect(observation?.text).not.toContain("in view");
@@ -1633,10 +1633,10 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "inventory_status"]);
-    expect(observation?.text).toBe("You have Brass Tube with you.");
+    expect(observation?.text).toBe("Brass Tube is with you.");
     expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: You have Brass Tube with you.",
+      "Local observation beat: Brass Tube is with you.",
       "Searched visible surfaces: inventory items.",
       "Observation query: Brass Tube.",
       "Observed entry labels: Brass Tube.",

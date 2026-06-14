@@ -114,7 +114,7 @@ const gmReadGenerationTimePassageNeedSchema = z.object({
 const gmReadGenerationLocalObservationNeedSchema = z.object({
   actorRef: z.literal("Player"),
   mode: cleanLocalObservationModeSchema,
-  queryText: gmReadGenerationShortText,
+  queryText: gmReadGenerationShortText.optional(),
   targetRef: gmReadGenerationModelSafeRef.nullable().optional(),
   surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
   allowBoundedNegative: z.boolean(),
@@ -392,12 +392,44 @@ function normalizeGmReadLocalObservationTargetCandidate(candidate: unknown): unk
   };
 }
 
-function normalizeGmReadCandidateForValidation(candidate: unknown): unknown {
-  const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(candidate);
+function normalizeGmReadLocalObservationListQueryCandidate(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const { candidate } = input;
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  const localObservationNeed = actionInterpretation.localObservationNeed;
+  if (!isRecord(localObservationNeed)) return candidate;
+  if (localObservationNeed.mode !== "list_surface") return candidate;
+  if (Object.hasOwn(localObservationNeed, "queryText")) return candidate;
+
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      localObservationNeed: {
+        ...localObservationNeed,
+        queryText: input.frame.playerAction,
+      },
+    },
+  };
+}
+
+function normalizeGmReadCandidateForValidation(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(input.candidate);
   const normalizedMethod = normalizeGmReadMethodCandidate(normalizedUncertainty);
   const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedMethod);
   const normalizedLocalObservation = normalizeGmReadLocalObservationTargetCandidate(normalizedTargetRefs);
-  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedLocalObservation);
+  const normalizedLocalObservationQuery = normalizeGmReadLocalObservationListQueryCandidate({
+    candidate: normalizedLocalObservation,
+    frame: input.frame,
+  });
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedLocalObservationQuery);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
   return {
     ...normalizedTransfer,
@@ -1459,7 +1491,10 @@ export function validateGmReadCandidate(input: {
     ...collectPrivateTermIssues(input.candidate, privateTerms),
   ];
 
-  const candidateForValidation = normalizeGmReadCandidateForValidation(input.candidate);
+  const candidateForValidation = normalizeGmReadCandidateForValidation({
+    candidate: input.candidate,
+    frame: input.frame,
+  });
   const parsed = gmReadSchema.safeParse(candidateForValidation);
   let parsedRead: GmRead | null = null;
   if (!parsed.success) {

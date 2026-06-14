@@ -1432,6 +1432,43 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["inventory_item"]);
   });
 
+  it("canonicalizes omitted list-surface localObservationNeed queryText from the current player action", () => {
+    const frame = localObservationFrame({
+      playerAction: "What am I carrying?",
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    });
+    const candidate = {
+      ...localObservationGmRead(frame),
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        summary: "The player asks for carried inventory.",
+        playerIntent: "List carried inventory.",
+        targetRefs: ["Market"],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          targetRef: null,
+          surfaceKinds: ["inventory_item"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toBe("What am I carrying?");
+    expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["inventory_item"]);
+  });
+
   it("requires GM Read candidates to choose an explicit primitive interaction kind", () => {
     const candidate = {
       ...validGmRead(),

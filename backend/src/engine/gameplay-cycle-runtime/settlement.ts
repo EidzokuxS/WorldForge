@@ -302,13 +302,13 @@ function localObservationStoryBeat(observation: {
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
   const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
   if (onlyInventoryMatches) {
-    return `You have ${evidenceEnglishList(labels)} with you.`;
+    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} with you.`;
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "inventory_item") {
-    return `You have ${evidenceEnglishList(labels)} with you.`;
+    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} with you.`;
   }
   if (observation.resultKind === "positive_list") {
     return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in the current visible set.`;
