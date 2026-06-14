@@ -6995,3 +6995,22 @@ Session: `gm-v1-consequenc-slice`.
     - Executed: focused `gameplay-cycle-runtime-narration` passed 100 tests; expanded clean-runtime suite passed 368 tests across contracts, Stage4, settlement, and narration; `npm --prefix backend run typecheck` passed.
     - Inspected: HIGH GitNexus detect affected only indexed `runCleanNarration` flows; broadened verification covered those clean-runtime contracts before commit.
     - Executed: code commit `f9403105` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring transient `.gitnexus/lbug` lock warnings.
+
+- P256 Stage 6 remove legacy prose-quality validator:
+  - Plan:
+    - [x] Run GitNexus impact before editing narration validation behavior.
+    - [x] Remove the legacy `proseQualityIssues` hard/audit validator branch from Stage 6 runtime code.
+    - [x] Remove semantic text-pattern helper constants/functions that only served prose-quality policing.
+    - [x] Keep structural validation for schema, accepted evidence refs, backend fact refs, page move refs, sentence plan refs, private/backend leaks, language, and finalText join.
+    - [x] Replace prose-quality rejection tests with structural-contract tests proving the positive page/sentence/prose-material contracts still carry the intended guidance.
+    - [x] Run focused narration tests, expanded clean-runtime tests, typecheck, GitNexus detect, commit/push, and index refresh.
+  - Review:
+    - Executed: removed the legacy `prose_quality` validation issue code, `proseQualityIssues`, `enforceProseQuality`, and semantic text-pattern helpers from `backend/src/engine/gameplay-cycle-runtime/narration.ts`.
+    - Executed: kept Stage 6 structural validation for schema, linkage/language, accepted evidence refs, backend fact refs, page move refs, sentence plan refs, private/backend leaks, old-runtime markers, and finalText joining.
+    - Executed: converted focused narration tests away from old style/semantic rejection expectations and toward structural acceptance/rejection contracts.
+    - Verified: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` passed 100/100.
+    - Verified: expanded clean-runtime suite passed 368/368 across contracts, Stage 4, settlement, and narration.
+    - Verified: `npm --prefix backend run typecheck` passed.
+    - Verified: `git diff --check` passed; `rg` found no legacy prose-quality runtime/test symbols.
+    - Verified: GitNexus `detect_changes` reported low risk and 0 affected execution flows for staged backend changes.
+    - Executed: code commit `5f390517` pushed to `develop`; `npx gitnexus analyze --embeddings` completed successfully with recurring `.gitnexus/lbug` lock warnings.
