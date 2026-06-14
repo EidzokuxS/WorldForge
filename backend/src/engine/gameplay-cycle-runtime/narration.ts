@@ -361,6 +361,7 @@ type CleanNarratorPageArc = CleanNarratorPromptInput["narrativePageTask"]["pageA
 type CleanNarratorPagePerformance = CleanNarratorPromptInput["narrativePageTask"]["pagePerformance"];
 type CleanNarratorPageVariation = CleanNarratorPromptInput["narrativePageTask"]["pageVariation"];
 type CleanNarratorPageFocus = CleanNarratorPromptInput["narrativePageTask"]["pageFocus"];
+type CleanNarratorChoicePresentation = CleanNarratorPromptInput["narrativePageTask"]["choicePresentation"];
 type CleanNarratorStoryPageBrief = CleanNarratorPromptInput["narrativePageTask"]["storyPageBrief"];
 
 function evidenceIncludesClaimKind(
@@ -1525,6 +1526,121 @@ function buildCleanPageFocus(
   };
 }
 
+function choicePresentationMode(choiceCount: number): CleanNarratorChoicePresentation["mode"] {
+  if (choiceCount === 0) return "none";
+  if (choiceCount === 1) return "single_route";
+  if (choiceCount <= 4) return "compact_route_group";
+  return "wide_route_fan";
+}
+
+function choicePresentationClosingStyle(
+  mode: CleanNarratorChoicePresentation["mode"],
+): CleanNarratorChoicePresentation["closingStyle"] {
+  switch (mode) {
+    case "compact_route_group":
+      return "group_named_options_with_cost";
+    case "none":
+      return "none";
+    case "single_route":
+      return "name_single_exit";
+    case "wide_route_fan":
+      return "show_route_fan";
+  }
+}
+
+function choicePresentationCostHandling(
+  choices: CleanNarratorChoicePresentation["choices"],
+): CleanNarratorChoicePresentation["costHandling"] {
+  const costs = choices.map((choice) => choice.costText).filter((cost): cost is string => cost !== null);
+  if (costs.length === 0) return "omit_costs";
+  if (costs.length === choices.length && uniqueStrings(costs).length === 1) return "preserve_shared_cost";
+  return "preserve_per_route_costs";
+}
+
+function usableFactByRole(
+  moves: CleanNarratorPageTaskMove[],
+  role: CleanNarratorPageTaskMove["usableFacts"][number]["role"],
+): CleanNarratorPageTaskMove["usableFacts"][number] | null {
+  for (const move of moves) {
+    const fact = move.usableFacts.find((entry) => entry.role === role);
+    if (fact) return fact;
+  }
+  return null;
+}
+
+function parseRouteChoiceCostMap(value: string): Map<string, string> {
+  const costs = new Map<string, string>();
+  for (const part of splitEvidenceLabels(value)) {
+    const separator = part.indexOf(":");
+    if (separator <= 0) continue;
+    const label = part.slice(0, separator).trim();
+    const cost = part.slice(separator + 1).trim();
+    if (label.length > 0 && cost.length > 0) costs.set(label, cost);
+  }
+  return costs;
+}
+
+function buildCleanChoicePresentation(
+  moves: CleanNarratorPageTaskMove[],
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorChoicePresentation {
+  const choiceSentencePlan = sentencePlan.filter((step) =>
+    step.sentenceRole === "next_action_handle"
+      && step.proseMaterials.some((material) => material.proseUse === "route_choice")
+  );
+  const sourceSentenceRefs = choiceSentencePlan.map((step) => step.sentenceRef);
+  const sourceMoveRefs = uniqueStrings(choiceSentencePlan.map((step) => step.moveRef));
+  if (sourceMoveRefs.length === 0 || sourceSentenceRefs.length === 0) {
+    return {
+      mode: "none",
+      sourceMoveRefs: [],
+      sourceSentenceRefs: [],
+      choices: [],
+      choiceCount: 0,
+      anchorFactRefs: [],
+      anchorStyle: "choice_labels_only",
+      labelHandling: "preserve_route_labels_verbatim",
+      costHandling: "omit_costs",
+      closingStyle: "none",
+      readerHandoff: "none",
+    };
+  }
+
+  const choiceMoves = moves.filter((move) => sourceMoveRefs.includes(move.moveRef));
+  const labelFact = usableFactByRole(choiceMoves, "open_route_labels")
+    ?? usableFactByRole(choiceMoves, "route_choice_labels");
+  if (!labelFact?.value) {
+    throw new Error("Narrative choice presentation requires accepted route label value evidence.");
+  }
+  const labels = splitRouteChoiceLabels(labelFact.value);
+  const costFact = usableFactByRole(choiceMoves, "route_choice_travel_costs");
+  const originFact = usableFactByRole(choiceMoves, "route_origin");
+  const costMap = costFact?.value ? parseRouteChoiceCostMap(costFact.value) : new Map<string, string>();
+  const choices = labels.map((label) => {
+    const costText = costMap.get(label) ?? null;
+    return {
+      label,
+      labelFactRef: labelFact.factRef,
+      costText,
+      costFactRef: costText && costFact ? costFact.factRef : null,
+    };
+  });
+  const mode = choicePresentationMode(choices.length);
+  return {
+    mode,
+    sourceMoveRefs,
+    sourceSentenceRefs,
+    choices,
+    choiceCount: choices.length,
+    anchorFactRefs: originFact?.value ? [originFact.factRef] : [],
+    anchorStyle: originFact?.value ? "route_origin_place_label" : "choice_labels_only",
+    labelHandling: "preserve_route_labels_verbatim",
+    costHandling: choicePresentationCostHandling(choices),
+    closingStyle: choicePresentationClosingStyle(mode),
+    readerHandoff: choices.length > 0 ? "choose_one_visible_route" : "none",
+  };
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
@@ -1597,6 +1713,7 @@ function buildCleanNarrativePageTask(
     pagePerformance,
     pageVariation: buildCleanPageVariation(pagePerformance, sentencePlan),
     pageFocus: buildCleanPageFocus(pageArc, moves, sentencePlan),
+    choicePresentation: buildCleanChoicePresentation(moves, sentencePlan),
     moves,
     sentencePlan,
   };
@@ -1725,6 +1842,7 @@ export function buildCleanNarrationSystemPrompt(
     "Page performance: promptInput.narrativePageTask.pagePerformance names openingBeat, pageMotion, continuityMaterial, closingBeat, and readerHandoff. Use it to connect sentencePlan steps into one text-RPG page: start from the opening material, carry continuity material through the page motion, and land the reader handoff while preserving sentence refs and evidence refs.",
     "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, cadenceTarget, dictionPalette, and variationBoundary. Use it to vary syntax, cadence, and RPG diction across pages while staying inside cited proseMaterials; variationBoundary=vary_syntax_only_inside_cited_material means style changes the phrasing path, not the facts.",
     "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs, frameMoveRefs/frameSentenceRefs, preferredFrameSentenceRefs, emphasis, frameSelection, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. When preferredFrameSentenceRefs is nonempty, use those frame sentence refs before the core; other frame refs are support material and may be omitted. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
+    "Choice presentation: promptInput.narrativePageTask.choicePresentation names sourceMoveRefs/sourceSentenceRefs, exact route choices, anchorStyle, cost handling, closingStyle, and readerHandoff for playable route-choice pages. Use choices as the reader's next playable paths from the accepted route evidence: preserve route labels verbatim, mention shared or per-route costs only when present in choicePresentation, anchor through route origin as a place label when anchorStyle=route_origin_place_label, reserve posture verbs for cited player_local_condition evidence, and close as an adventure handoff with the named routes acting as exits in the scene.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing only its allowedBackendFactRefs plus the cited accepted evidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",

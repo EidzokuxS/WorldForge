@@ -1376,6 +1376,19 @@ describe("clean Stage 6 narration contracts", () => {
         coreFrameRelationship: "result_stands_alone",
         contextUse: "none",
       },
+      choicePresentation: {
+        mode: "none",
+        sourceMoveRefs: [],
+        sourceSentenceRefs: [],
+        choices: [],
+        choiceCount: 0,
+        anchorFactRefs: [],
+        anchorStyle: "choice_labels_only",
+        labelHandling: "preserve_route_labels_verbatim",
+        costHandling: "omit_costs",
+        closingStyle: "none",
+        readerHandoff: "none",
+      },
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1842,6 +1855,24 @@ describe("clean Stage 6 narration contracts", () => {
       coreFrameRelationship: "context_frames_choices",
       contextUse: "texture_before_core",
     });
+    expect(promptInput.narrativePageTask.choicePresentation).toEqual({
+      mode: "single_route",
+      sourceMoveRefs: ["m2"],
+      sourceSentenceRefs: ["s3"],
+      choices: [{
+        label: "North Hall",
+        labelFactRef: "e1.f4",
+        costText: "1 minute",
+        costFactRef: "e1.f6",
+      }],
+      choiceCount: 1,
+      anchorFactRefs: ["e1.f2"],
+      anchorStyle: "route_origin_place_label",
+      labelHandling: "preserve_route_labels_verbatim",
+      costHandling: "preserve_shared_cost",
+      closingStyle: "name_single_exit",
+      readerHandoff: "choose_one_visible_route",
+    });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_playable_choices_page",
       narratorStance: "second_person_present_player_view",
@@ -2140,6 +2171,44 @@ describe("clean Stage 6 narration contracts", () => {
         },
       },
     ]);
+  });
+
+  it("derives wide route-choice presentation from accepted open route labels and costs", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsManyView());
+
+    expect(promptInput.narrativePageTask.pageArc).toEqual({
+      arcShape: "single_choice_handle",
+      pageCadence: "single_compact_beat",
+      readerPosture: "choose_visible_next_action",
+      closingIntent: "playable_next_action",
+    });
+    expect(promptInput.narrativePageTask.choicePresentation).toEqual({
+      mode: "wide_route_fan",
+      sourceMoveRefs: ["m1"],
+      sourceSentenceRefs: ["s1"],
+      choices: [
+        "Anchor Chain Pylon",
+        "Auditor Spire",
+        "Charter Gallery",
+        "Resonance Tower",
+        "Silt Warrens",
+        "Slip Twelve Berth",
+        "The Copper Tap",
+        "Upper Dam Ruins",
+      ].map((label) => ({
+        label,
+        labelFactRef: "e1.f4",
+        costText: "1 minute",
+        costFactRef: "e1.f6",
+      })),
+      choiceCount: 8,
+      anchorFactRefs: ["e1.f2"],
+      anchorStyle: "route_origin_place_label",
+      labelHandling: "preserve_route_labels_verbatim",
+      costHandling: "preserve_shared_cost",
+      closingStyle: "show_route_fan",
+      readerHandoff: "choose_one_visible_route",
+    });
   });
 
   it("prefers texture frame over scene-anchor support for textured route-status pages", () => {
@@ -5108,6 +5177,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredFrameSentenceRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("frameSelection");
     expect(buildCleanNarrationSystemPrompt()).toContain("coreFrameRelationship");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Choice presentation:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.choicePresentation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("anchorStyle");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserve route labels verbatim");
+    expect(buildCleanNarrationSystemPrompt()).toContain("reserve posture verbs for cited player_local_condition evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("adventure handoff");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");

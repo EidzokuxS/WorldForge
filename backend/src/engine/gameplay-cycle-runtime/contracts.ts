@@ -2885,6 +2885,45 @@ const cleanNarratorPageFocusSchema = z.object({
   ]),
 }).strict();
 
+const cleanNarratorChoicePresentationSchema = z.object({
+  mode: z.enum([
+    "compact_route_group",
+    "none",
+    "single_route",
+    "wide_route_fan",
+  ]),
+  sourceMoveRefs: z.array(shortText).max(4),
+  sourceSentenceRefs: z.array(shortText).max(6),
+  choices: z.array(z.object({
+    label: shortText,
+    labelFactRef: shortText,
+    costText: shortText.nullable(),
+    costFactRef: shortText.nullable(),
+  }).strict()).max(24),
+  choiceCount: z.number().int().min(0).max(24),
+  anchorFactRefs: z.array(shortText).max(4),
+  anchorStyle: z.enum([
+    "choice_labels_only",
+    "route_origin_place_label",
+  ]),
+  labelHandling: z.literal("preserve_route_labels_verbatim"),
+  costHandling: z.enum([
+    "omit_costs",
+    "preserve_per_route_costs",
+    "preserve_shared_cost",
+  ]),
+  closingStyle: z.enum([
+    "group_named_options_with_cost",
+    "name_single_exit",
+    "none",
+    "show_route_fan",
+  ]),
+  readerHandoff: z.enum([
+    "choose_one_visible_route",
+    "none",
+  ]),
+}).strict();
+
 const cleanNarratorStoryPageBriefSchema = z.object({
   pageKind: z.enum([
     "audit_notice_page",
@@ -2934,6 +2973,7 @@ const cleanNarratorPageTaskSchema = z.object({
   pagePerformance: cleanNarratorPagePerformanceSchema,
   pageVariation: cleanNarratorPageVariationSchema,
   pageFocus: cleanNarratorPageFocusSchema,
+  choicePresentation: cleanNarratorChoicePresentationSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();
