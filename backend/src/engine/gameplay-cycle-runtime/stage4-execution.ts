@@ -2980,6 +2980,11 @@ function localObservationSummary(input: {
     const itemLabels = localObservationNaturalLabelList(input.matchedEntries);
     return `You carry ${itemLabels}.`;
   }
+  if (labels.length > 0 && isOnlyVisibleActorSurface(input.effect.surfaceKinds)) {
+    const actorLabels = localObservationNaturalLabelList(input.matchedEntries);
+    const verb = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length === 1 ? "is" : "are";
+    return `${actorLabels} ${verb} present.`;
+  }
   if (input.resultKind === "positive_list") {
     return labels.length > 0
       ? `Current ${surfaceGroup} include: ${labels}.`

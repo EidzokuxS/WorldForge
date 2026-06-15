@@ -8774,3 +8774,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p326-inventory-status-proof-20260615T024347`: real `runCleanStage4Execution` inventory local-observation receipt summary `You carry Courier satchel and Brass Tube.`, accepted `local_observation_beat` `At Lowwater Bazaar, you carry Courier satchel and Brass Tube.`, narration text exactly `At Lowwater Bazaar, you carry Courier satchel and Brass Tube.`, and `oldPhrasePresent=false`.
     - Verified prose audit `output/clean-runtime-p326-inventory-status-proof-20260615T024347/prose-audit.json`: one narrative, 10 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed symbols, 6 changed files, and 0 affected execution flows.
+
+- P327 clean visible-actor presence prose:
+  - Diagnosis:
+    - [x] Latest broad scan `output/clean-runtime-p325-prose-scan-20260615T020437/summary.json` still shows actor visibility as status prose: `Guide is in sight at Lowwater Bazaar.`
+    - [x] Direct-scene settlement owns `Guide is in view here.`, and local-observation settlement/prompt grammar teaches `<label> is in sight at <scene>`.
+    - [x] The root is typed visible-presence phrasing, not narrator validation.
+  - Plan:
+    - [x] Run GitNexus impact for `sceneEvidence`, `localObservationStoryBeat`, and `buildCleanNarrationSystemPrompt`.
+    - [x] Rephrase visible actor accepted beats to neutral presence prose: `Guide is present here.` / `Guide is present at <scene>.`
+    - [x] Keep truth narrow: visible current-scene actor label and scene anchor only; no posture, action, distance, intent, dialogue, relationship, absence, or no-change.
+    - [x] Update settlement/narration expectations and local-observation prompt examples.
+    - [x] Run focused/expanded tests, typecheck, proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Default visible actor accepted evidence no longer emits `is in view here` or teaches `is in sight at <scene>`.
+    - [x] Actor labels and scene anchors remain represented as typed backend facts.
+    - [x] The fix changes typed accepted evidence/prompt contracts, not regex cleanup, semantic banlists, validators, or gameplay fallbacks.
+  - Review:
+    - Added settlement-owned `visibleActorPresenceBeat()` and used it for direct scene visible actor evidence and visible-actor local_observation evidence.
+    - Updated Stage 4 visible-actor local_observation summary from `Current visible actors include...` to `Guide is present.` style public receipt prose.
+    - Updated Stage 6 local_observation grammar and deterministic direct-scene projection to use presence prose for visible actors.
+    - Updated settlement, Stage 4, and narration expectations from `in view/in sight` actor phrasing to `present` actor phrasing while leaving non-actor object/place observation fixtures untouched.
+    - Verified focused settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified actor old-phrase search: zero `Guide is in view`, `Guide is in sight`, `is in view here`, or `is in sight at <scene>` matches in clean runtime source/tests; the remaining `central telegraph desk is in view here` fixture is non-actor local_observation and stays outside P327.
+    - Verified proof artifact `output/clean-runtime-p327-visible-actor-proof-20260615T025825`: real Stage 4 visible-actor local_observation receipt summary `Guide is present.`, accepted `local_observation_beat` `Guide is present at Lowwater Bazaar.`, narration text exactly `Guide is present at Lowwater Bazaar.`, and `oldActorPhrasePresent=false`.
+    - Verified prose audit `output/clean-runtime-p327-visible-actor-proof-20260615T025825/prose-audit.json`: one narrative, 6 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 8 touched indexed symbols, 7 changed files, and 0 affected execution flows.

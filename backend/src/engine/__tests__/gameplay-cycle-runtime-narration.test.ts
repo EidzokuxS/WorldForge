@@ -639,7 +639,7 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
-      text: "Guide is in view here.",
+      text: "Guide is present here.",
       backendFacts: [{ factRef: "e2.f1", role: "visible_actor_labels", value: "Guide", text: "Visible actor labels: Guide.", exact: true }],
       limits: {
         proves: ["actor visible in the current scene"],
@@ -1142,9 +1142,9 @@ function visibleActorLocalObservationWithSceneTextureView(): CleanNarratorView {
         ref: "e1",
         authority: "local_observation_receipt",
         claimKinds: ["local_observation"],
-        text: "Guide is in view here.",
+        text: "Guide is present here.",
         backendFacts: [
-          { factRef: "e1.f1", role: "local_observation_beat", value: "Guide is in view here.", text: "Local observation beat: Guide is in view here.", exact: true },
+          { factRef: "e1.f1", role: "local_observation_beat", value: "Guide is present here.", text: "Local observation beat: Guide is present here.", exact: true },
           { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible actors.", exact: true },
           { factRef: "e1.f3", role: "observation_query", text: "Observation query: visible people nearby.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "Guide", text: "Observed entry labels: Guide.", exact: true },
@@ -4066,7 +4066,7 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["scene_texture"],
           },
           {
-            text: "Guide is in view, with Brass Tube and Notice Board visible nearby.",
+            text: "Guide is present here, with Brass Tube and Notice Board visible nearby.",
             evidenceRefs: ["e2", "e4"],
             backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
             claimKinds: ["visible_actor", "visible_target"],
@@ -4089,7 +4089,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is in view, with Brass Tube and Notice Board visible nearby. You carry Courier satchel. North Hall is the way onward from here.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is present here, with Brass Tube and Notice Board visible nearby. You carry Courier satchel. North Hall is the way onward from here.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -4307,7 +4307,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("Market frames the immediate scene. Guide is in view. You carry Courier satchel. Brass Tube and Notice Board are in sight. North Hall is the way onward from Market; it takes 1 minute.");
+    expect(text).toBe("Market frames the immediate scene. Guide is present. You carry Courier satchel. Brass Tube and Notice Board are in sight. North Hall is the way onward from Market; it takes 1 minute.");
     expect(text).not.toContain("You are at");
     expect(text).not.toContain("is here.");
     expect(text).not.toContain("are visible.");
@@ -4339,7 +4339,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Guide is in view, with Brass Tube and Notice Board in sight.",
+          text: "Guide is present here, with Brass Tube and Notice Board in sight.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
@@ -4360,7 +4360,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toContain("Guide is in view");
+    expect(result.text).toContain("Guide is present");
     expect(result.text).not.toContain("Guide, Courier satchel");
     expect(result.text).not.toContain("Guide, Brass Tube");
     expect(result.text).not.toContain("Courier satchel is visible");
@@ -4382,7 +4382,7 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Guide is in view, with Brass Tube and Notice Board in sight.",
+          text: "Guide is present here, with Brass Tube and Notice Board in sight.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
@@ -5516,7 +5516,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Guide is in sight at Lowwater Bazaar.",
+          text: "Guide is present at Lowwater Bazaar.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation"],
@@ -5525,7 +5525,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Guide is in sight at Lowwater Bazaar.");
+    expect(result.text).toBe("Rain taps the brass gutters. Guide is present at Lowwater Bazaar.");
     for (const internalToken of ["SceneFrame", "worldVersion", "surface entry", "visible actor", "route", "Brass Tube", "no change"]) {
       expect(result.text).not.toContain(internalToken);
     }
@@ -5648,7 +5648,7 @@ describe("clean Stage 6 narration contracts", () => {
         modelCalls += 1;
         return acceptedCandidate(view, [
           {
-            text: "At Market, Guide is in view.",
+            text: "Guide is present at Market.",
             evidenceRefs: ["e5"],
             backendFactRefs: ["e5.f2", "e5.f4"],
             claimKinds: ["current_scene", "visible_actor"],
@@ -5671,14 +5671,14 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Guide is in view. You carry Courier satchel. North Hall is the way onward from here.");
+    expect(result.text).toBe("Guide is present at Market. You carry Courier satchel. North Hall is the way onward from here.");
     expect(result.text).not.toMatch(/\b(Current scene is|Visible actor:|Inventory item:|Movement option:|backend|receipt|nothing changed|no change)\b/iu);
 
     const inventoryPhrase = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "At Market, Guide is in view.",
+          text: "Guide is present at Market.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f2", "e5.f4"],
           claimKinds: ["current_scene", "visible_actor"],
@@ -5719,7 +5719,7 @@ describe("clean Stage 6 narration contracts", () => {
       view: texturedView,
       candidate: acceptedCandidate(texturedView, [
         {
-          text: "At Market, Guide is in view.",
+          text: "Guide is present at Market.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f2", "e5.f4"],
           claimKinds: ["current_scene", "visible_actor"],
@@ -5751,7 +5751,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Guide is in view.",
+          text: "Guide is present at Market.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f2", "e5.f4"],
           claimKinds: ["current_scene", "visible_actor"],
@@ -5771,7 +5771,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
     expect(texturedResult.source).toBe("model");
-    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view. You carry Courier satchel. North Hall is the way onward from here.");
+    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. Guide is present at Market. You carry Courier satchel. North Hall is the way onward from here.");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {

@@ -311,8 +311,12 @@ function localObservationStoryBeat(observation: {
   }
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
   const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
+  const onlyVisibleActorMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_actor");
   if (onlyInventoryMatches) {
     return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
+  }
+  if (onlyVisibleActorMatches) {
+    return visibleActorPresenceBeat(labels, observation.anchorSceneLabel);
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
@@ -638,6 +642,14 @@ function evidenceNaturalList(labels: readonly string[]): string {
   return `${values.slice(0, -1).join(", ")}, and ${last}`;
 }
 
+function visibleActorPresenceBeat(labels: readonly string[], anchorSceneLabel?: string): string {
+  const actorLabels = evidenceEnglishList(labels);
+  const verb = uniqueStrings(labels).length === 1 ? "is" : "are";
+  return anchorSceneLabel
+    ? `${actorLabels} ${verb} present at ${anchorSceneLabel}.`
+    : `${actorLabels} ${verb} present here.`;
+}
+
 function inventoryCustodyBeat(labels: readonly string[], anchorSceneLabel?: string): string {
   const itemLabels = evidenceNaturalList(labels);
   return anchorSceneLabel
@@ -838,7 +850,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_actor"],
-      text: `${actor.label} is in view here.`,
+      text: visibleActorPresenceBeat([actor.label]),
       visibleRefs: [actor.ref],
       backendFacts: [fact(actorEvidenceId, 1, "visible_actor_labels", `Visible actor labels: ${actor.label}.`, actor.label)],
       limits: {

@@ -915,7 +915,7 @@ describe("clean Stage 5 settlement contracts", () => {
     const targetEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_target"));
     const actorEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_actor"));
     const inventoryEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("inventory_status"));
-    expect(actorEvidence?.text).toBe("Guide is in view here.");
+    expect(actorEvidence?.text).toBe("Guide is present here.");
     expect(actorEvidence?.limits.proves).toEqual(["actor visible in the current scene"]);
     expect(inventoryEvidence?.text).toBe("You carry Courier satchel.");
     expect(inventoryEvidence?.backendFacts.map((entry) => entry.text)).toEqual([

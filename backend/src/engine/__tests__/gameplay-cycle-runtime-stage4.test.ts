@@ -1205,7 +1205,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current visible actors include: Sendo Atsushi.",
+        summary: "Sendo Atsushi is present.",
         localObservation: {
           resultKind: "positive_list",
           targetLabel: null,
