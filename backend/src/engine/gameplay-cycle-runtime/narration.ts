@@ -1047,7 +1047,11 @@ function sentencePlanMaterialCopyMode(
   fact: AcceptedNarrationEvidence["backendFacts"][number],
   proseUse: CleanNarratorFactUse["proseUse"],
 ): CleanNarratorSentencePlanStep["proseMaterials"][number]["copyMode"] {
-  if (fact.role === "device_surface_beat") {
+  if (
+    fact.role === "device_surface_beat"
+    || fact.role === "custody_change"
+    || fact.role === "settled_custody"
+  ) {
     return "copy_exact";
   }
   switch (proseUse) {
@@ -2662,7 +2666,7 @@ export function buildCleanNarrationSystemPrompt(
     "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials.",
     "Composed support-dialogue surface: when one page has support_actor_materialization and dialogue_response, use separate sentencePlan steps. First land the accepted support actor as a support_actor_presence_line from support actor materials; then frame the accepted dialogue_quote from dialogue materials. The support sentence owns presence only, and the dialogue sentence owns the visible utterance only.",
     "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
-    "Item-state surface: for item_state, use the item custody sentence plan as a scene-custody task card. Make the item label the sentence center, phrase from backendFacts with roles `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`, and use `custody_change` / `settled_custody` as proof material for the transfer. The item sentence may weave custody endpoints and scene anchor into one beat; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
+    "Item-state surface: for item_state, use the item custody sentence plan as a scene-custody task card. Make the item label the sentence center, preserve backendFacts with roles `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`, and copy `custody_change` / `settled_custody` exact-copy materials exactly when cited. The item sentence may place the accepted custody sentences beside texture/context sentences; scene texture belongs to the texture sentence, and context-anchor placement belongs to the context sentence.",
     "Item-state grammar: scene_custody_beat_line with land_scene_custody lands ownership and equip state through endpoint-owned item verbs such as changes hands, now carries, already carries, has the item equipped, or rests at the exact scene anchor. Source and target labels are custody endpoints; the scene anchor is a placement token; final_equip_state names the landing state. Handling gestures, player posture, ambient restaging, readiness, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
     "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> settles over <scene>' or '<time> presses around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
@@ -2942,6 +2946,25 @@ export function validateCleanNarrationCandidate(input: {
           message: "Narration sentence must cite at least one core material backend fact from its cited sentence-plan refs.",
         });
       }
+      const citedBackendFactRefs = new Set(sentence.backendFactRefs);
+      const normalizedSentenceText = normalizeText(sentence.text);
+      const exactCustodyMaterials = citedSentencePlans.flatMap((step) =>
+        step?.proseMaterials.filter((material) => {
+          if (!citedBackendFactRefs.has(material.factRef) || material.copyMode !== "copy_exact") return false;
+          const role = acceptedBackendFactsByRef.get(material.factRef)?.role;
+          return role === "custody_change" || role === "settled_custody";
+        }) ?? []
+      );
+      for (const material of exactCustodyMaterials) {
+        const exactMaterialText = normalizeText(material.materialText);
+        if (exactMaterialText.length > 0 && !normalizedSentenceText.includes(exactMaterialText)) {
+          issues.push({
+            code: "sentence_plan_not_supported",
+            path: `sentences.${index}.text`,
+            message: `Item-state narration must copy accepted custody material ${material.factRef} exactly.`,
+          });
+        }
+      }
       const sentencePlanPrimaryClaimKinds = new Set(citedSentencePlans.flatMap((step) =>
         step?.claimFocus.primaryClaimKinds ?? []
       ));
@@ -3151,6 +3174,9 @@ function narrationValidationRepairLines(
       lines.push(routeHandoffRepairText
         ? `For direct-scene route handoff repair, use a label-led sentence such as ${JSON.stringify(routeHandoffRepairText)} and cite only the route sentencePlanRefs/materialObligations refs.`
         : "For direct-scene route handoff repair, make the accepted route labels the sentence subject and use here as local placement when the cited sentencePlanRef lacks scene-anchor material.");
+    }
+    if (issues.some((issue) => issue.message.includes("copy accepted custody material"))) {
+      lines.push("For item_state repair, copy cited custody_change and settled_custody materialText exactly, preserving accepted item labels and custody endpoints literally.");
     }
     if (issues.some((issue) =>
       issue.message.includes("outside its sentence-plan refs")

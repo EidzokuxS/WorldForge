@@ -8857,3 +8857,46 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p329-dialogue-frame-proof-20260615T062159`: accepted `dialogue_quote` fact `Guide replies: "The north stairs flooded before dawn."`, narration text exactly `Guide replies: "The north stairs flooded before dawn."`, `quoteBodyUnchanged=true`, and `oldDialogueFramePresent=false`.
     - Verified prose audit `output/clean-runtime-p329-dialogue-frame-proof-20260615T062159/prose-audit.json`: one narrative, 8 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed symbols, 5 changed files, and 0 affected execution flows.
+
+- P330 fresh clean-runtime prose scan after P326-P329:
+  - Diagnosis:
+    - [x] P326-P329 closed stale scan gaps for inventory custody, visible actors, visible targets, and dialogue quote frames.
+    - [x] Current live clean-runtime output needs a fresh broad scan before picking the next prose owner.
+  - Plan:
+    - [x] Reuse the existing clean-runtime prose probe runner against fresh clones from `p69-item-transfer-045651`.
+    - [x] Run direct look, route, inventory, visible actor, condition, item transfer, dialogue, wait, and minor-POI probes on current `develop`.
+    - [x] Run the existing prose audit over the scan root.
+    - [x] Pick one remaining player-facing prose gap and trace it to a typed owner before editing.
+  - Success criteria:
+    - [x] Fresh scan summary records all probes with clean runtime, zero legacy-store writes, and player-facing narration text.
+    - [x] Next edit target comes from actual current output, not stale scan memory.
+  - Review:
+    - Ran fresh scan `output/clean-runtime-p330-prose-scan-20260615T062753`: 12/12 probes settled through `gameplay-cycle-runtime`, every probe wrote zero legacy stores, and the audit counted 12 narratives with all hit counters 0.
+    - Confirmed P326-P329 effects in live output: inventory says `You carry...`, visible actor says `Guide is present at Lowwater Bazaar.`, visible-target probes no longer use old in-view/in-sight frames, and dialogue quotes use `Guide replies: "..."`.
+    - Selected P331 from current output, not stale scan memory: item transfer accepted evidence preserves `Brass Tube`, but Stage 6 model prose rendered `The Brass Tube... it...`, so the next root owner is the item_state material copy contract.
+
+- P331 exact item-state custody material:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p330-prose-scan-20260615T062753` shows item transfer narration as `The Brass Tube changes hands from Mira Voss to Guide; Guide now carries it at Lowwater Bazaar.`
+    - [x] Settlement evidence is already correct: accepted `custody_change` is `Brass Tube changes hands from Mira Voss to Guide at Lowwater Bazaar.` and accepted `settled_custody` is `Guide now carries Brass Tube at Lowwater Bazaar.`
+    - [x] Root owner is Stage 6 `sentencePlanMaterialCopyMode()`: item_state custody facts are `primary_beat` with `phrase_from_material`, so model prose can replace exact item labels with article/pronoun wording.
+  - Plan:
+    - [x] Run GitNexus impact for `sentencePlanMaterialCopyMode`, `buildCleanNarrationSystemPrompt`, and `validateCleanNarrationCandidate`.
+    - [x] Make `custody_change` and `settled_custody` exact-copy prose materials.
+    - [x] Update item_state prompt guidance and tests so item transfer pages copy the accepted custody sentences or cite only label tokens they preserve exactly.
+    - [x] Keep truth narrow: accepted item/source/target labels, final holder/equip state, and scene anchor only; no NPC reaction, consent, item use, discovery, private knowledge, absence, or no-change.
+    - [x] Run focused/expanded tests, typecheck, proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Item_state structural validation rejects prose that cites accepted custody facts while replacing `Brass Tube` with `The Brass Tube` or `it`.
+    - [x] Accepted item-state model/projection output preserves exact custody material from `custody_change` and `settled_custody`.
+    - [x] The fix changes typed material obligations and their existing structural enforcement, not regex cleanup, semantic banlists, or gameplay fallbacks.
+  - Review:
+    - Marked `custody_change` and `settled_custody` sentence-plan materials as `copy_exact`, so item-transfer narration that cites those facts carries the accepted item label, source, target, and scene anchor literally.
+    - Updated the item_state prompt contract and repair hint to make custody material copying the model-facing task instead of polishing around label drift.
+    - Updated narration fixtures to preserve the two accepted custody sentences exactly and added a regression that rejects `The Brass Tube... it...` pronoun/article drift.
+    - Verified focused narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (118 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified proof artifact `output/clean-runtime-p331-item-state-exact-custody-proof-20260615T064215`: exact candidate accepted as `Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.`, drift candidate rejected with `copy accepted custody material`, and model result preserved both exact custody sentences.
+    - Verified prose audit `output/clean-runtime-p331-item-state-exact-custody-proof-20260615T064215/prose-audit.json`: one narrative, 17 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 4 touched indexed symbols, 3 changed files, and 0 affected execution flows.

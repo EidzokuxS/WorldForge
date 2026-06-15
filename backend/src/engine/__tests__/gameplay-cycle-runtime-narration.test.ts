@@ -2507,6 +2507,28 @@ describe("clean Stage 6 narration contracts", () => {
         styleLevers: ["item_custody_focus", "accepted_label_anchor", "settled_state_focus", "custody_endpoint_rotation"],
       },
     });
+    expect(itemStep?.proseMaterials
+      .filter((material) => material.factRef === "e1.f2" || material.factRef === "e1.f1")
+      .map((material) => ({
+        factRef: material.factRef,
+        proseUse: material.proseUse,
+        materialText: material.materialText,
+        copyMode: material.copyMode,
+      }))).toEqual([
+        {
+          factRef: "e1.f2",
+          proseUse: "primary_beat",
+          materialText: "Guide now carries Brass Tube at Market.",
+          copyMode: "copy_exact",
+        },
+        {
+          factRef: "e1.f1",
+          proseUse: "primary_beat",
+          materialText: "Brass Tube changes hands from Player to Guide at Market.",
+          copyMode: "copy_exact",
+        },
+      ]);
+    expect(itemStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f2", "e1.f1"]);
   });
 
   it("builds support actor presence as a scene-presence task card", () => {
@@ -3977,7 +3999,7 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [{
-          text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+          text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
           claimKinds: ["item_state"],
@@ -3987,7 +4009,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.");
+    expect(result.text).toBe("Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.");
   });
 
   it("accepts selected scene_texture frame for dialogue_response at runtime without prose-quality repair", async () => {
@@ -4937,7 +4959,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+        text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
         claimKinds: ["item_state"],
@@ -4945,7 +4967,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.");
+    expect(result.text).toBe("Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.");
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
@@ -4964,7 +4986,7 @@ describe("clean Stage 6 narration contracts", () => {
     const result = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+        text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
         claimKinds: ["item_state"],
@@ -4972,6 +4994,23 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.status).toBe("accepted");
+
+    const pronounDrift = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The Brass Tube changes hands from Player to Guide; Guide now carries it at Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
+        claimKinds: ["item_state"],
+      }]),
+    });
+
+    expect(pronounDrift.status).toBe("rejected");
+    if (pronounDrift.status !== "rejected") throw new Error("expected rejected");
+    expect(pronounDrift.issues.some((issue) =>
+      issue.code === "sentence_plan_not_supported"
+      && issue.message.includes("copy accepted custody material")
+    )).toBe(true);
   });
 
   it("uses accepted scene_texture for item_state prose when texture is available", async () => {
@@ -4987,7 +5026,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+          text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
           claimKinds: ["item_state"],
@@ -4996,7 +5035,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.");
+    expect(result.text).toBe("Rain taps the brass gutters. Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.");
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
@@ -5005,7 +5044,7 @@ describe("clean Stage 6 narration contracts", () => {
     const result = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+        text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
         claimKinds: ["item_state"],
@@ -5027,7 +5066,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+          text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
           claimKinds: ["item_state"],
@@ -5045,7 +5084,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+          text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
           claimKinds: ["item_state"],
@@ -5078,7 +5117,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there.",
+          text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
           claimKinds: ["item_state"],
@@ -5093,7 +5132,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. Brass Tube changes hands from Player to Guide at Market, and Guide now carries Brass Tube there. Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Rain taps the brass gutters. Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market. Guide answers: "The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(durable world fact|confirmed by the world|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
@@ -6032,7 +6071,7 @@ describe("clean Stage 6 narration contracts", () => {
     const result = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Guide now carries Brass Tube at Market. Target: Guide. Final equip state: carried. Current scene anchor: Market.",
+        text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market. Target: Guide. Final equip state: carried. Current scene anchor: Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f1", "e1.f3", "e1.f5", "e1.f6", "e1.f7"],
         claimKinds: ["item_state"],
@@ -6298,8 +6337,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
-    expect(buildCleanNarrationSystemPrompt()).toContain("phrase from backendFacts with roles `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`");
-    expect(buildCleanNarrationSystemPrompt()).toContain("use `custody_change` / `settled_custody` as proof material for the transfer");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserve backendFacts with roles `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`");
+    expect(buildCleanNarrationSystemPrompt()).toContain("copy `custody_change` / `settled_custody` exact-copy materials exactly when cited");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_custody_beat_line with land_scene_custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through endpoint-owned item verbs");
