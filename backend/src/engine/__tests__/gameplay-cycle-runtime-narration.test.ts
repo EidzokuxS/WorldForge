@@ -763,9 +763,9 @@ function supportActorView(): CleanNarratorView {
       ref: "e1",
       authority: "support_actor_materialization_receipt",
       claimKinds: ["visible_actor", "support_actor_materialization"],
-      text: "Local Vendor is now in view at Market as a vendor.",
+      text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
       backendFacts: [
-        { factRef: "e1.f1", role: "support_actor_presence", value: "Local Vendor is now in view at Market as a vendor.", text: "Local Vendor is now in view at Market as a vendor.", exact: true },
+        { factRef: "e1.f1", role: "support_actor_presence", value: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.", text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.", exact: true },
         { factRef: "e1.f2", role: "visible_support_actor", value: "Local Vendor", text: "Visible person now in view: Local Vendor.", exact: true },
         { factRef: "e1.f3", role: "support_role", value: "vendor", text: "Ordinary scene role: vendor.", exact: true },
         { factRef: "e1.f4", role: "anchor_scene", value: "Market", text: "Scene anchor: Market.", exact: true },
@@ -2515,7 +2515,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.beatObjective === "render_support_actor_presence"
     );
 
-    expect(supportStep?.preferredBackendFactRefs).toEqual(["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1"]);
+    expect(supportStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f4", "e1.f3", "e1.f6", "e1.f7"]);
     expect(supportStep).toMatchObject({
       beatObjective: "render_support_actor_presence",
       adventureCue: {
@@ -2541,12 +2541,12 @@ describe("clean Stage 6 narration contracts", () => {
       proseUse: material.proseUse,
       materialText: material.materialText,
     }))).toEqual([
+      { factRef: "e1.f1", proseUse: "primary_beat", materialText: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards." },
       { factRef: "e1.f2", proseUse: "label_anchor", materialText: "Local Vendor" },
       { factRef: "e1.f4", proseUse: "scene_anchor", materialText: "Market" },
-      { factRef: "e1.f6", proseUse: "primary_beat", materialText: "A local vendor stands beside the stall boards, against worn counter boards." },
-      { factRef: "e1.f7", proseUse: "supporting_detail", materialText: "An ordinary local vendor stands beside the stall boards at Market, against worn counter boards." },
       { factRef: "e1.f3", proseUse: "label_anchor", materialText: "vendor" },
-      { factRef: "e1.f1", proseUse: "primary_beat", materialText: "Local Vendor is now in view at Market as a vendor." },
+      { factRef: "e1.f6", proseUse: "supporting_detail", materialText: "A local vendor stands beside the stall boards, against worn counter boards." },
+      { factRef: "e1.f7", proseUse: "supporting_detail", materialText: "An ordinary local vendor stands beside the stall boards at Market, against worn counter boards." },
     ]);
   });
 
@@ -2560,7 +2560,7 @@ describe("clean Stage 6 narration contracts", () => {
       "render_support_actor_presence",
       "frame_dialogue_reply",
     ]);
-    expect(turnSteps[0]?.preferredBackendFactRefs).toEqual(["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1"]);
+    expect(turnSteps[0]?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f4", "e1.f3", "e1.f6", "e1.f7"]);
     expect(turnSteps[0]?.proseAssembly.sentenceShape).toBe("support_actor_presence_line");
     expect(turnSteps[0]?.literaryCue.renderShape).toBe("weave_support_actor_scene_presence");
     expect(turnSteps[1]?.preferredBackendFactRefs).toEqual(["e4.f1", "e4.f2", "e4.f3"]);
@@ -3369,7 +3369,7 @@ describe("clean Stage 6 narration contracts", () => {
     ))).toThrow("Player-local-condition projection requires accepted Player condition operation value evidence.");
 
     expect(renderCleanAuthorityProjection(withOpaqueFactText(supportActorView(), "support_actor_presence")))
-      .toBe("At Market, Local Vendor stands beside the stall boards, against worn counter boards.");
+      .toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(supportActorView(), "support_actor_presence")))
       .toThrow("Support-actor projection requires accepted Support actor presence value evidence.");
 
@@ -4031,7 +4031,7 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [{
-          text: "Local Vendor takes a visible place at Market.",
+          text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4041,7 +4041,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(0);
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Local Vendor stands beside the stall boards, against worn counter boards.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
   });
 
   it("accepts direct-scene custody status at runtime without prose-quality repair", async () => {
@@ -4543,7 +4543,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
     const text = renderCleanAuthorityProjection(supportActorView());
 
-    expect(text).toBe("At Market, Local Vendor stands beside the stall boards, against worn counter boards.");
+    expect(text).toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     for (const forbidden of [
       "Visible support actor",
       "Visible person now in view",
@@ -4590,7 +4590,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "Local Vendor takes a visible place at Market.",
+        text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f1"],
         claimKinds: ["visible_actor", "support_actor_materialization"],
@@ -4598,7 +4598,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("At Market, Local Vendor stands beside the stall boards, against worn counter boards.");
+    expect(result.text).toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     for (const forbidden of [
       "Visible support actor",
       "Visible person now in view",
@@ -4637,7 +4637,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Local Vendor glances up from a narrow plank counter.",
+          text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4646,7 +4646,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, Local Vendor stands beside the stall boards, against worn counter boards.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4670,7 +4670,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, Local Vendor glances up from a narrow plank counter.",
+        text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
         evidenceRefs: ["e1", "e3"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1", "e3.f1"],
         claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4688,7 +4688,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Local Vendor glances up from a narrow plank counter.",
+          text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
           evidenceRefs: ["e1", "e3"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1", "e3.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization", "current_scene"],
@@ -4711,7 +4711,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, Local Vendor glances up from a narrow plank counter.",
+          text: "Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6", "e1.f7", "e1.f3", "e1.f1"],
           claimKinds: ["visible_actor", "support_actor_materialization"],
@@ -4726,7 +4726,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Canvas awnings hang over the market lanes. At Market, Local Vendor stands beside the stall boards, against worn counter boards. Local Vendor says: "The audit bell rang before dawn."');
+    expect(result.text).toBe('Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards. Local Vendor says: "The audit bell rang before dawn."');
     for (const forbidden of [
       "has set up",
       "set up",

@@ -588,6 +588,35 @@ function trimTrailingSentencePunctuation(value: string): string {
   return compact;
 }
 
+function supportActorCuePlacementPhrase(cue: string, roleLabel: string): string {
+  let phrase = trimTrailingSentencePunctuation(cue);
+  const role = roleLabel.trim();
+  const prefixes = role
+    ? [`A local ${role} `, `An ordinary ${role} `, `An ${role} `, `A ${role} `]
+    : [];
+  for (const prefix of prefixes) {
+    if (phrase.toLocaleLowerCase("en-US").startsWith(prefix.toLocaleLowerCase("en-US"))) {
+      phrase = phrase.slice(prefix.length).trimStart();
+      break;
+    }
+  }
+  const standingPrefix = "stands ";
+  if (phrase.toLocaleLowerCase("en-US").startsWith(standingPrefix)) {
+    phrase = phrase.slice(standingPrefix.length).trimStart();
+  }
+  return phrase;
+}
+
+function supportActorPresenceText(supportActor: NonNullable<CleanStage4Receipt["publicResult"]["supportActor"]>): string {
+  const base = supportActor.resultKind === "reused"
+    ? `${supportActor.actorLabel} remains in view at ${supportActor.anchorSceneLabel}`
+    : `${supportActor.actorLabel} comes into view at ${supportActor.anchorSceneLabel}`;
+  const cuePhrase = supportActor.visibleCue
+    ? supportActorCuePlacementPhrase(supportActor.visibleCue, supportActor.roleLabel)
+    : "";
+  return cuePhrase ? `${base}, ${cuePhrase}.` : `${base}.`;
+}
+
 function evidenceSemicolonList(labels: readonly string[]): string {
   return uniqueStrings(labels.map(trimTrailingSentencePunctuation).filter((label) => label.length > 0)).join("; ");
 }
@@ -1316,7 +1345,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "support_actor_materialization_receipt" && receipt.publicResult.supportActor) {
       const evidenceId = nextEvidenceId(evidence);
       const supportActor = receipt.publicResult.supportActor;
-      const presenceText = `${supportActor.actorLabel} is now in view at ${supportActor.anchorSceneLabel} as a ${supportActor.roleLabel}.`;
+      const presenceText = supportActorPresenceText(supportActor);
       const supportFacts = boundedBackendFacts([
         fact(evidenceId, 1, "support_actor_presence", presenceText, presenceText),
         fact(evidenceId, 2, "visible_support_actor", `Visible person now in view: ${supportActor.actorLabel}.`, supportActor.actorLabel),

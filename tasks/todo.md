@@ -8691,3 +8691,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Tea Stall draws attention at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p323-minor-poi-live-20260615T014338/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatMinorPoi`.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 6 touched indexed symbols, 6 changed files, and 0 affected execution flows.
+
+- P324 clean support-actor accepted presence prose:
+  - Diagnosis:
+    - [x] Fresh clean runtime scan `output/clean-runtime-p323-prose-scan-20260615T012544/summary.json` shows support-actor prose still reads like a placement summary: `At Lowwater Bazaar, Local Vendor stands beside the stall boards, against worn counter boards.`
+    - [x] Stage 4 settlement already owns `support_actor_presence`, but its value is dry: `Local Vendor is now in view at Market as a vendor.`
+    - [x] Stage 6 then reassembles the player-facing sentence from `support_actor_visible_cue`, which spreads one prose responsibility across settlement and renderer.
+  - Plan:
+    - [x] Run GitNexus impact for the support-actor settlement/projection owners before edits.
+    - [x] Move the complete player-facing support presence sentence into the accepted `support_actor_presence` value.
+    - [x] Make Stage 6 deterministic support-actor projection require and copy `support_actor_presence`, while keeping actor label, role, scene, cue, and public summary as structured supporting facts.
+    - [x] Keep support-actor truth narrow: visible current-scene person, ordinary role, current-scene presence/reuse only; no services, trade behavior, setup action, dialogue, relationship, future relevance, or world truth.
+    - [x] Update settlement/narration expectations and focused tests.
+    - [x] Run focused/expanded tests, typecheck, live support-actor proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Accepted support-actor evidence and deterministic projection no longer use `is now in view at ... as a ...` or the `At <scene>, <actor> <cue>` placement formula.
+    - [x] Actor label, role label, scene anchor, visible cue, and public summary remain represented by typed backend facts.
+    - [x] The fix changes typed accepted support-actor material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented settlement-owned support presence prose: created support actors now expose `Local Vendor comes into view at <scene>, beside the stall boards, against worn counter boards.` as exact `support_actor_presence`.
+    - Simplified Stage 6 support actor deterministic projection to require and copy `support_actor_presence`; `support_actor_visible_cue` and `support_actor_public_summary` remain supporting typed facts for model-authored composed pages.
+    - Reordered support actor page-task fact refs so the primary presence beat is the first prose material, followed by actor label, scene anchor, role, cue, and public summary.
+    - Verified focused settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p324-support-actor-live-20260615T015821`: support actor action settled through `gameplay-cycle-runtime`, one accepted `support_actor_create` Stage 4 receipt, `mutationApplied=true`, `worldVersion=1`, NPC persisted in `npcs` with broad and exact scene ids, one clean turn record, zero old stores, and accepted `support_actor_presence` exactly `Local Vendor comes into view at Lowwater Bazaar, beside the stall boards, against worn counter boards.`.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Local Vendor comes into view at Lowwater Bazaar, beside the stall boards, against worn counter boards.`
+    - Verified prose audit `output/clean-runtime-p324-support-actor-live-20260615T015821/prose-audit.json`: one narrative, 35 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatSupportActor`.
+    - Verified GitNexus all-scope `detect_changes`: MEDIUM scope from 10 touched indexed symbols, 5 changed files, and one settlement-internal affected process (`Stage4Evidence -> UniqueStrings`).

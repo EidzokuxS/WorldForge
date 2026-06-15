@@ -233,12 +233,12 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
   }
   if (evidence.claimKinds.includes("support_actor_materialization")) {
     return preferredPromptFactsByRole(evidence, [
+      "support_actor_presence",
       "visible_support_actor",
       "anchor_scene",
+      "support_role",
       "support_actor_visible_cue",
       "support_actor_public_summary",
-      "support_role",
-      "support_actor_presence",
       "materialization_result",
     ]);
   }
@@ -660,7 +660,6 @@ function narrativeFactProseUse(
     case "player_condition_operation":
     case "minor_poi_beat":
     case "support_actor_presence":
-    case "support_actor_visible_cue":
     case "custody_change":
     case "settled_custody":
     case "visible_scene_facts":
@@ -930,12 +929,12 @@ function isStandaloneElapsedTimeMove(move: CleanNarratorPageTaskMove): boolean {
 
 function selectSupportActorPresenceFactRefs(move: CleanNarratorPageTaskMove): string[] {
   return sentencePlanFactRefsByRole(move, [
+    "support_actor_presence",
     "visible_support_actor",
     "anchor_scene",
+    "support_role",
     "support_actor_visible_cue",
     "support_actor_public_summary",
-    "support_role",
-    "support_actor_presence",
   ]);
 }
 
@@ -3601,37 +3600,11 @@ function renderMinorPoiTurnProjection(
 }
 
 function renderSupportActorProjection(evidence: AcceptedNarrationEvidence): string {
-  requireFactValueByRole(
+  return requireFactValueByRole(
     evidence,
     "support_actor_presence",
     "Support-actor projection requires accepted Support actor presence value evidence.",
   );
-  const actorLabel = requireFactValueByRole(
-    evidence,
-    "visible_support_actor",
-    "Support-actor projection requires accepted visible support actor label evidence.",
-  );
-  const sceneLabel = requireFactValueByRole(
-    evidence,
-    "anchor_scene",
-    "Support-actor projection requires accepted scene anchor evidence.",
-  );
-  const cue = evidence.backendFacts.find((fact) =>
-    fact.role === "support_actor_visible_cue" && fact.value?.trim()
-  )?.value?.trim();
-  if (cue) {
-    const roleLabel = evidence.backendFacts.find((fact) =>
-      fact.role === "support_role" && fact.value?.trim()
-    )?.value?.trim().toLocaleLowerCase("en-US");
-    const trimmedCue = trimSentencePeriod(cue);
-    const genericPrefixes = roleLabel ? [`A local ${roleLabel} `, `A ${roleLabel} `] : [];
-    const matchedPrefix = genericPrefixes.find((prefix) =>
-      trimmedCue.toLocaleLowerCase("en-US").startsWith(prefix.toLocaleLowerCase("en-US"))
-    );
-    const cueRemainder = matchedPrefix ? trimmedCue.slice(matchedPrefix.length) : trimmedCue;
-    return `At ${sceneLabel}, ${actorLabel} ${cueRemainder}.`;
-  }
-  return `At ${sceneLabel}, ${actorLabel} is in view.`;
 }
 
 function renderSupportActorTurnProjection(view: CleanNarratorView, supportActor: AcceptedNarrationEvidence): string {
