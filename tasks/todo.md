@@ -8561,3 +8561,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live accepted beat exactly matched the custody sentence: `Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p318-inventory-live-r2-20260615-031600/prose-audit.json`: one narrative, 37 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 8 touched indexed symbols, 7 changed files, and 0 affected execution flows.
+
+- P319 clean device-surface bounded observation prose:
+  - Diagnosis:
+    - [x] Device-surface no-requested-surface material still reaches Stage 6 as flat receipt prose: `Burner phone's visible surface shows no requested message indicator.`
+    - [x] The existing prose audit already treats that shape as `flatDeviceSurface`, so this is a known player-facing summary pattern rather than a validator gap.
+    - [x] Root owners are typed device material builders: Stage 4 `deviceFacetSummary()` for receipt/public summaries and settlement `deviceSurfaceStoryBeat()` for accepted `device_surface_beat` evidence.
+  - Plan:
+    - [x] Run GitNexus impact for `deviceFacetSummary`, `deviceSurfaceStoryBeat`, `deviceSurfaceObservationResult`, `renderDeviceSurfaceProjection`, prompt/projection owners, and the later `sentencePlanMaterialCopyMode` contract edit before edits.
+    - [x] Replace bounded no-requested-surface wording with compact prose from accepted device label and requested facet kinds.
+    - [x] Keep device truth narrow: requested public surface facet only; no private messages, no true absence of messages/calls/signal, no activation/use/hacking, no no-change.
+    - [x] Update Stage 4, settlement, narration, audit-facing expectations, and Stage 6 material obligations.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live device proof, prose audit, and GitNexus scope.
+  - Success criteria:
+    - [x] Device no-requested-surface output no longer matches the flat `visible surface shows no requested ...` summary.
+    - [x] Output proves only the bounded current visible device surface result for the requested facet.
+    - [x] The fix changes typed accepted device-surface material and sentence material obligations, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented Stage 4 receipt summary and Stage 5 accepted `device_surface_beat` wording as `No requested message indicator appears on Burner phone's visible surface.`.
+    - Implemented Stage 6 contract so `device_surface_beat` is an exact-copy prose material; the first live proof showed typed evidence was correct while the model added `the Burner phone`, and the exact-copy material contract closed that drift without runtime regex cleanup.
+    - Verified focused tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (180 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p319-device-surface-live-r2-20260615-033520`: `device_surface_observation` accepted, `mutationApplied=false`, clock unchanged, one clean turn record, one Stage 4 receipt, narrative includes the exact accepted beat, and no old flat/broad absence phrases were hit.
+    - Verified prose audit `output/clean-runtime-p319-device-surface-live-r2-20260615-033520/prose-audit.json`: one narrative, 45 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatDeviceSurface`.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 5 touched indexed symbols, 7 changed files, and 0 affected execution flows.

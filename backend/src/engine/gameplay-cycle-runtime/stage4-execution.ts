@@ -3167,6 +3167,13 @@ function deviceSurfaceForEffect(input: {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function noRequestedDeviceSurfaceSummary(deviceLabel: string, unavailableFacetKinds: readonly DeviceFacetKind[]): string {
+  const labels = uniqueDeviceFacetKinds(unavailableFacetKinds).map(deviceFacetKindLabel);
+  const facetText = deviceFacetKindListLabel(unavailableFacetKinds);
+  const verb = labels.length === 1 ? "appears" : "appear";
+  return `No requested ${facetText} ${verb} on ${deviceLabel}'s visible surface.`;
+}
+
 function deviceFacetSummary(input: {
   effect: DeviceSurfaceObservationEffect;
   surface: NonNullable<AuthoritativeSceneFrame["deviceStatusSurfaces"]>[number];
@@ -3175,8 +3182,7 @@ function deviceFacetSummary(input: {
   unavailableFacetKinds: readonly DeviceFacetKind[];
 }): string {
   if (input.resultKind === "no_requested_surface") {
-    const unavailable = deviceFacetKindListLabel(input.unavailableFacetKinds);
-    return `Current visible device surface for ${input.surface.deviceLabel} exposes no requested ${unavailable}.`;
+    return noRequestedDeviceSurfaceSummary(input.surface.deviceLabel, input.unavailableFacetKinds);
   }
   const observed = input.observedFacets
     .map((facet) => `${facet.displayLabel}: ${facet.valueText}`)

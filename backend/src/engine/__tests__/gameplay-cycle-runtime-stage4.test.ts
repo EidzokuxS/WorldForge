@@ -1459,7 +1459,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
     const summary = result.execution?.receipts[0]?.publicResult.summary ?? "";
-    expect(summary).toBe("Current visible device surface for Burner phone exposes no requested message indicator.");
+    expect(summary).toBe("No requested message indicator appears on Burner phone's visible surface.");
     expect(summary).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change/iu);
     const clock = getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")

@@ -340,6 +340,13 @@ function deviceFacetKindListLabel(kinds: readonly string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function noRequestedDeviceSurfaceBeat(deviceLabel: string, unavailableFacetKinds: readonly string[]): string {
+  const labels = uniqueStrings(unavailableFacetKinds.map(deviceFacetKindLabel));
+  const facetText = deviceFacetKindListLabel(unavailableFacetKinds);
+  const verb = labels.length === 1 ? "appears" : "appear";
+  return `No requested ${facetText} ${verb} on ${deviceLabel}'s visible surface.`;
+}
+
 function deviceSurfaceStoryBeat(observation: {
   deviceLabel: string;
   observedFacets: readonly { displayLabel: string; valueText: string }[];
@@ -349,7 +356,7 @@ function deviceSurfaceStoryBeat(observation: {
     throw new Error("Device surface story evidence requires observed or unavailable requested facets.");
   }
   if (observation.observedFacets.length === 0) {
-    return `${observation.deviceLabel}'s visible surface shows no requested ${deviceFacetKindListLabel(observation.unavailableFacetKinds)}.`;
+    return noRequestedDeviceSurfaceBeat(observation.deviceLabel, observation.unavailableFacetKinds);
   }
   const observed = observation.observedFacets
     .map((facet) => `${trimTrailingSentencePunctuation(facet.displayLabel)}: ${trimTrailingSentencePunctuation(facet.valueText)}`);

@@ -680,7 +680,7 @@ function deviceSurfaceObservationReceipt(inputFrame = frame(), inputChecklist = 
       mayAuthorizeMutation: false,
     },
     publicResult: {
-      summary: "Current visible device surface for Burner phone exposes no requested message indicator.",
+      summary: "No requested message indicator appears on Burner phone's visible surface.",
       visibleRefs: ["Player", "Burner phone", "Market"],
       routeStatus: null,
       locationChange: null,
@@ -700,7 +700,7 @@ function deviceSurfaceObservationReceipt(inputFrame = frame(), inputChecklist = 
         anchorSceneLabel: "Market",
         anchorLocationLabel: "Market",
         boundedNoSurface: true,
-        summary: "Current visible device surface for Burner phone exposes no requested message indicator.",
+        summary: "No requested message indicator appears on Burner phone's visible surface.",
         claimStatus: "bounded_current_frame_device_surface_only",
       },
       sceneBeat: null,
@@ -1671,16 +1671,16 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const deviceSurface = packet.acceptedEvidence.find((entry) => entry.authority === "device_surface_observation_receipt");
     expect(deviceSurface?.claimKinds).toEqual(["device_surface_observation", "device_surface_unavailable"]);
-    expect(deviceSurface?.text).toBe("Burner phone's visible surface shows no requested message indicator.");
+    expect(deviceSurface?.text).toBe("No requested message indicator appears on Burner phone's visible surface.");
     expect(deviceSurface?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Device surface beat: Burner phone's visible surface shows no requested message indicator.",
+      "Device surface beat: No requested message indicator appears on Burner phone's visible surface.",
       "Device label: Burner phone.",
       "Requested surface facets: message indicator.",
       "Unavailable surface facets: message indicator.",
       "Anchor scene: Market.",
       "Anchor location: Market.",
     ]);
-    expect(deviceSurface?.backendFacts[0]?.value).toBe("Burner phone's visible surface shows no requested message indicator.");
+    expect(deviceSurface?.backendFacts[0]?.value).toBe("No requested message indicator appears on Burner phone's visible surface.");
     expect(deviceSurface?.limits.proves).toEqual([
       "bounded current visible device surface result for requested facets",
       "requested device label",
