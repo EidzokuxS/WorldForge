@@ -917,13 +917,13 @@ describe("clean Stage 5 settlement contracts", () => {
     const inventoryEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("inventory_status"));
     expect(actorEvidence?.text).toBe("Guide is in view here.");
     expect(actorEvidence?.limits.proves).toEqual(["actor visible in the current scene"]);
-    expect(inventoryEvidence?.text).toBe("You have Courier satchel with you.");
+    expect(inventoryEvidence?.text).toBe("Courier satchel is in your keeping.");
     expect(inventoryEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Inventory status beat: You have Courier satchel with you.",
+      "Inventory status beat: Courier satchel is in your keeping.",
       "Inventory labels: Courier satchel.",
     ]);
     expect(inventoryEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
-      "You have Courier satchel with you.",
+      "Courier satchel is in your keeping.",
       "Courier satchel",
     ]);
     expect(inventoryEvidence?.limits.proves).toEqual(["inventory items are with the player in the current inventory view"]);
@@ -1568,10 +1568,10 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "inventory_status"]);
-    expect(observation?.text).toBe("Courier satchel and Brass Tube are with you.");
+    expect(observation?.text).toBe("Courier satchel and Brass Tube are in your keeping at Market.");
     expect(observation?.backendFacts).toHaveLength(8);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: Courier satchel and Brass Tube are with you.",
+      "Local observation beat: Courier satchel and Brass Tube are in your keeping at Market.",
       "Searched visible surfaces: inventory items.",
       "Observation query: What am I carrying?.",
       "Observed entry labels: Courier satchel; Brass Tube.",
@@ -1582,7 +1582,7 @@ describe("clean Stage 5 settlement contracts", () => {
     ]);
     expect(observation?.backendFacts.find((entry) => entry.role === "observed_inventory_item_labels")?.value)
       .toBe("Courier satchel; Brass Tube");
-    expect(observation?.backendFacts[0]?.value).toBe("Courier satchel and Brass Tube are with you.");
+    expect(observation?.backendFacts[0]?.value).toBe("Courier satchel and Brass Tube are in your keeping at Market.");
     expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
     expect(observation?.text).not.toContain("in sight");
     expect(observation?.text).not.toContain("in view");
@@ -1603,7 +1603,7 @@ describe("clean Stage 5 settlement contracts", () => {
       ...baseReceipt,
       publicResult: {
         ...baseReceipt.publicResult,
-        summary: "You have Brass Tube with you.",
+        summary: "Brass Tube is in your keeping.",
         visibleRefs: ["Player", "Market", "Brass Tube"],
         localObservation: {
           type: "local_observation",
@@ -1621,7 +1621,7 @@ describe("clean Stage 5 settlement contracts", () => {
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
           boundedNegative: false,
-          summary: "You have Brass Tube with you.",
+          summary: "Brass Tube is in your keeping.",
           claimStatus: "bounded_current_scene_observation_only",
         },
       },
@@ -1634,10 +1634,10 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "inventory_status"]);
-    expect(observation?.text).toBe("Brass Tube is with you.");
+    expect(observation?.text).toBe("Brass Tube is in your keeping at Market.");
     expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: Brass Tube is with you.",
+      "Local observation beat: Brass Tube is in your keeping at Market.",
       "Searched visible surfaces: inventory items.",
       "Observation query: Brass Tube.",
       "Observed entry labels: Brass Tube.",
@@ -2145,7 +2145,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Place label: Market.",
       "Visible actor labels: Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier.",
       "Visible scene facts: Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge.",
-      "Inventory status beat: You have Brass Tube, Field Notebook, Pocket Lens, and Token Pouch with you.",
+      "Inventory status beat: Brass Tube, Field Notebook, Pocket Lens, and Token Pouch are in your keeping.",
       "Route choices beat: From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
       "Route choice labels: North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door.",
     ]);
@@ -2155,7 +2155,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Market",
       "Guide; Harbor Clerk; Market Porter; Lamp Keeper; Cart Driver; Courier",
       "Lanterns burn along the market stalls; A route board hangs beside the stall; Rainwater gathers near the awning; The crowd keeps to the west edge",
-      "You have Brass Tube, Field Notebook, Pocket Lens, and Token Pouch with you.",
+      "Brass Tube, Field Notebook, Pocket Lens, and Token Pouch are in your keeping.",
       "From Market, visible route choices are North Hall, South Arcade, East Gate, West Stairs, Canal Walk, Archive Door.",
       "North Hall; South Arcade; East Gate; West Stairs; Canal Walk; Archive Door",
     ]);

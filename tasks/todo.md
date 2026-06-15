@@ -8534,3 +8534,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified prose audit `output/clean-runtime-p317-elapsed-live-20260615-025305/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope, 4 touched indexed symbols, 5 changed files, and one affected `renderCleanAuthorityProjection -> normalizeText` process; no HIGH/CRITICAL warnings.
     - Verified implementation commit: `81a7eb1c` recorded the P317 code/tests/proof notes.
+
+- P318 clean inventory/local-observation custody prose:
+  - Diagnosis:
+    - [x] Inventory status and inventory local-observation material still reaches Stage 6 as receipt-summary prose such as `You have Courier satchel with you.`, `Courier satchel and Brass Tube are with you.`, and `Brass Tube is with you.`
+    - [x] Root owners are accepted material builders, not validators: `inventoryStatusBeat()` for scene-frame inventory status and `localObservationStoryBeat()` for targeted/local inventory observations.
+  - Plan:
+    - [x] Run GitNexus impact for `inventoryStatusBeat`, `localObservationStoryBeat`, and nearby local-observation projection owners before code edits.
+    - [x] Replace inventory custody beats with a more literary but still clockwork-simple custody phrase from accepted inventory labels and accepted scene anchor.
+    - [x] Update focused settlement/narration tests for custody material and no-use/no-readiness/no-transfer/no-change constraints.
+    - [x] Run focused tests, expanded clean-runtime tests, typecheck, live inventory observation proof, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Inventory local-observation output no longer reads as `You have ... with you` or bare `... is with you`.
+    - [x] Output proves only matching current inventory/custody status; it does not add item handling, readiness, use, equip state, transfer, visibility as scene target, movement, no-change, discovery, or world truth.
+    - [x] The fix changes typed accepted custody/status material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Executed: `inventoryStatusBeat()` and inventory-only `localObservationStoryBeat()` now emit accepted custody material as `<items> is/are in your keeping`, with local observations carrying the accepted scene anchor as `at <scene>`.
+    - Executed: Stage 4 `localObservationSummary()` now uses the same inventory custody wording for public inventory observation summaries, so receipt material no longer carries `You have ... with you`.
+    - Executed: Stage 6 inventory prose materials now use `copy_exact` for `inventory_status`, the narrator prompt tells inventory local-observation/direct-scene steps to copy the accepted custody/status beat, and the old deterministic direct-scene fallback from labels to `You have ... with you` was removed from player-facing projection.
+    - Verified first live attempt `output/clean-runtime-p318-inventory-live-20260615-030600` exposed the second root cause: accepted settlement material already said `in your keeping`, but model-authored Stage 6 rephrased it to `are with you` because the prompt/copy contract still taught that phrasing.
+    - Verified focused Stage 4/settlement/narration suites after the full fix: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 180/180 passed.
+    - Verified expanded clean-runtime slice: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` -> 392/392 passed.
+    - Verified `npm --prefix backend run typecheck` passed.
+    - Verified live proof `output/clean-runtime-p318-inventory-live-r2-20260615-031600`: clean runtime settled one accepted `local_observation`, wrote one clean turn record and one clean Stage 4 receipt, kept `worldVersion/worldTimeMinutes/currentTick` at `0/0/0`, wrote no clock ledger or authority traces, and stopped backend port 31818 after proof.
+    - Verified live narration: `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping at Lowwater Bazaar.`
+    - Verified live accepted beat exactly matched the custody sentence: `Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p318-inventory-live-r2-20260615-031600/prose-audit.json`: one narrative, 37 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 8 touched indexed symbols, 7 changed files, and 0 affected execution flows.

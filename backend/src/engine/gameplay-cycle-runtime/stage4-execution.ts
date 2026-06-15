@@ -2923,6 +2923,13 @@ function localObservationLabelList(entries: readonly LocalObservationSurfaceEntr
   return uniqueStrings(entries.map((entry) => entry.label)).join(", ");
 }
 
+function localObservationNaturalLabelList(entries: readonly LocalObservationSurfaceEntry[]): string {
+  const labels = uniqueStrings(entries.map((entry) => entry.label));
+  if (labels.length <= 2) return labels.join(" and ");
+  const last = labels[labels.length - 1]!;
+  return `${labels.slice(0, -1).join(", ")}, and ${last}`;
+}
+
 function localObservationEntryList(entries: readonly LocalObservationSurfaceEntry[]): string {
   return entries.map(localObservationSurfaceEntryLabel).join(", ");
 }
@@ -2970,7 +2977,9 @@ function localObservationSummary(input: {
   }
   const labels = localObservationLabelList(input.matchedEntries);
   if (labels.length > 0 && isOnlyInventoryItemSurface(input.effect.surfaceKinds)) {
-    return `You have ${labels} with you.`;
+    const itemLabels = localObservationNaturalLabelList(input.matchedEntries);
+    const verb = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length === 1 ? "is" : "are";
+    return `${itemLabels} ${verb} in your keeping.`;
   }
   if (input.resultKind === "positive_list") {
     return labels.length > 0

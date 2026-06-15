@@ -302,13 +302,13 @@ function localObservationStoryBeat(observation: {
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
   const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
   if (onlyInventoryMatches) {
-    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} with you.`;
+    return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "inventory_item") {
-    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} with you.`;
+    return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
   }
   if (observation.resultKind === "positive_list") {
     return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in the current visible set.`;
@@ -579,8 +579,15 @@ function evidenceNaturalList(labels: readonly string[]): string {
   return `${values.slice(0, -1).join(", ")}, and ${last}`;
 }
 
+function inventoryCustodyBeat(labels: readonly string[], anchorSceneLabel?: string): string {
+  const itemLabels = evidenceNaturalList(labels);
+  const verb = uniqueStrings(labels).length === 1 ? "is" : "are";
+  const scene = anchorSceneLabel ? ` at ${anchorSceneLabel}` : "";
+  return `${itemLabels} ${verb} in your keeping${scene}.`;
+}
+
 function inventoryStatusBeat(labels: readonly string[]): string {
-  return `You have ${evidenceNaturalList(labels)} with you.`;
+  return inventoryCustodyBeat(labels);
 }
 
 function scenePlacementText(currentScene: string, currentLocation: string): string {
