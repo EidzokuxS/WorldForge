@@ -109,7 +109,7 @@ function formatDialogueQuoteFact(dialogue: CleanDialogueResult): string {
   if (!quotedSpeech) return `${dialogue.speakerLabel} has a ${dialogue.outcomeKind} dialogue response.`;
   const quoteAlreadyEndsSentence = /[.!?]$/.test(quotedSpeech);
   const displayedQuote = quoteAlreadyEndsSentence ? quotedSpeech : `${quotedSpeech}.`;
-  return `${dialogue.speakerLabel} says: "${displayedQuote}"`;
+  return `${dialogue.speakerLabel} replies: "${displayedQuote}"`;
 }
 
 const SUPPORT_ACTOR_DOES_NOT_PROVE = [

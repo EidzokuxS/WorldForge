@@ -701,10 +701,10 @@ function dialogueView(): CleanNarratorView {
       ref: "e1",
       authority: "terminal_dialogue_receipt",
       claimKinds: ["dialogue_response"],
-      text: 'Guide says: "The north stairs flooded before dawn."',
+      text: 'Guide replies: "The north stairs flooded before dawn."',
       backendFacts: [
         { factRef: "e1.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-        { factRef: "e1.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+        { factRef: "e1.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
         { factRef: "e1.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
       ],
       limits: {
@@ -724,10 +724,10 @@ function dialogueWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "terminal_dialogue_receipt",
         claimKinds: ["dialogue_response"],
-        text: 'Guide says: "The north stairs flooded before dawn."',
+        text: 'Guide replies: "The north stairs flooded before dawn."',
         backendFacts: [
           { factRef: "e5.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-          { factRef: "e5.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e5.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
           { factRef: "e5.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
@@ -854,10 +854,10 @@ function supportActorWithDialogueAndSceneTextureView(): CleanNarratorView {
         ref: "e4",
         authority: "terminal_dialogue_receipt",
         claimKinds: ["dialogue_response"],
-        text: 'Local Vendor says: "The audit bell rang before dawn."',
+        text: 'Local Vendor replies: "The audit bell rang before dawn."',
         backendFacts: [
           { factRef: "e4.f1", role: "speaker_label", value: "Local Vendor", text: "Speaker: Local Vendor.", exact: true },
-          { factRef: "e4.f2", role: "dialogue_quote", value: 'Local Vendor says: "The audit bell rang before dawn."', text: 'Local Vendor says: "The audit bell rang before dawn."', exact: true },
+          { factRef: "e4.f2", role: "dialogue_quote", value: 'Local Vendor replies: "The audit bell rang before dawn."', text: 'Local Vendor replies: "The audit bell rang before dawn."', exact: true },
           { factRef: "e4.f3", role: "dialogue_summary", value: "Local Vendor says the audit bell rang before dawn.", text: "Dialogue summary: Local Vendor says the audit bell rang before dawn.", exact: true },
         ],
         limits: {
@@ -935,10 +935,10 @@ function itemStateWithDialogueView(): CleanNarratorView {
         ref: "e2",
         authority: "terminal_dialogue_receipt",
         claimKinds: ["dialogue_response"],
-        text: 'Guide says: "The north stairs flooded before dawn."',
+        text: 'Guide replies: "The north stairs flooded before dawn."',
         backendFacts: [
           { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
           { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
@@ -980,10 +980,10 @@ function itemStateWithDialogueAndSceneTextureView(): CleanNarratorView {
         ref: "e2",
         authority: "terminal_dialogue_receipt",
         claimKinds: ["dialogue_response"],
-        text: 'Guide says: "The north stairs flooded before dawn."',
+        text: 'Guide replies: "The north stairs flooded before dawn."',
         backendFacts: [
           { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+          { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
           { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
         ],
         limits: {
@@ -1682,7 +1682,7 @@ describe("clean Stage 6 narration contracts", () => {
       claimKinds: ["dialogue_response"],
       proseCue: "dialogue_response",
       compositionSlot: "event_beat",
-      summary: 'Guide says: "The north stairs flooded before dawn."',
+      summary: 'Guide replies: "The north stairs flooded before dawn."',
       backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
       limits: {
         proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
@@ -1773,7 +1773,7 @@ describe("clean Stage 6 narration contracts", () => {
       },
     ]);
     expect(promptInput.narrativePageTask.moves[1]?.usableFacts.map((fact) => fact.value))
-      .toEqual([undefined, 'Guide says: "The north stairs flooded before dawn."', undefined]);
+      .toEqual([undefined, 'Guide replies: "The north stairs flooded before dawn."', undefined]);
     expect(promptInput.narrativePageTask.sentencePlan).toEqual([
       {
         sentenceRef: "s1",
@@ -1874,7 +1874,7 @@ describe("clean Stage 6 narration contracts", () => {
           {
             factRef: "e5.f2",
             proseUse: "exact_dialogue_quote",
-            materialText: 'Guide says: "The north stairs flooded before dawn."',
+            materialText: 'Guide replies: "The north stairs flooded before dawn."',
             materialTextSource: "accepted_value",
             copyMode: "copy_exact",
           },
@@ -3572,10 +3572,10 @@ describe("clean Stage 6 narration contracts", () => {
           ref: "e6",
           authority: "terminal_dialogue_receipt",
           claimKinds: ["dialogue_response"],
-          text: 'Guide says: "The north stairs flooded before dawn."',
+          text: 'Guide replies: "The north stairs flooded before dawn."',
           backendFacts: [
             { factRef: "e6.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-            { factRef: "e6.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+            { factRef: "e6.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
             { factRef: "e6.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
           ],
           limits: {
@@ -4407,7 +4407,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
     const text = renderCleanAuthorityProjection(dialogueView());
 
-    expect(text).toBe('Guide says: "The north stairs flooded before dawn."');
+    expect(text).toBe('Guide replies: "The north stairs flooded before dawn."');
     const promotedTruth = validateCleanNarrationCandidate({
       view: dialogueView(),
       candidate: {
@@ -4453,7 +4453,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(renderCleanAuthorityProjection(roleValueView))
-      .toBe('Guide says: "The north stairs flooded before dawn."');
+      .toBe('Guide replies: "The north stairs flooded before dawn."');
     expect(() => renderCleanAuthorityProjection(missingValueView))
       .toThrow("Dialogue projection requires accepted dialogue quote value evidence.");
   });
@@ -4567,16 +4567,16 @@ describe("clean Stage 6 narration contracts", () => {
     const inventedDialogue = validateCleanNarrationCandidate({
       view: supportActorView(),
       candidate: {
-        ...movementCandidate("Local Vendor says: \"Fresh fruit here.\""),
+        ...movementCandidate("Local Vendor replies: \"Fresh fruit here.\""),
         sentences: [{
           kind: "accepted_evidence",
-          text: "Local Vendor says: \"Fresh fruit here.\"",
+          text: "Local Vendor replies: \"Fresh fruit here.\"",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f1"],
           claimKinds: ["dialogue_response"],
           auditStepIds: [],
         }],
-        finalText: "Local Vendor says: \"Fresh fruit here.\"",
+        finalText: "Local Vendor replies: \"Fresh fruit here.\"",
       },
     });
     expect(inventedDialogue.status).toBe("rejected");
@@ -4726,7 +4726,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards. Local Vendor says: "The audit bell rang before dawn."');
+    expect(result.text).toBe('Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards. Local Vendor replies: "The audit bell rang before dawn."');
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4810,10 +4810,10 @@ describe("clean Stage 6 narration contracts", () => {
           ref: "e2",
           authority: "terminal_dialogue_receipt",
           claimKinds: ["dialogue_response"],
-          text: 'Guide says: "The north stairs flooded before dawn."',
+          text: 'Guide replies: "The north stairs flooded before dawn."',
           backendFacts: [
             { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-            { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+            { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
             { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
           ],
           limits: {
@@ -5254,10 +5254,10 @@ describe("clean Stage 6 narration contracts", () => {
           ref: "e2",
           authority: "terminal_dialogue_receipt",
           claimKinds: ["dialogue_response"],
-          text: 'Guide says: "The north stairs flooded before dawn."',
+          text: 'Guide replies: "The north stairs flooded before dawn."',
           backendFacts: [
             { factRef: "e2.f1", role: "speaker_label", text: "Speaker: Guide.", exact: true },
-            { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide says: "The north stairs flooded before dawn."', text: 'Guide says: "The north stairs flooded before dawn."', exact: true },
+            { factRef: "e2.f2", role: "dialogue_quote", value: 'Guide replies: "The north stairs flooded before dawn."', text: 'Guide replies: "The north stairs flooded before dawn."', exact: true },
             { factRef: "e2.f3", role: "dialogue_summary", text: "Dialogue summary: Guide says the north stairs flooded before dawn.", exact: true },
           ],
           limits: {

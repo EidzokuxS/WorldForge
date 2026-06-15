@@ -8830,3 +8830,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p328-visible-target-proof-20260615T030853`: real Stage 4 visible-target local_observation receipt summary `central telegraph desk is visible.`, accepted `local_observation_beat` `At Market, central telegraph desk is visible.`, narration text exactly `At Market, central telegraph desk is visible.`, and `oldTargetPhrasePresent=false`.
     - Verified prose audit `output/clean-runtime-p328-visible-target-proof-20260615T030853/prose-audit.json`: one narrative, 7 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 10 touched indexed symbols, 7 changed files, and 0 affected execution flows.
+
+- P329 clean dialogue quote frame prose:
+  - Diagnosis:
+    - [x] Latest broad scan still shows dialogue narration as a bare status frame: `Guide says: "..."`
+    - [x] Settlement owns the accepted `dialogue_quote` fact via `formatDialogueQuoteFact()`, and Stage 6 deterministic dialogue projection copies that exact accepted fact.
+    - [x] The quote text itself is authoritative and must remain exact; only the player-facing speaker frame should change.
+  - Plan:
+    - [x] Run GitNexus impact for `formatDialogueQuoteFact`.
+    - [x] Rephrase accepted dialogue quote frames from `<Speaker> says:` to `<Speaker> replies:` while preserving the quoted speech exactly.
+    - [x] Keep truth narrow: visible speaker label and exact utterance only; no emotion, intent, truth of claim, relationship, future commitment, action, or world fact.
+    - [x] Update settlement/narration expectations and dialogue prompt examples.
+    - [x] Run focused/expanded tests, typecheck, proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Dialogue accepted evidence and deterministic projection no longer use bare `<Speaker> says:` as the default quote frame.
+    - [x] `quotedSpeech` remains exact inside the quotation marks.
+    - [x] The fix changes typed accepted dialogue material, not regex cleanup, semantic banlists, validators, or gameplay fallbacks.
+  - Review:
+    - Changed settlement-owned `formatDialogueQuoteFact()` from `<Speaker> says: "<quote>"` to `<Speaker> replies: "<quote>"`.
+    - Preserved `quotedSpeech` exactly inside quotation marks; the settlement quote fact remains the only accepted player-facing dialogue material copied by Stage 6 projection.
+    - Updated narration contract fixtures and the dialogue prompt example to cite the new accepted `dialogue_quote` frame.
+    - Verified focused settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified old quote-frame search: zero `<Speaker> says: "<quote>"` matches in clean runtime source/tests for the dialogue quote frame.
+    - Verified proof artifact `output/clean-runtime-p329-dialogue-frame-proof-20260615T062159`: accepted `dialogue_quote` fact `Guide replies: "The north stairs flooded before dawn."`, narration text exactly `Guide replies: "The north stairs flooded before dawn."`, `quoteBodyUnchanged=true`, and `oldDialogueFramePresent=false`.
+    - Verified prose audit `output/clean-runtime-p329-dialogue-frame-proof-20260615T062159/prose-audit.json`: one narrative, 8 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed symbols, 5 changed files, and 0 affected execution flows.
