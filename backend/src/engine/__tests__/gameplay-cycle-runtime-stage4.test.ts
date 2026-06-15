@@ -2865,7 +2865,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "Current visible match: visible target central telegraph desk.",
+        summary: "central telegraph desk is visible.",
         localObservation: {
           resultKind: "positive_match",
           queryText: "visible marks or moving parts on the central telegraph desk",

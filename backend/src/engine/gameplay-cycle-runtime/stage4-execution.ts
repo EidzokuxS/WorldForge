@@ -2938,6 +2938,10 @@ function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]
   return kinds.length === 1 && kinds[0] === "visible_actor";
 }
 
+function isOnlyVisibleTargetSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
+  return kinds.length === 1 && kinds[0] === "visible_target";
+}
+
 function isOnlyInventoryItemSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
   return kinds.length === 1 && kinds[0] === "inventory_item";
 }
@@ -2984,6 +2988,11 @@ function localObservationSummary(input: {
     const actorLabels = localObservationNaturalLabelList(input.matchedEntries);
     const verb = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length === 1 ? "is" : "are";
     return `${actorLabels} ${verb} present.`;
+  }
+  if (labels.length > 0 && isOnlyVisibleTargetSurface(input.effect.surfaceKinds)) {
+    const targetLabels = localObservationNaturalLabelList(input.matchedEntries);
+    const verb = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length === 1 ? "is" : "are";
+    return `${targetLabels} ${verb} visible.`;
   }
   if (input.resultKind === "positive_list") {
     return labels.length > 0

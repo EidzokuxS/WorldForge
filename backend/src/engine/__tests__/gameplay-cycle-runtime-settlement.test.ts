@@ -929,7 +929,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(inventoryEvidence?.limits.proves).toEqual(["inventory items are with the player in the current inventory view"]);
     expect(inventoryEvidence?.limits.doesNotProve).toContain("item handling");
     expect(inventoryEvidence?.limits.doesNotProve).toContain("item readiness");
-    expect(targetEvidence?.text).toBe("Targets in view here include Guide, Notice Board, North Hall.");
+    expect(targetEvidence?.text).toBe("Guide, Notice Board, and North Hall are visible here.");
     expect(targetEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
       "Visible target labels: Guide; Notice Board; North Hall.",
       "Visible actor target labels: Guide.",

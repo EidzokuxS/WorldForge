@@ -8802,3 +8802,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p327-visible-actor-proof-20260615T025825`: real Stage 4 visible-actor local_observation receipt summary `Guide is present.`, accepted `local_observation_beat` `Guide is present at Lowwater Bazaar.`, narration text exactly `Guide is present at Lowwater Bazaar.`, and `oldActorPhrasePresent=false`.
     - Verified prose audit `output/clean-runtime-p327-visible-actor-proof-20260615T025825/prose-audit.json`: one narrative, 6 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 8 touched indexed symbols, 7 changed files, and 0 affected execution flows.
+
+- P328 clean visible-target/object observation prose:
+  - Diagnosis:
+    - [x] Generic visible targets still expose backend-shaped prose: `Targets in view here include ...`, `Current visible match: visible target ...`, and deterministic `... are in sight.`
+    - [x] Actor presence is now owned separately by P327; P328 should only cover object/place/location target visibility.
+    - [x] Root owners are Stage 4 `localObservationSummary()`, settlement `localObservationStoryBeat()` / `sceneEvidence()`, and Stage 6 direct-scene projection/prompt guidance.
+  - Plan:
+    - [x] Run GitNexus impact for target owners before edits.
+    - [x] Rephrase target accepted beats to neutral visibility prose: `<labels> is/are visible here.` and `At <scene>, <labels> is/are visible.`
+    - [x] Keep truth narrow: visible object/place/location labels and scene anchor only; no salience, discovery, inspection result, route truth, services, contents, absence, or no-change.
+    - [x] Update Stage 4, settlement, and narration expectations.
+    - [x] Run focused/expanded tests, typecheck, proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Generic visible-target evidence no longer emits `Targets in view here include`, `Current visible match: visible target`, or deterministic `are in sight` for target lists.
+    - [x] Target labels and scene anchors remain represented as typed backend facts.
+    - [x] The fix changes typed accepted evidence/prompt contracts, not regex cleanup, semantic banlists, validators, or gameplay fallbacks.
+  - Review:
+    - Added Stage 4 visible-target local_observation summaries as `<target> is visible.` instead of `Current visible match: visible target ...`.
+    - Added settlement-owned `visibleTargetBeat()` so direct scene targets expose `<labels> are visible here.` and anchored local observations expose `At <scene>, <label> is visible.`.
+    - Updated deterministic direct-scene projection from `... are in sight.` to `... are visible here.` and tightened prompt guidance so target labels form a visible-here beat.
+    - Updated Stage 4, settlement, and narration expectations away from `Targets in view here include`, `Current visible match: visible target`, and target-list `in sight`; dialogue quotes containing `in sight` remain accepted utterance text only.
+    - Verified focused Stage4/settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (180 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified old target phrase search: zero `Targets in view here include`, `Current visible match: visible target`, `are in sight`, `is in view here`, or stale `central telegraph desk is visible at Market` matches in clean runtime source/tests; remaining `in sight` strings are accepted dialogue quotes.
+    - Verified proof artifact `output/clean-runtime-p328-visible-target-proof-20260615T030853`: real Stage 4 visible-target local_observation receipt summary `central telegraph desk is visible.`, accepted `local_observation_beat` `At Market, central telegraph desk is visible.`, narration text exactly `At Market, central telegraph desk is visible.`, and `oldTargetPhrasePresent=false`.
+    - Verified prose audit `output/clean-runtime-p328-visible-target-proof-20260615T030853/prose-audit.json`: one narrative, 7 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 10 touched indexed symbols, 7 changed files, and 0 affected execution flows.

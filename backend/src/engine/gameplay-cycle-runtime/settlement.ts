@@ -312,11 +312,15 @@ function localObservationStoryBeat(observation: {
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
   const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
   const onlyVisibleActorMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_actor");
+  const onlyVisibleTargetMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_target");
   if (onlyInventoryMatches) {
     return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
   }
   if (onlyVisibleActorMatches) {
     return visibleActorPresenceBeat(labels, observation.anchorSceneLabel);
+  }
+  if (onlyVisibleTargetMatches) {
+    return visibleTargetBeat(labels, observation.anchorSceneLabel);
   }
   if (observation.resultKind === "positive_list" && observation.searchedSurfaceKinds.length === 1 && observation.searchedSurfaceKinds[0] === "movement_option") {
     return `The visible route choices here are ${evidenceLabelList(labels)}.`;
@@ -650,6 +654,14 @@ function visibleActorPresenceBeat(labels: readonly string[], anchorSceneLabel?: 
     : `${actorLabels} ${verb} present here.`;
 }
 
+function visibleTargetBeat(labels: readonly string[], anchorSceneLabel?: string): string {
+  const targetLabels = evidenceEnglishList(labels);
+  const verb = uniqueStrings(labels).length === 1 ? "is" : "are";
+  return anchorSceneLabel
+    ? `At ${anchorSceneLabel}, ${targetLabels} ${verb} visible.`
+    : `${targetLabels} ${verb} visible here.`;
+}
+
 function inventoryCustodyBeat(labels: readonly string[], anchorSceneLabel?: string): string {
   const itemLabels = evidenceNaturalList(labels);
   return anchorSceneLabel
@@ -924,7 +936,7 @@ function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvi
       sourceRef: frame.frameId,
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: `Targets in view here include ${visibleTargetLabels.join(", ")}.`,
+      text: visibleTargetBeat(visibleTargetLabels),
       visibleRefs: visibleTargets.map((target) => target.ref),
       backendFacts: boundedBackendFacts(targetFactTexts.map((entry, index) =>
         fact(targetEvidenceId, index + 1, entry.role, entry.text, entry.value)

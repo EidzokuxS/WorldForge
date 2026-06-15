@@ -534,7 +534,7 @@ function clarificationWithSceneFrameSnapshotView(): CleanNarratorView {
       ref: "e2",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Targets in view here include Guide, Courier.",
+      text: "Guide and Courier are visible here.",
       backendFacts: [
         { factRef: "e2.f1", role: "visible_target_labels", value: "Guide; Courier", text: "Visible target labels: Guide; Courier.", exact: true },
         { factRef: "e2.f2", role: "visible_actor_target_labels", value: "Guide; Courier", text: "Visible actor target labels: Guide; Courier.", exact: true },
@@ -580,7 +580,7 @@ function sceneFrameSnapshotView(): CleanNarratorView {
       ref: "e3",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Targets in view here include Notice Board.",
+      text: "Notice Board is visible here.",
       backendFacts: [
         { factRef: "e3.f1", role: "visible_target_labels", value: "Notice Board", text: "Visible target labels: Notice Board.", exact: true },
         { factRef: "e3.f2", role: "visible_place_handle_target_labels", value: "Notice Board", text: "Visible place-handle target labels: Notice Board.", exact: true },
@@ -662,7 +662,7 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
       ref: "e4",
       authority: "scene_frame_snapshot",
       claimKinds: ["visible_target"],
-      text: "Targets in view here include Guide, Courier satchel, North Hall, Brass Tube, Notice Board.",
+      text: "Guide, Courier satchel, North Hall, Brass Tube, and Notice Board are visible here.",
       backendFacts: [
         { factRef: "e4.f1", role: "visible_target_labels", value: "Guide; Courier satchel; North Hall; Brass Tube; Notice Board", text: "Visible target labels: Guide; Courier satchel; North Hall; Brass Tube; Notice Board.", exact: true },
         { factRef: "e4.f2", role: "visible_actor_target_labels", value: "Guide", text: "Visible actor target labels: Guide.", exact: true },
@@ -1091,9 +1091,9 @@ function positiveLocalObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "local_observation_receipt",
       claimKinds: ["local_observation", "visible_target"],
-      text: "central telegraph desk is in view here.",
+      text: "At Market, central telegraph desk is visible.",
       backendFacts: [
-        { factRef: "e1.f1", role: "local_observation_beat", value: "central telegraph desk is in view here.", text: "Local observation beat: central telegraph desk is in view here.", exact: true },
+        { factRef: "e1.f1", role: "local_observation_beat", value: "At Market, central telegraph desk is visible.", text: "Local observation beat: At Market, central telegraph desk is visible.", exact: true },
         { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible targets.", exact: true },
         { factRef: "e1.f3", role: "observation_query", text: "Observation query: central telegraph desk.", exact: true },
         { factRef: "e1.f4", role: "observed_entry_labels", value: "central telegraph desk", text: "Observed entry labels: central telegraph desk.", exact: true },
@@ -4307,7 +4307,7 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("Market frames the immediate scene. Guide is present. You carry Courier satchel. Brass Tube and Notice Board are in sight. North Hall is the way onward from Market; it takes 1 minute.");
+    expect(text).toBe("Market frames the immediate scene. Guide is present. You carry Courier satchel. Brass Tube and Notice Board are visible here. North Hall is the way onward from Market; it takes 1 minute.");
     expect(text).not.toContain("You are at");
     expect(text).not.toContain("is here.");
     expect(text).not.toContain("are visible.");
@@ -4339,7 +4339,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Guide is present here, with Brass Tube and Notice Board in sight.",
+          text: "Guide is present here; Brass Tube and Notice Board are visible here.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
@@ -4382,7 +4382,7 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Guide is present here, with Brass Tube and Notice Board in sight.",
+          text: "Guide is present here; Brass Tube and Notice Board are visible here.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
@@ -5364,7 +5364,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "The central telegraph desk is visible at Market.",
+        text: "The At Market, central telegraph desk is visible.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
@@ -5373,7 +5373,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("model");
     expect(result.text).toBe(
-      "The central telegraph desk is visible at Market.",
+      "The At Market, central telegraph desk is visible.",
     );
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
   });
@@ -5427,7 +5427,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "The central telegraph desk is visible at Market.",
+          text: "The At Market, central telegraph desk is visible.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation", "visible_target"],
@@ -5436,7 +5436,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. The central telegraph desk is visible at Market.");
+    expect(result.text).toBe("Rain taps the brass gutters. The At Market, central telegraph desk is visible.");
     expect(result.text).not.toMatch(/SceneFrame|worldVersion|visible target|visible marks|moving parts|touch|move/iu);
 
     const selectedTextureRepeated = validateCleanNarrationCandidate({
@@ -5449,7 +5449,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "The central telegraph desk is visible at Market.",
+          text: "The At Market, central telegraph desk is visible.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["local_observation", "visible_target"],
@@ -5461,7 +5461,7 @@ describe("clean Stage 6 narration contracts", () => {
     const omittedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "The central telegraph desk is visible at Market.",
+        text: "The At Market, central telegraph desk is visible.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
@@ -5472,7 +5472,7 @@ describe("clean Stage 6 narration contracts", () => {
     const uncitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "The central telegraph desk is visible at Market.",
+        text: "The At Market, central telegraph desk is visible.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["local_observation", "visible_target"],
