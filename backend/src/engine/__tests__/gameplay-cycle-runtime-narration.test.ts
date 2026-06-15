@@ -133,6 +133,8 @@ function movementCandidate(
       evidenceRefs,
       backendFactRefs,
       claimKinds: ["player_location_change", "elapsed_time"],
+      hardClaims: [],
+      softProseKinds: [],
       pageMoveRefs: pageMoveRefsForSentence(view, evidenceRefs, backendFactRefs),
       sentencePlanRefs: sentencePlanRefsForSentence(view, evidenceRefs, backendFactRefs),
       auditStepIds: [],
@@ -148,6 +150,8 @@ function acceptedCandidate(
     evidenceRefs: string[];
     backendFactRefs: string[];
     claimKinds: NarrationClaimKind[];
+    hardClaims?: CleanNarrationCandidate["sentences"][number]["hardClaims"];
+    softProseKinds?: CleanNarrationCandidate["sentences"][number]["softProseKinds"];
     pageMoveRefs?: string[];
     sentencePlanRefs?: string[];
   }>,
@@ -163,6 +167,8 @@ function acceptedCandidate(
       evidenceRefs: sentence.evidenceRefs,
       backendFactRefs: sentence.backendFactRefs,
       claimKinds: sentence.claimKinds,
+      hardClaims: sentence.hardClaims ?? [],
+      softProseKinds: sentence.softProseKinds ?? [],
       pageMoveRefs: sentence.pageMoveRefs
         ?? pageMoveRefsForSentence(view, sentence.evidenceRefs, sentence.backendFactRefs),
       sentencePlanRefs: sentence.sentencePlanRefs
@@ -1540,12 +1546,27 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.source).toBe("derived_from_prompt_accepted_evidence");
     expect(promptInput.storyFrame.pagePlan.version).toBe("gameplay-runtime.clean-narrator-page-plan.v1");
     expect(promptInput.storyFrame.pagePlan.source).toBe("derived_from_story_frame_composition_slots");
+    expect(promptInput.hardFactContract.categories).toEqual([
+      "movement",
+      "item_custody",
+      "route",
+      "time",
+      "injury_condition",
+      "dialogue_quote",
+      "secret_world_fact",
+      "resource",
+      "relationship",
+      "important_object_affordance",
+    ]);
+    expect(promptInput.softProseBudget.mayInventLowStakesVisibleSensoryDetail).toBe(true);
+    expect(promptInput.softProseBudget.becomesWorldStateAuthority).toBe(false);
+    expect(promptInput.softProseBudget.laterPlayerUseRequiresAdjudication).toBe(true);
     expect(promptInput.narrativePageTask).toEqual({
       version: "gameplay-runtime.clean-narrator-page-task.v1",
       source: "derived_from_story_frame_page_plan",
       referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
       pageGoal: "turn_changelog_to_grounded_text_rpg_page",
-      truthBoundary: "accepted_evidence_only",
+      truthBoundary: "hard_facts_strict_soft_prose_free",
       storyPageBrief: {
         pageKind: "settled_turn_page",
         narratorStance: "second_person_present_player_view",
@@ -3600,18 +3621,36 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("uses deterministic elapsed-time prose with accepted scene_texture when texture is available", async () => {
+  it("uses model-authored elapsed-time prose with accepted scene_texture when texture is available", async () => {
     const view = timeWithSceneTextureView();
+    let attempts = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("model generator should not be called for standalone elapsed_time");
+      generateCandidate: async (request) => {
+        attempts += 1;
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
+        return acceptedCandidate(view, [
+          {
+            text: "Rain taps the brass gutters.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f2"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "Five minutes slip by at Market.",
+            evidenceRefs: ["e5", "e3"],
+            backendFactRefs: ["e5.f2", "e3.f2"],
+            claimKinds: ["elapsed_time", "current_scene"],
+            hardClaims: ["time"],
+          },
+        ]);
       },
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes slip by at Market.");
+    expect(attempts).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes slip by at Market.");
     expect(result.text).not.toContain("World clock");
     expect(result.text).not.toContain("minute(s)");
     expect(result.text).not.toContain("backend");
@@ -3853,31 +3892,25 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("preserves route-options shared route cost in validation retry feedback", async () => {
+  it("fails route-options validation without retry when shared route cost is missing", async () => {
     const view = routeOptionsManyView();
     const prompts: string[] = [];
-    const result = await runCleanNarration({
+    await expect(runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async ({ prompt }) => {
         prompts.push(prompt);
         return acceptedCandidate(view, [{
-          text: prompts.length === 1
-            ? "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar."
-            : "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
+          text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
         }]);
       },
-    });
+    })).rejects.toThrow("Route-choice narration must preserve accepted route cost 1 minute");
 
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain("sharedCostText 1 minute");
-    expect(result.source).toBe("model");
-    expect(result.text).toBe(
-      "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
-    );
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain("Stage 6 validation feedback");
   });
 
   it("uses model-authored route-options prose when accepted scene_texture is available", async () => {
@@ -4009,21 +4042,36 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("Market stalls surround you while North Hall is the way onward from here; it takes 1 minute.");
   });
 
-  it("projects standalone elapsed-time runtime prose before model generation or prose repair", async () => {
+  it("uses one model pass for standalone elapsed-time runtime prose without repair", async () => {
     const view = timeWithSceneTextureView();
     let attempts = 0;
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
+      generateCandidate: async (request) => {
         attempts += 1;
-        throw new Error("model generator should not be called for standalone elapsed_time");
+        expect(request.prompt).not.toContain("Stage 6 validation feedback");
+        return acceptedCandidate(view, [
+          {
+            text: "Rain taps the brass gutters.",
+            evidenceRefs: ["e2"],
+            backendFactRefs: ["e2.f2"],
+            claimKinds: ["scene_texture"],
+          },
+          {
+            text: "Five minutes slip by at Market.",
+            evidenceRefs: ["e5", "e3"],
+            backendFactRefs: ["e5.f2", "e3.f2"],
+            claimKinds: ["elapsed_time", "current_scene"],
+            hardClaims: ["time"],
+          },
+        ]);
       },
     });
 
-    expect(attempts).toBe(0);
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Five minutes slip by at Market.");
+    expect(attempts).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Five minutes slip by at Market.");
   });
 
   it("accepts missing scene_texture for item_state at runtime without prose-quality repair", async () => {
@@ -4098,9 +4146,9 @@ describe("clean Stage 6 narration contracts", () => {
       },
     });
 
-    expect(attempts).toBe(0);
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
+    expect(attempts).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
   });
 
   it("accepts direct-scene custody status at runtime without prose-quality repair", async () => {
@@ -4252,7 +4300,7 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Canvas awnings hang over the market lanes.",
+          text: "Rain taps the brass gutters.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f1"],
           claimKinds: ["scene_texture"],
@@ -4643,7 +4691,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic support_actor_materialization prose without scene_texture", async () => {
+  it("uses model-authored support_actor_materialization prose without scene_texture", async () => {
     const view = supportActorView();
     const result = await runCleanNarration({
       narratorView: view,
@@ -4656,7 +4704,7 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.source).toBe("model");
     expect(result.text).toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     for (const forbidden of [
       "Visible support actor",
@@ -4683,7 +4731,7 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("uses accepted scene_texture for deterministic support_actor_materialization prose when texture is available", async () => {
+  it("uses accepted scene_texture for model-authored support_actor_materialization prose when texture is available", async () => {
     const view = supportActorWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
@@ -4704,8 +4752,8 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4784,8 +4832,8 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe('Canvas awnings hang over the market lanes. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards. Local Vendor replies: "The audit bell rang before dawn."');
+    expect(result.source).toBe("model");
+    expect(result.text).toBe('Rain taps the brass gutters. Local Vendor comes into view at Market, beside the stall boards, against worn counter boards. Local Vendor answers: "The audit bell rang before dawn."');
     for (const forbidden of [
       "has set up",
       "set up",
@@ -4831,33 +4879,49 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedHp.issues.some((issue) => issue.code === "schema_invalid" || issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic player_local_condition prose without scene_texture even with snapshot context", async () => {
+  it("uses model-authored player_local_condition prose without scene_texture even with snapshot context", async () => {
     const view = playerLocalConditionWithSceneFrameSnapshotView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("model generator should not be called for player_local_condition");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "Your hands are visible at Market.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1"],
+        claimKinds: ["player_local_condition"],
+        hardClaims: ["injury_condition"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.source).toBe("model");
     expect(result.text).toBe("Your hands are visible at Market.");
     expect(result.text).not.toMatch(/\b(Condition key|Current scene anchor|Condition result|Condition target|inventory|route|at hand|visible target|still|remains?|no change)\b/iu);
   });
 
-  it("uses deterministic player_local_condition prose with accepted scene_texture when texture is available", async () => {
+  it("uses model-authored player_local_condition prose with accepted scene_texture when texture is available", async () => {
     const view = playerLocalConditionWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("model generator should not be called for player_local_condition");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "You kneel at Market.",
+          evidenceRefs: ["e1", "e3"],
+          backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e3.f1"],
+          claimKinds: ["player_local_condition", "current_scene"],
+          hardClaims: ["injury_condition"],
+        },
+      ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. You kneel at Market.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. You kneel at Market.");
     expect(result.text).not.toMatch(/\b(hp|damage|cover|combat|moves?|route|item custody|dialogue|no change|nothing changed)\b/iu);
   });
 
@@ -5233,17 +5297,21 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses deterministic minor_poi_handle prose without scene_texture", async () => {
+  it("uses model-authored minor_poi_handle prose without scene_texture", async () => {
     const view = minorPoiHandleView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("model generator should not be called for standalone minor_poi_handle");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [{
+        text: "Tea Stall draws attention at Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"],
+        claimKinds: ["minor_poi_handle", "visible_target"],
+        hardClaims: ["important_object_affordance"],
+      }]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
+    expect(result.source).toBe("model");
     expect(result.text).toBe("Tea Stall draws attention at Market.");
     for (const forbidden of [
       "Visible current-scene",
@@ -5267,7 +5335,7 @@ describe("clean Stage 6 narration contracts", () => {
     }
   });
 
-  it("uses deterministic minor_poi_handle prose with accepted scene_texture when texture is available", async () => {
+  it("uses model-authored minor_poi_handle prose with accepted scene_texture when texture is available", async () => {
     const view = minorPoiHandleWithSceneTextureView();
     const promptInput = buildCleanNarratorPromptInput(view);
     const poiStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
@@ -5291,13 +5359,25 @@ describe("clean Stage 6 narration contracts", () => {
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => {
-        throw new Error("model generator should not be called for standalone minor_poi_handle");
-      },
+      generateCandidate: async () => acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "Tea Stall draws attention at Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["minor_poi_handle", "visible_target"],
+          hardClaims: ["important_object_affordance"],
+        },
+      ]),
     });
 
-    expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Tea Stall draws attention at Market.");
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Rain taps the brass gutters. Tea Stall draws attention at Market.");
     for (const forbidden of [
       "target handle",
       "place handle",
@@ -5420,13 +5500,14 @@ describe("clean Stage 6 narration contracts", () => {
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f1"],
         claimKinds: ["local_observation", "bounded_visibility_negative"],
+        hardClaims: ["secret_world_fact"],
       }]),
     });
     expect(broadAbsence.status).toBe("rejected");
     if (broadAbsence.status !== "rejected") throw new Error("expected rejected");
     expect(broadAbsence.issues.some((issue) =>
-      issue.code === "sentence_plan_not_supported"
-      && issue.message.includes("copy accepted observation material")
+      issue.code === "claim_not_supported"
+      && issue.path === "sentences.0.hardClaims"
     )).toBe(true);
   });
 
@@ -5632,10 +5713,10 @@ describe("clean Stage 6 narration contracts", () => {
       factRef: material.factRef,
       copyMode: material.copyMode,
     }))).toEqual([
-      { factRef: "e1.f1", copyMode: "copy_exact" },
+      { factRef: "e1.f1", copyMode: "phrase_from_material" },
       { factRef: "e1.f5", copyMode: "copy_exact" },
     ]);
-    expect(observationStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f1", "e1.f5"]);
+    expect(observationStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f5"]);
     expect(observationStep?.adventureCue.subjectFocus).toBe("settled_result_material");
     expect(observationStep?.adventureCue.verbFrame).toBe("land_settled_result");
     expect(observationStep?.literaryCue.renderShape).toBe("land_settled_turn_result");
@@ -5683,12 +5764,12 @@ describe("clean Stage 6 narration contracts", () => {
       factRef: material.factRef,
       copyMode: material.copyMode,
     }))).toEqual([
-      { factRef: "e1.f1", copyMode: "copy_exact" },
+      { factRef: "e1.f1", copyMode: "phrase_from_material" },
       { factRef: "e1.f5", copyMode: "copy_exact" },
     ]);
-    expect(observationStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f1", "e1.f5"]);
+    expect(observationStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f5"]);
 
-    const driftResult = validateCleanNarrationCandidate({
+    const softSurfaceResult = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
@@ -5698,18 +5779,41 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "The Brass Tube is still with you at Lowwater Bazaar.",
+          text: "The Brass Tube rests with you at Lowwater Bazaar, rain-cold and scratched dull along the rim.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f1", "e1.f5"],
           claimKinds: ["local_observation"],
+          hardClaims: ["item_custody"],
+          softProseKinds: ["temperature", "scratches", "wear", "non_mechanical_object_surface"],
         },
       ]),
     });
-    expect(driftResult.status).toBe("rejected");
-    if (driftResult.status !== "rejected") throw new Error("expected rejected");
-    expect(driftResult.issues.some((issue) =>
-      issue.code === "sentence_plan_not_supported"
-      && issue.message.includes("copy accepted observation material")
+    expect(softSurfaceResult.status).toBe("accepted");
+
+    const hiddenMechanismResult = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+        },
+        {
+          text: "The Brass Tube is with you at Lowwater Bazaar, and a hidden button under its rim waits to unlock a sealed tower.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f5"],
+          claimKinds: ["local_observation"],
+          hardClaims: ["item_custody", "important_object_affordance", "secret_world_fact", "route"],
+          softProseKinds: ["non_mechanical_object_surface"],
+        },
+      ]),
+    });
+    expect(hiddenMechanismResult.status).toBe("rejected");
+    if (hiddenMechanismResult.status !== "rejected") throw new Error("expected rejected");
+    expect(hiddenMechanismResult.issues.some((issue) =>
+      issue.code === "claim_not_supported"
+      && issue.path === "sentences.1.hardClaims"
     )).toBe(true);
 
     const result = await runCleanNarration({
@@ -6440,7 +6544,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Every flourish remains a phrasing choice over cited evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Flourish can color the surface; it cannot add hard facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Soft-prose budget:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("If the player later uses a soft detail");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
     expect(buildCleanNarrationSystemPrompt()).toContain("roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values");
@@ -6478,7 +6584,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("observed_entry_labels plus anchor_scene");
     expect(buildCleanNarrationSystemPrompt()).toContain("local_observation_line with observed_labels_then_scene");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, surface-kind wording, actor action");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line with actor_then_scene_with_role_context");

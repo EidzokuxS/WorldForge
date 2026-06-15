@@ -2241,6 +2241,48 @@ const cleanSettledClaimKindSchema = z.enum([
   "clarification_request",
 ]);
 
+const cleanNarrationHardClaimKindSchema = z.enum([
+  "movement",
+  "item_custody",
+  "route",
+  "time",
+  "injury_condition",
+  "dialogue_quote",
+  "secret_world_fact",
+  "resource",
+  "relationship",
+  "important_object_affordance",
+]);
+
+const cleanNarrationSoftProseKindSchema = z.enum([
+  "color",
+  "wear",
+  "scratches",
+  "smell",
+  "ordinary_texture",
+  "temperature",
+  "ambient_sound",
+  "posture_flavor",
+  "small_gesture",
+  "ambient_motion",
+  "non_mechanical_object_surface",
+]);
+
+const cleanNarratorHardFactContractSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-hard-fact-contract.v1"),
+  source: z.literal("accepted_evidence_required"),
+  strict: z.literal(true),
+  categories: z.array(cleanNarrationHardClaimKindSchema).min(10).max(10),
+}).strict();
+
+const cleanNarratorSoftProseBudgetSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narrator-soft-prose-budget.v1"),
+  mayInventLowStakesVisibleSensoryDetail: z.literal(true),
+  becomesWorldStateAuthority: z.literal(false),
+  laterPlayerUseRequiresAdjudication: z.literal(true),
+  allowedKinds: z.array(cleanNarrationSoftProseKindSchema).min(11).max(11),
+}).strict();
+
 const cleanSettledEvidenceAuthoritySchema = z.enum([
   "clarification_request",
   "scene_frame_snapshot",
@@ -3117,7 +3159,7 @@ const cleanNarratorPageTaskSchema = z.object({
   source: z.literal("derived_from_story_frame_page_plan"),
   referenceProfile: z.literal("zetta_micro_1_1_3_primary_ff5_micro_secondary"),
   pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
-  truthBoundary: z.literal("accepted_evidence_only"),
+  truthBoundary: z.literal("hard_facts_strict_soft_prose_free"),
   storyPageBrief: cleanNarratorStoryPageBriefSchema,
   pageArc: cleanNarratorPageArcSchema,
   pagePerformance: cleanNarratorPagePerformanceSchema,
@@ -3184,6 +3226,8 @@ export const cleanNarratorPromptInputSchema = z.object({
   languageSource: z.literal("derived_from_player_action_without_prompting_raw_action"),
   preserveLabelsVerbatim: z.literal(true),
   acceptedEvidence: z.array(cleanNarratorAcceptedEvidenceSchema).max(24),
+  hardFactContract: cleanNarratorHardFactContractSchema,
+  softProseBudget: cleanNarratorSoftProseBudgetSchema,
   storyFrame: cleanNarratorStoryFrameSchema,
   narrativePageTask: cleanNarratorPageTaskSchema,
   stepAuditForGrounding: z.array(cleanNarratorAuditNoticeSchema).max(6),
@@ -3196,6 +3240,8 @@ export const cleanNarrationSentenceSchema = z.object({
   evidenceRefs: z.array(shortText).max(12),
   backendFactRefs: z.array(shortText).max(12),
   claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
+  hardClaims: z.array(cleanNarrationHardClaimKindSchema).max(10).default([]),
+  softProseKinds: z.array(cleanNarrationSoftProseKindSchema).max(11).default([]),
   pageMoveRefs: z.array(shortText).max(4).default([]),
   sentencePlanRefs: z.array(shortText).max(4).default([]),
   auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),

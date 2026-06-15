@@ -1,5 +1,29 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-15 - P334 Stage 6 Soft Prose Contract
+
+Goal:
+- Fix Stage 6 truth contract so hard gameplay facts stay strict and low-stakes visible/sensory prose stays free.
+
+Plan:
+- [x] Read handoff, git status, recent commits, `narration.ts`, `contracts.ts`, and relevant lessons.
+- [x] Run GitNexus impact before modifying Stage 6 symbols.
+- [x] Add explicit hard-facts/soft-prose contract to Stage 6 prompt/input shape.
+- [x] Relax validation to schema, refs, hard claims, private/internal leaks, and hard-fact coverage.
+- [x] Remove normal-turn repair loop and deterministic narrator replacement paths from this slice.
+- [x] Add Brass Tube tests: harmless surface prose accepted; hidden/mechanical affordance rejected.
+- [x] Run typecheck, focused/expanded clean-runtime tests, audit/live proof if feasible, GitNexus detect_changes.
+- [x] Commit and push clean result.
+
+Review:
+- Implemented a Stage 6 hard/soft truth contract: hard gameplay claims are explicit and evidence-backed; low-stakes visible/sensory prose is prompt-authorized and marked as non-durable soft prose.
+- Removed the normal-turn Stage 6 repair loop and deterministic projection replacement path; clarification/audit responses remain deterministic.
+- Focused proof passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 119 tests.
+- Expanded clean-runtime proof passed: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` -> 393 tests.
+- Typecheck passed: `npm --prefix backend run typecheck`.
+- Live proof passed: `output/clean-runtime-p334-soft-prose-proof-20260615T082115`, action `Look at the Brass Tube.`, runtime `gameplay-cycle-runtime`, settled turn, accepted `local_observation`, old stores 0.
+- Prose audit passed for `output/clean-runtime-p334-soft-prose-proof-20260615T082115/prose-audit.json`: 1 narrative, zero hits.
+
 Rollback point: `45517081` on `codex/gameplay-loop-rebuild`.
 Working branch/worktree: `codex/rebuild-gm-turn-cycle` in normal worktree `R:\Projects\WorldForge`.
 
