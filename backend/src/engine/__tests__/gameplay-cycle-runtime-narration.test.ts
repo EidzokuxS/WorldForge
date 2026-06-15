@@ -1001,14 +1001,15 @@ function minorPoiHandleView(): CleanNarratorView {
       ref: "e1",
       authority: "minor_poi_handle_receipt",
       claimKinds: ["minor_poi_handle", "visible_target"],
-      text: "Visible current-scene point marked: Tea Stall. Current scene anchor: Market.",
+      text: "Tea Stall draws attention at Market.",
       backendFacts: [
-        { factRef: "e1.f1", role: "minor_poi_operation", value: "Visible current-scene point marked: Tea Stall.", text: "Visible current-scene point marked: Tea Stall.", exact: true },
-        { factRef: "e1.f2", role: "place_handle_label", value: "Tea Stall", text: "Scene point label: Tea Stall.", exact: true },
-        { factRef: "e1.f3", role: "place_handle_kind", value: "stall", text: "Scene point kind: stall.", exact: true },
-        { factRef: "e1.f4", role: "current_scene_anchor", value: "Market", text: "Current scene anchor: Market.", exact: true },
-        { factRef: "e1.f5", role: "handle_result", value: "created", text: "Scene point result: created.", exact: true },
-        { factRef: "e1.f6", role: "place_handle_scope", text: "This is a visible current-scene point for reference only; movement uses separate route evidence.", exact: true },
+        { factRef: "e1.f1", role: "minor_poi_beat", value: "Tea Stall draws attention at Market.", text: "Tea Stall draws attention at Market.", exact: true },
+        { factRef: "e1.f2", role: "minor_poi_operation", value: "Visible current-scene point marked: Tea Stall.", text: "Visible current-scene point marked: Tea Stall.", exact: true },
+        { factRef: "e1.f3", role: "place_handle_label", value: "Tea Stall", text: "Scene point label: Tea Stall.", exact: true },
+        { factRef: "e1.f4", role: "place_handle_kind", value: "stall", text: "Scene point kind: stall.", exact: true },
+        { factRef: "e1.f5", role: "current_scene_anchor", value: "Market", text: "Current scene anchor: Market.", exact: true },
+        { factRef: "e1.f6", role: "handle_result", value: "created", text: "Scene point result: created.", exact: true },
+        { factRef: "e1.f7", role: "place_handle_scope", text: "This is a visible current-scene point for reference only; movement uses separate route evidence.", exact: true },
       ],
       limits: {
         proves: [
@@ -3372,10 +3373,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(() => renderCleanAuthorityProjection(withoutFactValue(supportActorView(), "support_actor_presence")))
       .toThrow("Support-actor projection requires accepted Support actor presence value evidence.");
 
-    expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "place_handle_label")))
-      .toBe("Tea Stall marks a visible point at Market.");
-    expect(() => renderCleanAuthorityProjection(withoutFactValue(minorPoiHandleView(), "place_handle_kind")))
-      .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
+    expect(renderCleanAuthorityProjection(withOpaqueFactText(minorPoiHandleView(), "minor_poi_beat")))
+      .toBe("Tea Stall draws attention at Market.");
+    expect(() => renderCleanAuthorityProjection(withoutFactValue(minorPoiHandleView(), "minor_poi_beat")))
+      .toThrow("Minor-POI projection requires accepted minor POI beat evidence.");
   });
 
   it("fails terminal authority projections when their accepted story facts are missing", () => {
@@ -3431,11 +3432,11 @@ describe("clean Stage 6 narration contracts", () => {
     minorPoi.acceptedEvidence[0] = {
       ...minorPoi.acceptedEvidence[0]!,
       backendFacts: minorPoi.acceptedEvidence[0]!.backendFacts.filter((fact) =>
-        fact.role !== "place_handle_kind"
+        fact.role !== "minor_poi_beat"
       ),
     };
     expect(() => renderCleanAuthorityProjection(minorPoi))
-      .toThrow("Minor-POI projection requires accepted Place handle kind value evidence.");
+      .toThrow("Minor-POI projection requires accepted minor POI beat evidence.");
 
     const oracle = oracleOutcomeView();
     oracle.acceptedEvidence[0] = {
@@ -5100,24 +5101,27 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For minor_poi_handle");
     const text = renderCleanAuthorityProjection(minorPoiHandleView());
 
-    expect(text).toBe("Tea Stall marks a visible point at Market.");
+    expect(text).toBe("Tea Stall draws attention at Market.");
     const lowerCaseLabelView = minorPoiHandleView();
     lowerCaseLabelView.acceptedEvidence[0] = {
       ...lowerCaseLabelView.acceptedEvidence[0]!,
       backendFacts: lowerCaseLabelView.acceptedEvidence[0]!.backendFacts.map((fact) =>
         fact.role === "place_handle_label"
           ? { ...fact, value: "tea stall", text: "Scene point label: tea stall." }
+          : fact.role === "minor_poi_beat"
+            ? { ...fact, value: "A tea stall draws attention at Market.", text: "A tea stall draws attention at Market." }
           : fact
       ),
     };
     expect(renderCleanAuthorityProjection(lowerCaseLabelView))
-      .toBe("A tea stall marks a visible point at Market.");
+      .toBe("A tea stall draws attention at Market.");
     for (const forbidden of [
       "Visible current-scene",
       "Place handle",
       "Current scene anchor",
       "Handle result",
       "visible as a",
+      "visible point",
       "target handle",
       "place handle",
       "route",
@@ -5164,13 +5168,14 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Tea Stall marks a visible point at Market.");
+    expect(result.text).toBe("Tea Stall draws attention at Market.");
     for (const forbidden of [
       "Visible current-scene",
       "Place handle",
       "Current scene anchor",
       "Handle result",
       "visible as a",
+      "visible point",
       "target handle",
       "place handle",
       "route",
@@ -5195,13 +5200,13 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(promptInput.narrativePageTask.sentencePlan.some((step) => step.sentenceRole === "context_anchor"))
       .toBe(false);
-    expect(poiStep?.preferredBackendFactRefs).toEqual(["e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f1"]);
+    expect(poiStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f3", "e1.f4", "e1.f5", "e1.f6"]);
     expect(poiStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
+      "primary_beat",
       "label_anchor",
       "state_value",
       "scene_anchor",
       "state_value",
-      "primary_beat",
     ]);
     expect(poiStep?.proseAssembly.sentenceShape).toBe("minor_poi_handle_line");
     expect(poiStep?.proseAssembly.materialWeaveOrder).toBe("minor_poi_label_kind_then_scene");
@@ -5216,11 +5221,12 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("deterministic_authority_projection");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Tea Stall marks a visible point at Market.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Tea Stall draws attention at Market.");
     for (const forbidden of [
       "target handle",
       "place handle",
       "visible as a",
+      "visible point",
       "You stand",
       "You are at",
       "route",
@@ -5276,9 +5282,9 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Tea Stall marks a visible point at Market.",
+        text: "Tea Stall draws attention at Market.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+        backendFactRefs: ["e1.f1"],
         claimKinds: ["minor_poi_handle", "visible_target"],
       }]),
     });
@@ -5294,9 +5300,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "Tea Stall marks a visible point at Market.",
+          text: "Tea Stall draws attention at Market.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f5"],
+          backendFactRefs: ["e1.f1"],
           claimKinds: ["minor_poi_handle", "visible_target"],
         },
       ]),

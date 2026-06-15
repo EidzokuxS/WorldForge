@@ -2290,6 +2290,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "item_transfer_result",
   "local_observation_beat",
   "materialization_result",
+  "minor_poi_beat",
   "minor_poi_operation",
   "observed_device_facets",
   "observed_entry_labels",

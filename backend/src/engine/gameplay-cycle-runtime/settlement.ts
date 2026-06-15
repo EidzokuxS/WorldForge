@@ -475,6 +475,19 @@ function fact(
   };
 }
 
+function minorPoiBeatSubject(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return label;
+  const lower = trimmed.toLocaleLowerCase("en-US");
+  if (lower.startsWith("a ") || lower.startsWith("an ") || lower.startsWith("the ")) {
+    return trimmed;
+  }
+  const first = trimmed.charAt(0);
+  const startsWithLowercaseLetter = first === first.toLocaleLowerCase("en-US")
+    && first !== first.toLocaleUpperCase("en-US");
+  return startsWithLowercaseLetter ? `A ${trimmed}` : trimmed;
+}
+
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
 
 function playerLocalConditionStateText(condition: PlayerLocalConditionResult): string {
@@ -1406,6 +1419,10 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
     if (receipt.authority.evidenceAuthority === "minor_poi_handle_receipt" && receipt.publicResult.minorPoi) {
       const evidenceId = nextEvidenceId(evidence);
       const minorPoi = receipt.publicResult.minorPoi;
+      const poiSubject = minorPoiBeatSubject(minorPoi.poiLabel);
+      const poiBeat = minorPoi.resultKind === "reused"
+        ? `${poiSubject} remains in view at ${minorPoi.anchorSceneLabel}.`
+        : `${poiSubject} draws attention at ${minorPoi.anchorSceneLabel}.`;
       const operationText = minorPoi.resultKind === "reused"
         ? `Visible current-scene point reused: ${minorPoi.poiLabel}.`
         : `Visible current-scene point marked: ${minorPoi.poiLabel}.`;
@@ -1415,15 +1432,16 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         sourceRef: receipt.receiptId,
         authority: "minor_poi_handle_receipt",
         claimKinds: ["minor_poi_handle", "visible_target"],
-        text: `${operationText} Current scene anchor: ${minorPoi.anchorSceneLabel}.`,
+        text: poiBeat,
         visibleRefs: receipt.publicResult.visibleRefs,
         backendFacts: [
-          fact(evidenceId, 1, "minor_poi_operation", operationText, operationText),
-          fact(evidenceId, 2, "place_handle_label", `Scene point label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
-          fact(evidenceId, 3, "place_handle_kind", `Scene point kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
-          fact(evidenceId, 4, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`, minorPoi.anchorSceneLabel),
-          fact(evidenceId, 5, "handle_result", `Scene point result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
-          fact(evidenceId, 6, "place_handle_scope", "This is a visible current-scene point for reference only; movement uses separate route evidence."),
+          fact(evidenceId, 1, "minor_poi_beat", poiBeat, poiBeat),
+          fact(evidenceId, 2, "minor_poi_operation", operationText, operationText),
+          fact(evidenceId, 3, "place_handle_label", `Scene point label: ${minorPoi.poiLabel}.`, minorPoi.poiLabel),
+          fact(evidenceId, 4, "place_handle_kind", `Scene point kind: ${minorPoi.poiKind}.`, minorPoi.poiKind),
+          fact(evidenceId, 5, "current_scene_anchor", `Current scene anchor: ${minorPoi.anchorSceneLabel}.`, minorPoi.anchorSceneLabel),
+          fact(evidenceId, 6, "handle_result", `Scene point result: ${minorPoi.resultKind}.`, minorPoi.resultKind),
+          fact(evidenceId, 7, "place_handle_scope", "This is a visible current-scene point for reference only; movement uses separate route evidence."),
         ],
         limits: {
           proves: [

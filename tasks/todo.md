@@ -8664,3 +8664,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon lies open from here.`
     - Verified prose audit `output/clean-runtime-p322-route-status-live-20260615011629/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `oldRouteFormula`.
     - Verified GitNexus all/staged `detect_changes`: LOW scope, one touched indexed symbol (`stage4Evidence`), 4 changed files, and 0 affected execution flows.
+
+- P323 clean minor-POI accepted beat prose:
+  - Diagnosis:
+    - [x] Fresh clean runtime scan `output/clean-runtime-p323-prose-scan-20260615T012544/summary.json` shows the minor-POI turn still exposes a data-shaped beat: `A sheltered message stall marks a visible point at Lowwater Bazaar.`
+    - [x] Stage 6 is correctly projecting accepted minor-POI material; the dry prose is owned by Stage 4 settlement evidence and the minor-POI deterministic projection contract, not by narrator validation.
+    - [x] Root owner is the `minor_poi_create` branch in settlement evidence construction.
+  - Plan:
+    - [x] Run GitNexus impact for the settlement minor-POI owner before edits.
+    - [x] Change accepted `minor_poi_beat` to a player-facing scene observation such as `<Point label> draws attention at <scene>.`
+    - [x] Keep minor-POI truth narrow: visible point/locality only; no discovery action, item creation beyond the accepted POI, hidden significance, safety, route, inventory, or world mutation beyond the receipt.
+    - [x] Update settlement/narration expectations and focused tests.
+    - [x] Run focused/expanded tests, typecheck, live minor-POI proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Accepted minor-POI evidence and deterministic projection no longer use `marks a visible point`.
+    - [x] POI label and scene/location remain represented by typed backend facts.
+    - [x] The fix changes typed accepted minor-POI material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented `minor_poi_beat` as an explicit accepted backend fact role; Stage 4 settlement now emits `Tea Stall draws attention at Lowwater Bazaar.` style prose as the receipt text and exact beat.
+    - Moved lowercase-label article handling into settlement-owned beat construction, so `sheltered message stall` becomes `A sheltered message stall...` before Stage 6.
+    - Simplified Stage 6 minor-POI projection to require and copy `minor_poi_beat`; removed the old renderer helpers that assembled `visible point`.
+    - Verified focused settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p323-minor-poi-live-20260615T014338`: explicit minor-POI action settled through `gameplay-cycle-runtime`, one accepted `minor_poi_create` Stage 4 receipt, `mutationApplied=true`, `worldVersion=1`, one clean turn record, zero old stores, and accepted `minor_poi_beat` exactly `Tea Stall draws attention at Lowwater Bazaar.`.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Tea Stall draws attention at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p323-minor-poi-live-20260615T014338/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatMinorPoi`.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 6 touched indexed symbols, 6 changed files, and 0 affected execution flows.

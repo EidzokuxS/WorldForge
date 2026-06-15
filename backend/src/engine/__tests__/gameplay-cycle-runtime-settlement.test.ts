@@ -1363,7 +1363,9 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const handle = packet.acceptedEvidence.find((entry) => entry.authority === "minor_poi_handle_receipt");
     expect(handle?.claimKinds).toEqual(["minor_poi_handle", "visible_target"]);
+    expect(handle?.text).toBe("Tea Stall draws attention at Market.");
     expect(handle?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Tea Stall draws attention at Market.",
       "Visible current-scene point marked: Tea Stall.",
       "Scene point label: Tea Stall.",
       "Scene point kind: stall.",
@@ -1371,11 +1373,12 @@ describe("clean Stage 5 settlement contracts", () => {
       "Scene point result: created.",
       "This is a visible current-scene point for reference only; movement uses separate route evidence.",
     ]);
-    expect(handle?.backendFacts[0]?.value).toBe("Visible current-scene point marked: Tea Stall.");
-    expect(handle?.backendFacts[1]?.value).toBe("Tea Stall");
-    expect(handle?.backendFacts[2]?.value).toBe("stall");
-    expect(handle?.backendFacts[3]?.value).toBe("Market");
-    expect(handle?.backendFacts[4]?.value).toBe("created");
+    expect(handle?.backendFacts[0]?.value).toBe("Tea Stall draws attention at Market.");
+    expect(handle?.backendFacts[1]?.value).toBe("Visible current-scene point marked: Tea Stall.");
+    expect(handle?.backendFacts[2]?.value).toBe("Tea Stall");
+    expect(handle?.backendFacts[3]?.value).toBe("stall");
+    expect(handle?.backendFacts[4]?.value).toBe("Market");
+    expect(handle?.backendFacts[5]?.value).toBe("created");
     expect(handle?.limits.doesNotProve).toEqual(expect.arrayContaining([
       "services or inventory",
       "readable sign text",
