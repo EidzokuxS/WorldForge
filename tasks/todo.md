@@ -8586,3 +8586,28 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live proof `output/clean-runtime-p319-device-surface-live-r2-20260615-033520`: `device_surface_observation` accepted, `mutationApplied=false`, clock unchanged, one clean turn record, one Stage 4 receipt, narrative includes the exact accepted beat, and no old flat/broad absence phrases were hit.
     - Verified prose audit `output/clean-runtime-p319-device-surface-live-r2-20260615-033520/prose-audit.json`: one narrative, 45 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatDeviceSurface`.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 5 touched indexed symbols, 7 changed files, and 0 affected execution flows.
+
+- P320 clean direct-scene deterministic projection prose:
+  - Diagnosis:
+    - [x] Direct-scene deterministic projection still assembles a status digest: `You are at Market. Guide is here. Courier satchel is in your keeping. Brass Tube and Notice Board are visible. At Market, North Hall is the exit you can choose; it takes 1 minute.`
+    - [x] The existing prose audit treats that broad shape as `directSceneDigest`; this is a typed projection owner issue, not a validator gap.
+    - [x] Root owner is Stage 6 `renderSceneFrameSnapshotProjection()`, which renders direct `scene_frame_snapshot` / `scene_observation_receipt` fallback text from accepted role values.
+  - Plan:
+    - [x] Run GitNexus impact for `renderSceneFrameSnapshotProjection` before edits.
+    - [x] Replace the direct-scene deterministic assembly with compact scene prose from accepted scene/place labels, actor labels, inventory custody beat, visible target labels, and route labels/costs.
+    - [x] Preserve dedupe and truth boundaries: inventory labels do not become visible targets; route labels do not become target visibility; no actor action, search action, discovery, absence/no-change, route safety, movement, or item state beyond accepted facts.
+    - [x] Update focused narration expectations and run focused/expanded tests, typecheck, prose audit/live proof if feasible, and GitNexus scope.
+  - Success criteria:
+    - [x] Direct-scene fallback no longer matches the `You are at ... X is here ... visible ... route` digest shape.
+    - [x] Output still cites only accepted direct-scene facts and preserves exact labels.
+    - [x] The fix changes typed deterministic projection, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented direct-scene deterministic projection as compact scene prose: scene placement now renders as `<scene> frames the immediate scene`, visible actors as `in view`, visible targets as `in sight`, and routes as `the way(s) onward from <scene>`.
+    - Kept route-options standalone projection unchanged; P320 only changes direct-scene fallback assembly through `renderSceneFrameSnapshotProjection()`.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (118 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p320-direct-scene-live-20260615-034506`: broad scene look settled with `mutationApplied=false`, zero Stage 4 receipts, unchanged clock, accepted `scene_frame_snapshot` evidence with current scene/location, scene texture, visible actor, inventory status, visible target, and movement option claim kinds.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in sight at Lowwater Bazaar. Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from here.`
+    - Verified prose audit `output/clean-runtime-p320-direct-scene-live-20260615-034506/prose-audit.json`: one narrative, 66 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `directSceneDigest`.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 7 touched indexed symbols, 3 changed files, and 0 affected execution flows.

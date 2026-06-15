@@ -4306,7 +4306,11 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("You are at Market. Guide is here. Courier satchel is in your keeping. Brass Tube and Notice Board are visible. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(text).toBe("Market frames the immediate scene. Guide is in view. Courier satchel is in your keeping. Brass Tube and Notice Board are in sight. North Hall is the way onward from Market; it takes 1 minute.");
+    expect(text).not.toContain("You are at");
+    expect(text).not.toContain("is here.");
+    expect(text).not.toContain("are visible.");
+    expect(text).not.toContain("exit you can choose");
     expect(text).not.toContain("Guide, Courier satchel");
     expect(text).not.toContain("Guide, Brass Tube");
     expect(text).not.toContain("Courier satchel is visible");
@@ -4334,7 +4338,7 @@ describe("clean Stage 6 narration contracts", () => {
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Guide is here, with Brass Tube and Notice Board visible.",
+          text: "Guide is in view, with Brass Tube and Notice Board in sight.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
@@ -4355,7 +4359,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toContain("Guide is here");
+    expect(result.text).toContain("Guide is in view");
     expect(result.text).not.toContain("Guide, Courier satchel");
     expect(result.text).not.toContain("Guide, Brass Tube");
     expect(result.text).not.toContain("Courier satchel is visible");
@@ -4377,7 +4381,7 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Guide is here, with Brass Tube and Notice Board visible.",
+          text: "Guide is in view, with Brass Tube and Notice Board in sight.",
           evidenceRefs: ["e2", "e4"],
           backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],

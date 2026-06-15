@@ -3402,6 +3402,51 @@ function renderRouteOptionsProjection(evidence: AcceptedNarrationEvidence): stri
   return `${originPrefix}${subject} ${verb} ${exitNoun} you can choose.`;
 }
 
+function renderDirectScenePlacementProjection(currentScene: string | null, currentPlace: string | null): string | null {
+  if (currentScene && currentPlace && currentScene !== currentPlace) {
+    return `${currentScene} frames the immediate scene inside ${currentPlace}.`;
+  }
+  const label = currentScene ?? currentPlace;
+  return label ? `${label} frames the immediate scene.` : null;
+}
+
+function renderDirectSceneRouteProjection(evidence: AcceptedNarrationEvidence): string {
+  const labelValue = optionalFactValueByRole(evidence, "open_route_labels")
+    ?? optionalFactValueByRole(evidence, "route_choice_labels");
+  if (!labelValue) {
+    throw new Error("Direct-scene route projection requires accepted Route choice labels value evidence.");
+  }
+  const labels = splitRouteChoiceLabels(labelValue);
+  if (labels.length === 0) {
+    throw new Error("Direct-scene route projection requires accepted Route choice labels value evidence.");
+  }
+
+  const origin = optionalFactValueByRole(evidence, "route_origin");
+  const costValue = optionalFactValueByRole(evidence, "route_choice_travel_costs");
+  const costMap = costValue ? parseRouteChoiceCostMap(costValue) : new Map<string, string>();
+  const costs = labels.map((label) => costMap.get(label)).filter((cost): cost is string => Boolean(cost));
+  const uniqueCosts = uniqueStrings(costs);
+  const subject = englishList(labels);
+  const verb = labels.length === 1 ? "is" : "are";
+  const wayNoun = labels.length === 1 ? "the way" : "the ways";
+  const placement = origin ? `from ${origin}` : "from here";
+
+  if (costs.length === labels.length && uniqueCosts.length === 1) {
+    const costClause = labels.length === 1 ? `; it takes ${uniqueCosts[0]}` : `; each takes ${uniqueCosts[0]}`;
+    return `${subject} ${verb} ${wayNoun} onward ${placement}${costClause}.`;
+  }
+
+  if (costs.length > 0) {
+    const labelledCosts = labels.map((label) => {
+      const cost = costMap.get(label);
+      return cost ? `${label} (${cost})` : label;
+    });
+    return `Ways onward ${placement} are ${englishList(labelledCosts)}.`;
+  }
+
+  return `${subject} ${verb} ${wayNoun} onward ${placement}.`;
+}
+
 function renderRouteStatusProjection(
   _view: CleanNarratorView,
   evidence: AcceptedNarrationEvidence,
@@ -3479,22 +3524,17 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     backendFacts: routeFacts,
   };
   const sentences: string[] = [];
-  if (currentScene && currentPlace && currentScene !== currentPlace) {
-    sentences.push(`You are at ${currentScene}, inside ${currentPlace}.`);
-  } else if (currentScene) {
-    sentences.push(`You are at ${currentScene}.`);
-  } else if (currentPlace) {
-    sentences.push(`You are at ${currentPlace}.`);
-  }
+  const placementSentence = renderDirectScenePlacementProjection(currentScene, currentPlace);
+  if (placementSentence) sentences.push(placementSentence);
   for (const visibleFact of visibleSceneFacts) {
     sentences.push(`${visibleFact}.`);
   }
-  if (actors.length > 0) sentences.push(`${englishList(actors)} ${actors.length === 1 ? "is" : "are"} here.`);
+  if (actors.length > 0) sentences.push(`${englishList(actors)} ${actors.length === 1 ? "is" : "are"} in view.`);
   if (inventoryStatusBeats.length > 0) {
     sentences.push(...inventoryStatusBeats.map((beat) => `${beat}.`));
   }
-  if (targets.length > 0) sentences.push(`${englishList(targets)} ${targets.length === 1 ? "is" : "are"} visible.`);
-  if (routeFacts.length > 0) sentences.push(renderRouteOptionsProjection(routeEvidence));
+  if (targets.length > 0) sentences.push(`${englishList(targets)} ${targets.length === 1 ? "is" : "are"} in sight.`);
+  if (routeFacts.length > 0) sentences.push(renderDirectSceneRouteProjection(routeEvidence));
   return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
