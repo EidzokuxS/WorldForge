@@ -2978,8 +2978,7 @@ function localObservationSummary(input: {
   const labels = localObservationLabelList(input.matchedEntries);
   if (labels.length > 0 && isOnlyInventoryItemSurface(input.effect.surfaceKinds)) {
     const itemLabels = localObservationNaturalLabelList(input.matchedEntries);
-    const verb = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length === 1 ? "is" : "are";
-    return `${itemLabels} ${verb} in your keeping.`;
+    return `You carry ${itemLabels}.`;
   }
   if (input.resultKind === "positive_list") {
     return labels.length > 0

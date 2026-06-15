@@ -8747,3 +8747,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Brass Tube changes hands from Mira Voss to Guide at Market, and Guide now carries Brass Tube there.`
     - Verified prose audit `output/clean-runtime-p325-item-transfer-live-20260615T022847/prose-audit.json`: one narrative, 18 words, zero one-token output, zero list-like starts, and all hit counters 0 including `flatItemTransfer`, `receiptDebug`, and `enumLeak`.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 4 touched indexed symbols, 5 changed files, and 0 affected execution flows.
+
+- P326 clean inventory-status observation prose:
+  - Diagnosis:
+    - [x] Latest broad scan `output/clean-runtime-p325-prose-scan-20260615T020437/summary.json` shows direct scene and local inventory observations still expose dry ownership wording: `Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping...`.
+    - [x] The phrase is owned by typed clean-runtime evidence construction: Stage 4 `localObservationSummary()` for inventory receipts and settlement `inventoryCustodyBeat()` for scene/local observation backend facts.
+    - [x] Stage 6 is mostly copying accepted material here; polishing the narrator would hide the wrong layer.
+  - Plan:
+    - [x] Run GitNexus impact for `localObservationSummary` and `inventoryCustodyBeat` before edits.
+    - [x] Rephrase inventory-status accepted beats to player-facing state, e.g. `You carry <items>` / `At <scene>, you carry <items>.`
+    - [x] Keep truth narrow: carried inventory labels only; no bag/container/hand/equipment-slot/private knowledge/no-change inference.
+    - [x] Update Stage 4, settlement, and narration expectations that assert the accepted inventory-status phrase.
+    - [x] Run focused/expanded tests, typecheck, prose audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Clean inventory/local-observation evidence no longer emits `in your keeping`.
+    - [x] Inventory item labels remain represented as typed backend facts.
+    - [x] The fix changes typed accepted evidence wording, not regex cleanup, semantic banlists, validators, or gameplay fallbacks.
+  - Review:
+    - Implemented Stage 4 inventory local-observation summaries as `You carry <items>.`.
+    - Implemented settlement-owned inventory beats as `You carry <items>.` for direct scene inventory status and `At <scene>, you carry <items>.` for local observation evidence.
+    - Updated Stage 4, settlement, and narration tests so accepted inventory evidence carries the new player-facing phrase through backend facts and model-authored pages.
+    - Verified focused Stage4/settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (180 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified current clean-runtime source/tests contain zero `in your keeping` matches.
+    - Verified proof artifact `output/clean-runtime-p326-inventory-status-proof-20260615T024347`: real `runCleanStage4Execution` inventory local-observation receipt summary `You carry Courier satchel and Brass Tube.`, accepted `local_observation_beat` `At Lowwater Bazaar, you carry Courier satchel and Brass Tube.`, narration text exactly `At Lowwater Bazaar, you carry Courier satchel and Brass Tube.`, and `oldPhrasePresent=false`.
+    - Verified prose audit `output/clean-runtime-p326-inventory-status-proof-20260615T024347/prose-audit.json`: one narrative, 10 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 2 touched indexed symbols, 6 changed files, and 0 affected execution flows.

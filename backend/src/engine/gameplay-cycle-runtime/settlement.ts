@@ -640,9 +640,9 @@ function evidenceNaturalList(labels: readonly string[]): string {
 
 function inventoryCustodyBeat(labels: readonly string[], anchorSceneLabel?: string): string {
   const itemLabels = evidenceNaturalList(labels);
-  const verb = uniqueStrings(labels).length === 1 ? "is" : "are";
-  const scene = anchorSceneLabel ? ` at ${anchorSceneLabel}` : "";
-  return `${itemLabels} ${verb} in your keeping${scene}.`;
+  return anchorSceneLabel
+    ? `At ${anchorSceneLabel}, you carry ${itemLabels}.`
+    : `You carry ${itemLabels}.`;
 }
 
 function inventoryStatusBeat(labels: readonly string[]): string {
