@@ -1051,6 +1051,7 @@ function sentencePlanMaterialCopyMode(
     fact.role === "device_surface_beat"
     || fact.role === "custody_change"
     || fact.role === "settled_custody"
+    || fact.role === "local_observation_beat"
   ) {
     return "copy_exact";
   }
@@ -2948,20 +2949,29 @@ export function validateCleanNarrationCandidate(input: {
       }
       const citedBackendFactRefs = new Set(sentence.backendFactRefs);
       const normalizedSentenceText = normalizeText(sentence.text);
-      const exactCustodyMaterials = citedSentencePlans.flatMap((step) =>
+      const structurallyExactMaterials = citedSentencePlans.flatMap((step) =>
         step?.proseMaterials.filter((material) => {
           if (!citedBackendFactRefs.has(material.factRef) || material.copyMode !== "copy_exact") return false;
           const role = acceptedBackendFactsByRef.get(material.factRef)?.role;
-          return role === "custody_change" || role === "settled_custody";
+          return role === "custody_change"
+            || role === "settled_custody"
+            || role === "local_observation_beat";
         }) ?? []
       );
-      for (const material of exactCustodyMaterials) {
+      for (const material of structurallyExactMaterials) {
         const exactMaterialText = normalizeText(material.materialText);
         if (exactMaterialText.length > 0 && !normalizedSentenceText.includes(exactMaterialText)) {
+          const role = acceptedBackendFactsByRef.get(material.factRef)?.role;
+          const isCustodyMaterial = role === "custody_change" || role === "settled_custody";
+          const isLocalObservationMaterial = role === "local_observation_beat";
           issues.push({
             code: "sentence_plan_not_supported",
             path: `sentences.${index}.text`,
-            message: `Item-state narration must copy accepted custody material ${material.factRef} exactly.`,
+            message: isCustodyMaterial
+              ? `Item-state narration must copy accepted custody material ${material.factRef} exactly.`
+              : isLocalObservationMaterial
+                ? `Local-observation narration must copy accepted observation material ${material.factRef} exactly.`
+                : `Narration sentence must copy exact sentence-plan material ${material.factRef}.`,
           });
         }
       }
@@ -3177,6 +3187,12 @@ function narrationValidationRepairLines(
     }
     if (issues.some((issue) => issue.message.includes("copy accepted custody material"))) {
       lines.push("For item_state repair, copy cited custody_change and settled_custody materialText exactly, preserving accepted item labels and custody endpoints literally.");
+    }
+    if (issues.some((issue) => issue.message.includes("copy exact sentence-plan material"))) {
+      lines.push("For exact-copy repair, copy every cited exactCopyFactRefs materialText contiguously before adding any optional phrasing.");
+    }
+    if (issues.some((issue) => issue.message.includes("copy accepted observation material"))) {
+      lines.push("For local_observation repair, copy the cited local_observation_beat materialText exactly, preserving accepted item labels and scene anchors literally.");
     }
     if (issues.some((issue) =>
       issue.message.includes("outside its sentence-plan refs")

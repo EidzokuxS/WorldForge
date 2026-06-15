@@ -314,6 +314,9 @@ function localObservationStoryBeat(observation: {
   const onlyVisibleActorMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_actor");
   const onlyVisibleTargetMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_target");
   if (onlyInventoryMatches) {
+    if (observation.resultKind === "positive_match") {
+      return inventoryPresenceBeat(labels, observation.anchorSceneLabel);
+    }
     return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
   }
   if (onlyVisibleActorMatches) {
@@ -667,6 +670,14 @@ function inventoryCustodyBeat(labels: readonly string[], anchorSceneLabel?: stri
   return anchorSceneLabel
     ? `At ${anchorSceneLabel}, you carry ${itemLabels}.`
     : `You carry ${itemLabels}.`;
+}
+
+function inventoryPresenceBeat(labels: readonly string[], anchorSceneLabel?: string): string {
+  const itemLabels = evidenceNaturalList(labels);
+  const verb = uniqueStrings(labels).length === 1 ? "is" : "are";
+  return anchorSceneLabel
+    ? `${itemLabels} ${verb} with you at ${anchorSceneLabel}.`
+    : `${itemLabels} ${verb} with you.`;
 }
 
 function inventoryStatusBeat(labels: readonly string[]): string {

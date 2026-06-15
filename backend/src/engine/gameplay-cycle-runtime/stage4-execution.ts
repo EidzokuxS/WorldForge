@@ -2981,7 +2981,12 @@ function localObservationSummary(input: {
   }
   const labels = localObservationLabelList(input.matchedEntries);
   if (labels.length > 0 && isOnlyInventoryItemSurface(input.effect.surfaceKinds)) {
+    const itemCount = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length;
     const itemLabels = localObservationNaturalLabelList(input.matchedEntries);
+    if (input.resultKind === "positive_match") {
+      const verb = itemCount === 1 ? "is" : "are";
+      return `${itemLabels} ${verb} with you.`;
+    }
     return `You carry ${itemLabels}.`;
   }
   if (labels.length > 0 && isOnlyVisibleActorSurface(input.effect.surfaceKinds)) {

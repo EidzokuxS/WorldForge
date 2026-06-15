@@ -8900,3 +8900,46 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p331-item-state-exact-custody-proof-20260615T064215`: exact candidate accepted as `Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.`, drift candidate rejected with `copy accepted custody material`, and model result preserved both exact custody sentences.
     - Verified prose audit `output/clean-runtime-p331-item-state-exact-custody-proof-20260615T064215/prose-audit.json`: one narrative, 17 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 4 touched indexed symbols, 3 changed files, and 0 affected execution flows.
+
+- P332 fresh clean-runtime prose scan after exact item custody:
+  - Diagnosis:
+    - [x] P331 changed the current item_state material contract; P330 item-transfer output is now stale evidence.
+    - [x] The next prose fix should come from a fresh current scan and trace to the typed owner that produced the awkward page.
+  - Plan:
+    - [x] Reuse the clean-runtime prose probe set against fresh clones from `p69-item-transfer-045651`.
+    - [x] Run direct look, route, object, inventory, actor, condition, item-transfer, dialogue, wait, and minor-POI probes on current `develop`.
+    - [x] Run the prose audit over the scan root and confirm zero legacy-store writes.
+    - [x] Confirm item-transfer now preserves exact `Brass Tube` custody sentences.
+    - [x] Pick one remaining player-facing prose gap and trace it to a typed owner before editing.
+  - Success criteria:
+    - [x] Fresh scan summary records all probes with clean runtime, zero legacy-store writes, and player-facing narration text.
+    - [x] Next edit target comes from current output after P331, not stale scan memory.
+  - Review:
+    - Ran fresh scan `output/clean-runtime-p332-prose-scan-20260615T064730`: 12/12 probes settled through `gameplay-cycle-runtime`, every probe wrote zero legacy stores, and the audit counted 12 narratives with all hit counters 0.
+    - Confirmed P331 effect in current output: item transfer now renders `Brass Tube changes hands from Mira Voss to Guide at Lowwater Bazaar. Guide now carries Brass Tube at Lowwater Bazaar.`
+    - Selected P333 from current output: `Look at the Brass Tube` settles as a local_observation `positive_match`, but accepted evidence says `At Lowwater Bazaar, you carry Brass Tube.`; the item table has no description column/value, so the typed owner can only express current carried presence, not item appearance.
+
+- P333 inventory positive-match observation prose:
+  - Diagnosis:
+    - [x] Fresh scan `output/clean-runtime-p332-prose-scan-20260615T064730` shows object-look narration as `At Lowwater Bazaar, you carry Brass Tube.`
+    - [x] Stage4 receipt already distinguishes object-look from inventory list: object-look is local_observation `positive_match` over one `inventory_item`; inventory-check is `positive_list`.
+    - [x] Source DB `items` table has no item description field/value, so narrative cannot truthfully inspect appearance; it can only report that the named item is with the player.
+  - Plan:
+    - [x] Run GitNexus impact for `localObservationSummary`, `localObservationStoryBeat`, and `inventoryCustodyBeat`.
+    - [x] Add typed inventory single-match wording for local observations: `<item> is with you at <scene>.`
+    - [x] Preserve inventory-list wording as `You carry <items>.` / `At <scene>, you carry <items>.`
+    - [x] Update Stage4, settlement, and narration expectations for single inventory-match evidence.
+    - [x] Run focused/expanded tests, typecheck, proof/audit, GitNexus scope.
+  - Success criteria:
+    - [x] `Look at the Brass Tube` no longer reads like a generic inventory check.
+    - [x] Inventory-list checks keep the current carry-list wording.
+    - [x] The fix changes typed accepted evidence wording, not regex cleanup, semantic banlists, or gameplay fallbacks.
+  - Review:
+    - Changed Stage4 and settlement single-match inventory local observations to emit `Brass Tube is with you.` / `Brass Tube is with you at Lowwater Bazaar.` while leaving inventory-list custody text on the existing `You carry ...` wording.
+    - Marked `local_observation_beat` material as exact-copy when Stage 6 cites inventory local-observation evidence, so the player-facing object-look sentence uses the typed receipt text instead of drifting back into generic carry-list phrasing.
+    - Verified focused tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (181 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (393 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified proof artifact `output/clean-runtime-p333-inventory-single-match-proof-20260615T065808`: `Look at the Brass Tube.` produced accepted `local_observation` evidence with `Local observation beat: Brass Tube is with you at Lowwater Bazaar.` and player-facing narration `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Brass Tube is with you at Lowwater Bazaar.`
+    - Verified prose audit `output/clean-runtime-p333-inventory-single-match-proof-20260615T065808/prose-audit.json`: one narrative, 29 words, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 7 changed files, and 0 affected execution flows.

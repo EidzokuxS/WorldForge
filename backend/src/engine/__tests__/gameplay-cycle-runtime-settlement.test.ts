@@ -1606,7 +1606,7 @@ describe("clean Stage 5 settlement contracts", () => {
       ...baseReceipt,
       publicResult: {
         ...baseReceipt.publicResult,
-        summary: "You carry Brass Tube.",
+        summary: "Brass Tube is with you.",
         visibleRefs: ["Player", "Market", "Brass Tube"],
         localObservation: {
           type: "local_observation",
@@ -1624,7 +1624,7 @@ describe("clean Stage 5 settlement contracts", () => {
           anchorSceneLabel: "Market",
           anchorLocationLabel: "Market",
           boundedNegative: false,
-          summary: "You carry Brass Tube.",
+          summary: "Brass Tube is with you.",
           claimStatus: "bounded_current_scene_observation_only",
         },
       },
@@ -1637,10 +1637,10 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "inventory_status"]);
-    expect(observation?.text).toBe("At Market, you carry Brass Tube.");
+    expect(observation?.text).toBe("Brass Tube is with you at Market.");
     expect(observation?.limits.proves).toEqual(["matching current inventory entries"]);
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: At Market, you carry Brass Tube.",
+      "Local observation beat: Brass Tube is with you at Market.",
       "Searched visible surfaces: inventory items.",
       "Observation query: Brass Tube.",
       "Observed entry labels: Brass Tube.",

@@ -2759,7 +2759,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "You carry Brass Tube.",
+        summary: "Brass Tube is with you.",
         localObservation: {
           resultKind: "positive_match",
           queryText: "Brass Tube",
