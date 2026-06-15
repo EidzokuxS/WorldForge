@@ -179,9 +179,9 @@ function routeView(): CleanNarratorView {
       ref: "e1",
       authority: "route_check_receipt",
       claimKinds: ["route_status"],
-      text: "From here, the path to North Hall is open.",
+      text: "North Hall lies open from here.",
       backendFacts: [
-        { factRef: "e1.f1", role: "route_beat", value: "From here, the path to North Hall is open.", text: "Route beat: From here, the path to North Hall is open.", exact: true },
+        { factRef: "e1.f1", role: "route_beat", value: "North Hall lies open from here.", text: "Route beat: North Hall lies open from here.", exact: true },
         { factRef: "e1.f2", role: "route_label", value: "North Hall", text: "Route label: North Hall.", exact: true },
         { factRef: "e1.f3", role: "route_status", value: "connected", text: "Route status: connected.", exact: true },
       ],
@@ -201,12 +201,12 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "route_check_receipt",
         claimKinds: ["route_status"],
-        text: "From here, the path to Transmission Basement is open.",
+        text: "Transmission Basement lies open from here.",
         backendFacts: [{
           factRef: "e5.f1",
           role: "route_beat",
-          value: "From here, the path to Transmission Basement is open.",
-          text: "Route beat: From here, the path to Transmission Basement is open.",
+          value: "Transmission Basement lies open from here.",
+          text: "Route beat: Transmission Basement lies open from here.",
           exact: true,
         }, {
           factRef: "e5.f2",
@@ -3150,7 +3150,7 @@ describe("clean Stage 6 narration contracts", () => {
       styleLevers: ["route_status_focus", "accepted_label_anchor", "settled_state_focus", "concrete_present_verb"],
     });
     expect(routeStatusStep?.proseMaterials.map((material) => [material.factRef, material.materialText])).toEqual([
-      ["e5.f1", "From here, the path to Transmission Basement is open."],
+      ["e5.f1", "Transmission Basement lies open from here."],
       ["e5.f2", "Transmission Basement"],
       ["e5.f3", "connected"],
     ]);
@@ -3242,7 +3242,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "route_beat" ? { ...fact, text: "Opaque accepted route-status fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(routeStatus)).toBe("From here, the path to North Hall is open.");
+    expect(renderCleanAuthorityProjection(routeStatus)).toBe("North Hall lies open from here.");
 
     const routeStatusMissingValue = routeView();
     routeStatusMissingValue.acceptedEvidence[0] = {

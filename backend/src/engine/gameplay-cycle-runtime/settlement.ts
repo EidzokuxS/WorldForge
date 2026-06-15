@@ -1027,8 +1027,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const routeStatus = routeCheck.status;
       const routeLabel = routeCheck.label;
       const routeBeat = routeStatus === "connected"
-        ? `From here, the path to ${routeLabel} is open.`
-        : `The path to ${routeLabel} is closed from here.`;
+        ? `${routeLabel} lies open from here.`
+        : `${routeLabel} is closed from here.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",

@@ -1165,14 +1165,14 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const route = packet.acceptedEvidence.find((entry) => entry.authority === "route_check_receipt");
     expect(route?.claimKinds).toEqual(["route_status"]);
-    expect(route?.text).toBe("From here, the path to North Hall is open.");
+    expect(route?.text).toBe("North Hall lies open from here.");
     expect(route?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Route beat: From here, the path to North Hall is open.",
+      "Route beat: North Hall lies open from here.",
       "Route label: North Hall.",
       "Route status: connected.",
     ]);
     expect(route?.backendFacts.map((entry) => entry.value ?? null)).toEqual([
-      "From here, the path to North Hall is open.",
+      "North Hall lies open from here.",
       "North Hall",
       "connected",
     ]);

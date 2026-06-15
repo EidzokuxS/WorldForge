@@ -8638,3 +8638,29 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.`
     - Verified prose audit `output/clean-runtime-p321-route-options-live-r3-20260615-040532/prose-audit.json`: one narrative, 51 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `oldRouteFormula`, `stockRouteOptions`, and `optionMenu`.
     - Verified GitNexus all/staged `detect_changes`: LOW scope, 4 touched indexed symbols, 3 changed files, and 0 affected execution flows.
+
+- P322 clean route-status accepted beat prose:
+  - Diagnosis:
+    - [x] Route-status settlement still owns a backend-shaped player-facing beat: `From here, the path to North Hall is open.`
+    - [x] Stage 6 correctly projects `route_beat` from accepted evidence; the dry prose is in the accepted route-status material, not in model generation.
+    - [x] Root owner is the `route_check_receipt` branch in settlement evidence construction.
+  - Plan:
+    - [x] Run GitNexus impact for the settlement route-status owner before edits.
+    - [x] Change accepted `route_beat` to a route-label-centered story beat such as `<Route label> lies open from here.` / `<Route label> is closed from here.`.
+    - [x] Keep route-status truth narrow: feasibility only; no movement, arrival, walking, safety, hidden-route, absence/no-change, current-scene change, or world fact.
+    - [x] Update settlement/narration expectations and focused tests.
+    - [x] Run focused/expanded tests, typecheck, live route-status proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Accepted route-status evidence and deterministic projection no longer use `From here, the path to ...` wording.
+    - [x] Route label and connected/disconnected status remain represented by typed backend facts.
+    - [x] The fix changes typed accepted route-status material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented route-check settlement evidence as route-label-centered prose: connected routes now expose `<Route label> lies open from here.`, disconnected routes expose `<Route label> is closed from here.`.
+    - Kept Stage 6 route-status projection boring: it still copies the accepted `route_beat` value, so the prose improvement is owned by accepted evidence, not model policing.
+    - Verified focused settlement/narration tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p322-route-status-live-20260615011629`: route-status question settled through `gameplay-cycle-runtime`, one accepted `route_check` Stage 4 receipt, `mutationApplied=false`, unchanged clock/worldVersion, one clean turn record, zero old stores, and accepted `route_beat` exactly `Anchor Chain Pylon lies open from here.`.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon lies open from here.`
+    - Verified prose audit `output/clean-runtime-p322-route-status-live-20260615011629/prose-audit.json`: one narrative, 26 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `oldRouteFormula`.
+    - Verified GitNexus all/staged `detect_changes`: LOW scope, one touched indexed symbol (`stage4Evidence`), 4 changed files, and 0 affected execution flows.
