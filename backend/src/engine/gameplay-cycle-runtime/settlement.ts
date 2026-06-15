@@ -163,41 +163,51 @@ const ITEM_TRANSFER_DOES_NOT_PROVE = [
 
 type CleanItemTransferResult = NonNullable<CleanStage4Receipt["publicResult"]["itemTransfer"]>;
 
-function itemTransferHolderPhrase(itemTransfer: CleanItemTransferResult): string {
-  if (itemTransfer.finalOwnerKind === "visible_actor") {
+function itemTransferHolderPhrase(
+  itemTransfer: CleanItemTransferResult,
+  timing: "settled" | "already",
+): string {
+  if (itemTransfer.finalOwnerKind === "visible_actor" || itemTransfer.finalOwnerKind === "player") {
     return itemTransfer.finalEquipState === "equipped"
-      ? `equipped by ${itemTransfer.targetLabel}`
-      : `carried by ${itemTransfer.targetLabel}`;
-  }
-  if (itemTransfer.finalOwnerKind === "player") {
-    return itemTransfer.finalEquipState === "equipped"
-      ? `equipped by ${itemTransfer.actorLabel}`
-      : `carried by ${itemTransfer.actorLabel}`;
+      ? `${itemTransfer.targetLabel} ${timing === "already" ? "already has" : "has"} ${itemTransfer.itemLabel} equipped`
+      : `${itemTransfer.targetLabel} ${timing === "already" ? "already carries" : "now carries"} ${itemTransfer.itemLabel}`;
   }
   if (itemTransfer.finalLocationKind === "current_scene") {
-    return `at ${itemTransfer.anchorSceneLabel}`;
+    return `${itemTransfer.itemLabel} ${timing === "already" ? "already rests" : "rests"}`;
   }
-  return `with ${itemTransfer.targetLabel}`;
+  throw new Error(
+    `Item transfer has no player-facing settled holder for ${itemTransfer.itemLabel} at ${itemTransfer.anchorSceneLabel}.`,
+  );
 }
 
 function itemTransferSettledCustodyText(itemTransfer: CleanItemTransferResult): string {
-  const holderPhrase = itemTransferHolderPhrase(itemTransfer);
-  if (holderPhrase.startsWith("at ")) {
-    return `${itemTransfer.itemLabel} is ${holderPhrase}.`;
-  }
-  return `${itemTransfer.itemLabel} is ${holderPhrase} at ${itemTransfer.anchorSceneLabel}.`;
+  return `${itemTransferHolderPhrase(itemTransfer, "settled")} at ${itemTransfer.anchorSceneLabel}.`;
 }
 
 function itemTransferCustodyChangeText(itemTransfer: CleanItemTransferResult): string {
   const settledText = itemTransferSettledCustodyText(itemTransfer);
   if (itemTransfer.resultKind === "already_satisfied") {
-    const holderPhrase = itemTransferHolderPhrase(itemTransfer);
-    return holderPhrase.startsWith("at ")
-      ? `${itemTransfer.itemLabel} is already ${holderPhrase}.`
-      : `${itemTransfer.itemLabel} is already ${holderPhrase} at ${itemTransfer.anchorSceneLabel}.`;
+    return `${itemTransferHolderPhrase(itemTransfer, "already")} at ${itemTransfer.anchorSceneLabel}.`;
   }
-  if (itemTransfer.sourceLabel && itemTransfer.targetLabel && itemTransfer.sourceLabel !== itemTransfer.targetLabel) {
-    return `${itemTransfer.itemLabel} passes from ${itemTransfer.sourceLabel} to ${itemTransfer.targetLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  if (
+    itemTransfer.resultKind === "transferred_to_actor"
+    && itemTransfer.sourceLabel
+    && itemTransfer.targetLabel
+    && itemTransfer.sourceLabel !== itemTransfer.targetLabel
+  ) {
+    return `${itemTransfer.itemLabel} changes hands from ${itemTransfer.sourceLabel} to ${itemTransfer.targetLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  if (itemTransfer.resultKind === "dropped_in_scene") {
+    return `${itemTransfer.sourceLabel} sets down ${itemTransfer.itemLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  if (itemTransfer.resultKind === "picked_up") {
+    return `${itemTransfer.targetLabel} picks up ${itemTransfer.itemLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  if (itemTransfer.resultKind === "equipped") {
+    return `${itemTransfer.targetLabel} equips ${itemTransfer.itemLabel} at ${itemTransfer.anchorSceneLabel}.`;
+  }
+  if (itemTransfer.resultKind === "unequipped") {
+    return `${itemTransfer.targetLabel} unequips ${itemTransfer.itemLabel} at ${itemTransfer.anchorSceneLabel}.`;
   }
   return settledText;
 }

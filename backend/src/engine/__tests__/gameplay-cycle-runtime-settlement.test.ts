@@ -1311,11 +1311,11 @@ describe("clean Stage 5 settlement contracts", () => {
     const itemState = packet.acceptedEvidence.find((entry) => entry.authority === "item_transfer_receipt");
     expect(itemState?.claimKinds).toEqual(["item_state"]);
     expect(itemState?.text).toBe(
-      "Brass Tube passes from Player to Guide at Market. Brass Tube is carried by Guide at Market.",
+      "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
     );
     expect(itemState?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Custody change: Brass Tube passes from Player to Guide at Market.",
-      "Settled custody: Brass Tube is carried by Guide at Market.",
+      "Custody change: Brass Tube changes hands from Player to Guide at Market.",
+      "Settled custody: Guide now carries Brass Tube at Market.",
       "Item label: Brass Tube.",
       "Source: Player.",
       "Target: Guide.",
@@ -1324,8 +1324,8 @@ describe("clean Stage 5 settlement contracts", () => {
       "Item transfer result: transferred_to_actor.",
     ]);
     expect(itemState?.backendFacts.map((entry) => entry.value)).toEqual([
-      "Brass Tube passes from Player to Guide at Market.",
-      "Brass Tube is carried by Guide at Market.",
+      "Brass Tube changes hands from Player to Guide at Market.",
+      "Guide now carries Brass Tube at Market.",
       "Brass Tube",
       "Player",
       "Guide",

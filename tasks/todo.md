@@ -8719,3 +8719,31 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Local Vendor comes into view at Lowwater Bazaar, beside the stall boards, against worn counter boards.`
     - Verified prose audit `output/clean-runtime-p324-support-actor-live-20260615T015821/prose-audit.json`: one narrative, 35 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `flatSupportActor`.
     - Verified GitNexus all-scope `detect_changes`: MEDIUM scope from 10 touched indexed symbols, 5 changed files, and one settlement-internal affected process (`Stage4Evidence -> UniqueStrings`).
+
+- P325 clean item-transfer handoff prose:
+  - Diagnosis:
+    - [x] Fresh broad scan `output/clean-runtime-p325-prose-scan-20260615T020437/summary.json` shows item transfer still reads like a ledger: `The Brass Tube leaves Mira Voss and comes into Guide's custody at Lowwater Bazaar, carried now by Guide.`
+    - [x] Settlement currently exposes `custody_change` / `settled_custody` as correct but dry logistics facts, and Stage 6 item_state examples teach `leaves ... carried now` wording.
+    - [x] Root owners are item-transfer settlement text helpers and Stage 6 item_state prompt/example material.
+  - Plan:
+    - [x] Run GitNexus impact for item-transfer settlement/projection/prompt owners before edits.
+    - [x] Rephrase accepted `custody_change` / `settled_custody` values into player-facing handoff prose such as `<Item> changes hands from <source> to <target> at <scene>.` and `<Target> now carries <item> there.`
+    - [x] Update Stage 6 item_state prompt/examples/tests so model-authored item transfer prose follows the same story-page sentence center.
+    - [x] Keep item-state truth narrow: exact item/source/target labels, final holder/equip-state, and scene anchor only; no NPC consent/reaction/dialogue/item use/discovery/private knowledge/no-change/world truth.
+    - [x] Run focused/expanded tests, typecheck, live item-transfer proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Live item-transfer narration no longer says `comes into ... custody` or `carried now by`.
+    - [x] Accepted item/source/target labels and final carried-by target remain represented by typed backend facts.
+    - [x] The fix changes typed accepted item-state material and item_state prompt examples, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented item-transfer settlement prose from typed operation/final-state fields: actor handoffs now expose `Brass Tube changes hands from Mira Voss to Guide at Market.` plus `Guide now carries Brass Tube at Market.` as accepted fact values.
+    - Added operation-specific player-facing beats for drop, pickup, equip, and unequip so non-handoff transfers no longer inherit a generic transfer phrase.
+    - Updated Stage 6 item_state prompt examples/grammar and narration fixtures away from `leaves ... carried now`, `transfers custody`, and `is carried by` wording.
+    - Verified targeted old-phrase search over changed clean-runtime item-transfer scope: zero matches for `passes from`, `carried now`, `transfers custody`, `comes into custody`, `is carried by`, and related old examples.
+    - Verified focused settlement/narration tests: `pnpm vitest run backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts backend/src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (141 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- <gameplay-cycle-runtime-*.test.ts explicit list>` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p325-item-transfer-live-20260615T022847`: real Stage 4 item transfer mutation moved `Brass Tube` to NPC `Guide`, `equipState=carried`, accepted facts are `Brass Tube changes hands from Mira Voss to Guide at Market.` and `Guide now carries Brass Tube at Market.`
+    - Verified live narration: `Brass Tube changes hands from Mira Voss to Guide at Market, and Guide now carries Brass Tube there.`
+    - Verified prose audit `output/clean-runtime-p325-item-transfer-live-20260615T022847/prose-audit.json`: one narrative, 18 words, zero one-token output, zero list-like starts, and all hit counters 0 including `flatItemTransfer`, `receiptDebug`, and `enumLeak`.
+    - Verified GitNexus all-scope `detect_changes`: LOW scope, 4 touched indexed symbols, 5 changed files, and 0 affected execution flows.
