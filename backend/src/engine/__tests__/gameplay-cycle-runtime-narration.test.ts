@@ -2332,7 +2332,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["scene_texture"],
       },
       {
-        text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "North Hall is the way onward from Market; it takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -2345,7 +2345,7 @@ describe("clean Stage 6 narration contracts", () => {
     const wrongMove = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "North Hall is the way onward from Market; it takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -2360,7 +2360,7 @@ describe("clean Stage 6 narration contracts", () => {
     const wrongSentencePlan = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "North Hall is the way onward from Market; it takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -2385,7 +2385,7 @@ describe("clean Stage 6 narration contracts", () => {
           sentencePlanRefs: ["s1"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the way onward from Market; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3263,7 +3263,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "route_choices_beat" ? { ...fact, text: "Opaque accepted route-options fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(routeOptions)).toBe("At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(renderCleanAuthorityProjection(routeOptions)).toBe("North Hall is the way onward from Market; it takes 1 minute.");
 
     const routeOptionsMissingValue = routeOptionsView();
     routeOptionsMissingValue.acceptedEvidence[0] = {
@@ -3675,7 +3675,7 @@ describe("clean Stage 6 narration contracts", () => {
       generateCandidate: async () => {
         modelCalls += 1;
         return acceptedCandidate(view, [{
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the way onward from Market; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3685,13 +3685,13 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("North Hall is the way onward from Market; it takes 1 minute.");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
 
     const manyRoutes = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
       candidate: acceptedCandidate(routeOptionsManyView(), [{
-        text: "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+        text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -3743,7 +3743,7 @@ describe("clean Stage 6 narration contracts", () => {
     const missingRouteCost = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, North Hall is the exit you can choose.",
+        text: "North Hall is the way onward from Market.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -3758,7 +3758,7 @@ describe("clean Stage 6 narration contracts", () => {
     const sceneExitShape = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+        text: "North Hall is the way onward from Market; it takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -3769,7 +3769,7 @@ describe("clean Stage 6 narration contracts", () => {
     const wideSceneExitShape = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
       candidate: acceptedCandidate(routeOptionsManyView(), [{
-        text: "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+        text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -3780,7 +3780,7 @@ describe("clean Stage 6 narration contracts", () => {
     const unsupportedSceneTextureClaim = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
       candidate: acceptedCandidate(routeOptionsManyView(), [{
-        text: "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+        text: "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
         claimKinds: ["movement_option", "scene_texture"],
@@ -3803,8 +3803,8 @@ describe("clean Stage 6 narration contracts", () => {
         prompts.push(prompt);
         return acceptedCandidate(view, [{
           text: prompts.length === 1
-            ? "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose."
-            : "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+            ? "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar."
+            : "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3816,7 +3816,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(prompts[1]).toContain("sharedCostText 1 minute");
     expect(result.source).toBe("model");
     expect(result.text).toBe(
-      "At Lowwater Bazaar, Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are exits you can choose; each takes 1 minute.",
+      "Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.",
     );
   });
 
@@ -3833,7 +3833,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the way onward from Market; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3842,7 +3842,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. At Market, North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. North Hall is the way onward from Market; it takes 1 minute.");
     expect(result.text).toContain("North Hall");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|you go|you walk|arrive)\b/iu);
 
@@ -3875,7 +3875,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the way onward from Market; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3894,7 +3894,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose; it takes 1 minute.",
+          text: "North Hall is the way onward from Market; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3906,7 +3906,7 @@ describe("clean Stage 6 narration contracts", () => {
     const uncitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Market stalls surround you while North Hall is the exit you can choose; it takes 1 minute.",
+        text: "Market stalls surround you while North Hall is the way onward from here; it takes 1 minute.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f4", "e1.f6"],
         claimKinds: ["movement_option"],
@@ -3917,7 +3917,7 @@ describe("clean Stage 6 narration contracts", () => {
     const wrongCitedTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Market stalls surround you while North Hall is the exit you can choose; it takes 1 minute.",
+        text: "Market stalls surround you while North Hall is the way onward from here; it takes 1 minute.",
         evidenceRefs: ["e1", "e2"],
         backendFactRefs: ["e1.f4", "e1.f6", "e2.f1"],
         claimKinds: ["movement_option", "scene_texture"],
@@ -3936,7 +3936,7 @@ describe("clean Stage 6 narration contracts", () => {
         attempts += 1;
         expect(request.prompt).not.toContain("Stage 6 validation feedback");
         return acceptedCandidate(view, [{
-          text: "Market stalls surround you while North Hall is the exit you can choose; it takes 1 minute.",
+          text: "Market stalls surround you while North Hall is the way onward from here; it takes 1 minute.",
           evidenceRefs: ["e1"],
           backendFactRefs: ["e1.f4", "e1.f6"],
           claimKinds: ["movement_option"],
@@ -3946,7 +3946,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Market stalls surround you while North Hall is the exit you can choose; it takes 1 minute.");
+    expect(result.text).toBe("Market stalls surround you while North Hall is the way onward from here; it takes 1 minute.");
   });
 
   it("projects standalone elapsed-time runtime prose before model generation or prose repair", async () => {
@@ -4077,7 +4077,7 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["inventory_status"],
           },
           {
-            text: "North Hall is the exit you can choose.",
+            text: "North Hall is the way onward from here.",
             evidenceRefs: ["e5"],
             backendFactRefs: ["e5.f3", "e5.f4"],
             claimKinds: ["movement_option"],
@@ -4088,7 +4088,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(attempts).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is in view, with Brass Tube and Notice Board visible nearby. Courier satchel is in your keeping. North Hall is the exit you can choose.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Guide is in view, with Brass Tube and Notice Board visible nearby. Courier satchel is in your keeping. North Hall is the way onward from here.");
   });
 
   it("uses deterministic authority projection for clarification requests before scene snapshot context", async () => {
@@ -4149,7 +4149,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4158,7 +4158,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. Courier satchel is in your keeping. North Hall is the exit you can choose.");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Notice Board is visible. Courier satchel is in your keeping. North Hall is the way onward from here.");
     expect(result.text).not.toMatch(/\b(Current scene|Current place|Inventory item|Visible target|Route option|connected|move|arrive|travel to|you go|hidden|absent|nothing changed|no change)\b/iu);
 
     const missingTexture = validateCleanNarrationCandidate({
@@ -4177,7 +4177,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4204,7 +4204,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status", "visible_target"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4237,7 +4237,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4268,7 +4268,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "At Market, North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from Market.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
@@ -4350,7 +4350,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f3", "e5.f4"],
           claimKinds: ["movement_option"],
@@ -4393,7 +4393,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is the exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f3", "e5.f4"],
           claimKinds: ["movement_option"],
@@ -5654,7 +5654,7 @@ describe("clean Stage 6 narration contracts", () => {
             claimKinds: ["inventory_status"],
           },
           {
-            text: "North Hall is an exit you can choose.",
+            text: "North Hall is the way onward from here.",
             evidenceRefs: ["e5"],
             backendFactRefs: ["e5.f7"],
             claimKinds: ["movement_option"],
@@ -5665,7 +5665,7 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(modelCalls).toBe(1);
     expect(result.source).toBe("model");
-    expect(result.text).toBe("At Market, Guide is in view. Courier satchel is in your keeping. North Hall is an exit you can choose.");
+    expect(result.text).toBe("At Market, Guide is in view. Courier satchel is in your keeping. North Hall is the way onward from here.");
     expect(result.text).not.toMatch(/\b(Current scene is|Visible actor:|Inventory item:|Movement option:|backend|receipt|nothing changed|no change)\b/iu);
 
     const inventoryPhrase = validateCleanNarrationCandidate({
@@ -5684,7 +5684,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is an exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f7"],
           claimKinds: ["movement_option"],
@@ -5725,7 +5725,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is an exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f7"],
           claimKinds: ["movement_option"],
@@ -5757,7 +5757,7 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["inventory_status"],
         },
         {
-          text: "North Hall is an exit you can choose.",
+          text: "North Hall is the way onward from here.",
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f7"],
           claimKinds: ["movement_option"],
@@ -5765,7 +5765,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
     expect(texturedResult.source).toBe("model");
-    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view. Courier satchel is in your keeping. North Hall is an exit you can choose.");
+    expect(texturedResult.text).toBe("Canvas awnings hang over the market lanes. At Market, Guide is in view. Courier satchel is in your keeping. North Hall is the way onward from here.");
   });
 
   it("renders device_surface_observation evidence without private messages, no-signal, no-message, or no-change claims", () => {
@@ -6288,7 +6288,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line");
     expect(buildCleanNarrationSystemPrompt()).toContain("quote frame");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("At Lowwater Bazaar, Anchor Chain Pylon and The Copper Tap are exits you can choose; each takes 1 minute.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Anchor Chain Pylon and The Copper Tap are the ways onward from Lowwater Bazaar; each takes 1 minute.");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
@@ -6307,7 +6307,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("answer the checked path as a route_status_line");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase the route_beat into ordinary path-status prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as scene exits the player can choose");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as the ways onward");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_exit_choice_line with exits_then_costs");
     expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");

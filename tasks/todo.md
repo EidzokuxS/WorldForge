@@ -8611,3 +8611,30 @@ Session: `gm-v1-consequenc-slice`.
     - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Guide is in sight at Lowwater Bazaar. Courier satchel, Sealed lacquer message tube, and Brass Tube are in your keeping. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from here.`
     - Verified prose audit `output/clean-runtime-p320-direct-scene-live-20260615-034506/prose-audit.json`: one narrative, 66 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `directSceneDigest`.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 7 touched indexed symbols, 3 changed files, and 0 affected execution flows.
+
+- P321 clean standalone route-options prose:
+  - Diagnosis:
+    - [x] Standalone route-options projection and prompt examples still teach menu-like phrasing: `At Market, North Hall is the exit you can choose; it takes 1 minute.`
+    - [x] Direct-scene route handoff already uses stronger adventure diction: `<label> is the way onward from <origin>`.
+    - [x] Root owners are Stage 6 `renderRouteOptionsProjection()` for deterministic fallback and `buildCleanNarrationSystemPrompt()` for model-authored route-option examples/instructions.
+  - Plan:
+    - [x] Run GitNexus impact for `renderRouteOptionsProjection`, `renderDirectSceneRouteProjection`, and `buildCleanNarrationSystemPrompt` before edits.
+    - [x] Replace standalone route-option fallback wording with `way(s) onward from <origin>` while preserving labels/costs.
+    - [x] Update prompt examples/tests so model-authored route-options prose follows the same player-facing route handoff.
+    - [x] Preserve route truth boundaries: no movement, no arrival, no route safety, no hidden-route claims, no current-scene change.
+    - [x] Run focused/expanded tests, typecheck, live route proof/audit, GitNexus scope, commit/push/index.
+  - Success criteria:
+    - [x] Standalone route-options output no longer says `exit(s) you can choose`.
+    - [x] Every accepted route label and cost remains represented when supplied.
+    - [x] The fix changes typed Stage 6 projection/prompt material, not regex cleanup, semantic banlists, or gameplay fallback.
+  - Review:
+    - Implemented shared `renderRouteChoiceProjectionLine()` so standalone `route_options_receipt` and direct-scene route handoff now use the same accepted route labels/origin/costs phrasing path.
+    - Updated Stage 6 prompt route examples and route-options/direct-scene surface instructions from `exit(s) you can choose` to `way(s) onward`, while keeping internal sentence-plan shape ids unchanged.
+    - Updated positive route-options and direct-scene narration tests so model-authored examples cite the same route truth with `from <route_origin>` when route-origin material is cited, or `from here` when the route evidence lacks route-origin material.
+    - Verified focused narration suite: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (118 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts --run` (392 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p321-route-options-live-r3-20260615-040532`: route-options turn settled with `mutationApplied=false`, one accepted `route_options` Stage 4 receipt, unchanged `worldVersion/worldTimeMinutes/currentTick`, one clean turn record, zero old stores, and `p321-route-wording-proof.json` passed.
+    - Verified live narration: `Wooden platforms lashed to anchored barges form a shifting grid of walkways and stalls above the slow canal current. Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar; each takes 1 minute.`
+    - Verified prose audit `output/clean-runtime-p321-route-options-live-r3-20260615-040532/prose-audit.json`: one narrative, 51 words, zero one-token output, zero `youOpening`, zero list-like starts, and all hit counters 0 including `oldRouteFormula`, `stockRouteOptions`, and `optionMenu`.
+    - Verified GitNexus all/staged `detect_changes`: LOW scope, 4 touched indexed symbols, 3 changed files, and 0 affected execution flows.
