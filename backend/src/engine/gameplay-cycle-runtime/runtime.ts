@@ -126,6 +126,7 @@ export interface CleanGameplayRuntimeCoreOptions {
   runNarration?: (input: {
     narratorView: ReturnType<typeof buildCleanNarratorView>;
     provider: ProviderConfig;
+    recentPlayerFacingText?: readonly string[];
   }) => Promise<CleanNarrationRunResult>;
 }
 
@@ -144,6 +145,18 @@ function providerSummary(provider: ProviderConfig): GameplayRuntimeProviderSumma
     model: provider.model ?? null,
     baseUrl: provider.baseUrl ?? null,
   };
+}
+
+function recentAssistantPlayerFacingText(campaignId: string, limit = 24): string[] {
+  const history = getChatHistory(campaignId);
+  const recent: string[] = [];
+  for (let index = history.length - 1; index >= 0 && recent.length < limit; index -= 1) {
+    const message = history[index];
+    if (message?.role !== "assistant") continue;
+    const content = message.content.trim();
+    if (content.length > 0) recent.push(content);
+  }
+  return recent.reverse();
 }
 
 function readExistingWorldClock(campaignId: string): {
@@ -488,9 +501,11 @@ export async function* processCleanGameplayTurnFromInput(
     stage4Execution: stage4Execution?.execution ?? null,
   });
   const narratorView = buildCleanNarratorView(settledPacket);
+  const recentPlayerFacingText = recentAssistantPlayerFacingText(turn.campaignId);
   const narration = await (options.runNarration ?? runCleanNarration)({
     narratorView,
     provider: options.storytellerProvider ?? options.judgeProvider,
+    recentPlayerFacingText,
   });
   const narrativeText = narration.text;
   const projection = buildFrozenProjection({
@@ -527,6 +542,7 @@ export async function* processCleanGameplayTurnFromInput(
       settledPacket,
       narratorView,
     },
+    ...(narration.proof ? { narration: narration.proof } : {}),
   });
   yield {
     type: "done",

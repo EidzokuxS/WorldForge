@@ -1703,6 +1703,11 @@ function collectDialoguePrivateTermIssues(input: {
     : [];
 }
 
+function looksLikeTruncatedGeneratedText(value: string | null | undefined): boolean {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.endsWith("...") || trimmed.endsWith("…");
+}
+
 export function validateDialogueRequestEffectCandidate(input: {
   frame: AuthoritativeSceneFrame;
   step: Step;
@@ -1742,6 +1747,10 @@ export function validateDialogueRequestEffectCandidate(input: {
     ...effect.addresseeRefs,
     ...effect.evidenceRefs,
   ]);
+  const plannedRoleRefs = uniqueStrings([
+    effect.speakerRef,
+    ...effect.addresseeRefs,
+  ]);
 
   for (const ref of refs) {
     if (!citable.has(normalizedRef(ref))) {
@@ -1751,11 +1760,11 @@ export function validateDialogueRequestEffectCandidate(input: {
         message: `Dialogue request cited ref "${ref}" outside SceneFrame.citableRefs.`,
       });
     }
-    if (!planned.has(normalizedRef(ref))) {
+    if (plannedRoleRefs.includes(ref) && !planned.has(normalizedRef(ref))) {
       issues.push({
         code: "unplanned_ref",
         path: "refs",
-        message: `Dialogue request cited ref "${ref}" outside the accepted checklist step scope.`,
+        message: `Dialogue request used speaker/addressee ref "${ref}" outside the accepted checklist step scope.`,
       });
     }
     if (backendRefIssue(ref)) {
@@ -1828,6 +1837,20 @@ export function validateDialogueRequestEffectCandidate(input: {
       code: "speaker_invalid",
       path: "addresseeRefs",
       message: "Dialogue request must include Player as an addressee in P65.",
+    });
+  }
+  if (effect.response.kind === "speech" && looksLikeTruncatedGeneratedText(effect.response.quotedSpeech)) {
+    issues.push({
+      code: "schema_invalid",
+      path: "response.quotedSpeech",
+      message: "Dialogue quotedSpeech must be complete text, not an ellipsis-truncated fragment.",
+    });
+  }
+  if (looksLikeTruncatedGeneratedText(effect.response.summary)) {
+    issues.push({
+      code: "schema_invalid",
+      path: "response.summary",
+      message: "Dialogue summary must be complete text, not an ellipsis-truncated fragment.",
     });
   }
 
@@ -1934,11 +1957,7 @@ function dialogueTaskCard(input: {
       ref: input.frame.player.ref,
       label: input.frame.player.label,
     },
-    allowedEvidenceRefs: uniqueStrings([
-      input.frame.player.ref,
-      ...input.step.targetRefs,
-      ...input.step.evidenceRefs,
-    ]),
+    allowedEvidenceRefs: uniqueStrings(input.frame.citableRefs),
     currentItemHolders,
     responseAuthority: {
       evidenceKind: "visible_speaker_response_content",
@@ -1958,6 +1977,8 @@ export function buildStage4DialogueRequestSystemPrompt(): string {
     "For non-silence outcomes, response.kind must be speech and quotedSpeech is required.",
     "For silence outcomes, response.kind must be silence and quotedSpeech must be null.",
     "response.summary restates the same visible response content in one concise sentence.",
+    "For speech outcomes, quotedSpeech should be one or two complete sentences under 360 characters.",
+    "Do not use trailing ellipsis or cut-off fragments in quotedSpeech or summary; a dialogue receipt must be complete visible speech.",
     "stateEffects.appliesState is false for this clean dialogue task.",
     "World-state, relationship, item, condition, location, movement, memory, and durable-event authority belongs to backend receipts; dialogue stores visible response content.",
     "For current item holder/custody answers, Dialogue task card currentItemHolders is the complete evidence basis for quotedSpeech and summary.",
@@ -2956,8 +2977,25 @@ function localObservationRequiresSurfaceContentProof(effect: LocalObservationEff
     "unlock",
     "activate",
     "activation",
+    "authorization",
+    "authorisation",
+    "threading",
+    "contact seating",
+    "relay hardware",
+    "hardware mark",
+    "hardware marks",
+    "route-opening",
+    "route opening",
+    "coded mark",
+    "coded marking",
+    "latch",
+    "hidden seam",
+    "damage",
+    "damaged",
     "reveals a route",
     "reveal a route",
+    "visible label",
+    "visible labels",
     "means anything",
     "mean anything",
     "meaning",

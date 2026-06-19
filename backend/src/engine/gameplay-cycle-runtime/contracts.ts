@@ -2887,6 +2887,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "elapsed_time_value",
       "item_custody_state",
       "observed_visible_entries",
+      "playable_room_state",
       "playable_route_choices",
       "player_scene_position",
       "settled_result_material",
@@ -2896,6 +2897,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
     verbFrame: z.enum([
       "ask_direct_question",
       "copy_visible_texture",
+      "compose_playable_room_beat",
       "frame_exact_utterance",
       "land_settled_result",
       "land_item_custody",
@@ -2912,6 +2914,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "accepted_primary_beat",
       "accepted_question",
       "accepted_quote",
+      "accepted_room_state",
       "accepted_route_choices",
       "accepted_state",
       "accepted_texture",
@@ -2934,6 +2937,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "item_custody_line",
       "local_observation_line",
       "minor_poi_handle_line",
+      "playable_room_beat_line",
       "quote_framed_beat",
       "result_beat_line",
       "route_status_line",
@@ -2984,6 +2988,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "item_custody_with_scene_anchor",
       "minor_poi_with_kind_scene_anchor",
       "observed_labels_with_scene_anchor",
+      "room_beat_with_state_and_exits",
       "query_with_scene_anchor",
       "route_status_with_label",
       "actor_role_with_scene_anchor",
@@ -3004,6 +3009,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "item_source_target_state_scene_then_custody_proof",
       "minor_poi_label_kind_then_scene",
       "observed_labels_then_scene",
+      "scene_actor_inventory_then_exits",
       "query_scene_then_bounded_no_match_proof",
       "actor_then_role_then_scene",
       "actor_then_scene_with_role_context",
@@ -3032,6 +3038,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "route_status_cadence",
       "scene_beat_surface_cadence",
       "scene_exit_handoff_cadence",
+      "playable_room_beat_cadence",
       "scene_anchor_cadence",
       "scene_custody_cadence",
       "support_presence_cadence",
@@ -3218,6 +3225,27 @@ const cleanNarratorPageVariationSchema = z.object({
     "time_pressure",
   ])).min(1).max(7),
   variationBoundary: z.literal("vary_syntax_only_inside_cited_material"),
+  openingDoor: z.enum([
+    "accepted_texture_first",
+    "choice_handoff_first",
+    "core_result_first",
+    "object_or_actor_first",
+    "sensory_strike_first",
+    "speech_first",
+  ]),
+  recentSurfaceAvoid: z.object({
+    source: z.literal("recent_player_facing_style_only"),
+    maySupportWorldTruth: z.literal(false),
+    recentOpeningDoors: z.array(z.enum([
+      "accepted_texture_first",
+      "choice_handoff_first",
+      "core_result_first",
+      "object_or_actor_first",
+      "sensory_strike_first",
+      "speech_first",
+    ])).max(24),
+    recentFirstSentenceShapes: z.array(shortText).max(24),
+  }).strict(),
 }).strict();
 
 const cleanNarratorPageFocusSchema = z.object({
@@ -3295,6 +3323,38 @@ const cleanNarratorChoicePresentationSchema = z.object({
   ]),
 }).strict();
 
+const cleanNarratorDirectScenePresentationSchema = z.object({
+  mode: z.enum([
+    "look_around_digest",
+    "none",
+    "playable_room_beat",
+  ]),
+  sourceMoveRefs: z.array(shortText).max(4),
+  sourceSentenceRefs: z.array(shortText).max(6),
+  sentenceObjectPolicy: z.enum([
+    "none",
+    "optional_texture_then_single_room_beat",
+    "single_room_beat",
+  ]),
+  roomBeatSplitPolicy: z.enum([
+    "actor_inventory_routes_same_sentence_text",
+    "none",
+  ]),
+  catalogPolicy: z.enum([
+    "no_receipt_lists",
+    "none",
+  ]),
+  mergeAllowed: z.boolean(),
+  routeClose: z.enum([
+    "final_handoff_when_present",
+    "none",
+  ]),
+  inventoryPolicy: z.enum([
+    "none",
+    "subordinate_unless_core",
+  ]),
+}).strict();
+
 const cleanNarratorStoryPageBriefSchema = z.object({
   pageKind: z.enum([
     "audit_notice_page",
@@ -3345,6 +3405,7 @@ const cleanNarratorPageTaskSchema = z.object({
   pageVariation: cleanNarratorPageVariationSchema,
   pageFocus: cleanNarratorPageFocusSchema,
   choicePresentation: cleanNarratorChoicePresentationSchema,
+  directScenePresentation: cleanNarratorDirectScenePresentationSchema,
   moves: z.array(cleanNarratorPageTaskMoveSchema).max(4),
   sentencePlan: z.array(cleanNarratorSentencePlanStepSchema).max(6),
 }).strict();
@@ -3447,6 +3508,56 @@ export const cleanNarrationResultSchema = z.object({
   ]),
 }).strict();
 
+const cleanNarrationProofValidationIssueSchema = z.object({
+  code: shortText,
+  path: z.string().trim().min(1).max(300),
+  message: z.string().trim().min(1).max(700),
+}).strict();
+
+export const cleanNarrationProofSchema = z.object({
+  version: z.literal("gameplay-runtime.clean-narration-proof.v1"),
+  result: cleanNarrationResultSchema,
+  promptInput: cleanNarratorPromptInputSchema,
+  candidate: cleanNarrationCandidateSchema.nullable(),
+  validation: z.object({
+    status: z.enum(["accepted", "deterministic_authority_projection"]),
+    issues: z.array(cleanNarrationProofValidationIssueSchema).max(24),
+  }).strict(),
+}).strict().superRefine((proof, ctx) => {
+  if (proof.result.packetId !== proof.promptInput.packetId) {
+    ctx.addIssue({ code: "custom", path: ["result", "packetId"], message: "Narration proof result packetId must match promptInput." });
+  }
+  if (proof.result.turnId !== proof.promptInput.turnId) {
+    ctx.addIssue({ code: "custom", path: ["result", "turnId"], message: "Narration proof result turnId must match promptInput." });
+  }
+  if (proof.result.source === "model") {
+    if (proof.validation.status !== "accepted") {
+      ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Model narration proof must carry accepted validation status." });
+    }
+    if (proof.candidate === null) {
+      ctx.addIssue({ code: "custom", path: ["candidate"], message: "Model narration proof must preserve the accepted model candidate." });
+    } else {
+      if (proof.candidate.packetId !== proof.result.packetId) {
+        ctx.addIssue({ code: "custom", path: ["candidate", "packetId"], message: "Narration proof candidate packetId must match result." });
+      }
+      if (proof.candidate.turnId !== proof.result.turnId) {
+        ctx.addIssue({ code: "custom", path: ["candidate", "turnId"], message: "Narration proof candidate turnId must match result." });
+      }
+      if (proof.candidate.finalText !== proof.result.text) {
+        ctx.addIssue({ code: "custom", path: ["candidate", "finalText"], message: "Narration proof candidate finalText must match result text." });
+      }
+    }
+  }
+  if (proof.result.source === "deterministic_authority_projection") {
+    if (proof.validation.status !== "deterministic_authority_projection") {
+      ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Deterministic narration proof must carry deterministic validation status." });
+    }
+    if (proof.candidate !== null) {
+      ctx.addIssue({ code: "custom", path: ["candidate"], message: "Deterministic narration proof must not carry a model candidate." });
+    }
+  }
+});
+
 const publicSafeRuntimeId = z.string().trim().regex(
   /^[a-z][a-z0-9_]{7,96}$/u,
   "Clean runtime public ids must be stable public-safe tokens.",
@@ -3526,6 +3637,7 @@ export const cleanPlayerFacingTurnRecordSchema = z.object({
     settledPacket: cleanSettledTurnPacketSchema,
     narratorView: cleanNarratorViewSchema,
   }).strict(),
+  narration: cleanNarrationProofSchema.optional(),
   evidenceRefs: z.array(cleanPlayerFacingTurnEvidenceRefSchema).min(1).max(8),
   durableEventIds: z.object({
     accepted: z.array(shortText).max(0),
@@ -3622,6 +3734,7 @@ export type CleanNarratorPromptInput = z.infer<typeof cleanNarratorPromptInputSc
 export type CleanNarrationSentence = z.infer<typeof cleanNarrationSentenceSchema>;
 export type CleanNarrationCandidate = z.infer<typeof cleanNarrationCandidateSchema>;
 export type CleanNarrationResult = z.infer<typeof cleanNarrationResultSchema>;
+export type CleanNarrationProof = z.infer<typeof cleanNarrationProofSchema>;
 export type FrozenApiProjection = z.infer<typeof frozenApiProjectionSchema>;
 export type CleanPlayerFacingTurnEvidenceRef = z.infer<typeof cleanPlayerFacingTurnEvidenceRefSchema>;
 export type CleanPlayerFacingTurnDoneBoundary = z.infer<typeof cleanPlayerFacingTurnDoneBoundarySchema>;

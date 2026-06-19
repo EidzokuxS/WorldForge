@@ -6,6 +6,7 @@ import { getSqliteConnection } from "../../db/index.js";
 import { withSqliteWriteLock } from "../../db/sqlite-write-lock.js";
 import {
   assertCleanPlayerFacingTurnRecord,
+  type CleanNarrationProof,
   type CleanNarratorView,
   type CleanPlayerFacingTurnDoneBoundary,
   type CleanPlayerFacingTurnEvidenceRef,
@@ -33,6 +34,7 @@ export interface CommitCleanPlayerFacingTurnInput {
     settledPacket: CleanSettledTurnPacket;
     narratorView: CleanNarratorView;
   };
+  narration?: CleanNarrationProof;
   evidenceRefs: CleanPlayerFacingTurnEvidenceRef[];
   now?: number;
   chat?: CleanPlayerFacingTurnChatAdapter;
@@ -165,6 +167,7 @@ function buildRecord(input: {
     settledPacket: CleanSettledTurnPacket;
     narratorView: CleanNarratorView;
   };
+  narration?: CleanNarrationProof;
   evidenceRefs: CleanPlayerFacingTurnEvidenceRef[];
   beforeLength: number;
   afterHistory: ChatMessage[];
@@ -212,6 +215,7 @@ function buildRecord(input: {
     },
     terminalProjection: input.projection,
     settlement: input.settlement,
+    ...(input.narration ? { narration: input.narration } : {}),
     evidenceRefs: input.evidenceRefs,
     durableEventIds: {
       accepted: [],
@@ -281,6 +285,7 @@ export async function commitCleanPlayerFacingTurn(
       turn: input.turn,
       projection: input.projection,
       settlement: input.settlement,
+      narration: input.narration,
       evidenceRefs: input.evidenceRefs,
       beforeLength: expectedBefore,
       afterHistory,

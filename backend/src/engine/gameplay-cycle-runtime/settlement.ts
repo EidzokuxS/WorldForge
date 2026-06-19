@@ -319,14 +319,89 @@ function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function whetherPresenceSubject(questionBody: string): string | null {
+  const lowerBody = questionBody.toLocaleLowerCase("en-US");
+  const suffixes = [
+    " is visibly present",
+    " are visibly present",
+    " is visible",
+    " are visible",
+    " is present",
+    " are present",
+  ];
+  for (const suffix of suffixes) {
+    if (lowerBody.endsWith(suffix)) {
+      const subject = questionBody.slice(0, questionBody.length - suffix.length).trim();
+      return subject.length > 0 ? subject : null;
+    }
+  }
+  return null;
+}
+
+function whetherSurfaceFinding(input: string): { surface: string; finding: string } | null {
+  const lowerInput = input.toLocaleLowerCase("en-US");
+  for (const marker of [" reveal ", " reveals ", " show ", " shows "]) {
+    const index = lowerInput.indexOf(marker);
+    if (index <= 0) continue;
+    const surface = input.slice(0, index).trim();
+    const finding = input.slice(index + marker.length).trim();
+    if (surface.length > 0 && finding.length > 0) {
+      return { surface, finding };
+    }
+  }
+  return null;
+}
+
+function visibleSurfacePhrase(surface: string): string {
+  const prefix = "visible details on ";
+  if (surface.toLocaleLowerCase("en-US").startsWith(prefix)) {
+    const target = surface.slice(prefix.length).trim();
+    if (target.length > 0) return `on ${target}`;
+  }
+  return `in ${surface}`;
+}
+
+function visibleFindingPhrase(finding: string): string {
+  const visiblePrefix = "visible ";
+  const trimmed = finding.trim();
+  if (trimmed.toLocaleLowerCase("en-US").startsWith(visiblePrefix)) {
+    const withoutVisible = trimmed.slice(visiblePrefix.length).trim();
+    if (withoutVisible.length > 0) return withoutVisible;
+  }
+  return trimmed;
+}
+
+function observationSurfaceFinding(input: string): { surface: string; finding: string } | null {
+  const marker = " on ";
+  const lowerInput = input.toLocaleLowerCase("en-US");
+  const index = lowerInput.lastIndexOf(marker);
+  if (index <= 0) return null;
+  const finding = input.slice(0, index).trim();
+  const surface = input.slice(index + marker.length).trim();
+  if (finding.length === 0 || surface.length === 0) return null;
+  return { finding, surface };
+}
+
 function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneLabel: string): string {
   const query = queryText.trim();
   if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
     const questionBody = query.slice("whether ".length).trim();
     if (questionBody.length > 0) {
-      return `No visible sign at ${anchorSceneLabel} settles whether ${questionBody}.`;
+      const presenceSubject = whetherPresenceSubject(questionBody);
+      if (presenceSubject) {
+        return `No visible sign of ${presenceSubject} shows at ${anchorSceneLabel}.`;
+      }
+      const surfaceFinding = whetherSurfaceFinding(questionBody);
+      if (surfaceFinding) {
+        return `No visible sign of ${visibleFindingPhrase(surfaceFinding.finding)} shows ${visibleSurfacePhrase(surfaceFinding.surface)} at ${anchorSceneLabel}.`;
+      }
+      return `At ${anchorSceneLabel}, nothing visible supports that ${questionBody}.`;
     }
-    return `No visible sign at ${anchorSceneLabel} settles that question.`;
+    return `At ${anchorSceneLabel}, nothing visible supports that question.`;
+  }
+  const surfaceFinding = observationSurfaceFinding(query);
+  if (surfaceFinding) {
+    return `No visible sign of ${visibleFindingPhrase(surfaceFinding.finding)} shows on ${surfaceFinding.surface} at ${anchorSceneLabel}.`;
   }
   const lowerQuery = query.toLocaleLowerCase("en-US");
   const personPropertyPrefixes = [
@@ -1316,8 +1391,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const routeStatus = routeCheck.status;
       const routeLabel = routeCheck.label;
       const routeBeat = routeStatus === "connected"
-        ? `${routeLabel} lies open from here.`
-        : `${routeLabel} is closed from here.`;
+        ? `The path to ${routeLabel} is open from here.`
+        : `The path to ${routeLabel} is closed from here.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",
@@ -1793,6 +1868,40 @@ function oracleEvidence(settlement: OracleSettlement, evidence: CleanSettledEvid
   });
 }
 
+function nonAcceptedStepPublicReason(receipt: CleanStage4Receipt): string {
+  if (receipt.status === "skipped") {
+    return "That planned beat was skipped because its visible setup did not resolve.";
+  }
+
+  switch (receipt.capabilityId) {
+    case "item_transfer":
+      return "The handoff does not resolve from the current visible item state.";
+    case "movement":
+      return "The move does not resolve from the current visible route state.";
+    case "route_check":
+      return "That route check does not resolve from the current visible route state.";
+    case "route_options":
+      return "The visible route list does not resolve from the current route state.";
+    case "dialogue_record":
+      return "That exchange does not resolve for a visible speaker.";
+    case "support_actor_create":
+      return "That local presence does not resolve from the current visible scene.";
+    case "condition_set":
+      return "That posture change does not resolve from the current visible position.";
+    case "minor_poi_create":
+      return "That local point does not resolve from the current visible scene.";
+    case "device_surface_observation":
+      return "That device-surface check does not resolve from the current visible item state.";
+    case "observe_visible":
+    case "local_observation":
+    case "scene_beat_record":
+    case "time_advance":
+      return "That beat does not resolve from the current visible situation.";
+  }
+
+  return "That beat does not resolve from the current visible situation.";
+}
+
 function stepAudit(input: {
   checklist: GmActionChecklist | null;
   stage4Execution: CleanStage4ExecutionResult | null;
@@ -1823,7 +1932,7 @@ function stepAudit(input: {
       authority: receipt.authority.evidenceAuthority,
       publicReason: receipt.status === "accepted"
         ? receipt.publicResult.summary
-        : receipt.failure?.message ?? receipt.publicResult.summary,
+        : nonAcceptedStepPublicReason(receipt),
       maySupportWorldClaim: false,
     };
   });

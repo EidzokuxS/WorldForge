@@ -162,6 +162,10 @@ function openingDoor(text) {
 function directSceneImpliedActionSupportedByPlayerAction(row) {
   const text = row.text;
   const action = String(row.action ?? "");
+  const receiptCaps = Array.isArray(row.receiptCaps) ? row.receiptCaps : [];
+  if (receiptCaps.some((receipt) => receipt?.capabilityId === "scene_beat_record")) {
+    return true;
+  }
   if (/^You stand in [^.!?]+[.!?,]/iu.test(text)) {
     return true;
   }
@@ -184,6 +188,7 @@ for (const root of roots) {
       file,
       action: data.action ?? data.playerAction ?? null,
       text,
+      receiptCaps: data?.db?.receiptCaps ?? [],
       wordCount: words(text).length,
     });
   }

@@ -4,8 +4,10 @@ import {
   assertCleanNarrationResult,
   assertCleanNarratorPromptInput,
   cleanNarrationCandidateSchema,
+  cleanNarrationProofSchema,
   type CleanNarrationCandidate,
   type CleanNarrationLanguage,
+  type CleanNarrationProof,
   type CleanNarrationResult,
   type CleanNarratorPromptInput,
   type CleanNarratorView,
@@ -44,6 +46,7 @@ export type CleanNarrationStyleMode = "grounded_clean" | "realism_nsfw";
 
 export type CleanNarrationRunResult = CleanNarrationResult & {
   validationIssues: CleanNarrationValidationIssue[];
+  proof?: CleanNarrationProof;
 };
 
 export class CleanNarrationGenerationError extends Error {
@@ -183,6 +186,32 @@ function preferredPromptFactsByRole(
   return uniqueFactsByRef([...preferred, ...evidence.backendFacts]);
 }
 
+function promptFactsByRoleStrict(
+  evidence: AcceptedNarrationEvidence,
+  roles: readonly AcceptedNarrationBackendFactRole[],
+): AcceptedNarrationBackendFact[] {
+  const missingRoleFact = evidence.backendFacts.find((fact) => fact.role === undefined);
+  if (missingRoleFact) {
+    throw new Error(`Prompt fact selection for ${evidence.authority} requires typed backend fact roles.`);
+  }
+  const selected = roles.flatMap((role) =>
+    evidence.backendFacts.filter((fact) => fact.role === role)
+  );
+  if (selected.length === 0) {
+    throw new Error(`Prompt fact selection for ${evidence.authority} requires at least one selected backend fact role.`);
+  }
+  return uniqueFactsByRef(selected);
+}
+
+function promptDialogueFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
+  const hasQuote = evidence.backendFacts.some((fact) =>
+    fact.role === "dialogue_quote" && (fact.value ?? fact.text).trim().length > 0
+  );
+  return hasQuote
+    ? promptFactsByRoleStrict(evidence, ["speaker_label", "dialogue_quote"])
+    : promptFactsByRoleStrict(evidence, ["speaker_label", "dialogue_summary"]);
+}
+
 function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarrationBackendFact[] {
   if (evidence.claimKinds.includes("item_state")) {
     return preferredPromptFactsByRole(evidence, [
@@ -197,11 +226,7 @@ function preferredPromptFacts(evidence: AcceptedNarrationEvidence): AcceptedNarr
     ]);
   }
   if (evidence.claimKinds.includes("dialogue_response")) {
-    return preferredPromptFactsByRole(evidence, [
-      "speaker_label",
-      "dialogue_quote",
-      "dialogue_summary",
-    ]);
+    return promptDialogueFacts(evidence);
   }
   if (evidence.claimKinds.includes("route_status")) {
     return preferredPromptFactsByRole(evidence, [
@@ -326,6 +351,12 @@ function limitPromptEvidenceFacts(evidence: AcceptedNarrationEvidence): Accepted
   assertDeviceSurfaceStoryEvidence(evidence);
   assertSceneBeatStoryEvidence(evidence);
   assertSupportActorStoryEvidence(evidence);
+  if (evidence.claimKinds.includes("dialogue_response")) {
+    return {
+      ...evidence,
+      backendFacts: promptDialogueFacts(evidence).map(promptSafeBackendFact),
+    };
+  }
   const maxFacts = maxPromptBackendFactsForEvidence(evidence);
   const backendFacts = evidence.backendFacts.length <= maxFacts
     ? evidence.backendFacts
@@ -424,7 +455,31 @@ function terminalEvidenceNeedsSceneTexture(
   );
 }
 
-function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarrationEvidence[] {
+function sceneTextureEvidenceRecentlySpent(
+  evidence: AcceptedNarrationEvidence,
+  recentSurfaceAvoid: CleanNarratorPageVariation["recentSurfaceAvoid"],
+): boolean {
+  if (!evidence.claimKinds.includes("scene_texture")) return false;
+  if (recentSurfaceAvoid.recentFirstSentenceShapes.length === 0) return false;
+  const recentShapes = recentSurfaceAvoid.recentFirstSentenceShapes
+    .map((shape) => normalizeRecentPlayerFacingText(shape).toLowerCase())
+    .filter((shape) => shape.length > 0);
+  return evidence.backendFacts.some((fact) => {
+    const value = fact.value?.trim();
+    const normalizedValue = typeof value === "string"
+      ? normalizeRecentPlayerFacingText(value).toLowerCase()
+      : "";
+    return fact.role === "scene_texture"
+      && typeof value === "string"
+      && value.length > 0
+      && recentShapes.some((shape) => normalizedValue === shape || normalizedValue.startsWith(shape));
+  });
+}
+
+function selectPromptAcceptedEvidence(
+  view: CleanNarratorView,
+  recentSurfaceAvoid: CleanNarratorPageVariation["recentSurfaceAvoid"] = buildRecentSurfaceAvoid(),
+): AcceptedNarrationEvidence[] {
   if (!isLiteraryNarrationCandidateExpected(view)) {
     return view.acceptedEvidence.map(limitPromptEvidenceFacts);
   }
@@ -434,6 +489,7 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
       .filter((fact) => fact.role === "route_choice_labels" || fact.role === "open_route_labels")
       .flatMap((fact) => acceptedLabelList(fact.value)));
     return view.acceptedEvidence
+      .filter((evidence) => !sceneTextureEvidenceRecentlySpent(evidence, recentSurfaceAvoid))
       .map((evidence) => directSceneSnapshotPromptEvidence(evidence, { routeLabels }))
       .filter((evidence): evidence is AcceptedNarrationEvidence => evidence !== null);
   }
@@ -448,6 +504,7 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
     const sceneTexture = view.acceptedEvidence.find((evidence) =>
       evidence.authority === "scene_frame_snapshot"
       && evidence.claimKinds.includes("scene_texture")
+      && !sceneTextureEvidenceRecentlySpent(evidence, recentSurfaceAvoid)
     );
     return [
       ...(sceneTexture ? [directSceneTexturePromptEvidence(sceneTexture)] : []),
@@ -461,7 +518,11 @@ function selectPromptAcceptedEvidence(view: CleanNarratorView): AcceptedNarratio
     && (
       evidence.claimKinds.includes("current_scene")
       || evidence.claimKinds.includes("current_location")
-      || (includeSceneTexture && evidence.claimKinds.includes("scene_texture"))
+      || (
+        includeSceneTexture
+        && evidence.claimKinds.includes("scene_texture")
+        && !sceneTextureEvidenceRecentlySpent(evidence, recentSurfaceAvoid)
+      )
     )
   );
   const byRef = new Set<string>();
@@ -487,6 +548,7 @@ type CleanNarratorPagePerformance = CleanNarratorPromptInput["narrativePageTask"
 type CleanNarratorPageVariation = CleanNarratorPromptInput["narrativePageTask"]["pageVariation"];
 type CleanNarratorPageFocus = CleanNarratorPromptInput["narrativePageTask"]["pageFocus"];
 type CleanNarratorChoicePresentation = CleanNarratorPromptInput["narrativePageTask"]["choicePresentation"];
+type CleanNarratorDirectScenePresentation = CleanNarratorPromptInput["narrativePageTask"]["directScenePresentation"];
 type CleanNarratorStoryPageBrief = CleanNarratorPromptInput["narrativePageTask"]["storyPageBrief"];
 
 function evidenceIncludesClaimKind(
@@ -552,6 +614,13 @@ function cleanNarratorStoryFrameEntry(
   };
 }
 
+function storyFrameHasSurfaceOnlySceneBeatTurn(
+  turnEvents: CleanNarratorStoryFrameEntry[],
+): boolean {
+  return turnEvents.length > 0
+    && turnEvents.every((entry) => entry.proseCue === "scene_beat");
+}
+
 function storyFrameEntryRefsForSlots(
   entries: CleanNarratorStoryFrameEntry[],
   slots: CleanNarratorCompositionSlot[],
@@ -570,6 +639,7 @@ function storyFrameEntryRefsForSlots(
 function buildCleanNarratorPagePlan(
   currentContext: CleanNarratorStoryFrameEntry[],
   turnEvents: CleanNarratorStoryFrameEntry[],
+  hasAuditNotice: boolean = false,
 ): CleanNarratorPromptInput["storyFrame"]["pagePlan"] {
   const allEntries = [...currentContext, ...turnEvents];
   const steps: CleanNarratorPagePlanStep[] = [];
@@ -579,6 +649,13 @@ function buildCleanNarratorPagePlan(
       version: "gameplay-runtime.clean-narrator-page-plan.v1",
       source: "derived_from_story_frame_composition_slots",
       steps: [{ step: "ask_clarification", entryRefs: clarificationRefs }],
+    };
+  }
+  if (hasAuditNotice && turnEvents.length === 0) {
+    return {
+      version: "gameplay-runtime.clean-narrator-page-plan.v1",
+      source: "derived_from_story_frame_composition_slots",
+      steps: [],
     };
   }
 
@@ -593,7 +670,7 @@ function buildCleanNarratorPagePlan(
   }
 
   const nextActionRefs = storyFrameEntryRefsForSlots(allEntries, ["next_action_context"]);
-  if (nextActionRefs.length > 0) {
+  if (nextActionRefs.length > 0 && !storyFrameHasSurfaceOnlySceneBeatTurn(turnEvents)) {
     steps.push({ step: "close_with_next_action_context", entryRefs: nextActionRefs });
   }
 
@@ -613,6 +690,7 @@ function buildCleanNarratorPagePlan(
 
 function buildCleanNarratorStoryFrame(
   acceptedEvidence: AcceptedNarrationEvidence[],
+  hasAuditNotice: boolean = false,
 ): CleanNarratorPromptInput["storyFrame"] {
   const currentContext = acceptedEvidence
     .filter((evidence) =>
@@ -632,7 +710,7 @@ function buildCleanNarratorStoryFrame(
     source: "derived_from_prompt_accepted_evidence",
     currentContext,
     turnEvents,
-    pagePlan: buildCleanNarratorPagePlan(currentContext, turnEvents),
+    pagePlan: buildCleanNarratorPagePlan(currentContext, turnEvents, hasAuditNotice),
   };
 }
 
@@ -821,6 +899,15 @@ function selectDirectSceneInventoryStatusFactRefs(move: CleanNarratorPageTaskMov
   return sentencePlanFactRefsByRole(move, ["inventory_labels", "inventory_status_beat"]);
 }
 
+function selectDirectScenePlayableRoomBeatFactRefs(move: CleanNarratorPageTaskMove): string[] {
+  if (!moveUsesDirectSceneSurface(move)) return [];
+  return uniqueStrings([
+    ...selectDirectSceneSurfaceFactRefs(move),
+    ...selectDirectSceneInventoryStatusFactRefs(move),
+    ...selectPlayableNextActionFactRefs(move),
+  ]);
+}
+
 function selectCurrentSceneLabelAnchor(input: {
   currentContext: CleanNarratorStoryFrameEntry[];
   backendFactsByRef: Map<string, AcceptedNarrationEvidence["backendFacts"][number]>;
@@ -936,6 +1023,22 @@ function selectFrameTextureFactRefs(
   if (textureFactRefs.length <= 1) return textureFactRefs;
 
   return [textureFactRefs[selectTextureFrameIndex(coreProseCues, textureFactRefs.length)]!];
+}
+
+function exactTextureFrameRecentlySpent(
+  move: CleanNarratorPageTaskMove,
+  textureFactRefs: readonly string[],
+  recentSurfaceAvoid: CleanNarratorPageVariation["recentSurfaceAvoid"],
+): boolean {
+  if (textureFactRefs.length === 0 || recentSurfaceAvoid.recentFirstSentenceShapes.length === 0) return false;
+  const recentShapes = recentSurfaceAvoid.recentFirstSentenceShapes
+    .map((shape) => normalizeRecentPlayerFacingText(shape).toLowerCase())
+    .filter((shape) => shape.length > 0);
+  return textureFactRefs.some((factRef) => {
+    const fact = move.usableFacts.find((entry) => entry.factRef === factRef);
+    const value = fact?.value ? normalizeRecentPlayerFacingText(fact.value).toLowerCase() : "";
+    return value.length > 0 && recentShapes.some((shape) => value === shape || value.startsWith(shape));
+  });
 }
 
 function shouldUseExactContextTexture(
@@ -1125,6 +1228,18 @@ function sentencePlanProseMaterials(
   });
 }
 
+function directSceneRoomBeatProseMaterials(
+  beatObjective: CleanNarratorSentencePlanStep["beatObjective"],
+  proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
+): CleanNarratorSentencePlanStep["proseMaterials"] {
+  if (beatObjective !== "render_direct_scene_snapshot") return proseMaterials;
+  return proseMaterials.map((material) =>
+    material.proseUse === "inventory_status"
+      ? { ...material, copyMode: "phrase_from_material" }
+      : material
+  );
+}
+
 function sentencePlanMaterialObligations(
   proseMaterials: CleanNarratorSentencePlanStep["proseMaterials"],
 ): CleanNarratorSentencePlanStep["materialObligations"] {
@@ -1209,11 +1324,11 @@ function sentencePlanAdventureSubjectFocus(
   if (sentenceRole === "clarification_question") return "accepted_question";
   if (sentenceRole === "exact_context_texture") return "accepted_texture";
   if (sentenceRole === "context_anchor") return "player_scene_position";
+  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
+    return "playable_room_state";
+  }
   if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
     return "settled_result_material";
-  }
-  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
-    return "player_scene_position";
   }
   if (sentenceRole === "next_action_handle") return "playable_route_choices";
   if (beatObjective === "render_elapsed_time") return "elapsed_time_value";
@@ -1234,11 +1349,11 @@ function sentencePlanAdventureVerbFrame(
   if (sentenceRole === "clarification_question") return "ask_direct_question";
   if (sentenceRole === "exact_context_texture") return "copy_visible_texture";
   if (sentenceRole === "context_anchor") return "place_player_in_scene";
+  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
+    return "compose_playable_room_beat";
+  }
   if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
     return "land_settled_result";
-  }
-  if (sentenceRole === "next_action_handle" && beatObjective === "render_direct_scene_snapshot") {
-    return "place_player_in_scene";
   }
   if (sentenceRole === "next_action_handle") return "offer_scene_exits";
   if (beatObjective === "render_elapsed_time") return "mark_elapsed_time_pressure";
@@ -1261,7 +1376,7 @@ function sentencePlanAdventureDetailPalette(
       case "exact_texture_sentence":
         return "accepted_texture";
       case "inventory_status":
-        return "accepted_state";
+        return "accepted_room_state";
       case "label_anchor":
       case "scene_anchor":
         return "accepted_labels";
@@ -1363,6 +1478,18 @@ function sentencePlanProseAssembly(
         closingFunction: "orient_context",
       };
     case "next_action_handle": {
+      if (beatObjective === "render_direct_scene_snapshot") {
+        return {
+          perspective: "second_person_present",
+          sentenceShape: "playable_room_beat_line",
+          openingSource: "preserved_label_anchor",
+          verbEnergy: "concrete_present",
+          detailRhythm: "room_beat_with_state_and_exits",
+          materialWeaveOrder: "scene_actor_inventory_then_exits",
+          styleBudget: "playable_room_beat_cadence",
+          closingFunction: "offer_next_action",
+        };
+      }
       if (proseMaterials.some((material) => material.proseUse === "inventory_status")) {
         const carriesItemLabels = proseMaterials.some((material) => material.proseUse === "label_anchor");
         return {
@@ -1373,30 +1500,6 @@ function sentencePlanProseAssembly(
           detailRhythm: carriesItemLabels ? "core_with_preserved_tokens" : "single_core_material",
           materialWeaveOrder: carriesItemLabels ? "result_then_preserved_tokens" : "result_only",
           styleBudget: carriesItemLabels ? "result_with_anchor_cadence" : "result_beat_cadence",
-          closingFunction: "orient_context",
-        };
-      }
-      if (beatObjective === "render_direct_scene_snapshot") {
-        if (proseMaterials.some((material) => material.proseUse === "label_anchor")) {
-          return {
-            perspective: "second_person_present",
-            sentenceShape: "local_observation_line",
-            openingSource: "observed_visible_label",
-            verbEnergy: "land_visible_observation",
-            detailRhythm: "observed_labels_with_scene_anchor",
-            materialWeaveOrder: "observed_labels_then_scene",
-            styleBudget: "local_observation_cadence",
-            closingFunction: "orient_context",
-          };
-        }
-        return {
-          perspective: "second_person_present",
-          sentenceShape: "scene_anchor_line",
-          openingSource: "preserved_label_anchor",
-          verbEnergy: "concrete_present",
-          detailRhythm: "scene_anchor_tokens",
-          materialWeaveOrder: "scene_anchor_only",
-          styleBudget: "scene_anchor_cadence",
           closingFunction: "orient_context",
         };
       }
@@ -1705,6 +1808,7 @@ function sentencePlanForMove(
   coreProseCues: readonly CleanNarratorProseCue[],
   suppressRouteOptionsContextAnchor: boolean,
   hasAuthoritativeTurnMove: boolean,
+  recentSurfaceAvoid: CleanNarratorPageVariation["recentSurfaceAvoid"],
 ): CleanNarratorSentencePlanDraft[] {
   const steps: CleanNarratorSentencePlanDraft[] = [];
   const pushPlan = (
@@ -1714,8 +1818,11 @@ function sentencePlanForMove(
     beatObjectiveOverride?: CleanNarratorSentencePlanStep["beatObjective"],
   ) => {
     if (preferredBackendFactRefs.length === 0) return;
-    const proseMaterials = sentencePlanProseMaterials(move, preferredBackendFactRefs);
     const beatObjective = beatObjectiveOverride ?? sentencePlanBeatObjective(move, sentenceRole);
+    const proseMaterials = directSceneRoomBeatProseMaterials(
+      beatObjective,
+      sentencePlanProseMaterials(move, preferredBackendFactRefs),
+    );
     const materialObligations = sentencePlanMaterialObligations(proseMaterials);
     const entryRefs = uniqueStrings(preferredBackendFactRefs.flatMap((factRef) =>
       entryRefsByFactRef.get(factRef) ?? []
@@ -1753,22 +1860,35 @@ function sentencePlanForMove(
     });
   };
 
+  const coreCanCarrySceneAnchor = coreProseCues.some((cue) =>
+    cue === "bounded_visibility_negative"
+      || cue === "device_surface_observation"
+      || cue === "dialogue_response"
+      || cue === "item_state"
+      || cue === "local_observation"
+      || cue === "minor_poi_handle"
+      || cue === "movement_result"
+      || cue === "player_local_condition"
+      || cue === "route_status"
+      || cue === "scene_beat"
+      || cue === "support_actor_materialization"
+  );
+
   switch (move.proseMove) {
     case "ask_accepted_question":
       pushPlan("clarification_question", "required", sentencePlanPreferredFactRefs(move, ["primary_beat", "supporting_detail"]));
       break;
     case "establish_playable_context":
       if (shouldUseExactContextTexture(coreProseCues, hasAuthoritativeTurnMove)) {
-        pushPlan("exact_context_texture", move.coverage, selectFrameTextureFactRefs(move, coreProseCues));
+        const textureFactRefs = selectFrameTextureFactRefs(move, coreProseCues);
+        if (!exactTextureFrameRecentlySpent(move, textureFactRefs, recentSurfaceAvoid)) {
+          pushPlan("exact_context_texture", move.coverage, textureFactRefs);
+        }
       }
       if (
-        !coreProseCues.includes("item_state")
+        !coreCanCarrySceneAnchor
         && !coreProseCues.includes("elapsed_time")
-        && !coreProseCues.includes("route_status")
-        && !coreProseCues.includes("minor_poi_handle")
         && !coreProseCues.includes("direct_scene_snapshot")
-        && !coreProseCues.includes("local_observation")
-        && !coreProseCues.includes("bounded_visibility_negative")
         && !(coreProseCues.includes("dialogue_response") && move.entryProseCues.includes("scene_texture"))
         && !suppressRouteOptionsContextAnchor
       ) {
@@ -1801,16 +1921,9 @@ function sentencePlanForMove(
         pushPlan(
           "next_action_handle",
           move.coverage,
-          selectDirectSceneSurfaceFactRefs(move),
+          selectDirectScenePlayableRoomBeatFactRefs(move),
           "render_direct_scene_snapshot",
         );
-        pushPlan(
-          "next_action_handle",
-          move.coverage,
-          selectDirectSceneInventoryStatusFactRefs(move),
-          "render_direct_scene_snapshot",
-        );
-        pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
       } else {
         pushPlan("next_action_handle", move.coverage, selectPlayableNextActionFactRefs(move));
       }
@@ -2201,15 +2314,96 @@ function pageVariationDictionPalette(
   return palette;
 }
 
+function pageVariationOpeningDoor(
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorPageVariation["openingDoor"] {
+  if (sentencePlan.some((step) => step.beatObjective === "frame_dialogue_reply")) return "speech_first";
+  if (sentencePlan.some((step) => step.sentenceRole === "exact_context_texture")) return "accepted_texture_first";
+  if (sentencePlan.some((step) => step.sentenceRole === "next_action_handle")) return "choice_handoff_first";
+  if (sentencePlan.some((step) =>
+    step.beatObjective === "render_support_actor_presence"
+      || step.beatObjective === "render_item_custody"
+      || step.beatObjective === "render_minor_poi_handle"
+      || step.beatObjective === "render_scene_beat"
+  )) {
+    return "object_or_actor_first";
+  }
+  if (sentencePlan.some((step) =>
+    step.proseMaterials.some((material) =>
+      material.proseUse === "exact_texture_sentence"
+        || material.proseUse === "supporting_detail"
+    )
+  )) {
+    return "sensory_strike_first";
+  }
+  return "core_result_first";
+}
+
+function normalizeRecentPlayerFacingText(text: string): string {
+  let normalized = text.trim().replaceAll("\r", " ").replaceAll("\n", " ").replaceAll("\t", " ");
+  while (normalized.includes("  ")) normalized = normalized.replaceAll("  ", " ");
+  return normalized;
+}
+
+function firstSentencePreview(text: string): string | null {
+  const normalized = normalizeRecentPlayerFacingText(text);
+  if (normalized.length === 0) return null;
+  let end = Math.min(normalized.length, 180);
+  for (let index = 0; index < normalized.length && index < 180; index += 1) {
+    const char = normalized[index];
+    if (char === "." || char === "!" || char === "?") {
+      end = index + 1;
+      break;
+    }
+  }
+  return normalized.slice(0, end);
+}
+
+function inferRecentOpeningDoor(text: string): CleanNarratorPageVariation["openingDoor"] {
+  const preview = firstSentencePreview(text)?.toLowerCase() ?? "";
+  if (preview.length === 0) return "core_result_first";
+  if (preview.startsWith("\"") || preview.includes(" replies:") || preview.includes(" says:")) {
+    return "speech_first";
+  }
+  if (preview.includes("from here") || preview.includes("ways onward") || preview.includes("ways out")) {
+    return "choice_handoff_first";
+  }
+  if (preview.startsWith("a ") || preview.startsWith("an ") || preview.startsWith("the ")) {
+    return "accepted_texture_first";
+  }
+  if (preview.startsWith("you ")) return "core_result_first";
+  return "sensory_strike_first";
+}
+
+const RECENT_SURFACE_AVOID_LIMIT = 24;
+
+function buildRecentSurfaceAvoid(
+  recentPlayerFacingText: readonly string[] = [],
+): CleanNarratorPageVariation["recentSurfaceAvoid"] {
+  const recent = recentPlayerFacingText
+    .map(firstSentencePreview)
+    .filter((preview): preview is string => preview !== null)
+    .slice(-RECENT_SURFACE_AVOID_LIMIT);
+  return {
+    source: "recent_player_facing_style_only",
+    maySupportWorldTruth: false,
+    recentOpeningDoors: recent.map(inferRecentOpeningDoor),
+    recentFirstSentenceShapes: recent,
+  };
+}
+
 function buildCleanPageVariation(
   pagePerformance: CleanNarratorPagePerformance,
   sentencePlan: CleanNarratorSentencePlanStep[],
+  recentPlayerFacingText: readonly string[] = [],
 ): CleanNarratorPageVariation {
   return {
     openingRotation: pageVariationOpeningRotation(pagePerformance),
     cadenceTarget: pageVariationCadenceTarget(pagePerformance),
     dictionPalette: pageVariationDictionPalette(sentencePlan),
     variationBoundary: "vary_syntax_only_inside_cited_material",
+    openingDoor: pageVariationOpeningDoor(sentencePlan),
+    recentSurfaceAvoid: buildRecentSurfaceAvoid(recentPlayerFacingText),
   };
 }
 
@@ -2448,10 +2642,61 @@ function buildCleanChoicePresentation(
   };
 }
 
+function buildCleanDirectScenePresentation(
+  moves: CleanNarratorPageTaskMove[],
+  sentencePlan: CleanNarratorSentencePlanStep[],
+): CleanNarratorDirectScenePresentation {
+  const directSceneMoves = moves.filter((move) =>
+    move.entryProseCues.includes("direct_scene_snapshot")
+      || moveUsesDirectSceneSurface(move)
+  );
+  const directSceneSentencePlan = sentencePlan.filter((step) =>
+    step.beatObjective === "render_direct_scene_snapshot"
+      || directSceneMoves.some((move) => move.moveRef === step.moveRef)
+  );
+  if (directSceneMoves.length === 0 || directSceneSentencePlan.length === 0) {
+    return {
+      mode: "none",
+      sourceMoveRefs: [],
+      sourceSentenceRefs: [],
+      sentenceObjectPolicy: "none",
+      roomBeatSplitPolicy: "none",
+      catalogPolicy: "none",
+      mergeAllowed: false,
+      routeClose: "none",
+      inventoryPolicy: "none",
+    };
+  }
+
+  const hasRouteHandoff = directSceneSentencePlan.some((step) =>
+    step.sentenceRole === "next_action_handle"
+      && step.proseMaterials.some((material) => material.proseUse === "route_choice")
+  );
+  const hasInventory = directSceneSentencePlan.some((step) =>
+    step.proseMaterials.some((material) => material.proseUse === "inventory_status")
+  );
+  const hasTextureFrame = sentencePlan.some((step) =>
+    step.sentenceRole === "exact_context_texture"
+  );
+  return {
+    mode: hasRouteHandoff ? "playable_room_beat" : "look_around_digest",
+    sourceMoveRefs: directSceneMoves.map((move) => move.moveRef),
+    sourceSentenceRefs: directSceneSentencePlan.map((step) => step.sentenceRef),
+    sentenceObjectPolicy: hasTextureFrame ? "optional_texture_then_single_room_beat" : "single_room_beat",
+    roomBeatSplitPolicy: hasRouteHandoff ? "actor_inventory_routes_same_sentence_text" : "none",
+    catalogPolicy: "no_receipt_lists",
+    mergeAllowed: true,
+    routeClose: hasRouteHandoff ? "final_handoff_when_present" : "none",
+    inventoryPolicy: hasInventory ? "subordinate_unless_core" : "none",
+  };
+}
+
 function buildCleanNarrativePageTask(
   storyFrame: CleanNarratorPromptInput["storyFrame"],
   acceptedEvidence: AcceptedNarrationEvidence[],
+  recentPlayerFacingText: readonly string[] = [],
 ): CleanNarratorPromptInput["narrativePageTask"] {
+  const recentSurfaceAvoid = buildRecentSurfaceAvoid(recentPlayerFacingText);
   const entries = [...storyFrame.currentContext, ...storyFrame.turnEvents];
   const entriesByRef = new Map(entries.map((entry) => [entry.ref, entry] as const));
   const claimKindsByEntryRef = new Map(entries.map((entry) => [entry.ref, entry.claimKinds] as const));
@@ -2471,7 +2716,7 @@ function buildCleanNarrativePageTask(
       evidence.backendFacts.map((fact) => [fact.factRef, fact] as const)
     ),
   );
-  const elapsedTimeSceneAnchor = selectCurrentSceneLabelAnchor({
+  const currentSceneLabelAnchor = selectCurrentSceneLabelAnchor({
     currentContext: storyFrame.currentContext,
     backendFactsByRef,
   });
@@ -2487,8 +2732,11 @@ function buildCleanNarrativePageTask(
     const ownsStandaloneElapsedTime = step.step === "narrate_turn_event"
       && stepProseCues.includes("elapsed_time")
       && !stepProseCues.includes("movement_result");
-    const entryRefs = ownsStandaloneElapsedTime
-      ? uniqueStrings([...stepEntryRefs, ...elapsedTimeSceneAnchor.entryRefs])
+    const ownsDirectSceneRoomBeat = step.step === "close_with_next_action_context"
+      && stepProseCues.includes("direct_scene_snapshot");
+    const includeSceneLabelAnchor = ownsStandaloneElapsedTime || ownsDirectSceneRoomBeat;
+    const entryRefs = includeSceneLabelAnchor
+      ? uniqueStrings([...stepEntryRefs, ...currentSceneLabelAnchor.entryRefs])
       : stepEntryRefs;
     const entryProseCues = uniqueStrings(entryRefs.flatMap((ref) => {
       const cue = entriesByRef.get(ref)?.proseCue;
@@ -2496,9 +2744,9 @@ function buildCleanNarrativePageTask(
     })) as CleanNarratorProseCue[];
     const moveBackendFactRefs = uniqueStrings([
       ...stepEntryRefs.flatMap((ref) =>
-      entriesByRef.get(ref)?.backendFactRefs ?? []
+        entriesByRef.get(ref)?.backendFactRefs ?? []
       ),
-      ...(ownsStandaloneElapsedTime ? elapsedTimeSceneAnchor.factRefs : []),
+      ...(includeSceneLabelAnchor ? currentSceneLabelAnchor.factRefs : []),
     ]);
     const usableFacts = moveBackendFactRefs.flatMap((factRef) => {
       const fact = backendFactsByRef.get(factRef);
@@ -2536,6 +2784,7 @@ function buildCleanNarrativePageTask(
       coreProseCues,
       suppressRouteOptionsContextAnchor,
       hasAuthoritativeTurnMove,
+      recentSurfaceAvoid,
     ));
   }
   const sentencePlan = sentencePlanWithFlowCues(sentencePlanDrafts);
@@ -2551,9 +2800,10 @@ function buildCleanNarrativePageTask(
     storyPageBrief: buildCleanStoryPageBrief(pageArc, moves, sentencePlan),
     pageArc,
     pagePerformance,
-    pageVariation: buildCleanPageVariation(pagePerformance, sentencePlan),
+    pageVariation: buildCleanPageVariation(pagePerformance, sentencePlan, recentPlayerFacingText),
     pageFocus: buildCleanPageFocus(pageArc, moves, sentencePlan),
     choicePresentation: buildCleanChoicePresentation(moves, sentencePlan),
+    directScenePresentation: buildCleanDirectScenePresentation(moves, sentencePlan),
     moves,
     sentencePlan,
   };
@@ -2752,6 +3002,7 @@ const HARD_CLAIM_ANCHOR_FACT_ROLES: Partial<Record<CleanNarrationClaimKind, read
 
 const HARD_CLAIM_SUPPORT_FACT_ROLES: Partial<Record<string, readonly string[]>> = {
   visible_actor: ["visible_actor_labels", "visible_actor_target_labels", "observed_visible_actor_labels"],
+  visible_target: ["visible_target_labels", "observed_entry_labels", "observed_item_labels"],
 };
 
 function hardClaimKind(hardClaim: CleanNarrationHardClaimKind): string {
@@ -2914,9 +3165,16 @@ function backendFactsWithRoles(
   return facts;
 }
 
-export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNarratorPromptInput {
-  const acceptedEvidence = selectPromptAcceptedEvidence(view);
-  const storyFrame = buildCleanNarratorStoryFrame(acceptedEvidence);
+export function buildCleanNarratorPromptInput(
+  view: CleanNarratorView,
+  options: { recentPlayerFacingText?: readonly string[] } = {},
+): CleanNarratorPromptInput {
+  const recentSurfaceAvoid = buildRecentSurfaceAvoid(options.recentPlayerFacingText ?? []);
+  const acceptedEvidence = selectPromptAcceptedEvidence(view, recentSurfaceAvoid);
+  const storyFrame = buildCleanNarratorStoryFrame(
+    acceptedEvidence,
+    view.stepAuditForGrounding.length > 0,
+  );
   return assertCleanNarratorPromptInput({
     version: "gameplay-runtime.clean-narrator-prompt-input.v1",
     packetId: view.packetId,
@@ -2929,7 +3187,11 @@ export function buildCleanNarratorPromptInput(view: CleanNarratorView): CleanNar
     hardFactContract: cleanNarratorHardFactContract(),
     softProseBudget: cleanNarratorSoftProseBudget(),
     storyFrame,
-    narrativePageTask: buildCleanNarrativePageTask(storyFrame, acceptedEvidence),
+    narrativePageTask: buildCleanNarrativePageTask(
+      storyFrame,
+      acceptedEvidence,
+      options.recentPlayerFacingText ?? [],
+    ),
     stepAuditForGrounding: view.stepAuditForGrounding,
     guard: view.guard,
   });
@@ -2957,20 +3219,25 @@ export function buildCleanNarrationSystemPrompt(
     "World-truth source: promptInput.acceptedEvidence[].backendFacts and promptInput.acceptedEvidence[].text for hard facts; promptInput.softProseBudget authorizes low-stakes visible/sensory surface detail.",
     "raw player action is intentionally omitted; write the settled result described by accepted evidence.",
     "Stage authority: narration preserves accepted hard facts and writes player-facing prose. Soft prose is presentation, not durable world-state authority.",
+    "Ownership split: Stage 6 is a prose renderer only. It may choose cadence, sensory angle, sentence order, quote frame, and harmless soft surface color. It may not decide possibility, success, failure, existence, absence, hidden truth, route status, object function, NPC motive, player posture, or world mutation. Those belong to prior accepted evidence and later adjudication.",
     "Hard-fact contract: exact accepted claim kinds and high-level categories require accepted evidence. Exact kinds include current_scene, current_location, scene_texture, visible facts/actors/targets, local observations, bounded visibility, device surface observations, inventory status, movement options, route status, dialogue response, support actor materialization, player local condition, item state, minor POI handle, player location change, elapsed time, oracle outcome, and clarification requests. High-level categories include movement, item custody/equip/location, route availability/cost, elapsed time, injury/condition, quoted dialogue, secrets/world facts, resources, relationship changes, and important object affordances. Mark the exact kind or category in sentence.hardClaims when the sentence states it.",
     "HardClaims field values: write exact ids only, copied from accepted claim kinds or high-level category ids. Backend fact roles belong in backendFactRefs and proseMaterials; sentence.hardClaims stays a machine-readable claim/category id list. Put natural prose clauses in sentence.text.",
     "Soft-prose budget: harmless color, wear, scratches, smell, ordinary texture, temperature, ambient sound, posture flavor, small gestures, ambient motion, non-mechanical object surface, and ordinary plausible current-scene props may be invented for readability. Ordinary props include low-stakes scene dressing such as chairs, mugs, stools, ropes, loose boards, crates, awnings, puddles, cloth, and market clutter when they fit the current scene. Keep invented surface/prop detail in the present visible/sensory layer; do not imply past duration, use history, player grip/handling, body placement, ownership history, clues, mechanisms, source/cause, pressure/leak state, resource value, safety, damage, hidden content, route truth, or useful affordances unless accepted evidence supplies them. Mark used kinds in sentence.softProseKinds. If the player later uses a soft detail, the next turn adjudicates it normally.",
+    "<worldforge_soft_surface_spend> When the page is ordinary scene, direct look, route option, route status, local observation, scene beat, item custody, support presence, minor POI, device surface, or elapsed time, spend at most one small soft surface detail unless an exact scene_texture sentence or exact dialogue quote already carries the page's texture. Legal soft detail is present-tense, visible/sensory, low-stakes, and object- or scene-intrinsic: damp brick, scuffed lacquer, dulled brass, stale air, loose market cloth, a chair scrape, gutter drip, rope fibers, crate edges, wet planks. The soft detail must be grammatically attached to the harmless surface itself. Do not attach it to the player's body, grip, reach, handling, intent, readiness, or movement unless accepted evidence supplies that. Do not phrase soft detail as a clue, mechanism, route opener, safety signal, damage state, hidden history, valuable resource, inventory change, or durable world fact. If the player later acts on a soft detail, the next turn adjudicates it normally; Stage 6 did not create authority for it.</worldforge_soft_surface_spend>",
     "Story frame: promptInput.storyFrame.currentContext is compressed current playable context; promptInput.storyFrame.turnEvents is the authoritative summary of what happened this turn. storyFrame derives from promptInput.acceptedEvidence and adds no separate world truth.",
     "Story frame use: choose sentence shape, emphasis, pacing, and page flow from storyFrame, then prove every accepted_evidence sentence with evidenceRefs, backendFactRefs, and claimKinds from promptInput.acceptedEvidence.",
-    "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices, and clarification asks the accepted question. These cues are derived routing hints and add no world truth.",
-    "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
+    "Story composition cues: use storyFrame entries' proseCue to understand each beat kind and compositionSlot to order the page. opening_context and texture_context frame the scene, event_beat carries the settled result, next_action_context leaves the player with usable visible choices when the page task supplies that step, and clarification asks the accepted question. Surface-only scene_beat turns spend the page on the immediate physical beat; they do not automatically earn an inventory/route room-state tail. These cues are derived routing hints and add no world truth.",
+    "Story page plan: promptInput.storyFrame.pagePlan.steps gives the intended page order by entryRefs. Use open_with_context for setup, narrate_turn_event for the settled result, close_with_next_action_context for visible choices or direct-scene affordances when present, and ask_clarification for accepted clarification questions. The page plan organizes accepted evidence; it does not authorize facts beyond cited evidence.",
     "Story page brief: promptInput.narrativePageTask.storyPageBrief names the writer-facing page kind, second-person present stance, grounded adventure register, composition job, opening instruction, closing instruction, and required/optional move and sentence refs. Use it to turn the accepted changelog into one playable story page while keeping every claim inside cited evidence.",
+    "Tower-style role: Stage 6 is the narrative renderer only. GM Read, Stage4, Settlement, receipts, and validators have already handled interpretation and adjudication; narration turns their accepted turn brief into player-facing prose and dialogue-shaped text where dialogue evidence exists.",
     "Page arc: promptInput.narrativePageTask.pageArc names the whole-page shape and reader posture. Use arcShape, pageCadence, and closingIntent to make the sentence objects read as one playable RPG page: a single settled beat, context into result, context into choices, or an accepted clarification question. Page arc shapes flow only; accepted evidence remains the only source of hard facts.",
+    "Audit page arc: when storyPageBrief.pageKind is audit_notice_page, answer with one audit_notice sentence centered on stepAuditForGrounding[].publicReason. Do not replace the audit notice with scene, route, inventory, or actor catalog prose. Audit notices do not create world truth; they explain the unsettled beat and stop.",
     "Page performance: promptInput.narrativePageTask.pagePerformance names openingBeat, pageMotion, continuityMaterial, closingBeat, and readerHandoff. Use it to connect sentencePlan steps into one text-RPG page: start from the opening material, carry continuity material through the page motion, and land the reader handoff while preserving sentence refs and evidence refs.",
-    "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, cadenceTarget, dictionPalette, and variationBoundary. Use it to vary syntax, cadence, sensory angle, and RPG diction across pages while preserving cited hard facts.",
+    "Page variation: promptInput.narrativePageTask.pageVariation names openingRotation, openingDoor, cadenceTarget, dictionPalette, variationBoundary, and recentSurfaceAvoid. Use it as the prose entry plan, not as fact evidence. openingDoor decides how the first player-facing sentence enters the page: speech, sensory strike, object/actor, route handoff, accepted texture, or core result. cadenceTarget decides compression; dictionPalette decides which accepted material gets vivid treatment. recentSurfaceAvoid is style memory only, maySupportWorldTruth=false: avoid repeating nearby first-sentence shapes, but never reuse recent text as a fact. If the selected door would produce a list-shaped receipt sentence, choose a floor-level sensory or scene-pressure opening inside softProseBudget and keep all hard facts cited.",
     "Page focus: promptInput.narrativePageTask.pageFocus names coreMoveRefs/coreSentenceRefs, frameMoveRefs/frameSentenceRefs, preferredFrameSentenceRefs, emphasis, frameSelection, coreFrameRelationship, and contextUse. Treat the core refs as the story page center: the accepted turn event, playable next-action handle, or accepted clarification. When preferredFrameSentenceRefs is nonempty, use those frame sentence refs before the core; other frame refs are support material and may be omitted. Treat frame refs as context that orients the reader before the core, never as competing gameplay truth.",
     "Scene texture economy: exact scene_texture is an establishing/look-around frame for arrivals and direct scene pages. Ordinary item, dialogue, local condition, route-status, route-options, support actor, device, minor-POI, and elapsed-time turns open on the fresh settled beat; use scene labels, accepted state, and small softProseBudget surface detail instead of replaying the static scene description. If sentencePlan omits exact_context_texture, treat scene_texture as proof context only.",
     "Choice presentation: promptInput.narrativePageTask.choicePresentation names sourceMoveRefs/sourceSentenceRefs, exact route choices, sharedCostText/sharedCostFactRef, anchorStyle, cost handling, closingStyle, and readerHandoff for playable route-choice pages. Use choices as named ways onward from accepted route evidence: preserve route labels verbatim; costHandling names exact travel-cost material available for tactical timing, but route-choice prose may omit costs when the page only needs playable handles. When the sentence states travel cost or marks hardClaims with route_choice_travel_costs/shared_travel_cost, include sharedCostText or each choice costText exactly. Anchor through route origin as a place label when anchorStyle=route_origin_place_label; reserve posture verbs for cited player_local_condition evidence; close as an adventure handoff with the named route labels carrying the next move.",
+    "Direct-scene presentation: promptInput.narrativePageTask.directScenePresentation names whether direct-scene/rich-state pages should compose a playable_room_beat or look_around_digest. When mode is playable_room_beat or look_around_digest, catalogPolicy=no_receipt_lists and mergeAllowed=true mean actor labels, inventory status, visible targets, texture, and route labels may be woven into one playable room beat when every used fact is cited. sentenceObjectPolicy=optional_texture_then_single_room_beat means one exact texture sentence may frame the page, then one playable room beat carries the rest; sentenceObjectPolicy=single_room_beat means one room beat only. roomBeatSplitPolicy=actor_inventory_routes_same_sentence_text keeps actor, inventory, and route materials inside that one room-beat sentence text. routeClose=final_handoff_when_present puts route labels in the final player-choice handoff; inventoryPolicy=subordinate_unless_core keeps carried items as state context unless inventory is the turn's core result.",
     "Narrative page task: promptInput.narrativePageTask turns the story page plan into writer moves. Follow each move's proseMove order, use its entryRefs for page structure, and draw material from its usableFacts while citing exact acceptedEvidence refs and exact backendFacts refs copied from promptInput.acceptedEvidence.",
     "Beat objectives: each page move carries entryProseCues from storyFrame, and each sentencePlan step carries beatObjective. Use beatObjective as the concrete RPG sentence job: movement arrival, elapsed time, route status, route choices, item custody, dialogue reply, local observation, device surface, support actor presence, player condition, minor POI handle, oracle outcome, direct scene snapshot, scene texture, or accepted clarification.",
     "Claim focus: each sentencePlan step carries claimFocus.primaryClaimKinds and supportingClaimKinds. Set output sentence.claimKinds from the primaryClaimKinds of the cited sentencePlanRefs; if one player-facing sentence combines two planned roles, cite both sentencePlanRefs and use only their combined primaryClaimKinds. supportingClaimKinds names nearby context owned by other planned sentences.",
@@ -2984,24 +3251,32 @@ export function buildCleanNarrationSystemPrompt(
     "Texture cues: each sentencePlan step includes textureCue. mode=copy_exact_texture_sentence means this sentence owns the selected public scene texture frame and must copy one allowedTextureFactRefs material as its own context sentence. mode=omit_texture_in_this_sentence means the sentence should spend its prose on its preferred non-texture materials. Texture cues organize accepted scene texture; when no exact_context_texture step exists, the page should not recreate the static scene description from memory. softProseBudget may add harmless surface detail around hard facts.",
     "Selected texture frame: when accepted scene_texture has multiple backend facts, the page task places the chosen page frame in textureCue.allowedTextureFactRefs and materialObligations for the texture sentence. Other accepted texture facts remain proof context, not default player-facing prose for this page.",
     "Adventure cues: each sentencePlan step includes adventureCue.subjectFocus, adventureCue.verbFrame, and adventureCue.detailPalette. Use subjectFocus as the sentence's grammatical center, verbFrame as the action/placement frame, and detailPalette as the accepted material palette. These cues convert changelog entries into RPG scene beats while keeping every noun, action, quote, route, time, texture, and state inside cited proseMaterials.",
-    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as the sentence construction contract: pick the grammatical vantage, line shape, accepted opening material, verb force, detail rhythm, material order, legal style budget, and page-ending job before phrasing the cited proseMaterials. clock_beat_line with pressure_time uses the accepted duration as the subject, the accepted scene_anchor token as placement, and a present-tense pressure or settling verb frame such as '<time> settles over <scene>' or '<time> presses around <scene>'. scene_custody_beat_line with item_source_target_state_scene_then_custody_proof uses accepted item_label as the sentence center, target_label as the custody endpoint, final_equip_state plus current_scene_anchor as the landing state, and settled_custody/custody_change as proof material; phrase the surface as an item custody beat such as '<item> passes to <target> at <scene>; <target> carries <item> now' or '<target> has <item> at <scene> after the handoff'. scene_exit_choice_line uses accepted route labels as named ways onward and accepted route_origin as the placement token; route_choice_travel_costs is exact material only when the sentence states travel timing. scene_exit_choice_line with openingSource=playable_route_label and verbEnergy=offer_choice is a direct-scene handoff: phrase the accepted route labels as the sentence subject, for example '<labels> are the ways onward' or '<labels> lead onward from here'; use 'here' as placement wording when the step lacks scene_anchor or route_origin material; include every accepted route label, and include exact cost material only when timing is part of the player-facing sentence. support_actor_presence_line with actor_then_scene_with_role_context uses accepted visible_support_actor as the sentence center, anchor_scene as the exact placement token, support_role as identity context, and support_actor_presence as proof that the actor is in view. support_actor_presence_line with actor_then_visible_cue_then_scene uses accepted support_actor_visible_cue or support_actor_public_summary as visible detail material between the actor label and exact scene anchor. minor_poi_handle_line with minor_poi_label_kind_then_scene uses accepted place_handle_label as the sentence center, place_handle_kind and handle_result as the handle state, and current_scene_anchor as exact placement. scene_beat_surface_line with accepted_beat_then_sensory_stop uses accepted scene_beat as the turn-event center, may add one present sensory texture, and then stops; evaluation of what the surface reveals, hides, enables, blocks, proves, or changes belongs to a later local_observation, device, route, or capability check. local_observation_line with observed_labels_then_scene uses accepted observed_entry_labels as the sentence center and anchor_scene as the exact placement token, phrasing actor visibility as present-at-scene prose without adding posture, search action, or actor action. local_observation_line with query_scene_then_bounded_no_match_proof uses accepted observation_query as the checked visible target, anchor_scene as the placement token, and local_observation_beat as proof material; phrase plain target queries as bounded visible-scene prose such as '<query> does not stand out in the visible scene at <scene>'; phrase person-property queries as 'No visible person seems to be waiting for a courier at <scene>' when the query asks for that visible match; phrase whether-shaped queries as 'No visible sign at <scene> settles whether <question-body>.' so queried surface words remain question material instead of becoming denied surface facts. Inventory local-observation steps use the accepted local_observation_beat custody sentence as exact sentence material when cited; observed_inventory_item_labels preserve the item labels carried by that accepted beat.",
+    "Prose assembly: each sentencePlan step includes proseAssembly.perspective, sentenceShape, openingSource, verbEnergy, detailRhythm, materialWeaveOrder, styleBudget, and closingFunction. Use these fields as writer scaffolding, then phrase the cited proseMaterials as natural game narration rather than as a receipt. clock_beat_line with pressure_time uses the accepted duration as the subject and the accepted scene_anchor token as placement; rotate clock prose through ordinary time pressure, pause, waiting, or scene settling without turning one phrase into a house style. scene_custody_beat_line with item_source_target_state_scene_then_custody_proof uses accepted item_label as the sentence center, target_label as the custody endpoint, final_equip_state plus current_scene_anchor as the landing state, and settled_custody/custody_change as proof material; phrase the surface as an item custody beat such as '<item> passes to <target> at <scene>; <target> carries <item> now' or '<target> has <item> at <scene> after the handoff'. playable_room_beat_line with scene_actor_inventory_then_exits is one direct-scene sentence task: weave the accepted scene label, visible actor labels, inventory status/item labels, and route labels into one playable room beat; inventory is subordinate state, route labels form the handoff, and every label/fact used remains cited. scene_exit_choice_line uses accepted route labels as named exits or ways the player can take, and accepted route_origin as the placement token; route_choice_travel_costs is exact material only when the sentence states travel timing. scene_exit_choice_line with openingSource=playable_route_label and verbEnergy=offer_choice is a direct-scene handoff: preserve every accepted route label, group them as playable options, use 'here' as placement wording when the step lacks scene_anchor or route_origin material, and include exact cost material only when timing is part of the player-facing sentence. support_actor_presence_line with actor_then_scene_with_role_context uses accepted visible_support_actor as the sentence center, anchor_scene as the exact placement token, support_role as identity context, and support_actor_presence as proof that the actor is present. support_actor_presence_line with actor_then_visible_cue_then_scene uses accepted support_actor_visible_cue or support_actor_public_summary as visible detail material between the actor label and exact scene anchor. minor_poi_handle_line with minor_poi_label_kind_then_scene uses accepted place_handle_label as the sentence center, place_handle_kind and handle_result as the handle state, and current_scene_anchor as exact placement. scene_beat_surface_line with accepted_beat_then_sensory_stop uses accepted scene_beat as the turn-event center, may add one present sensory texture, and then stops; evaluation of what the surface reveals, hides, enables, blocks, proves, or changes belongs to a later local_observation, device, route, or capability check. local_observation_line with observed_labels_then_scene uses accepted observed_entry_labels as the sentence center and anchor_scene as the exact placement token, phrasing actor visibility as present-at-scene prose without adding posture, search action, or actor action. Mixed visible-state local observations, including receipt material like 'you can see <actor>, <items>, and <route>', are room-state material: pressure verbs attach to the scene, surface, light, air, fixtures, or route handoff; bare actor labels use only neutral presence wording such as '<actor> is in view at <scene>' or '<actor> is present at <scene>' unless accepted visible cue material supplies posture, guarding, vigilance, resistance, work, waiting, reaction, or motion. local_observation_line with query_scene_then_bounded_no_match_proof uses accepted observation_query as the checked visible target, anchor_scene as the placement token, and local_observation_beat as proof material to interpret rather than prose to copy; phrase plain target queries as bounded visible-scene prose such as '<query> is not in view at <scene>' or 'nothing matching <query> shows itself at <scene>'; phrase person-property queries as a visible no-match for the requested person/role/property; for whether-shaped queries, avoid receipt/legal phrasing and answer as current visible-use result, such as 'No visible sign of <checked thing> shows at <scene>', 'No visible sign of <finding> shows on <target> at <scene>', or 'At <scene>, nothing visible supports that <question-body>.' For list-shaped property checks, prefer 'no visible sign of <A>, <B>, or <C> on <target>' over a singular present/absent clause. Do not turn any/some/a target in the checked query into every/all targets unless accepted observed_entry_labels enumerate that full set. When restating requested properties, keep the visible-sign qualifier attached: write 'no visible sign of degraded insulation' rather than 'no degraded insulation'. Inventory local-observation steps use the accepted local_observation_beat custody sentence as exact sentence material when cited; observed_inventory_item_labels preserve the item labels carried by that accepted beat.",
     "Citation proof: evidenceRefs and backendFactRefs are opaque citation tokens. Copy exact ref strings from promptInput.acceptedEvidence and promptInput.acceptedEvidence[].backendFacts; inventing nearby-looking refs such as e1.f2 when only e1.f1 exists invalidates the page. pageMoveRefs and sentencePlanRefs are optional routing metadata used only when they help preserve page flow.",
-    "Default literary profile: use Zetta Onyx v1.37 as the primary prose reference, especially Cinematic Realism, Hybrid POV, BOLT v2 Writing Room discipline, Balanced-Freaky NSFW adult register, Forward Motion, Door Rotation, Realistic NPCs, Character Individuation, Anti-Omniscient NPCs, NPC Voice, the Banned Word List, and the seven-family Zetta Prose Bans. Aim for compact adult adventure-page writing: concrete present-tense beats, tactile verbs, named visible objects, compressed stakes, scene pressure, and a playable final handle.",
-    "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move.",
-    "Truthful flourish: use proseAssembly.styleBudget, styleMode, and softProseBudget to spend style on cadence, syntax, sensory angle, quote frame, choice readability, adult body language, intimacy/violence diction when accepted evidence carries that charge, profanity when a character voice supports it, or sentence rhythm. Flourish can color the surface; it cannot add hard facts.",
+    "<worldforge_ordinary_page_contract> Ordinary successful Stage 6 pages should read as playable adult text-RPG/VN scene prose, not receipt prose. The default page spends one concrete sensory surface or material pressure beat when softProseBudget allows it, then lands the accepted hard fact or handoff. Use accepted labels exactly, but do not use receipt grammar as the sentence shape unless the page has no other playable shape. Prefer floor-level scene syntax: wet planks flex, brick sweats, brass dulls, lamps gutter, stale air presses, a named actor is in view, an item remains with you, a route label becomes the way out. The sensory surface is presentation only. It never proves existence, absence, hidden cause, route truth, safety, mechanism, clue, item readiness, actor behavior, player posture, player grip, relationship, damage, resource value, or future availability. If a sentence states any of those consequential facts, cite accepted backendFacts and list the hard claim. If it only colors harmless present surface, list the matching softProseKinds and keep hardClaims limited to the accepted evidence.</worldforge_ordinary_page_contract>",
+    "<worldforge_prose_rules> Zetta Onyx v1.37 is the prose donor. Adapt its active blocks as method, not as world truth: Cinematic Realism, Hybrid POV, BOLT v2 Writing Room, Freaky-Balanced adult register, Forward Motion, Door Rotation, Realistic NPCs, Character Individuation, Anti-Omniscient NPCs, NPC Voice, Banned Word List, and Zetta Prose Bans. Prose: finalText must contain literary realism, concrete sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, visible/audible macro action, and fluid sentence rhythm. Output is built from what can be seen, heard, touched, smelled, tasted, handled, or physically felt through accepted evidence plus softProseBudget. Keep Zetta's anti-fragmentation discipline in narrator-authored text outside exact accepted quotes: no em dash or en dash glue; use comma, semicolon, colon, or a new sentence. JSON refs carry proof; the player-facing sentence carries the scene.</worldforge_prose_rules>",
+    "<worldforge_forward_motion> You are writing the next beat of a living scene. Every sentence earns its place by moving the scene forward: a new accepted act, state, route, quote, sensory surface, consequence, answer, pressure, or handoff. The raw player wording and the last static establishing shot are fuel already burned. Answer what the accepted outcome means in the scene; do not bounce the player's wording back. For local scene_beat, write the world response now: the brick grinds, the pipe ticks, the chair scrapes, the lamp gutters. Lift-out test: if a sentence only survives by pointing at the player's phrasing instead of accepted evidence, rewrite it as something happening now in the world.</worldforge_forward_motion>",
+    "<worldforge_room_beat> Direct room beats are played from the floor, not from an audit desk. A direct scene page should normally begin with the accepted scene label doing physical work, a single safe sensory strike, or material pressure in the room. Fold accepted actor, inventory, visible target, and route labels into one playable room beat when directScenePresentation permits it. Bare actor labels do only neutral presence work: '<actor> is in view' or '<actor> is present'. Inventory labels do only current custody/with-player state unless accepted item_state or player_local_condition material proves more. Route labels become exits, ways out, paths, or next handles, never movement already taken, safety, hidden routes, or discovery. Pressure verbs attach to scene surfaces, air, light, fixtures, crowds, weather, doors, paths, and room shape. Receipt grammar such as '<scene> has <actor> in view; you carry <item>' is a proof fallback, not the default player-facing shape. The target shape is: scene pressure first, accepted labels woven second, playable handoff last.</worldforge_room_beat>",
+    "Room-beat diction: interface phrases such as 'gives you a clear read', 'frames the immediate scene', 'what is here', 'take in the scene', or 'who is visible' are draft scaffolding. Render the room itself instead: brick sweats, tunnels narrow, boards flex, lamps gutter, water stinks, named people are in view, carried items remain with the player, and route labels become exits. Pressure verbs attach to scene surfaces, air, light, fixtures, crowds, weather, doors, paths, and room shape; actor labels without accepted visible cue material stay as present/in-view labels.",
+    "<worldforge_bolt_v2> Run a private writing room before JSON. SCOUT sets exact accepted state, scene, clock, routes, inventory, actors, and knowledge limits. DIRECTOR chooses the page pressure and closing handoff. PROSE shapes concrete sensory language through proseAssembly, adventureCue, literaryCue, pageVariation, and softProseBudget. VOICE frames only accepted dialogue quotes in character-specific rhythm. EDITOR checks refs, knowledge firewall, echo, slop families, hard/soft claim boundaries, finalText joining, and private/backend leaks. Emit none of this room; final output is only the JSON candidate.</worldforge_bolt_v2>",
+    "<worldforge_adult_mode> Freaky-Balanced is a register donor. WorldForge is adult fiction and the adult register is active all the time as directness: blunt bodies, injury, desire, fear, tenderness, cruelty, grotesque texture, profanity, vulgar speech, and erotic charge are open when accepted evidence creates that charge. Directness is always available; avoid coy fade-outs, clinical euphemism, sanitized pain, and vague heat. Sex/intimacy enter through established charge and slow burn; explicit sex, violence, injury, relationship change, consent state, custody, route truth, secrets, resources, and important affordances stay accepted-evidence owned. If the turn has no adult charge, keep the prose physical, concrete, and unsanitized rather than sterile.</worldforge_adult_mode>",
+    "<worldforge_door_rotation> pageVariation.openingDoor is the door. Use the Zetta door-rotation logic inside WorldForge's evidence boundary: speech first when a quote exists; motion already underway for movement or local action; one sensory strike into the scene when softProseBudget carries it; setting straight into speech or action when texture is the frame; time landing already in motion when elapsed time is accepted; actor/object decision when support, item, POI, or scene beat is the center. recentSurfaceAvoid is player-facing style memory only, maySupportWorldTruth=false. recentFirstSentenceShapes are stale openings to avoid, not facts to reuse. Same door twice in nearby turns is a prose failure; it never proves a fact.</worldforge_door_rotation>",
+    "Micro-page rhythm: follow storyFrame.pagePlan from accepted context to accepted turn event, then to accepted next-action context only when that move exists. Let accepted labels carry continuity, choose one precise verb per beat, and shape the final sentence so the player can immediately decide the next move without reading a receipt.",
+    "Truthful flourish: use proseAssembly.styleBudget, styleMode, and softProseBudget to spend style on cadence, syntax, sensory angle, quote frame, choice readability, adult body language, intimacy/violence diction when accepted evidence carries that charge, profanity when a character voice supports it, or sentence rhythm. Flourish colors the surface and leaves hard facts inside cited accepted evidence.",
     "Player-facing diction: avoid backend framing phrases such as 'current scene', 'current visible', 'current observation', or 'visible entry'. Say 'here', 'at <scene label>', 'in view', or name the accepted scene label instead.",
-    "Reference transformation examples are patterns, not extra facts. Example movement: prompt-safe accepted facts with roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values 'After 1 minute, you reach North Hall.', 'North Hall', and '1 minute'; they can become 'After one minute, North Hall takes your weight underfoot.' with evidenceRefs ['e1'], backendFactRefs ['e1.f1','e1.f2','e1.f3'], claimKinds ['player_location_change','elapsed_time'].",
+    "Reference transformation examples are patterns, not stock prose. Example movement: prompt-safe accepted facts with roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values 'After 1 minute, you reach North Hall.', 'North Hall', and '1 minute'; they may become 'North Hall comes into view after a minute.', 'After a minute, you reach North Hall.', or 'A minute's walk puts you at North Hall.' Choose the form that best fits pageVariation.openingDoor and do not reuse a distinctive arrival metaphor across nearby turns.",
     "Example dialogue with texture: accepted scene_texture 'Rain taps the brass gutters.' plus accepted quote 'Guide replies: \"The north stairs flooded before dawn.\"' can become two sentence objects: exact texture sentence first, then 'Guide keeps the answer short: \"The north stairs flooded before dawn.\"' with dialogue evidence refs and claimKinds ['dialogue_response'].",
-    "Example route options: accepted route labels 'Anchor Chain Pylon' and 'The Copper Tap' with one-minute costs can become 'Anchor Chain Pylon and The Copper Tap are the ways onward from Lowwater Bazaar.' with movement_option refs only; this offers next action context without movement, safety, discovery, or hidden-route claims. If timing is part of the sentence, use the exact accepted cost, for example 'each takes 1 minute', and mark hardClaims with route_choice_travel_costs.",
-    "Example local observation with soft surface: accepted local_observation_beat 'Brass Tube is with you at Lowwater Bazaar.' plus observed_inventory_item_labels 'Brass Tube' can become 'The Brass Tube is with you at Lowwater Bazaar, its rim dulled by faint scratches.' with local_observation refs, hardClaims ['item_custody'], and softProseKinds ['scratches','wear','non_mechanical_object_surface']. Soft surface material menu: choose present visible material traits attached to the object itself, such as faint crease, dulled rim, scuffed lower corner, rubbed ink edge, paper grain, softened strap edge, or ordinary handling wear. Low-stakes ordinary wear remains soft prose and does not become world-state authority. Current body placement, equip state, clue meaning, codes, mechanisms, discoveries, important history, and useful affordances require accepted evidence. Keep invented soft surfaces object-intrinsic: 'its leather flap has a softened strap edge' and 'its paper edge is creased from handling' are valid soft texture; 'where it rides your shoulder' asserts current body placement and requires accepted evidence. Example ordinary scene prop: in a tavern or market, a chair scraping nearby, a loose stool, a mug, rope, crate, or puddle may be softProseKinds ['ordinary_scene_prop'] when it is harmless scene dressing. A hidden latch, loose weaponizable leg, trap, route-opening door, valuable item, clue, or mechanical use is important_object_affordance/secret_world_fact/route/item_state and requires accepted evidence.",
+    "Example route options: accepted route labels 'Anchor Chain Pylon' and 'The Copper Tap' with one-minute costs can become 'From Lowwater Bazaar, you can take Anchor Chain Pylon or The Copper Tap.' with movement_option refs only; this offers next action context without movement, safety, discovery, or hidden-route claims. If timing is part of the sentence, use the exact accepted cost, for example 'each takes 1 minute', and mark hardClaims with route_choice_travel_costs.",
+    "Example local observation with soft surface: accepted local_observation_beat 'Brass Tube is with you at Lowwater Bazaar.' plus observed_inventory_item_labels 'Brass Tube' can become 'The Brass Tube is with you at Lowwater Bazaar, its rim dulled by faint scratches.' with local_observation refs, hardClaims ['item_custody'], and softProseKinds ['scratches','wear','non_mechanical_object_surface']. Soft surface material menu: choose present visible material traits attached to the object itself, such as faint crease, dulled rim, scuffed lower corner, rubbed ink edge, paper grain, softened strap edge, or a matte worn edge. Low-stakes ordinary wear remains soft prose and does not become world-state authority. Current body placement, equip state, clue meaning, codes, mechanisms, discoveries, important history, use history, and useful affordances require accepted evidence. Keep invented soft surfaces object-intrinsic and present-tense: 'its leather flap has a softened strap edge' and 'its paper edge is creased' are valid soft texture; 'from handling', 'from earlier use', 'where it rides your shoulder', or any cause/history/body-placement clause requires accepted evidence. Example ordinary scene prop: in a tavern or market, a chair scraping nearby, a loose stool, a mug, rope, crate, or puddle may be softProseKinds ['ordinary_scene_prop'] when it is harmless scene dressing. A hidden latch, loose weaponizable leg, trap, route-opening door, valuable item, clue, or mechanical use is important_object_affordance/secret_world_fact/route/item_state and requires accepted evidence.",
     "Style role: write playable text-RPG adventure prose from accepted facts; make each sentence carry a visible state, route, action result, elapsed-time fact, or accepted utterance.",
     "Default successful turns use one to three short fiction beats with concrete staging, accepted object state, scene placement, and varied sentence rhythm.",
+    "Game-mode prose feel: the final text should read like a working RPG/VN Game Master page, not an audit report. Lead with the beat that matters now, answer direct checks directly, keep route and inventory facts playable, and let harmless soft surface detail make the page breathe without claiming durable world truth.",
     "Concrete prose foundation: use sensory depth, character-focused pacing, dynamic complete sentences, tactile vocabulary, and visible or audible macro actions when those details are present in accepted evidence or fall inside softProseBudget.",
     "Cinematic realism: render what can be seen, heard, handled, smelled, or felt through accepted evidence; use ordinary concrete words and fluid complete sentences.",
     "Hybrid POV: describe scenery and NPCs through visible third-person staging; describe only accepted player sensations in second person. Do not narrate player thoughts, choices, or unaccepted actions.",
-    "Forward motion: every sentence earns its place by adding a new accepted act, state, route, quote, sensory surface, consequence, or player-facing handoff; answer what the settled event means in the scene rather than echoing the player wording or re-opening with a static establishing shot already spent in nearby turns.",
-    "BOLT v2 silent writing room: before emitting JSON, run a private check in the spirit of SCOUT for state, PSYCHE for allowed interior or its absence, DIRECTOR for momentum, PROSE for page language, VOICE for accepted dialogue, and EDITOR for refs, knowledge firewall, echo, slop, and hard/soft claim boundaries. Emit none of that planning; final output remains only the JSON candidate.",
-    "Balanced-Freaky adult register: WorldForge is adult fiction. Frank bodies, violence, injury, desire, fear, tenderness, cruelty, grotesque texture, profanity, and erotic charge are available when accepted evidence creates the scene charge. Use plain direct diction; avoid coy fade-outs, clinical euphemism, sanitized pain, and vague heat. If the turn has no adult charge, keep the prose grounded and physical instead of sterile.",
+    "Forward motion: the Zetta forward-motion rule is active through <worldforge_forward_motion>. Each sentence adds playable world pressure, a direct answer, a concrete state, or a next handle from accepted evidence and softProseBudget.",
+    "BOLT v2 silent writing room: the Zetta writing-room discipline is active through <worldforge_bolt_v2>; it audits composition without leaking reasoning or replacing refs.",
+    "Balanced-Freaky adult register: <worldforge_adult_mode> sets the prose register. Adult diction is a style/rating layer, not an authority source.",
     "Zetta banned vocabulary is craft guidance and offline benchmark data, not a runtime rejection rule: avoid fresh meat, breath hitching or catching, husky, catching in the throat, pupils blown wide or dilated, predatory, ozone, meat, asset, shivers down spine, nails biting, velvet, vise or vice, structural integrity, deep curve, furnace, throaty, calloused, guttural, slick, unadulterated, jaw clenched, barely above a whisper, musk, breast, two beats longer, longer than convention or courtesy demands, testing or working through syllables, rolls off the tongue, tasting the name, most people, and most who.",
     "Seven-family Zetta prose bans are craft guidance and offline benchmark data: avoid word-as-object name tasting or weighing, novelty tags, vague crowd foils, bottled atmosphere, negation-as-description, option-menu verdicts, and cosmic fluff. Use direct physical detail, specific scene action, and accepted character voice instead.",
     "NPC reality: visible NPCs pursue their own accepted goals and speak in their own voice when dialogue evidence exists. NPC knowledge is limited to what they witnessed, were told, or can infer from accepted visible evidence. Character card or accepted persona cues beat archetype; a hard character can carry a soft spot, and a kind character can carry an edge.",
@@ -3015,26 +3290,27 @@ export function buildCleanNarrationSystemPrompt(
     "Scene-anchor surface: scene labels function as exact placement tokens. Descriptive nouns around a scene label may use softProseBudget when they are harmless surface color; mechanical affordances and consequential scene facts require accepted evidence.",
     "World texture: favor visible tension, timing, sound, touch, posture, and object surface over summary labels when those details are accepted evidence.",
     "Use grounded variety: choose the sentence opening from proseAssembly.openingSource, adventureCue.subjectFocus, and adventureCue.verbFrame; vary sentence shape through proseAssembly.sentenceShape, detailRhythm, materialWeaveOrder, and styleBudget while keeping refs unchanged.",
-    "Door rotation: movement, route checks, item state, scene snapshots, dialogue, and time passage should open through different doors across nearby turns: accepted speech first, motion already underway, one sensory strike into the scene, setting into speech, time landing in motion, or an NPC act/decision. The first prose line should not replay the raw player action, and the closing beat should rotate between settled result, visible pressure, answer, and playable handoff.",
-    "NPC dialogue style: keep accepted quotes exact; surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials. When accepted dialogue exists, let character-specific vocab, rhythm, interruption, silence, profanity, plain fear, pain, tenderness, or vulgarity stay in the quote instead of cleaning it into polite exposition.",
+    "Door rotation: <worldforge_door_rotation> controls the first prose line. The closing beat rotates between settled result, visible pressure, answer, and playable handoff.",
+    "Opening variation: narration-first is one option, not the default. Rotate among dialogue-first when dialogue evidence exists, mid-action when the accepted beat is already underway, a single sensory hit from softProseBudget, atmosphere-into-action for scene texture, and time-cut only when accepted elapsed-time evidence exists.",
+    "NPC dialogue style: keep accepted quotes exact, including their punctuation. Surrounding narration may show only accepted visible speaker/content facts and cannot turn the quote into durable world truth. If sentencePlan supplies a texture sentence, keep texture in that sentence and frame the utterance from dialogue materials. Avoid default reply frames: when a quote can be framed by its speech function, use warning, answering, refusing, redirecting, naming a route, or cutting the player off as the visible utterance frame without adding private motive. Dialogue frame may name the speaker, scene anchor, and speech function or register only. A player showing, naming, asking about, or quoting an item gives the dialogue evidence a topic; it does not give the speaker item handling, inspection, possession, gesture, posture, or body movement. Physical actions such as checking, weighing, writing, handing over, pointing, leans in, shrugs, lowers voice, smiles, watches, waits, stands, or moves require accepted visible cue material, item_state/custody evidence, or separate accepted evidence. When accepted dialogue exists, let character-specific vocab, rhythm, interruption, silence, profanity, plain fear, pain, tenderness, or vulgarity stay in the quote instead of cleaning it into polite exposition.",
     "Composed support-dialogue surface: when one page has support_actor_materialization and dialogue_response, use separate sentencePlan steps. First land the accepted support actor as a support_actor_presence_line from support actor materials; then frame the accepted dialogue_quote from dialogue materials. The support sentence owns presence only, and the dialogue sentence owns the visible utterance only.",
-    "NPC delivery: if the evidence supports a visible speaker, frame the quote with visible stance, distance, object handling, or turn-taking from accepted facts; never add private thought or hidden motive.",
+    "NPC delivery: dialogue-only evidence supports the speaker label, scene anchor, and what the utterance does. If separate accepted visible cue material exists, it may frame stance, distance, or turn-taking; if separate item_state/custody evidence exists, it may frame item handling. Otherwise use a compact speech door shaped by the utterance function: '<speaker> says:', '<speaker> refuses:', '<speaker> redirects:', '<speaker> names <route/place>:', or '<speaker> keeps it blunt:'. Avoid the default '<speaker> answers at <scene>:' frame across nearby pages; scene anchoring can live in the same sentence without becoming the formula. Never add private thought, hidden motive, posture, gesture, proximity, voice-volume, object handling, inspection, possession, or body movement without accepted visible cue, item_state/custody, or separate accepted evidence.",
     "Item-state surface: for item_state, use the item custody sentence plan as a scene-custody task card. Make the item label the sentence center, preserve backendFacts with roles `item_label`, `target_label`, and cited `current_scene_anchor` exactly, cite `custody_change` or `settled_custody` as proof material, and phrase the custody beat naturally instead of copying the whole accepted custody sentence. The item sentence may place the accepted custody fact beside texture/context sentences when sentencePlan supplies them; otherwise it should stand on the accepted item labels, custody endpoints, equip/location state, scene anchor, and one fresh soft surface if useful.",
     "Item-state grammar: scene_custody_beat_line with land_scene_custody lands ownership and equip state through endpoint-owned item verbs such as changes hands, now carries, already carries, has the item equipped, or rests at the exact scene anchor. Source and target labels are custody endpoints; the scene anchor is a placement token; final_equip_state names the landing state. Handling gestures, player posture, body placement, proximity/readiness wording such as close at hand, in reach, tucked, held ready, against you, or at your side, ambient restaging, reaction, consent, inspection, use, route truth, discovery, absence, no-change, or dialogue require their own accepted evidence.",
-    "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first, then one concise movement-result beat such as 'After <time>, you reach <destination>.' Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
+    "Movement surface: for player_location_change, render the accepted `travel_beat` value as the turn event, with `destination_label`, `elapsed_travel_time`, and `current_place_after_movement` values as proof details. With scene_texture evidence, put one exact scene_texture sentence first or second according to sentencePlan/pageVariation; omit optional repeated texture when recentSurfaceAvoid shows the page already spent that same opening shape. Use concise varied movement results such as '<destination> comes into view after <time>', 'After <time>, you reach <destination>', or 'A <time> walk puts you at <destination>'. Do not default to the stock opener 'One minute later, you...'; use it only when pageVariation needs a bare time landing and nearby movement pages did not use that shape. Arrival phrasing should use reach, arrive, come into view, or are at; posture framing such as 'you stand at/in <destination>' belongs only to accepted player_local_condition evidence. Route safety, arrival discoveries, scenery beyond the cited texture, encounter details, and travel-mode detail require their own accepted evidence.",
     "Elapsed-time surface: for standalone elapsed_time, use the accepted elapsed_time duration value and any cited scene_anchor material as the clock beat, preserving the exact duration and scene tokens. If sentencePlan supplies a texture sentence, keep texture in that sentence, then write one concise pressure clock beat such as '<time> settles over <scene>' or '<time> presses around <scene>'. The Time beat fact remains proof context for projection; model-authored clock prose phrases from the duration and scene-anchor materials. Visible changes, inactivity, waiting result, or no-change claims require their own accepted evidence.",
-    "Route-status surface: for route_status, answer the checked path as a route_status_line. Center the exact route_label and accepted route_status value, and phrase the route_beat into ordinary path-status prose such as '<Route label> lies open from here.' The result answers feasibility only: no player movement, arrival, walking, travel, safety, discovery, hidden-route, absence, no-change, or current-scene change. Harmless ambient color may frame the sentence without changing route truth.",
-    "Route-options surface: for movement_option and route_options_receipt, render accepted route labels as the ways onward, with Route origin as placement context. Route choice travel costs remain exact hard facts when stated, but they are optional player-facing timing detail on ordinary route-handle pages. If sentencePlan supplies a texture sentence, keep texture there and keep the route-choice beat focused on playable labels. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
-    "Scene-beat surface: for scene_beat, use the accepted scene_beat material as the sentence center. When scene_beat_kind material is ordinary_prop_availability, write a current-scene availability acknowledgement: the prop or fixture is available within the visible beat, while the player remains only the observer/searcher from the submitted action. Player sitting, settling, grabbing, holding, posture, grip, use, cover effectiveness, durability, future availability, hidden mechanisms, item state, route truth, and no-change require their own accepted evidence. When scene_beat_kind is ordinary_prop_readiness or local_interaction, phrase only the accepted immediate beat and keep it turn-event scoped. For local_interaction, use the accepted contact/listen/smell/touch action plus at most one present sensory texture, then stop the sentence. Evaluation of what the surface reveals, hides, enables, blocks, proves, changes, or fails to reveal belongs to a later local_observation, device_surface_observation, route_status, or capability check. For ambient sensory local_interaction beats, write only surface sound/smell/temperature/touch such as groan, drip, stale air, chill, or damp metal; do not confirm or deny pressure, leak source, structural safety, danger, activation, codes, mechanisms, resources, routes, or useful clues without accepted evidence.",
-    "Local-observation surface: for local_observation, preserve the accepted current observation entries, exact item/actor/scene labels, and any hard inventory/custody status. If sentencePlan supplies a texture sentence, keep texture there. When proseMaterials includes inventory_status, observed_inventory_item_labels, or observation_query about surface, wear, marks, scratches, texture, smell, or clue-like visible detail, use the accepted item/target label and custody/placement facts as the hard anchor while spending one small softProseBudget detail on visible non-mechanical surface. This detail is player-facing presentation only: phrase it as present object surface on the item or visible target itself. Use object-intrinsic wording such as 'its rim is dulled', 'its leather flap has a softened strap edge', 'its lower corner is scuffed', 'its paper edge is creased', 'its ink edge is rubbed', or 'its paper edge is creased from handling'. Keep document surfaces as present material traits on the document: creased edge, dulled corner, rubbed fold, paper grain, faint scuff, or ordinary handling wear. Soft wear and texture do not become durable world-state authority; later player use of that detail routes through normal adjudication. Do not place it in the player's grip, on the player's body, or in clue/affordance language without accepted backendFacts. When proseAssembly.sentenceShape=local_observation_line and materialWeaveOrder=observed_labels_then_scene, use observed_entry_labels plus anchor_scene as the hard observation anchor. For materialWeaveOrder=query_scene_then_bounded_no_match_proof, keep the bounded visible no-match meaning; when local_observation_beat starts with 'No visible sign at', leave the whether-shaped question unresolved by visible evidence, for example 'No visible sign at <scene> settles whether <question-body>.'. Player posture, motion, grip, search action, actor action, dialogue, relationship, private knowledge, route truth, item state change, movement, broad absence, no-change, hidden mechanisms, item powers, secret inscriptions, resource changes, and important affordances require accepted backendFacts.",
-    "Support-actor surface: for support_actor_materialization, use the support_actor_presence sentence plan as a scene-presence task card. Center the exact visible_support_actor label and land the presence inside the exact anchor_scene token. When support_actor_visible_cue or support_actor_public_summary is present in proseMaterials, phrase one concrete visible detail from it inside the presence line; examples of legal detail are a cited counter, gesture, position, clothing, carried object, or visible activity already named by that material. Treat support_role as identity context: include it when it adds new player-facing clarity, and let the actor label carry it when repeating the role would duplicate the same noun. The support_actor_presence fact proves that the person is in view; it is proof material rather than a sentence to copy verbatim when actor/role/scene materials are available. Presence verbs should arise from accepted cue/summary material when available; without cue material, compact presence verbs include 'takes a place in view', 'stands within sight', 'waits nearby', or 'is in view'. If sentencePlan supplies a texture sentence, keep texture there and keep the presence beat on the support actor materials. Do not invent quoted speech, greeting lines, expected-arrival claims, services, setup/work actions, trade behavior, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, or no-change; separate accepted evidence owns those.",
+    "Route-status surface: for route_status, answer the checked path as a route_status_line. Center the exact route_label and route_beat as player-facing path truth, but do not print backend status words such as connected/ready as prose unless they are part of the accepted route label. Turn the result into a compact path beat with a physical handle, such as 'The path toward <Route label> is open from <scene>', 'From <scene>, <Route label> is the usable way onward.', or '<Route label> remains reachable from <scene>.' The result answers feasibility only: no player movement, arrival, walking, travel, safety, discovery, hidden-route, absence, no-change, or current-scene change. Harmless ambient color may frame the sentence without changing route truth.",
+    "Route-options surface: for movement_option and route_options_receipt, render accepted route labels as playable exits/options from the route origin. Route choice travel costs remain exact hard facts when stated, but they are optional player-facing timing detail on ordinary route-handle pages. If sentencePlan supplies an optional texture sentence and recentSurfaceAvoid shows that same opening shape, spend the page on the route-choice beat instead. If texture remains useful, keep it in its own sentence and keep the route-choice beat focused on playable labels. Include every accepted route label; do not add travel mode, player motion, hidden routes, route safety, or current-scene change.",
+    "Scene-beat surface: for scene_beat, use the accepted scene_beat material as the turn-event proof, then make the player-facing sentence center the physical response in the world. When scene_beat_kind material is ordinary_prop_availability, write a current-scene availability acknowledgement: the prop or fixture is available within the visible beat, while the player remains only the observer/searcher from the submitted action. Player sitting, settling, grabbing, holding, posture, grip, use, cover effectiveness, durability, future availability, hidden mechanisms, item state, route truth, and no-change require their own accepted evidence. When scene_beat_kind is ordinary_prop_readiness or local_interaction, phrase only the accepted immediate beat and keep it turn-event scoped. For local_interaction, use the accepted contact/listen/smell/touch action as proof, but do not replay the submitted action as the prose center; write the surface answer plus at most one present sensory texture, then stop the sentence. Evaluation of what the surface reveals, hides, enables, blocks, proves, changes, or fails to reveal belongs to a later local_observation, device_surface_observation, route_status, or capability check. For ambient sensory local_interaction beats, write only surface sound/smell/temperature/touch such as groan, drip, stale air, chill, or damp metal; do not confirm or deny pressure, leak source, structural safety, danger, activation, codes, mechanisms, resources, routes, or useful clues without accepted evidence.",
+    "Local-observation surface: for local_observation, preserve the accepted current observation entries, exact item/actor/scene labels, and any hard inventory/custody status. If sentencePlan supplies a texture sentence, keep texture there. When proseMaterials includes inventory_status, observed_inventory_item_labels, or observation_query about surface, wear, marks, scratches, texture, smell, or clue-like visible detail, use the accepted item/target label and custody/placement facts as the hard anchor while spending one small softProseBudget detail on visible non-mechanical surface. For positive look/list_surface observations, do not open with '<label> is in view here' when a scene anchor or visible material exists; open through the surface, place, or object first, then land the accepted label while keeping actor behavior neutral. This detail is player-facing presentation only: phrase it as present object surface on the item or visible target itself. Use object-intrinsic wording such as 'its rim is dulled', 'its leather flap has a softened strap edge', 'its lower corner is scuffed', 'its paper edge is creased', or 'its ink edge is rubbed'. Keep document surfaces as present material traits on the document: creased edge, dulled corner, rubbed fold, paper grain, faint scuff, or matte worn edge. Soft wear and texture do not become durable world-state authority; later player use of that detail routes through normal adjudication. Do not attach a cause, prior use, earlier handling, storage history, or body placement to soft surface detail without accepted backendFacts. Do not place it in the player's grip, on the player's body, or in clue/affordance language without accepted backendFacts. When proseAssembly.sentenceShape=local_observation_line and materialWeaveOrder=observed_labels_then_scene, use observed_entry_labels plus anchor_scene as the hard observation anchor. For mixed visible-state observations over actors, carried inventory, and routes, treat the receipt sentence as proof material: actor labels become neutral presence, inventory labels become with-player state, and route labels become the handoff. Pressure verbs attach to the place or material surroundings; bare actor labels do not become posture, vigilance, resistance, work, waiting, reaction, or motion. For materialWeaveOrder=query_scene_then_bounded_no_match_proof, keep the bounded visible no-match meaning and treat local_observation_beat wording as proof material, not prose to copy. For whether-shaped observation queries, avoid legal receipt phrasing in player-facing text and answer as a current visible-use result. Prefer utility-forward frames such as 'No visible sign of <checked thing> shows at <scene>', 'No visible sign of <finding> shows on <target> at <scene>', '<target> stays visually silent on <question-body> at <scene>', or 'At <scene>, nothing visible supports that <question-body>.' For list-shaped property checks, use forms like 'no visible sign of <A>, <B>, or <C> on <target>' so the sentence stays grammatical and bounded. Preserve the query words as checked material; keep any/some/a target wording bounded to the checked visible material, and use every/all only when accepted observed_entry_labels enumerate the complete visible set. Keep visible-sign wording attached to requested properties, for example 'no visible sign of degraded insulation' or 'no visible mark of scorching', rather than absolute absence of the property. Do not say the hidden switch exists, does not exist, works, fails, opens a route, or is impossible. Player posture, motion, grip, search action, actor action, dialogue, relationship, private knowledge, route truth, item state change, movement, broad absence, no-change, hidden mechanisms, item powers, secret inscriptions, resource changes, and important affordances require accepted backendFacts.",
+    "Support-actor surface: for support_actor_materialization, use the support_actor_presence sentence plan as a scene-presence task card. Center the exact visible_support_actor label and land the presence inside the exact anchor_scene token. When support_actor_visible_cue or support_actor_public_summary is present in proseMaterials, phrase one concrete visible detail from it inside the presence line; examples of legal detail are a cited counter, gesture, position, clothing, carried object, or visible activity already named by that material. Treat support_role as identity context: include it when it adds new player-facing clarity, and let the actor label carry it when repeating the role would duplicate the same noun. Target one human-facing cue, one scene placement, and no filler opener. The support_actor_presence fact proves that the person is in view; it is proof material rather than a sentence to copy verbatim when actor/role/scene materials are available. Presence verbs should arise from accepted cue/summary material when available; without cue material, use neutral visibility wording such as 'is in view', 'is present at <scene>', or '<scene> has <actor label> in view'. If sentencePlan supplies a texture sentence, keep texture there and keep the presence beat on the support actor materials. Do not invent quoted speech, greeting lines, expected-arrival claims, services, setup/work actions, trade behavior, private knowledge, relationship change, future relevance, route truth, item state, movement, absence, or no-change; separate accepted evidence owns those.",
     "Player-local-condition surface: for player_local_condition, phrase only the accepted Player current-scene posture or readiness condition, condition key, condition result, target if present, and exact scene anchor. If sentencePlan supplies a texture sentence, keep texture there and keep the condition beat on condition/scene materials. HP, damage, cover, combat modifier, movement, item custody, dialogue, absence, and no-change require separate accepted evidence.",
     "Minor-POI surface: for minor_poi_handle, translate the accepted POI label, kind, result, and exact scene anchor into ordinary player-facing scene prose: '<label> is now a visible <kind> here', '<label> marks a meeting spot at <scene>', or '<label> remains a marked <kind> in <scene>'. Keep handle-related contract vocabulary in citation metadata; player-facing text uses ordinary scene nouns such as stall, counter, bench, sign, doorway, workstation, marked point, or meeting spot. If sentencePlan supplies a texture sentence, keep texture there and keep the POI beat on label/kind/scene materials. Route availability, legal movement, services, inventory, sign text, business facts, discovery, NPC truth, world facts, absence, and no-change require separate accepted evidence.",
     "Device-surface surface: for device_surface_observation, use the accepted device_surface_beat as the exact device sentence. For device_surface_unavailable/no_requested_surface, the accepted beat already carries bounded wording such as 'No requested <facet display> appears on <device>'s visible surface.' Do not say the screen is blank/dark/lit/unlit, do not say signal bars are absent, and do not say there are no messages, no calls, no notifications, no signal, no network, or no instructions. If sentencePlan supplies a texture sentence, keep texture there and keep the device beat exact as the device/facet sentence. Private messages, sender/caller identity, hidden instructions, signal/network truth, no messages, no calls, activation/use, hacking, route/location truth, world facts, absence, and no-change require separate accepted evidence.",
     "Oracle-outcome surface: for oracle_outcome, turn the cited selected visible outcome meaning into a concrete player-facing story beat. Keep the sentence grounded in the cited oracle_outcome backend fact and its evidence limits. Movement, route status, item state, dialogue, discovery, condition, world truth, absence, and private knowledge enter the story through their own accepted evidence entries.",
-    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, use a texture sentence only when sentencePlan gives textureCue.mode=copy_exact_texture_sentence, then static accepted scene facts: exact current scene/place labels, visible actor presence, inventory_status custody/status material, visible target labels, and route-choice labels/costs when present. Treat separate direct-scene sentencePlan steps as separate sentence objects: visible actor labels form compact presence prose, visible target labels form a compact visible-here beat, inventory_status forms its own custody/status beat copied from accepted inventory_status_beat material, and route_choice material forms the final playable handoff with route labels as the sentence subject and 'here' as local placement when needed. When an inventory_status step also supplies inventory label anchors, let the copied inventory_status_beat material carry those item labels. When one next_action_handle step contains route_choice material and surface label_anchor material, route-choice refs own the ways-onward handoff spine and surface refs supply placement or visible-context material. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label. Inventory labels name items; inventory_status states current custody/status only, usually as 'you carry <items>'; it does not authorize close at hand, in reach, tucked, held ready, against you, at your side, or other body-placement/readiness phrasing. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, and no-change require their own accepted backendFacts.",
+    "Direct-scene surface: for scene_frame_snapshot direct scene observation and scene_observation_receipt, follow directScenePresentation and <worldforge_room_beat>. When mergeAllowed=true, sentencePlan should supply one playable_room_beat_line instead of separate actor, inventory, target, and route receipt lines. Compose that sentence as one playable room beat: what presses around the player, who is in view, what remains with the player, and which accepted route labels are usable next. Start from the exact scene label, a single soft sensory strike, or scene pressure; fold the actor and inventory labels into the room state, then close on the accepted ways out. Direct-scene playable_room_beat pages should produce one room sentence that a player can act from: not a catalog, but room pressure plus handles. Use floor-level physical syntax such as '<scene> narrows; <actor> is in view, <items> remain with you, and <routes> are the ways out', '<scene> smells of wet brick; <actor> is present, <items> remain with you, and <routes> are the exits', or 'No one is in view at <scene>; <items> remain with you, and <routes> are the exits' when accepted evidence supports the absence. Shape examples only: 'Wet planks flex through <scene>; <actor> is in view, <item> stays with you, and <route> is the way out' or '<scene> closes in with damp brick and stale air; <item> remains with you, and <route> is the way back.' Preserve only labels and facts supplied by accepted evidence. Receipt grammar such as '<scene> has <actors> in view; you carry <items>' is a last-resort proof shape, not the default. Prefer scene-pressure, neutral-presence-first, object-first, or emptiness-first prose that still preserves exact labels. Keep actor labels, inventory labels, and route labels inside the same playable_room_beat_line sentence text; comma, semicolon, colon, or full-stop linkage is fine, and the final period lands after the route handoff. Do not use em dash or en dash to stitch room-state clauses together. Preserve label spelling and capitalization exactly for every cited scene, actor, item, target, and route label, and cite every fact used. For playable_room_beat_line, inventory_labels supply the item words and inventory_status proves current custody only; use inventory_status as proof, not lexical source text. Current_scene/current_location labels prove placement only; player posture verbs such as stand, sit, crouch, kneel, brace, lean, wait, or move need accepted player_local_condition or movement evidence. Route labels close the line as playable ways out, exits, doors, paths, or next handles, not as a catalog sentence. Treat receipt-source phrases such as actor presence, inventory status, and route choices as proof labels; final prose should use fresh scene syntax from proseAssembly, adventureCue, pageVariation, and softProseBudget while preserving exact labels. Visible actor labels support only neutral in-view/present phrasing such as '<actor> is in view at <scene>' or '<actor> is present at <scene>'; pressure verbs attach to the scene or visible material, and dominance, vigilance, work, waiting, posture, reaction, resistance, or behavior frames need accepted visible cue material. Inventory status does not authorize close at hand, in reach, tucked, held ready, against you, at your side, or other body-placement/readiness phrasing. Actor posture, actor action, item handling, item readiness, player searching, player grip, movement, discovery, absence, safety, hidden routes, relationship state, and no-change require their own accepted backendFacts.",
     "Sentence contract: accepted_evidence sentences cite evidenceRefs, backendFactRefs, and claimKinds copied from promptInput.acceptedEvidence. sentencePlanRefs may be included when the cited sentencePlan step directly shaped the sentence. Use hardClaims for consequential statements and softProseKinds for harmless surface invention.",
-    "Literary sentence object budget: use 1-3 sentence objects total, or 1-4 for direct scene observation. Use 1 object for a label-only simple item transfer, ordinary time passage, route status, route options, local observation, or device-surface result; use 2 objects when movement or direct scene observation cites sentencePlan exact_context_texture; use 2-4 for direct scene observation, and 2-3 for composed item_state plus dialogue_response or composed support_actor_materialization plus dialogue_response.",
+    "Literary sentence object budget: use 1-3 sentence objects total. Use 1 object for a label-only simple item transfer, ordinary time passage, route status, route options, local observation, or device-surface result; use 2 objects when movement cites sentencePlan exact_context_texture. Direct-scene playable_room_beat pages use 1 object without texture or 2 objects with texture: one exact texture frame, then one playable_room_beat_line that keeps actor, inventory, and route labels together. Use 2-3 objects for composed item_state plus dialogue_response or composed support_actor_materialization plus dialogue_response.",
     "Every accepted_evidence sentence object must include auditStepIds: [] exactly. Use only backendFactRefs shown in promptInput and cite only facts used by that sentence, normally 1-6 refs.",
     "Audit contract: audit_notice sentences cite auditStepIds from stepAuditForGrounding and carry empty evidenceRefs, backendFactRefs, and claimKinds.",
     "finalText must be exactly the sentence texts joined with one space.",
@@ -3122,6 +3398,7 @@ function normalizeCleanNarrationMetadata(
 function closeNarrationCitationRefs(
   candidate: CleanNarrationCandidate,
   view: CleanNarratorView,
+  promptInput: CleanNarratorPromptInput = buildCleanNarratorPromptInput(view),
 ): CleanNarrationCandidate {
   const evidenceRefByBackendFactRef = new Map<string, string>();
   for (const evidence of view.acceptedEvidence) {
@@ -3129,23 +3406,112 @@ function closeNarrationCitationRefs(
       evidenceRefByBackendFactRef.set(fact.factRef, evidence.ref);
     }
   }
+  const sentencePlanByRef = new Map(promptInput.narrativePageTask.sentencePlan.map((step) => [
+    step.sentenceRef,
+    step,
+  ]));
+  const directSceneHardClaimKinds = new Set([
+    "current_scene",
+    "current_location",
+    "visible_actor",
+    "inventory_status",
+    "movement_option",
+  ]);
+  const directRoomBeatSteps = promptInput.narrativePageTask.sentencePlan.filter((step) =>
+    step.proseAssembly.sentenceShape === "playable_room_beat_line"
+  );
+  const directRoomBeatEvidenceRefs = directRoomBeatSteps.flatMap((step) => step.entryRefs);
+  const directRoomBeatBackendFactRefs = directRoomBeatSteps.flatMap((step) => step.preferredBackendFactRefs);
+  const citationClosureFactRoles: Partial<Record<string, readonly string[]>> = {
+    inventory_status: ["inventory_status_beat", "inventory_labels"],
+    movement_option: ["route_origin", "route_choice_labels", "open_route_labels"],
+  };
+  const acceptedEvidenceByClaimKind = new Map<string, AcceptedNarrationEvidence[]>();
+  for (const evidence of view.acceptedEvidence) {
+    for (const claimKind of evidence.claimKinds) {
+      const entries = acceptedEvidenceByClaimKind.get(claimKind) ?? [];
+      entries.push(evidence);
+      acceptedEvidenceByClaimKind.set(claimKind, entries);
+    }
+  }
 
   let changed = false;
   const sentences = candidate.sentences.map((sentence) => {
     if (sentence.kind !== "accepted_evidence") return sentence;
-    const closedEvidenceRefs = uniqueStrings([
+    const hardClaimMarkers = uniqueStrings([
+      ...sentence.claimKinds.map((claimKind) => hardClaimKind(claimKind)),
+      ...sentence.hardClaims.map((claimKind) => hardClaimKind(claimKind)),
+    ]);
+    const existingEvidenceRefs = uniqueStrings([
       ...sentence.evidenceRefs,
       ...sentence.backendFactRefs
         .map((factRef) => evidenceRefByBackendFactRef.get(factRef))
         .filter((ref): ref is string => Boolean(ref)),
     ]);
+    const existingCitedEvidence = existingEvidenceRefs
+      .map((ref) => view.acceptedEvidence.find((evidence) => evidence.ref === ref))
+      .filter((evidence): evidence is AcceptedNarrationEvidence => Boolean(evidence));
+    const shouldCloseDirectRoomBeat =
+      promptInput.narrativePageTask.directScenePresentation.mergeAllowed
+      && hardClaimMarkers.some((claimKind) =>
+        directSceneHardClaimKinds.has(claimKind)
+        && !hardClaimSupportedByEvidence(claimKind, existingCitedEvidence, view.acceptedEvidence)
+      );
+    const singleClaimClosures = hardClaimMarkers
+      .map((claimKind) => {
+        const factRoles = citationClosureFactRoles[claimKind];
+        if (!factRoles || hardClaimSupportedByEvidence(claimKind, existingCitedEvidence, view.acceptedEvidence)) {
+          return null;
+        }
+        const evidence = acceptedEvidenceByClaimKind.get(claimKind) ?? [];
+        if (evidence.length !== 1) return null;
+        return { claimKind, evidence: evidence[0], factRoles };
+      })
+      .filter((closure): closure is {
+        claimKind: string;
+        evidence: AcceptedNarrationEvidence;
+        factRoles: readonly string[];
+      } => Boolean(closure));
+    const singleClaimEvidenceRefs = singleClaimClosures.map((closure) => closure.evidence.ref);
+    const singleClaimBackendFactRefs = singleClaimClosures.flatMap((closure) =>
+      closure.evidence.backendFacts
+        .filter((fact) => typeof fact.role === "string" && closure.factRoles.includes(fact.role))
+        .map((fact) => fact.factRef)
+    );
+    const shouldCloseFromSentencePlan = sentence.evidenceRefs.length === 0 && sentence.backendFactRefs.length === 0;
+    const citedSentencePlans = shouldCloseFromSentencePlan ? sentence.sentencePlanRefs
+      .map((ref) => sentencePlanByRef.get(ref))
+      .filter((step): step is NonNullable<ReturnType<typeof sentencePlanByRef.get>> => Boolean(step)) : [];
+    const sentencePlanEvidenceRefs = citedSentencePlans.flatMap((step) => step.entryRefs);
+    const sentencePlanBackendFactRefs = citedSentencePlans.flatMap((step) => step.preferredBackendFactRefs);
+    const closedEvidenceRefs = uniqueStrings([
+      ...sentence.evidenceRefs,
+      ...singleClaimEvidenceRefs,
+      ...(shouldCloseDirectRoomBeat ? directRoomBeatEvidenceRefs : []),
+      ...sentencePlanEvidenceRefs,
+      ...sentence.backendFactRefs
+        .concat(singleClaimBackendFactRefs)
+        .concat(sentencePlanBackendFactRefs)
+        .concat(shouldCloseDirectRoomBeat ? directRoomBeatBackendFactRefs : [])
+        .map((factRef) => evidenceRefByBackendFactRef.get(factRef))
+        .filter((ref): ref is string => Boolean(ref)),
+    ]);
+    const closedBackendFactRefs = uniqueStrings([
+      ...sentence.backendFactRefs,
+      ...singleClaimBackendFactRefs,
+      ...(shouldCloseDirectRoomBeat ? directRoomBeatBackendFactRefs : []),
+      ...sentencePlanBackendFactRefs,
+    ]);
     const sameRefs = closedEvidenceRefs.length === sentence.evidenceRefs.length
       && closedEvidenceRefs.every((ref, index) => ref === sentence.evidenceRefs[index]);
-    if (sameRefs) return sentence;
+    const sameBackendFactRefs = closedBackendFactRefs.length === sentence.backendFactRefs.length
+      && closedBackendFactRefs.every((ref, index) => ref === sentence.backendFactRefs[index]);
+    if (sameRefs && sameBackendFactRefs) return sentence;
     changed = true;
     return {
       ...sentence,
       evidenceRefs: closedEvidenceRefs,
+      backendFactRefs: closedBackendFactRefs,
     };
   });
 
@@ -3181,9 +3547,11 @@ export function validateCleanNarrationCandidate(input: {
     };
   }
 
+  const promptInput = buildCleanNarratorPromptInput(input.view);
   const candidate = closeNarrationCitationRefs(
     closeNarrationRuntimeMetadata(normalizeCleanNarrationMetadata(parsed.data), input.view),
     input.view,
+    promptInput,
   );
   const issues: CleanNarrationValidationIssue[] = [];
   if (candidate.packetId !== input.view.packetId) {
@@ -3217,7 +3585,6 @@ export function validateCleanNarrationCandidate(input: {
     });
   }
 
-  const promptInput = buildCleanNarratorPromptInput(input.view);
   const sentencePlansByRef = new Map(promptInput.narrativePageTask.sentencePlan.map((step, index) => [
     step.sentenceRef,
     { ...step, order: index },
@@ -3505,7 +3872,14 @@ function playerFacingClarificationQuestion(question: string, language: "ru" | "e
   const compact = normalizeText(question);
   const lower = compact.toLowerCase();
   const hasInternalTerm = INTERNAL_CLARIFICATION_TERMS.some((term) => lower.includes(term));
-  if (!hasInternalTerm) return compact;
+  if (!hasInternalTerm) {
+    const thirdPersonPhrase = "how does the player want to ";
+    const thirdPersonIndex = lower.indexOf(thirdPersonPhrase);
+    const playerQuestion = thirdPersonIndex >= 0
+      ? `${compact.slice(0, thirdPersonIndex)}How do you want to ${compact.slice(thirdPersonIndex + thirdPersonPhrase.length)}`
+      : compact;
+    return playerQuestion.replaceAll(" — ", ": ").replaceAll(" - ", ": ");
+  }
   return language === "ru"
     ? "Уточните, какую видимую деталь вы проверяете и что хотите узнать по ней?"
     : "What visible detail are you checking, and what do you want to learn from it?";
@@ -3834,7 +4208,15 @@ function renderSceneFrameSnapshotProjection(view: CleanNarratorView): string | n
     backendFacts: routeFacts,
   };
   const sentences: string[] = [];
-  const placementSentence = renderDirectScenePlacementProjection(currentScene, currentPlace);
+  const hasPlayerFacingRoomState =
+    visibleSceneFacts.length > 0
+    || actors.length > 0
+    || inventoryStatusBeats.length > 0
+    || targets.length > 0
+    || routeFacts.length > 0;
+  const placementSentence = hasPlayerFacingRoomState
+    ? null
+    : renderDirectScenePlacementProjection(currentScene, currentPlace);
   if (placementSentence) sentences.push(placementSentence);
   for (const visibleFact of visibleSceneFacts) {
     sentences.push(`${visibleFact}.`);
@@ -3971,7 +4353,7 @@ function isStandaloneMinorPoiView(view: CleanNarratorView): boolean {
 function needsDeterministicAuthorityProjection(view: CleanNarratorView): boolean {
   return view.acceptedEvidence.some((evidence) =>
     evidence.claimKinds.includes("clarification_request")
-  ) || view.stepAuditForGrounding.length > 0;
+  );
 }
 
 export function renderCleanAuthorityProjection(view: CleanNarratorView): string {
@@ -4158,22 +4540,36 @@ export async function runCleanNarration(input: {
   narratorView: CleanNarratorView;
   provider: ProviderConfig;
   styleMode?: CleanNarrationStyleMode;
+  recentPlayerFacingText?: readonly string[];
   generateCandidate?: CleanNarrationCandidateGenerator;
 }): Promise<CleanNarrationRunResult> {
-  const promptInput = buildCleanNarratorPromptInput(input.narratorView);
+  const promptInput = buildCleanNarratorPromptInput(input.narratorView, {
+    recentPlayerFacingText: input.recentPlayerFacingText ?? [],
+  });
   const styleMode = input.styleMode ?? "grounded_clean";
   const system = buildCleanNarrationSystemPrompt(styleMode);
   const prompt = buildCleanNarrationPrompt(promptInput);
   if (needsDeterministicAuthorityProjection(input.narratorView)) {
+    const result = assertCleanNarrationResult({
+      version: "gameplay-runtime.clean-narration-result.v1",
+      packetId: input.narratorView.packetId,
+      turnId: input.narratorView.turnId,
+      text: renderCleanAuthorityProjection(input.narratorView),
+      source: "deterministic_authority_projection",
+    });
     return {
-      ...assertCleanNarrationResult({
-        version: "gameplay-runtime.clean-narration-result.v1",
-        packetId: input.narratorView.packetId,
-        turnId: input.narratorView.turnId,
-        text: renderCleanAuthorityProjection(input.narratorView),
-        source: "deterministic_authority_projection",
-      }),
+      ...result,
       validationIssues: [],
+      proof: cleanNarrationProofSchema.parse({
+        version: "gameplay-runtime.clean-narration-proof.v1",
+        result,
+        promptInput,
+        candidate: null,
+        validation: {
+          status: "deterministic_authority_projection",
+          issues: [],
+        },
+      }),
     };
   }
   const generateCandidate =
@@ -4199,15 +4595,26 @@ export async function runCleanNarration(input: {
     candidate,
   });
   if (validation.status === "accepted") {
+    const result = assertCleanNarrationResult({
+      version: "gameplay-runtime.clean-narration-result.v1",
+      packetId: input.narratorView.packetId,
+      turnId: input.narratorView.turnId,
+      text: validation.candidate.finalText,
+      source: "model",
+    });
     return {
-      ...assertCleanNarrationResult({
-        version: "gameplay-runtime.clean-narration-result.v1",
-        packetId: input.narratorView.packetId,
-        turnId: input.narratorView.turnId,
-        text: validation.candidate.finalText,
-        source: "model",
-      }),
+      ...result,
       validationIssues: [],
+      proof: cleanNarrationProofSchema.parse({
+        version: "gameplay-runtime.clean-narration-proof.v1",
+        result,
+        promptInput,
+        candidate: validation.candidate,
+        validation: {
+          status: "accepted",
+          issues: [],
+        },
+      }),
     };
   }
   throw new CleanNarrationValidationError(

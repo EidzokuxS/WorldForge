@@ -1339,14 +1339,14 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const route = packet.acceptedEvidence.find((entry) => entry.authority === "route_check_receipt");
     expect(route?.claimKinds).toEqual(["route_status"]);
-    expect(route?.text).toBe("North Hall lies open from here.");
+    expect(route?.text).toBe("The path to North Hall is open from here.");
     expect(route?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Route beat: North Hall lies open from here.",
+      "Route beat: The path to North Hall is open from here.",
       "Route label: North Hall.",
       "Route status: connected.",
     ]);
     expect(route?.backendFacts.map((entry) => entry.value ?? null)).toEqual([
-      "North Hall lies open from here.",
+      "The path to North Hall is open from here.",
       "North Hall",
       "connected",
     ]);
@@ -1706,7 +1706,7 @@ describe("clean Stage 5 settlement contracts", () => {
     });
     const inputChecklist = checklist(inputFrame);
     const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
-    const expectedBeat = "No visible sign at Lowwater Bazaar settles whether faint canal damp on the Sealed lacquer message tube shows tampering or a hidden sign.";
+    const expectedBeat = "No visible sign of tampering or a hidden sign shows in faint canal damp on the Sealed lacquer message tube at Lowwater Bazaar.";
     const receipt = cleanStage4ReceiptSchema.parse({
       ...baseReceipt,
       publicResult: {
@@ -1735,6 +1735,54 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.backendFacts.map((entry) => entry.text)).toContain(`Local observation beat: ${expectedBeat}`);
     expect(observation?.backendFacts.map((entry) => entry.value)).toContain(expectedBeat);
     expect(observation?.text).not.toContain("No visible canal damp");
+    expect(observation?.text).not.toContain("visible surface gives you no usable sign");
+  });
+
+  it("settles targeted mechanical surface no-match without falling back to item presence prose", () => {
+    const query = "visible threading, contact seating, or relay hardware marks on Brass Tube";
+    const inputFrame = frame({
+      playerAction: "I check the Brass Tube for visible threading, contact seating, or relay hardware marks.",
+      scene: {
+        currentLocation: { ref: "Transmission Basement", label: "Transmission Basement", description: null },
+        currentScene: { ref: "Transmission Basement", label: "Transmission Basement", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      movementOptions: [],
+      citableRefs: ["Player", "Transmission Basement", "Brass Tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const expectedBeat = "No visible sign of threading, contact seating, or relay hardware marks shows on Brass Tube at Transmission Basement.";
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: `No match for "${query}" stands out among inventory items and visible facts.`,
+        visibleRefs: ["Player", "Transmission Basement", "Brass Tube"],
+        localObservation: {
+          ...baseReceipt.publicResult.localObservation!,
+          queryText: query,
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          anchorSceneLabel: "Transmission Basement",
+          anchorLocationLabel: "Transmission Basement",
+          summary: `No match for "${query}" stands out among inventory items and visible facts.`,
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
+    expect(observation?.text).toBe(expectedBeat);
+    expect(observation?.backendFacts.map((entry) => entry.text)).toContain(`Local observation beat: ${expectedBeat}`);
+    expect(observation?.text).not.toContain("Brass Tube is with you");
+    expect(observation?.text).not.toContain("lacquer surface");
   });
 
   it("settles person-property local_observation no-match as a visible-person match failure", () => {
@@ -2727,6 +2775,84 @@ describe("clean Stage 5 settlement contracts", () => {
       status: "failed",
       mayUseAsWorldTruth: false,
     });
+  });
+
+  it("keeps failed item handling audit public without leaking capability refs into narrator view", () => {
+    const inputFrame = frame({
+      playerAction: "I take the Brass Tube back from Guide.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        kind: "item",
+        holder: {
+          holderKind: "visible_actor",
+          holderLabel: "Guide",
+          equipState: "carried",
+        },
+      }],
+      capabilities: [
+        { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "Guide", "Brass Tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const failed = cleanStage4ReceiptSchema.parse({
+      ...movementReceipt(inputFrame, inputChecklist),
+      capabilityId: "item_transfer",
+      status: "failed",
+      result: { ...inputFrame.base, mutationApplied: false },
+      authority: {
+        evidenceAuthority: "failure_receipt",
+        mutationAuthority: "none",
+        visibleResultAuthority: "failure_only",
+        maySupportNarrationClaim: false,
+        mayAuthorizeMutation: false,
+      },
+      publicResult: {
+        summary: "Stage 4 item_transfer pickup requires a current-scene item source and player inventory target.",
+        visibleRefs: ["Player", "Brass Tube", "Guide"],
+        routeStatus: null,
+        locationChange: null,
+        routeOptions: null,
+        timeAdvance: null,
+        visibleObservation: null,
+        sceneBeat: null,
+        dialogue: null,
+        itemTransfer: null,
+      },
+      privateResult: {
+        playerId: null,
+        fromLocationId: null,
+        destinationLocationId: null,
+        edgeIds: [],
+        authorityTraceId: null,
+        clockReceiptId: null,
+        stateDeltaRefs: [],
+      },
+      failure: {
+        kind: "target_state_invalid",
+        message: "Stage 4 item_transfer pickup requires a current-scene item source and player inventory target.",
+        hiddenMutationApplied: false,
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([failed], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+
+    expect(view.stepAuditForGrounding[0]?.publicReason)
+      .toBe("The handoff does not resolve from the current visible item state.");
+    expect(JSON.stringify(view.stepAuditForGrounding)).not.toContain("item_transfer");
+    expect(JSON.stringify(view.stepAuditForGrounding)).not.toContain("Stage 4");
+    expect(packet.acceptedEvidence.some((entry) => entry.authority === "item_transfer_receipt")).toBe(false);
   });
 
   it("rejects private guard leaks in accepted evidence", () => {

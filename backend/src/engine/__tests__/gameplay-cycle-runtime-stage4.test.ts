@@ -12,6 +12,7 @@ import {
   buildStage4DialogueRequestSystemPrompt,
   CleanStage4InvariantError,
   runCleanStage4Execution,
+  validateDialogueRequestEffectCandidate,
 } from "../gameplay-cycle-runtime/stage4-execution.js";
 import type {
   AuthoritativeSceneFrame,
@@ -2401,6 +2402,8 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(systemPrompt).toContain("Dialogue task card as the job contract");
     expect(systemPrompt).toContain("dialoguePlan");
     expect(systemPrompt).toContain("currentItemHolders is the complete evidence basis");
+    expect(systemPrompt).toContain("one or two complete sentences under 360 characters");
+    expect(systemPrompt).toContain("Do not use trailing ellipsis or cut-off fragments");
     expect(prompt).toContain("Dialogue task card:");
     expect(prompt).toContain('"dialoguePlan"');
     expect(prompt).toContain('"playerIntent": "Ask Guide for a visible response"');
@@ -2410,6 +2413,128 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(prompt).toContain('"label": "Brass Tube"');
     expect(prompt).toContain('"currentHolderKind": "visible_actor"');
     expect(prompt).toContain('"currentHolderLabel": "Guide"');
+  });
+
+  it("rejects ellipsis-truncated dialogue quote fragments before they become terminal receipts", () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask Guide for the route.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support" as const,
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" as const }],
+      citableRefs: ["Player", "Market", "Guide"],
+    };
+
+    const validation = validateDialogueRequestEffectCandidate({
+      frame: inputFrame,
+      step: checklistForKind("dialogue_record", inputFrame).steps[0]!,
+      candidate: {
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "The route usually runs through the Bazaar throug...",
+          summary: "Guide starts to answer the route question.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      },
+    });
+
+    expect(validation.status).toBe("rejected");
+    if (validation.status !== "rejected") throw new Error("expected rejected truncated dialogue");
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      path: "response.quotedSpeech",
+      message: "Dialogue quotedSpeech must be complete text, not an ellipsis-truncated fragment.",
+    }));
+  });
+
+  it("allows dialogue evidence refs to name citable route labels without treating them as speaker refs", () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I ask Guide where the tube should go.",
+      actors: [{
+        ref: "Guide",
+        label: "Guide",
+        role: "support" as const,
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" as const }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    };
+    const step = checklistForKind("dialogue_record", inputFrame).steps[0]!;
+    const validation = validateDialogueRequestEffectCandidate({
+      frame: inputFrame,
+      step,
+      candidate: {
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "Take it to North Hall if you want it logged.",
+          summary: "Guide names North Hall as their answer.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market", "North Hall"],
+        stateEffects: {
+          appliesState: false,
+        },
+      },
+    });
+
+    expect(validation.status).toBe("accepted");
+
+    const badAddressee = validateDialogueRequestEffectCandidate({
+      frame: inputFrame,
+      step,
+      candidate: {
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Guide",
+        addresseeRefs: ["Player", "North Hall"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "North Hall is a place, not a participant.",
+          summary: "Guide answers the route-label question.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Guide", "Market", "North Hall"],
+        stateEffects: {
+          appliesState: false,
+        },
+      },
+    });
+
+    expect(badAddressee.status).toBe("rejected");
+    if (badAddressee.status !== "rejected") throw new Error("expected rejected addressee route label");
+    expect(badAddressee.issues).toContainEqual(expect.objectContaining({
+      code: "unplanned_ref",
+      path: "refs",
+      message: "Dialogue request used speaker/addressee ref \"North Hall\" outside the accepted checklist step scope.",
+    }));
   });
 
   it("fails item_transfer without mutating when the visible actor target is not in the current scene", async () => {
@@ -3147,6 +3272,94 @@ describe("clean Stage 4 executor DB contracts", () => {
           targetLabel: "Brass Tube",
           matchedEntries: [expect.objectContaining({ surfaceKind: "inventory_item", label: "Brass Tube" })],
           searchedSurfaceKinds: ["inventory_item"],
+        },
+      },
+    });
+
+    const inventoryPropertyFrame: AuthoritativeSceneFrame = {
+      ...inventoryFrame,
+      frameId: "frame-stage4-local-observation-inventory-property",
+      turnId: "clean-turn-stage4-local-observation-inventory-property",
+      playerAction: "I inspect the Brass Tube for visible labels, damage, or authorization marks.",
+    };
+    const inventoryPropertyChecklist = checklistForKind("local_observation", inventoryPropertyFrame);
+    inventoryPropertyChecklist.steps[0] = {
+      ...inventoryPropertyChecklist.steps[0]!,
+      targetRefs: ["Brass Tube", "Market"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      intended: {
+        ...inventoryPropertyChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "visible labels, damage, or authorization marks on Brass Tube",
+          targetRef: "Brass Tube",
+          surfaceKinds: ["inventory_item", "visible_fact"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const inventoryProperty = await runCleanStage4Execution({
+      frame: inventoryPropertyFrame,
+      checklist: inventoryPropertyChecklist,
+    });
+    expect(inventoryProperty.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No match for \"visible labels, damage, or authorization marks on Brass Tube\" stands out among inventory items and visible facts.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "visible labels, damage, or authorization marks on Brass Tube",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          boundedNegative: true,
+        },
+      },
+    });
+
+    const inventoryMechanicalPropertyFrame: AuthoritativeSceneFrame = {
+      ...inventoryFrame,
+      frameId: "frame-stage4-local-observation-inventory-mechanical-property",
+      turnId: "clean-turn-stage4-local-observation-inventory-mechanical-property",
+      playerAction: "I inspect the Brass Tube for visible threading, contact seating, or relay hardware marks.",
+    };
+    const inventoryMechanicalPropertyChecklist = checklistForKind("local_observation", inventoryMechanicalPropertyFrame);
+    inventoryMechanicalPropertyChecklist.steps[0] = {
+      ...inventoryMechanicalPropertyChecklist.steps[0]!,
+      targetRefs: ["Brass Tube", "Market"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      intended: {
+        ...inventoryMechanicalPropertyChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "visible threading, contact seating, or relay hardware marks on Brass Tube",
+          targetRef: "Brass Tube",
+          surfaceKinds: ["inventory_item", "visible_fact"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const inventoryMechanicalProperty = await runCleanStage4Execution({
+      frame: inventoryMechanicalPropertyFrame,
+      checklist: inventoryMechanicalPropertyChecklist,
+    });
+    expect(inventoryMechanicalProperty.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No match for \"visible threading, contact seating, or relay hardware marks on Brass Tube\" stands out among inventory items and visible facts.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "visible threading, contact seating, or relay hardware marks on Brass Tube",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          boundedNegative: true,
         },
       },
     });

@@ -18,6 +18,7 @@ import {
   judgeUncertaintySchema,
   cleanPlayerFacingTurnRecordSchema,
   cleanNarrationCandidateSchema,
+  cleanNarrationProofSchema,
   cleanNarratorViewSchema,
   cleanSettledTurnPacketSchema,
   cleanStage4ExecutionResultSchema,
@@ -26,6 +27,7 @@ import {
   type CleanStage4Receipt,
   type CleanPlayerFacingTurnRecord,
   type CleanNarratorView,
+  type CleanNarrationProof,
   oracleSettlementSchema,
   scopedForecastEnvelopeSchema,
   cleanStage4DialogueRequestEffectSchema,
@@ -78,6 +80,10 @@ import {
   type Stage4ExecutionEvent,
 } from "../gameplay-cycle-runtime/stage4-execution.js";
 import {
+  buildCleanNarratorPromptInput,
+  type CleanNarrationRunResult,
+} from "../gameplay-cycle-runtime/narration.js";
+import {
   buildCleanPublicTurnIds,
   commitCleanPlayerFacingTurn,
   type CleanPlayerFacingTurnRecordStore,
@@ -86,7 +92,6 @@ import {
   buildCleanNarratorView,
   buildCleanSettledTurnPacket,
 } from "../gameplay-cycle-runtime/settlement.js";
-import type { CleanNarrationRunResult } from "../gameplay-cycle-runtime/narration.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
 const runtimeDir = join(process.cwd(), "src", "engine", "gameplay-cycle-runtime");
@@ -572,6 +577,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
 
   it("makes runtime done wait for the injected commit adapter and uses public-safe done ids", async () => {
     const order: string[] = [];
+    let committedNarration: CleanNarrationProof | undefined;
     const frame = minimalFrame();
     const events = [];
     for await (const event of processCleanGameplayTurnFromInput({
@@ -583,6 +589,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
       runNarration: fakeRunNarration,
       commitTurn: async (input) => {
         order.push(`commit:${input.projection.narrativeText}`);
+        committedNarration = input.narration;
         return fakeCommitTurn(input);
       },
     })) {
@@ -591,6 +598,9 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     }
 
     expect(order).toEqual(["commit:Scene placement: You are at Market.", "done"]);
+    expect(committedNarration?.promptInput.version).toBe("gameplay-runtime.clean-narrator-prompt-input.v1");
+    expect(committedNarration?.candidate?.finalText).toBe("Scene placement: You are at Market.");
+    expect(committedNarration?.result.source).toBe("model");
     const done = events.at(-1);
     expect(done?.type).toBe("done");
     expect(done?.data).toMatchObject({
@@ -1247,6 +1257,7 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
       },
       terminalProjection: input.projection,
       settlement: input.settlement,
+      ...(input.narration ? { narration: input.narration } : {}),
       evidenceRefs: input.evidenceRefs,
       durableEventIds: { accepted: [], produced: [] },
       doneBoundary: {
@@ -1277,6 +1288,39 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
   };
 }
 
+function narrationProofForView(view: CleanNarratorView, text: string) {
+  const result = {
+    version: "gameplay-runtime.clean-narration-result.v1" as const,
+    packetId: view.packetId,
+    turnId: view.turnId,
+    text,
+    source: "model" as const,
+  };
+  return cleanNarrationProofSchema.parse({
+    version: "gameplay-runtime.clean-narration-proof.v1",
+    result,
+    promptInput: buildCleanNarratorPromptInput(view),
+    candidate: {
+      version: "gameplay-runtime.clean-narration-candidate.v1",
+      packetId: view.packetId,
+      turnId: view.turnId,
+      language: view.language,
+      sentences: [{
+        kind: "accepted_evidence",
+        text,
+        evidenceRefs: [],
+        backendFactRefs: [],
+        claimKinds: [],
+      }],
+      finalText: text,
+    },
+    validation: {
+      status: "accepted",
+      issues: [],
+    },
+  });
+}
+
 async function fakeRunNarration(input: {
   narratorView: CleanNarratorView;
   provider: ProviderConfig;
@@ -1291,6 +1335,7 @@ async function fakeRunNarration(input: {
     text,
     source: "model",
     validationIssues: [],
+    proof: narrationProofForView(input.narratorView, text),
   };
 }
 
@@ -1523,7 +1568,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       interpretationRationale: "The player asks for a broad current-scene overview, not a targeted receipt.",
     };
 
-    expect(buildGmReadSystemPrompt()).toContain("broad look/look around/what is visible without a concrete target query");
+    expect(buildGmReadSystemPrompt()).toContain("broad look/look around/what is visible/what feels immediately useful or notable around me without a concrete target query");
 
     const result = validateGmReadCandidate({ frame, candidate });
 
@@ -1564,6 +1609,44 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         },
       },
       interpretationRationale: "A broad multi-surface overview should use the current snapshot instead of a truncated local-observation receipt.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeNull();
+  });
+
+  it("drops broad useful/notable visible-target localObservationNeed so overview keeps snapshot ownership", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I slow down in Market and take in what feels immediately useful around me.",
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "East Gate", "Brass Tube"],
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "direct",
+      liveSceneQuestion: "What feels immediately useful or notable in Market?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player broadly takes in immediately useful current-scene material.",
+        playerIntent: "Take in what feels immediately useful around me.",
+        method: "look around",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "what is immediately useful or notable in Market",
+          targetRef: null,
+          surfaceKinds: ["visible_target"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "A broad useful/notable overview should use the current snapshot rather than a visible-target receipt that can miss route context.",
     };
 
     const result = validateGmReadCandidate({ frame, candidate });
@@ -1912,6 +1995,48 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(accepted.read.actionInterpretation).toMatchObject({
       interactionKind: "route_inquiry",
       targetRefs: ["Market"],
+    });
+  });
+
+  it("keeps broad route-options questions from narrowing to one movement option", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I check my ways out from Slip Twelve Berth.",
+      scene: {
+        currentLocation: { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", description: null },
+        currentScene: { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [
+        { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", connected: true, travelCost: 1 },
+        { ref: "Silt Warrens", label: "Silt Warrens", connected: true, travelCost: 1 },
+        { ref: "The Copper Tap", label: "The Copper Tap", connected: true, travelCost: 1 },
+      ],
+      citableRefs: ["Player", "Slip Twelve Berth", "Lowwater Bazaar", "Silt Warrens", "The Copper Tap"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Which ways out from Slip Twelve Berth can be listed?",
+      focalRefs: ["Player", "Slip Twelve Berth"],
+      evidenceRefs: ["Player", "Slip Twelve Berth", "Lowwater Bazaar"],
+      actionInterpretation: {
+        summary: "The player asks for ways out from the current scene.",
+        playerIntent: "Check ways out from Slip Twelve Berth.",
+        method: "route inquiry",
+        targetRefs: ["Lowwater Bazaar"],
+        interactionKind: "route_inquiry",
+      },
+      interpretationRationale: "The model chose one exposed route label while interpreting a broad exits question.",
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "route_inquiry",
+      targetRefs: [],
     });
   });
 
@@ -3375,6 +3500,62 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
     expect(result.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("ordinary_prop_readiness");
     expect(result.read.actionInterpretation.localObservationNeed).toBeUndefined();
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+  });
+
+  it("keeps ordinary prop posture plus carried-item closeness as one scene_local_beat", () => {
+    const frame = minimalFrame({
+      playerAction: "I lean one shoulder against a stacked wooden crate while keeping the Brass Tube close.",
+      actors: [],
+      targets: [],
+      inventory: [{
+        ref: "Brass Tube",
+        label: "Brass Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      movementOptions: [],
+      citableRefs: ["Player", "Market", "Brass Tube"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("valid ordinary prop plus carried-item readiness example shape");
+    expect(prompt).toContain("Lean on an ordinary crate while keeping Brass Tube close for this immediate beat");
+    expect(prompt).toContain("leave itemTransferNeed and localConditionNeed empty");
+    expect(buildGmReadSystemPrompt()).toContain("leaning on a crate or ducking behind a counter while keeping an already-inventory item close");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        situationSummary: "The player leans on a plausible ordinary prop while keeping an already-carried item close.",
+        focalRefs: ["Player", "Market", "Brass Tube"],
+        evidenceRefs: ["Player", "Market", "Brass Tube"],
+        liveSceneQuestion: "Can this low-stakes current-scene prop beat be recorded as a turn event only?",
+        actionInterpretation: {
+          summary: "The player leans on a stacked crate while keeping the Brass Tube close for the immediate beat.",
+          playerIntent: "Lean on an ordinary crate while keeping Brass Tube close for this immediate beat",
+          method: "immediate scene-prop interaction",
+          targetRefs: ["Market", "Brass Tube"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "ordinary_prop_readiness",
+            requestedBeatText: "Lean on an ordinary crate while keeping Brass Tube close for this immediate beat",
+            anchorRef: "Market",
+            evidenceRefs: ["Player", "Market", "Brass Tube"],
+          },
+        },
+        interpretationRationale: "The crate is an ordinary plausible current-scene prop; keeping the Brass Tube close stays inside the one immediate scene beat and does not change item custody or equipment.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.sceneBeatNeed?.requestedBeatText).toContain("Brass Tube close");
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
     expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
   });
 

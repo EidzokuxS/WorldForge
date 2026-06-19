@@ -29,6 +29,25 @@ const provider: ProviderConfig = {
   model: "test-model",
 };
 
+const emptyRecentSurfaceAvoid = {
+  source: "recent_player_facing_style_only",
+  maySupportWorldTruth: false,
+  recentOpeningDoors: [],
+  recentFirstSentenceShapes: [],
+} as const;
+
+const noDirectScenePresentation = {
+  mode: "none",
+  sourceMoveRefs: [],
+  sourceSentenceRefs: [],
+  sentenceObjectPolicy: "none",
+  roomBeatSplitPolicy: "none",
+  catalogPolicy: "none",
+  mergeAllowed: false,
+  routeClose: "none",
+  inventoryPolicy: "none",
+} as const;
+
 type NarrationClaimKind = CleanNarratorView["acceptedEvidence"][number]["claimKinds"][number];
 
 function pageMoveRefsForSentence(
@@ -185,9 +204,9 @@ function routeView(): CleanNarratorView {
       ref: "e1",
       authority: "route_check_receipt",
       claimKinds: ["route_status"],
-      text: "North Hall lies open from here.",
+      text: "The path to North Hall is open from here.",
       backendFacts: [
-        { factRef: "e1.f1", role: "route_beat", value: "North Hall lies open from here.", text: "Route beat: North Hall lies open from here.", exact: true },
+        { factRef: "e1.f1", role: "route_beat", value: "The path to North Hall is open from here.", text: "Route beat: The path to North Hall is open from here.", exact: true },
         { factRef: "e1.f2", role: "route_label", value: "North Hall", text: "Route label: North Hall.", exact: true },
         { factRef: "e1.f3", role: "route_status", value: "connected", text: "Route status: connected.", exact: true },
       ],
@@ -207,12 +226,12 @@ function routeWithSceneFrameSnapshotView(): CleanNarratorView {
         ref: "e5",
         authority: "route_check_receipt",
         claimKinds: ["route_status"],
-        text: "Transmission Basement lies open from here.",
+        text: "The path to Transmission Basement is open from here.",
         backendFacts: [{
           factRef: "e5.f1",
           role: "route_beat",
-          value: "Transmission Basement lies open from here.",
-          text: "Route beat: Transmission Basement lies open from here.",
+          value: "The path to Transmission Basement is open from here.",
+          text: "Route beat: The path to Transmission Basement is open from here.",
           exact: true,
         }, {
           factRef: "e5.f2",
@@ -1494,6 +1513,7 @@ function fakeCommit(input: Parameters<typeof processCleanGameplayTurnFromInput>[
       },
       terminalProjection: input.projection,
       settlement: input.settlement,
+      ...(input.narration ? { narration: input.narration } : {}),
       evidenceRefs: input.evidenceRefs,
       durableEventIds: { accepted: [], produced: [] },
       doneBoundary: {
@@ -1587,8 +1607,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.softProseBudget.laterPlayerUseRequiresAdjudication).toBe(true);
     expect(buildCleanNarrationSystemPrompt()).toContain("Keep invented soft surfaces object-intrinsic");
     expect(buildCleanNarrationSystemPrompt()).toContain("Low-stakes ordinary wear remains soft prose and does not become world-state authority");
-    expect(buildCleanNarrationSystemPrompt()).toContain("'its paper edge is creased from handling' are valid soft texture");
-    expect(buildCleanNarrationSystemPrompt()).toContain("'where it rides your shoulder' asserts current body placement");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'its paper edge is creased' are valid soft texture");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'from handling', 'from earlier use', 'where it rides your shoulder'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("requires accepted evidence");
     expect(promptInput.narrativePageTask).toEqual({
       version: "gameplay-runtime.clean-narrator-page-task.v1",
       source: "derived_from_story_frame_page_plan",
@@ -1625,6 +1646,8 @@ describe("clean Stage 6 narration contracts", () => {
         cadenceTarget: "single_micro_beat",
         dictionPalette: ["scene_anchor_tokens", "concrete_result_verbs", "time_pressure"],
         variationBoundary: "vary_syntax_only_inside_cited_material",
+        openingDoor: "core_result_first",
+        recentSurfaceAvoid: emptyRecentSurfaceAvoid,
       },
       pageFocus: {
         coreMoveRefs: ["m1"],
@@ -1652,6 +1675,7 @@ describe("clean Stage 6 narration contracts", () => {
         closingStyle: "none",
         readerHandoff: "none",
       },
+      directScenePresentation: noDirectScenePresentation,
       moves: [{
         moveRef: "m1",
         step: "narrate_turn_event",
@@ -1769,7 +1793,7 @@ describe("clean Stage 6 narration contracts", () => {
       proseCue: "dialogue_response",
       compositionSlot: "event_beat",
       summary: 'Guide replies: "The north stairs flooded before dawn."',
-      backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+      backendFactRefs: ["e5.f1", "e5.f2"],
       limits: {
         proves: ["visible speaker identity", "visible response content", "speaker response happened this turn"],
         doesNotProve: ["truth of speaker claim", "durable world fact", "movement", "arrival"],
@@ -1791,28 +1815,30 @@ describe("clean Stage 6 narration contracts", () => {
       closingIntent: "settled_result",
     });
     expect(promptInput.narrativePageTask.pagePerformance).toEqual({
-      openingBeat: "context_anchor_opening",
+      openingBeat: "settled_result_opening",
       pageMotion: "context_to_result",
       continuityMaterial: "context_labels_to_result",
       closingBeat: "settled_result_closure",
       readerHandoff: "continue_from_result",
     });
     expect(promptInput.narrativePageTask.pageVariation).toEqual({
-      openingRotation: "context_label_first",
+      openingRotation: "core_result_first",
       cadenceTarget: "context_then_short_result",
       dictionPalette: ["scene_anchor_tokens", "quote_frame"],
       variationBoundary: "vary_syntax_only_inside_cited_material",
+      openingDoor: "speech_first",
+      recentSurfaceAvoid: emptyRecentSurfaceAvoid,
     });
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: ["m2"],
       frameMoveRefs: ["m1"],
-      coreSentenceRefs: ["s2"],
-      frameSentenceRefs: ["s1"],
-      preferredFrameSentenceRefs: ["s1"],
+      coreSentenceRefs: ["s1"],
+      frameSentenceRefs: [],
+      preferredFrameSentenceRefs: [],
       emphasis: "settled_turn_event",
-      frameSelection: "prefer_scene_anchor_frame",
+      frameSelection: "no_frame",
       coreFrameRelationship: "context_frames_result",
-      contextUse: "orient_before_core",
+      contextUse: "none",
     });
     expect(promptInput.narrativePageTask.storyPageBrief).toEqual({
       pageKind: "context_to_settled_result_page",
@@ -1823,8 +1849,8 @@ describe("clean Stage 6 narration contracts", () => {
       closingInstruction: "close_on_settled_result",
       requiredMoveRefs: ["m2"],
       optionalMoveRefs: ["m1"],
-      requiredSentenceRefs: ["s2"],
-      optionalSentenceRefs: ["s1"],
+      requiredSentenceRefs: ["s1"],
+      optionalSentenceRefs: [],
     });
     expect(promptInput.narrativePageTask.moves).toEqual([
       {
@@ -1849,100 +1875,27 @@ describe("clean Stage 6 narration contracts", () => {
         entryProseCues: ["dialogue_response"],
         proseMove: "render_authoritative_turn_event",
         coverage: "required",
-        allowedBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+        allowedBackendFactRefs: ["e5.f1", "e5.f2"],
         usableFacts: promptBackendFactsForRefs(promptInput, ["e5"]),
         factUses: [
           { factRef: "e5.f1", proseUse: "label_anchor" },
           { factRef: "e5.f2", proseUse: "exact_dialogue_quote" },
-          { factRef: "e5.f3", proseUse: "supporting_detail" },
         ],
       },
     ]);
     expect(promptInput.narrativePageTask.moves[1]?.usableFacts.map((fact) => fact.value))
-      .toEqual([undefined, 'Guide replies: "The north stairs flooded before dawn."', undefined]);
+      .toEqual([undefined, 'Guide replies: "The north stairs flooded before dawn."']);
+    expect(promptInput.narrativePageTask.directScenePresentation).toEqual(noDirectScenePresentation);
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) => step.sentenceRole === "context_anchor"))
+      .toBe(false);
     expect(promptInput.narrativePageTask.sentencePlan).toEqual([
       {
         sentenceRef: "s1",
-        moveRef: "m1",
-        sentenceRole: "context_anchor",
-        coverage: "optional",
-        entryRefs: ["e1"],
-        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
-        claimFocus: {
-          primaryClaimKinds: ["current_scene", "current_location"],
-          supportingClaimKinds: [],
-          citationMode: "primary_claims_of_cited_sentence_plan_refs",
-        },
-        beatObjective: "place_current_scene",
-        proseMaterials: [
-          {
-            factRef: "e1.f1",
-            proseUse: "scene_anchor",
-            materialText: "You are at Market.",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-          {
-            factRef: "e1.f2",
-            proseUse: "scene_anchor",
-            materialText: "Market",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-          {
-            factRef: "e1.f3",
-            proseUse: "scene_anchor",
-            materialText: "Market",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-        ],
-        materialObligations: {
-          allowedMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
-          coreMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
-          exactCopyFactRefs: [],
-          preserveTokenFactRefs: ["e1.f1", "e1.f2", "e1.f3"],
-          phraseFromMaterialFactRefs: [],
-          citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
-        },
-        textureCue: {
-          mode: "omit_texture_in_this_sentence",
-          playerFacingUse: "none",
-          allowedTextureFactRefs: [],
-        },
-        adventureCue: {
-          subjectFocus: "player_scene_position",
-          verbFrame: "place_player_in_scene",
-          detailPalette: ["accepted_labels"],
-        },
-        proseAssembly: {
-          perspective: "second_person_present",
-          sentenceShape: "scene_anchor_line",
-          openingSource: "preserved_label_anchor",
-          verbEnergy: "concrete_present",
-          detailRhythm: "scene_anchor_tokens",
-          materialWeaveOrder: "scene_anchor_only",
-          styleBudget: "scene_anchor_cadence",
-          closingFunction: "orient_context",
-        },
-        literaryCue: {
-          renderShape: "place_player_in_context",
-          cadence: "compact_present_beat",
-          styleLevers: ["accepted_label_anchor", "concrete_present_verb"],
-        },
-        flowCue: {
-          pagePosition: "opening",
-          transitionRole: "context_setup",
-          readerEffect: "carry_forward_context",
-        },
-      },
-      {
-        sentenceRef: "s2",
         moveRef: "m2",
         sentenceRole: "turn_event_beat",
         coverage: "required",
         entryRefs: ["e5"],
-        preferredBackendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+        preferredBackendFactRefs: ["e5.f1", "e5.f2"],
         claimFocus: {
           primaryClaimKinds: ["dialogue_response"],
           supportingClaimKinds: [],
@@ -1964,20 +1917,13 @@ describe("clean Stage 6 narration contracts", () => {
             materialTextSource: "accepted_value",
             copyMode: "copy_exact",
           },
-          {
-            factRef: "e5.f3",
-            proseUse: "supporting_detail",
-            materialText: "Dialogue summary: Guide says the north stairs flooded before dawn.",
-            materialTextSource: "accepted_text",
-            copyMode: "phrase_from_material",
-          },
         ],
         materialObligations: {
-          allowedMaterialFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
+          allowedMaterialFactRefs: ["e5.f1", "e5.f2"],
           coreMaterialFactRefs: ["e5.f1", "e5.f2"],
           exactCopyFactRefs: ["e5.f2"],
           preserveTokenFactRefs: ["e5.f1"],
-          phraseFromMaterialFactRefs: ["e5.f3"],
+          phraseFromMaterialFactRefs: [],
           citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
         },
         textureCue: {
@@ -1988,7 +1934,7 @@ describe("clean Stage 6 narration contracts", () => {
         adventureCue: {
           subjectFocus: "visible_speaker",
           verbFrame: "frame_exact_utterance",
-          detailPalette: ["accepted_labels", "accepted_quote", "accepted_primary_beat"],
+          detailPalette: ["accepted_labels", "accepted_quote"],
         },
         proseAssembly: {
           perspective: "visible_speaker_present",
@@ -2006,7 +1952,7 @@ describe("clean Stage 6 narration contracts", () => {
           styleLevers: ["visible_speaker_frame", "accepted_label_anchor"],
         },
         flowCue: {
-          pagePosition: "closing",
+          pagePosition: "single",
           transitionRole: "settled_result",
           readerEffect: "land_outcome",
         },
@@ -2063,6 +2009,91 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
   });
 
+  it("passes recent player-facing openings as style-only variation memory", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView(), {
+      recentPlayerFacingText: [
+        "A squat stone tavern sits wedged between two brick sluice gates.",
+        "Guide replies: \"Go west\"",
+      ],
+    });
+
+    expect(promptInput.narrativePageTask.pageVariation.recentSurfaceAvoid).toEqual({
+      source: "recent_player_facing_style_only",
+      maySupportWorldTruth: false,
+      recentOpeningDoors: ["accepted_texture_first", "speech_first"],
+      recentFirstSentenceShapes: [
+        "A squat stone tavern sits wedged between two brick sluice gates.",
+        "Guide replies: \"Go west\"",
+      ],
+    });
+  });
+
+  it("keeps enough recent player-facing openings for return-route texture avoidance", () => {
+    const recentPlayerFacingText = Array.from({ length: 12 }, (_, index) =>
+      `Scene ${index + 1} opens with a distinct texture sentence. Then the turn lands.`
+    );
+
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView(), {
+      recentPlayerFacingText,
+    });
+
+    expect(promptInput.narrativePageTask.pageVariation.recentSurfaceAvoid.recentFirstSentenceShapes)
+      .toHaveLength(12);
+    expect(promptInput.narrativePageTask.pageVariation.recentSurfaceAvoid.recentOpeningDoors)
+      .toHaveLength(12);
+  });
+
+  it("omits a repeated exact texture opener when recent style memory already spent it", () => {
+    const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView(), {
+      recentPlayerFacingText: ["Canvas awnings hang over the market lanes."],
+    });
+
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
+      step.sentenceRole === "exact_context_texture"
+    )).toBe(false);
+    expect(promptInput.narrativePageTask.pageVariation.openingDoor).toBe("choice_handoff_first");
+    expect(promptInput.narrativePageTask.pageVariation.recentSurfaceAvoid).toMatchObject({
+      source: "recent_player_facing_style_only",
+      maySupportWorldTruth: false,
+      recentFirstSentenceShapes: ["Canvas awnings hang over the market lanes."],
+    });
+  });
+
+  it("omits repeated long texture when recent style memory only has a first-sentence preview", () => {
+    const longTexture = "A vaulted stone corridor stretches two hundred feet beneath the cliffside, its granite walls covered floor-to-ceiling in engraved brass plaques reflecting gaslight from iron sconces above the charter desks.";
+    const baseView = sceneObservationReceiptWithSceneTextureView();
+    const view: CleanNarratorView = {
+      ...baseView,
+      acceptedEvidence: baseView.acceptedEvidence.map((evidence) => {
+        if (evidence.ref !== "e6") return evidence;
+        return {
+          ...evidence,
+          text: `Current scene texture: ${longTexture}`,
+          backendFacts: [{
+            factRef: "e6.f1",
+            role: "scene_texture",
+            value: longTexture,
+            text: `Scene texture: ${longTexture}`,
+            exact: true,
+          }],
+        };
+      }),
+    };
+
+    const promptInput = buildCleanNarratorPromptInput(view, {
+      recentPlayerFacingText: [`${longTexture} One minute later, you stand in Charter Gallery.`],
+    });
+
+    expect(promptInput.narrativePageTask.pageVariation.recentSurfaceAvoid.recentFirstSentenceShapes[0])
+      .toHaveLength(180);
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
+      step.sentenceRole === "exact_context_texture"
+    )).toBe(false);
+    expect(promptInput.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("scene_texture")
+    )).toBe(false);
+  });
+
   it("derives route-option texture and next-action composition cues from structured evidence", () => {
     const promptInput = buildCleanNarratorPromptInput(routeOptionsWithSceneTextureView());
 
@@ -2105,6 +2136,8 @@ describe("clean Stage 6 narration contracts", () => {
         "playable_route_labels",
       ],
       variationBoundary: "vary_syntax_only_inside_cited_material",
+      openingDoor: "accepted_texture_first",
+      recentSurfaceAvoid: emptyRecentSurfaceAvoid,
     });
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: ["m2"],
@@ -2507,6 +2540,17 @@ describe("clean Stage 6 narration contracts", () => {
     expect(claimKinds).not.toContain("movement_option");
   });
 
+  it("exposes exact dialogue quote facts without model summary action material", () => {
+    const promptInput = buildCleanNarratorPromptInput(dialogueView());
+    const dialogueFacts = promptBackendFactsForRefs(promptInput, ["e1"]);
+
+    expect(dialogueFacts.map((fact) => fact.role)).toEqual(["speaker_label", "dialogue_quote"]);
+    expect(dialogueFacts.map((fact) => fact.factRef)).toEqual(["e1.f1", "e1.f2"]);
+    expect(dialogueFacts.map((fact) => fact.role)).not.toContain("dialogue_summary");
+    expect(dialogueFacts.map((fact) => fact.text).join("\n"))
+      .not.toContain("Dialogue summary:");
+  });
+
   it("uses a bounded item-transfer citation shortlist in literary prompt input", () => {
     const view = itemStateView();
     const promptInput = buildCleanNarratorPromptInput(view);
@@ -2643,7 +2687,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(turnSteps[0]?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f4", "e1.f3", "e1.f6", "e1.f7"]);
     expect(turnSteps[0]?.proseAssembly.sentenceShape).toBe("support_actor_presence_line");
     expect(turnSteps[0]?.literaryCue.renderShape).toBe("weave_support_actor_scene_presence");
-    expect(turnSteps[1]?.preferredBackendFactRefs).toEqual(["e4.f1", "e4.f2", "e4.f3"]);
+    expect(turnSteps[1]?.preferredBackendFactRefs).toEqual(["e4.f1", "e4.f2"]);
     expect(turnSteps[1]?.proseAssembly.sentenceShape).toBe("quote_framed_beat");
     expect(turnSteps[1]?.literaryCue.renderShape).toBe("frame_exact_quote");
   });
@@ -2725,64 +2769,49 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).toEqual(["e3.f2"]);
     expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.role)).toEqual(["visible_place_handle_target_labels"]);
-    const routeChoiceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
-      step.sentenceRole === "next_action_handle"
-      && step.beatObjective === "render_route_choices"
-    );
-    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e4.f3", "e4.f4"]);
-    expect(routeChoiceStep?.proseAssembly).toMatchObject({
-      sentenceShape: "scene_exit_choice_line",
-      openingSource: "playable_route_label",
-      verbEnergy: "offer_choice",
-      materialWeaveOrder: "exits_only",
-    });
-    expect(routeChoiceStep?.literaryCue).toMatchObject({
-      renderShape: "leave_scene_exit_handoff",
-      cadence: "scene_exit_choice_sentence",
-      styleLevers: ["route_exit_grouping", "accepted_label_anchor", "concrete_present_verb"],
-    });
-    expect(routeChoiceStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
-      "route_choice",
-      "route_choice",
-    ]);
     expect(promptInput.narrativePageTask.choicePresentation.anchorStyle).toBe("choice_labels_only");
     expect(promptInput.narrativePageTask.choicePresentation.anchorFactRefs).toEqual([]);
+    expect(promptInput.narrativePageTask.directScenePresentation).toMatchObject({
+      mode: "playable_room_beat",
+      sentenceObjectPolicy: "single_room_beat",
+      roomBeatSplitPolicy: "actor_inventory_routes_same_sentence_text",
+      catalogPolicy: "no_receipt_lists",
+      mergeAllowed: true,
+      routeClose: "final_handoff_when_present",
+      inventoryPolicy: "subordinate_unless_core",
+    });
     const directSceneSurfaceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
       && step.beatObjective === "render_direct_scene_snapshot"
       && step.proseMaterials.some((material) => material.factRef === "e3.f2")
     );
-    expect(directSceneSurfaceStep?.preferredBackendFactRefs).toEqual(["e3.f2"]);
+    expect(directSceneSurfaceStep?.preferredBackendFactRefs).toEqual([
+      "e3.f2",
+      "e1.f2",
+      "e2.f2",
+      "e2.f1",
+      "e4.f3",
+      "e4.f4",
+    ]);
     expect(directSceneSurfaceStep?.preferredBackendFactRefs).not.toContain("e3.f1");
     expect(directSceneSurfaceStep?.proseAssembly).toMatchObject({
-      sentenceShape: "local_observation_line",
-      openingSource: "observed_visible_label",
-      verbEnergy: "land_visible_observation",
-      materialWeaveOrder: "observed_labels_then_scene",
-    });
-    expect(directSceneSurfaceStep?.literaryCue).toMatchObject({
-      renderShape: "land_visible_observation",
-      cadence: "local_observation_beat_sentence",
-      styleLevers: ["local_observation_focus", "accepted_label_anchor", "concrete_present_verb"],
-    });
-    const inventoryStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
-      step.sentenceRole === "next_action_handle"
-      && step.proseMaterials.some((material) => material.factRef === "e2.f1")
-    );
-    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e2.f2", "e2.f1"]);
-    expect(inventoryStatusStep?.beatObjective).toBe("render_direct_scene_snapshot");
-    expect(inventoryStatusStep?.proseAssembly).toMatchObject({
-      sentenceShape: "result_beat_line",
+      sentenceShape: "playable_room_beat_line",
+      openingSource: "preserved_label_anchor",
       verbEnergy: "concrete_present",
-      materialWeaveOrder: "result_then_preserved_tokens",
-      styleBudget: "result_with_anchor_cadence",
+      materialWeaveOrder: "scene_actor_inventory_then_exits",
+      styleBudget: "playable_room_beat_cadence",
+      closingFunction: "offer_next_action",
     });
-    expect(inventoryStatusStep?.proseMaterials).toEqual(expect.arrayContaining([
+    expect(directSceneSurfaceStep?.adventureCue).toMatchObject({
+      subjectFocus: "playable_room_state",
+      verbFrame: "compose_playable_room_beat",
+    });
+    expect(directSceneSurfaceStep?.proseMaterials).toEqual(expect.arrayContaining([
       expect.objectContaining({
         factRef: "e2.f1",
         proseUse: "inventory_status",
         materialText: "You carry Courier satchel.",
-        copyMode: "copy_exact",
+        copyMode: "phrase_from_material",
       }),
       expect.objectContaining({
         factRef: "e2.f2",
@@ -2790,10 +2819,22 @@ describe("clean Stage 6 narration contracts", () => {
         materialText: "Courier satchel",
         copyMode: "preserve_token",
       }),
+      expect.objectContaining({
+        factRef: "e4.f3",
+        proseUse: "route_choice",
+        materialText: "North Hall",
+        copyMode: "preserve_token",
+      }),
     ]));
-    expect(inventoryStatusStep?.materialObligations.exactCopyFactRefs).toEqual(["e2.f1"]);
-    expect(inventoryStatusStep?.materialObligations.phraseFromMaterialFactRefs).toEqual([]);
-    expect(inventoryStatusStep?.materialObligations.preserveTokenFactRefs).toEqual(["e2.f2"]);
+    expect(directSceneSurfaceStep?.materialObligations.exactCopyFactRefs).toEqual([]);
+    expect(directSceneSurfaceStep?.materialObligations.phraseFromMaterialFactRefs).toEqual(["e2.f1"]);
+    expect(directSceneSurfaceStep?.materialObligations.preserveTokenFactRefs).toEqual([
+      "e3.f2",
+      "e1.f2",
+      "e2.f2",
+      "e4.f3",
+      "e4.f4",
+    ]);
     expect(routeEvidence?.backendFacts.map((fact) => fact.text)).toEqual([
       "Market",
       "North Hall",
@@ -2815,19 +2856,24 @@ describe("clean Stage 6 narration contracts", () => {
       { step: "close_with_next_action_context", entryRefs: ["e5"] },
     ]);
 
-    const routeChoiceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+    const roomBeatStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "next_action_handle"
-      && step.beatObjective === "render_route_choices"
+      && step.beatObjective === "render_direct_scene_snapshot"
     );
-    expect(routeChoiceStep?.preferredBackendFactRefs).toEqual(["e5.f7"]);
+    expect(roomBeatStep?.preferredBackendFactRefs).toEqual(["e5.f2", "e5.f3", "e5.f4", "e5.f5", "e5.f7"]);
+    expect(roomBeatStep?.proseAssembly).toMatchObject({
+      sentenceShape: "playable_room_beat_line",
+      materialWeaveOrder: "scene_actor_inventory_then_exits",
+      styleBudget: "playable_room_beat_cadence",
+    });
 
-    const inventoryStatusStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
-      step.sentenceRole === "next_action_handle"
-      && step.proseMaterials.some((material) => material.factRef === "e5.f5")
-    );
-    expect(inventoryStatusStep?.preferredBackendFactRefs).toEqual(["e5.f5"]);
-    expect(inventoryStatusStep?.materialObligations.exactCopyFactRefs).toEqual(["e5.f5"]);
-    expect(inventoryStatusStep?.materialObligations.phraseFromMaterialFactRefs).toEqual([]);
+    expect(roomBeatStep?.proseMaterials.some((material) => material.factRef === "e5.f5")).toBe(true);
+    expect(roomBeatStep?.materialObligations.exactCopyFactRefs).toEqual([]);
+    expect(roomBeatStep?.materialObligations.phraseFromMaterialFactRefs).toEqual(["e5.f5"]);
+    expect(promptInput.narrativePageTask.directScenePresentation).toMatchObject({
+      sentenceObjectPolicy: "optional_texture_then_single_room_beat",
+      roomBeatSplitPolicy: "actor_inventory_routes_same_sentence_text",
+    });
   });
 
   it("keeps elapsed-time literary prompt input to time evidence and scene label anchors", () => {
@@ -3047,6 +3093,19 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.source).toBe("model");
     expect(result.text).toBe("Canvas awnings hang over the market lanes. After one minute, you reach North Hall.");
+    expect(result.proof).toMatchObject({
+      version: "gameplay-runtime.clean-narration-proof.v1",
+      result: {
+        text: result.text,
+        source: "model",
+      },
+      validation: {
+        status: "accepted",
+        issues: [],
+      },
+    });
+    expect(result.proof?.promptInput.packetId).toBe(view.packetId);
+    expect(result.proof?.candidate?.finalText).toBe(result.text);
     expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
   });
 
@@ -3066,7 +3125,76 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
+  it("closes direct-scene citations from cited sentence plan refs before hard-claim validation", () => {
+    const view = sceneFrameSnapshotWithOverlappingTargetsView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const roomStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.proseAssembly.sentenceShape === "playable_room_beat_line"
+    );
+    if (!roomStep) throw new Error("Expected direct-scene room beat sentence plan.");
+
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Slip Twelve Berth narrows around Guide; Courier satchel stays with you, and North Hall is the way out.",
+        evidenceRefs: [],
+        backendFactRefs: [],
+        hardClaims: ["inventory_status.", "movement_option."],
+        claimKinds: ["visible_actor", "inventory_status", "movement_option"],
+        pageMoveRefs: [roomStep.moveRef],
+        sentencePlanRefs: [roomStep.sentenceRef],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status === "accepted") {
+      expect(result.candidate.sentences[0]?.evidenceRefs).toContain("e3");
+      expect(result.candidate.sentences[0]?.evidenceRefs).toContain("e5");
+      expect(result.candidate.sentences[0]?.backendFactRefs.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("closes direct-scene hard-claim citations from the room beat plan when refs are incomplete", () => {
+    const view = sceneFrameSnapshotWithOverlappingTargetsView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Slip Twelve Berth keeps Guide in view; Courier satchel stays with you, and North Hall is the way out.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2"],
+        hardClaims: ["inventory_status.", "movement_option."],
+        claimKinds: ["current_scene", "inventory_status", "movement_option"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status === "accepted") {
+      const inventoryEvidence = view.acceptedEvidence.find((evidence) =>
+        evidence.claimKinds.includes("inventory_status")
+      );
+      const routeEvidence = view.acceptedEvidence.find((evidence) =>
+        evidence.claimKinds.includes("movement_option")
+      );
+      expect(result.candidate.sentences[0]?.evidenceRefs).toContain(inventoryEvidence?.ref);
+      expect(result.candidate.sentences[0]?.evidenceRefs).toContain(routeEvidence?.ref);
+      expect(result.candidate.sentences[0]?.backendFactRefs.length).toBeGreaterThan(1);
+    }
+  });
+
   it("supports visible_actor hard claims only from actor-specific evidence roles", () => {
+    const visibleTargetView = sceneFrameSnapshotView();
+    const visibleTarget = validateCleanNarrationCandidate({
+      view: visibleTargetView,
+      candidate: acceptedCandidate(visibleTargetView, [{
+        text: "Notice Board is visible here.",
+        evidenceRefs: ["e3"],
+        backendFactRefs: ["e3.f1"],
+        claimKinds: ["visible_target"],
+        hardClaims: ["visible_target"],
+      }]),
+    });
+    expect(visibleTarget.status).toBe("accepted");
+
     const actorTargetView = clarificationWithSceneFrameSnapshotView();
     const actorTarget = validateCleanNarrationCandidate({
       view: actorTargetView,
@@ -3258,7 +3386,7 @@ describe("clean Stage 6 narration contracts", () => {
       styleLevers: ["route_status_focus", "accepted_label_anchor", "settled_state_focus", "concrete_present_verb"],
     });
     expect(routeStatusStep?.proseMaterials.map((material) => [material.factRef, material.materialText])).toEqual([
-      ["e5.f1", "Transmission Basement lies open from here."],
+      ["e5.f1", "The path to Transmission Basement is open from here."],
       ["e5.f2", "Transmission Basement"],
       ["e5.f3", "connected"],
     ]);
@@ -3267,7 +3395,7 @@ describe("clean Stage 6 narration contracts", () => {
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [{
-        text: "Transmission Basement lies open from here.",
+        text: "The path to Transmission Basement is open from here.",
         evidenceRefs: ["e5"],
         backendFactRefs: ["e5.f1", "e5.f2", "e5.f3"],
         claimKinds: ["route_status"],
@@ -3275,7 +3403,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Transmission Basement lies open from here.");
+    expect(result.text).toBe("The path to Transmission Basement is open from here.");
     expect(result.text).toContain("Transmission Basement");
     expect(result.text).not.toContain("Transmission Basin");
     expect(result.text).not.toContain("You are at");
@@ -3350,7 +3478,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "route_beat" ? { ...fact, text: "Opaque accepted route-status fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(routeStatus)).toBe("North Hall lies open from here.");
+    expect(renderCleanAuthorityProjection(routeStatus)).toBe("The path to North Hall is open from here.");
 
     const routeStatusMissingValue = routeView();
     routeStatusMissingValue.acceptedEvidence[0] = {
@@ -3677,7 +3805,8 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps ambient sensory scene beats surface-only instead of pressure or mechanism claims", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For ambient sensory local_interaction beats");
     expect(buildCleanNarrationSystemPrompt()).toContain("do not confirm or deny pressure, leak source");
-    expect(buildCleanNarrationSystemPrompt()).toContain("accepted contact/listen/smell/touch action plus at most one present sensory texture");
+    expect(buildCleanNarrationSystemPrompt()).toContain("accepted contact/listen/smell/touch action as proof");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not replay the submitted action as the prose center");
     expect(buildCleanNarrationSystemPrompt()).toContain("Evaluation of what the surface reveals, hides, enables, blocks, proves, changes, or fails to reveal belongs to a later");
     const view = movementView({
       acceptedEvidence: [{
@@ -3728,6 +3857,66 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(surfaceSound.status).toBe("accepted");
+  });
+
+  it("keeps local scene beats from inheriting direct-scene inventory and route tails", () => {
+    const view = movementView({
+      acceptedEvidence: [
+        ...sceneFrameSnapshotView().acceptedEvidence,
+        {
+          ref: "e5",
+          authority: "scene_beat_receipt",
+          claimKinds: ["scene_beat"],
+          text: "Step onto a loose brick near the edge of a silt puddle for this moment at Market.",
+          backendFacts: [
+            {
+              factRef: "e5.f1",
+              role: "scene_beat",
+              value: "Step onto a loose brick near the edge of a silt puddle for this moment at Market.",
+              text: "Scene beat: Step onto a loose brick near the edge of a silt puddle for this moment at Market.",
+              exact: true,
+            },
+            {
+              factRef: "e5.f2",
+              role: "scene_beat_kind",
+              value: "local_interaction",
+              text: "Scene beat kind: local_interaction.",
+              exact: true,
+            },
+          ],
+          limits: {
+            proves: ["local visible scene beat acknowledgement"],
+            doesNotProve: ["pressure state", "hidden mechanism", "route", "item state", "no-change"],
+          },
+        },
+      ],
+    });
+    const promptInput = buildCleanNarratorPromptInput(view);
+
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([
+      { step: "open_with_context", entryRefs: ["e1"] },
+      { step: "narrate_turn_event", entryRefs: ["e5"] },
+    ]);
+    expect(promptInput.storyFrame.pagePlan.steps)
+      .not.toContainEqual({ step: "close_with_next_action_context", entryRefs: ["e4"] });
+    expect(promptInput.narrativePageTask.directScenePresentation).toEqual(noDirectScenePresentation);
+    expect(promptInput.narrativePageTask.storyPageBrief.requiredSentenceRefs).toEqual(["s1"]);
+    expect(promptInput.narrativePageTask.sentencePlan.map((step) => step.beatObjective))
+      .toEqual(["render_scene_beat"]);
+    expect(promptInput.narrativePageTask.sentencePlan[0]?.preferredBackendFactRefs)
+      .toEqual(["e5.f1", "e5.f2"]);
+
+    const surfaceOnly = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The loose brick grinds under your boot at Market, damp grit catching against the edge.",
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2"],
+        claimKinds: ["scene_beat"],
+        softProseKinds: ["ordinary_scene_prop", "ordinary_texture"],
+      }]),
+    });
+    expect(surfaceOnly.status).toBe("accepted");
   });
 
   it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
@@ -4485,6 +4674,26 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
+  it("renders accepted clarification questions in second person player-facing prose", () => {
+    const view = clarificationWithSceneFrameSnapshotView();
+    const clarification = view.acceptedEvidence[0]!;
+    const question = "The Brass Tube is currently held by Local Clerk. How does the player want to retrieve it — ask the clerk to hand it over, or take it by force or persuasion?";
+    const playerFacing = renderCleanAuthorityProjection({
+      ...view,
+      acceptedEvidence: [{
+        ...clarification,
+        text: `Clarification needed: ${question}`,
+        backendFacts: [{
+          ...clarification.backendFacts[0]!,
+          value: question,
+          text: `Clarification request: ${question}`,
+        }],
+      }],
+    });
+
+    expect(playerFacing).toBe("Please clarify: The Brass Tube is currently held by Local Clerk. How do you want to retrieve it: ask the clerk to hand it over, or take it by force or persuasion?");
+  });
+
   it("uses model-authored literary narration for direct scene targets and exits", async () => {
     const view = sceneFrameSnapshotWithTextureView();
     const result = await runCleanNarration({
@@ -4661,7 +4870,8 @@ describe("clean Stage 6 narration contracts", () => {
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
     const text = renderCleanAuthorityProjection(sceneFrameSnapshotWithOverlappingTargetsView());
 
-    expect(text).toBe("Market frames the immediate scene. Guide is present. You carry Courier satchel. Brass Tube and Notice Board are visible here. North Hall is the way onward from Market; it takes 1 minute.");
+    expect(text).toBe("Guide is present. You carry Courier satchel. Brass Tube and Notice Board are visible here. North Hall is the way onward from Market; it takes 1 minute.");
+    expect(text).not.toContain("frames the immediate scene");
     expect(text).not.toContain("You are at");
     expect(text).not.toContain("is here.");
     expect(text).not.toContain("are visible.");
@@ -4862,7 +5072,8 @@ describe("clean Stage 6 narration contracts", () => {
     const promptInput = buildCleanNarratorPromptInput(view);
     expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
       step.sentenceRole === "context_anchor"
-    )).toBe(true);
+    )).toBe(false);
+    expect(promptInput.narrativePageTask.pageVariation.openingDoor).toBe("speech_first");
     const result = await runCleanNarration({
       narratorView: view,
       provider,
@@ -6041,7 +6252,7 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("shapes targeted inventory local_observation as item presence material with texture", async () => {
-    expect(buildCleanNarrationSystemPrompt()).toContain("inventory_status states current custody/status only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("inventory_status proves current custody only");
     expect(buildCleanNarrationSystemPrompt()).toContain("does not authorize close at hand");
     const view = inventorySingleMatchLocalObservationWithSceneTextureView();
     const promptInput = buildCleanNarratorPromptInput(view);
@@ -6403,6 +6614,19 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(inventoryAsSceneSurface.status).toBe("accepted");
 
+    const richerRoomBeat = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Wet boards flex through Market; Notice Board is in view, Courier satchel stays with you, and North Hall is the way out.",
+        evidenceRefs: ["e1", "e2", "e3", "e4"],
+        backendFactRefs: ["e1.f2", "e2.f1", "e2.f2", "e3.f1", "e4.f3"],
+        claimKinds: ["current_scene", "visible_target", "inventory_status", "movement_option"],
+        hardClaims: ["current_scene", "visible_target", "item_custody", "route"],
+        softProseKinds: ["ordinary_texture", "ordinary_scene_prop"],
+      }]),
+    });
+    expect(richerRoomBeat.status).toBe("accepted");
+
     const texturedView = sceneObservationReceiptWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
       view: texturedView,
@@ -6634,6 +6858,8 @@ describe("clean Stage 6 narration contracts", () => {
       cadenceTarget: "audit_notice_sentence",
       dictionPalette: ["audit_notice_clarity"],
       variationBoundary: "vary_syntax_only_inside_cited_material",
+      openingDoor: "core_result_first",
+      recentSurfaceAvoid: emptyRecentSurfaceAvoid,
     });
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: [],
@@ -6663,6 +6889,60 @@ describe("clean Stage 6 narration contracts", () => {
 
     expect(result.status).toBe("rejected");
     expect(renderCleanAuthorityProjection(view)).toContain("not confirmed");
+  });
+
+  it("uses model-authored audit notice instead of deterministic room projection when frame context exists", async () => {
+    const view = {
+      ...sceneFrameSnapshotView(),
+      stepAuditForGrounding: [{
+        stepId: "step-1" as const,
+        status: "failed" as const,
+        publicReason: "The handoff does not resolve from the current visible item state.",
+        mayUseAsWorldTruth: false as const,
+      }],
+    };
+    const promptInput = buildCleanNarratorPromptInput(view);
+    expect(promptInput.storyFrame.currentContext.map((entry) => entry.ref)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(promptInput.storyFrame.turnEvents).toEqual([]);
+    expect(promptInput.storyFrame.pagePlan.steps).toEqual([]);
+    expect(promptInput.narrativePageTask.storyPageBrief.pageKind).toBe("audit_notice_page");
+    expect(promptInput.narrativePageTask.pageArc.arcShape).toBe("audit_notice_only");
+    expect(promptInput.narrativePageTask.moves).toEqual([]);
+    expect(promptInput.narrativePageTask.sentencePlan).toEqual([]);
+
+    let attempts = 0;
+    const result = await runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async (request) => {
+        attempts += 1;
+        expect(request.promptInput.narrativePageTask.storyPageBrief.pageKind).toBe("audit_notice_page");
+        return {
+          version: "gameplay-runtime.clean-narration-candidate.v1",
+          packetId: view.packetId,
+          turnId: view.turnId,
+          language: view.language,
+          sentences: [{
+            kind: "audit_notice",
+            text: "The handoff does not resolve from the current visible item state.",
+            evidenceRefs: [],
+            backendFactRefs: [],
+            claimKinds: [],
+            hardClaims: [],
+            softProseKinds: [],
+            pageMoveRefs: [],
+            sentencePlanRefs: [],
+            auditStepIds: ["step-1"],
+          }],
+          finalText: "The handoff does not resolve from the current visible item state.",
+        } satisfies CleanNarrationCandidate;
+      },
+    });
+
+    expect(attempts).toBe(1);
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("The handoff does not resolve from the current visible item state.");
+    expect(result.text).not.toMatch(/\b(Local Clerk|Courier satchel|Notice Board|North Hall|visible here|ways onward)\b/u);
   });
 
   it("rejects private terms and exact prompt-owned internal token leaks", () => {
@@ -6957,10 +7237,13 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("documents that raw player action is intentionally omitted from the system prompt", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("raw player action is intentionally omitted");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Ownership split: Stage 6 is a prose renderer only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("may not decide possibility, success, failure, existence, absence, hidden truth, route status");
     expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write playable text-RPG adventure prose from accepted facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Default successful turns use one to three short fiction beats");
     expect(buildCleanNarrationSystemPrompt()).toContain("Adventure prose floor:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Default literary profile:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_prose_rules>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37 is the prose donor");
     expect(buildCleanNarrationSystemPrompt()).toContain("HardClaims field values: write exact ids only");
     expect(buildCleanNarrationSystemPrompt()).toContain("Backend fact roles belong in backendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Put natural prose clauses in sentence.text");
@@ -6974,7 +7257,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Hybrid POV:");
     expect(buildCleanNarrationSystemPrompt()).toContain("BOLT v2 silent writing room:");
     expect(buildCleanNarrationSystemPrompt()).toContain("NPC knowledge is limited");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced-Freaky NSFW adult register");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Freaky-Balanced is a register donor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Adult diction is a style/rating layer");
     expect(buildCleanNarrationSystemPrompt()).toContain("WorldForge is adult fiction");
     expect(buildCleanNarrationSystemPrompt()).toContain("Zetta banned vocabulary is craft guidance and offline benchmark data");
     expect(buildCleanNarrationSystemPrompt()).toContain("fresh meat");
@@ -6982,7 +7266,8 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("word-as-object name tasting");
     expect(buildCleanNarrationSystemPrompt()).toContain("clinical euphemism");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event, then to accepted next-action context only when that move exists");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Surface-only scene_beat turns spend the page on the immediate physical beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Story page brief:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.storyPageBrief");
     expect(buildCleanNarrationSystemPrompt()).toContain("writer-facing page kind");
@@ -6999,9 +7284,14 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Page variation:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageVariation");
     expect(buildCleanNarrationSystemPrompt()).toContain("openingRotation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("openingDoor");
     expect(buildCleanNarrationSystemPrompt()).toContain("cadenceTarget");
     expect(buildCleanNarrationSystemPrompt()).toContain("dictionPalette");
     expect(buildCleanNarrationSystemPrompt()).toContain("variationBoundary");
+    expect(buildCleanNarrationSystemPrompt()).toContain("recentSurfaceAvoid");
+    expect(buildCleanNarrationSystemPrompt()).toContain("maySupportWorldTruth=false");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Use it as the prose entry plan, not as fact evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("If the selected door would produce a list-shaped receipt sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Page focus:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.pageFocus");
     expect(buildCleanNarrationSystemPrompt()).toContain("coreMoveRefs");
@@ -7019,6 +7309,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("preserve route labels verbatim");
     expect(buildCleanNarrationSystemPrompt()).toContain("reserve posture verbs for cited player_local_condition evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("adventure handoff");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Direct-scene presentation:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.directScenePresentation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("catalogPolicy=no_receipt_lists");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentenceObjectPolicy=optional_texture_then_single_room_beat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("roomBeatSplitPolicy=actor_inventory_routes_same_sentence_text");
+    expect(buildCleanNarrationSystemPrompt()).toContain("playable_room_beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Narrative page task:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask turns the story page plan into writer moves");
     expect(buildCleanNarrationSystemPrompt()).toContain("entryProseCues");
@@ -7069,29 +7365,60 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("materialWeaveOrder");
     expect(buildCleanNarrationSystemPrompt()).toContain("styleBudget");
     expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
-    expect(buildCleanNarrationSystemPrompt()).toContain("different doors across nearby turns");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_prose_rules>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_forward_motion>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_bolt_v2>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_adult_mode>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_door_rotation>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37 is the prose donor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Every sentence earns its place by moving the scene forward");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For local scene_beat, write the world response now");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Run a private writing room before JSON");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Same door twice in nearby turns is a prose failure");
+    expect(buildCleanNarrationSystemPrompt()).toContain("recentFirstSentenceShapes are stale openings to avoid");
+    expect(buildCleanNarrationSystemPrompt()).toContain("no em dash or en dash glue");
+    expect(buildCleanNarrationSystemPrompt()).toContain("narrator-authored text outside exact accepted quotes");
     expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("optional routing metadata");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_ordinary_page_contract>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("not receipt prose");
+    expect(buildCleanNarrationSystemPrompt()).toContain("one concrete sensory surface or material pressure beat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The sensory surface is presentation only");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Flourish can color the surface; it cannot add hard facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Flourish colors the surface and leaves hard facts inside cited accepted evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft-prose budget:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_soft_surface_spend>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Legal soft detail is present-tense, visible/sensory, low-stakes");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The soft detail must be grammatically attached to the harmless surface itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Keep invented surface/prop detail in the present visible/sensory layer");
     expect(buildCleanNarrationSystemPrompt()).toContain("do not imply past duration, use history, player grip/handling");
     expect(buildCleanNarrationSystemPrompt()).toContain("Ordinary props include low-stakes scene dressing");
     expect(buildCleanNarrationSystemPrompt()).toContain("If the player later uses a soft detail");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not stock prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
     expect(buildCleanNarrationSystemPrompt()).toContain("roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values");
     expect(buildCleanNarrationSystemPrompt()).toContain("'After 1 minute, you reach North Hall.', 'North Hall', and '1 minute'");
-    expect(buildCleanNarrationSystemPrompt()).toContain("After one minute, North Hall takes your weight underfoot.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not stock prose");
+    expect(buildCleanNarrationSystemPrompt()).toContain("North Hall comes into view after a minute");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("takes your weight underfoot");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example dialogue with texture:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Rain taps the brass gutters.");
     expect(buildCleanNarrationSystemPrompt()).toContain("Composed support-dialogue surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line");
     expect(buildCleanNarrationSystemPrompt()).toContain("quote frame");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep accepted quotes exact, including their punctuation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Dialogue frame may name the speaker, scene anchor, and speech function or register only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("A player showing, naming, asking about, or quoting an item gives the dialogue evidence a topic");
+    expect(buildCleanNarrationSystemPrompt()).toContain("it does not give the speaker item handling, inspection, possession, gesture, posture, or body movement");
+    expect(buildCleanNarrationSystemPrompt()).toContain("dialogue-only evidence supports the speaker label, scene anchor, and what the utterance does");
+    expect(buildCleanNarrationSystemPrompt()).toContain("if separate item_state/custody evidence exists, it may frame item handling");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Avoid the default '<speaker> answers at <scene>:' frame");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'<speaker> keeps it blunt:'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Physical actions such as checking, weighing, writing, handing over, pointing");
+    expect(buildCleanNarrationSystemPrompt()).toContain("require accepted visible cue material, item_state/custody evidence, or separate accepted evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Anchor Chain Pylon and The Copper Tap are the ways onward from Lowwater Bazaar.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("From Lowwater Bazaar, you can take Anchor Chain Pylon or The Copper Tap.");
     expect(buildCleanNarrationSystemPrompt()).toContain("If timing is part of the sentence, use the exact accepted cost");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example local observation with soft surface:");
@@ -7099,7 +7426,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("ordinary plausible current-scene props");
     expect(buildCleanNarrationSystemPrompt()).toContain("softProseKinds ['ordinary_scene_prop']");
     expect(buildCleanNarrationSystemPrompt()).toContain("A hidden latch, loose weaponizable leg, trap");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced-Freaky NSFW adult register");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Freaky-Balanced is a register donor");
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft surface material menu: choose present visible material traits attached to the object itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
@@ -7110,19 +7437,31 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through endpoint-owned item verbs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted `travel_beat` value as the turn event");
+    expect(buildCleanNarrationSystemPrompt()).toContain("put one exact scene_texture sentence first or second");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not default to the stock opener 'One minute later, you...'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not reuse a distinctive arrival metaphor across nearby turns");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Arrival phrasing should use reach, arrive, come into view, or are at");
+    expect(buildCleanNarrationSystemPrompt()).toContain("posture framing such as 'you stand at/in <destination>' belongs only to accepted player_local_condition evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("accepted elapsed_time duration value and any cited scene_anchor material as the clock beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("clock_beat_line with pressure_time");
     expect(buildCleanNarrationSystemPrompt()).toContain("pressure clock beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-status surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("answer the checked path as a route_status_line");
-    expect(buildCleanNarrationSystemPrompt()).toContain("phrase the route_beat into ordinary path-status prose");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not print backend status words such as connected/ready as prose");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Turn the result into a compact path beat with a physical handle");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The path toward <Route label> is open from <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<Route label> remains reachable from <scene>.");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("such as '<Route label> lies open from here.'");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as the ways onward");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as playable exits/options");
+    expect(buildCleanNarrationSystemPrompt()).toContain("recentSurfaceAvoid shows that same opening shape");
     expect(buildCleanNarrationSystemPrompt()).toContain("route_choice_travel_costs is exact material only when the sentence states travel timing");
     expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For positive look/list_surface observations");
+    expect(buildCleanNarrationSystemPrompt()).toContain("open through the surface, place, or object first");
     expect(buildCleanNarrationSystemPrompt()).toContain("observation_query about surface, wear, marks, scratches");
     expect(buildCleanNarrationSystemPrompt()).toContain("spending one small softProseBudget detail on visible non-mechanical surface");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase it as present object surface on the item or visible target itself");
@@ -7131,21 +7470,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not place it in the player's grip, on the player's body, or in clue/affordance language");
     expect(buildCleanNarrationSystemPrompt()).toContain("observed_entry_labels plus anchor_scene");
     expect(buildCleanNarrationSystemPrompt()).toContain("local_observation_line with observed_labels_then_scene");
-    expect(buildCleanNarrationSystemPrompt()).toContain("phrase whether-shaped queries as 'No visible sign at <scene> settles whether <question-body>.'");
-    expect(buildCleanNarrationSystemPrompt()).toContain("phrase person-property queries as 'No visible person seems to be waiting for a courier at <scene>'");
-    expect(buildCleanNarrationSystemPrompt()).toContain("when local_observation_beat starts with 'No visible sign at'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Mixed visible-state local observations");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Pressure verbs attach to the place or material surroundings");
+    expect(buildCleanNarrationSystemPrompt()).toContain("bare actor labels do not become posture, vigilance, resistance");
+    expect(buildCleanNarrationSystemPrompt()).toContain("treat local_observation_beat wording as proof material, not prose to copy");
+    expect(buildCleanNarrationSystemPrompt()).toContain("avoid receipt/legal phrasing");
+    expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <checked thing> shows at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <finding> shows on <target> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("At <scene>, nothing visible supports that <question-body>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<target> stays visually silent on <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not turn any/some/a target in the checked query into every/all targets");
+    expect(buildCleanNarrationSystemPrompt()).toContain("use every/all only when accepted observed_entry_labels enumerate the complete visible set");
+    expect(buildCleanNarrationSystemPrompt()).toContain("keep the visible-sign qualifier attached");
+    expect(buildCleanNarrationSystemPrompt()).toContain("no visible sign of degraded insulation");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For list-shaped property checks");
+    expect(buildCleanNarrationSystemPrompt()).toContain("no visible sign of <A>, <B>, or <C> on <target>");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("No visible sign at <scene> settles whether");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("visible surface gives you no usable sign");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("nothing visible answers <question-body>");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("answers whether");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("settles whether");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase person-property queries as a visible no-match");
     expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, answer the question as unresolved by visible evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line with actor_then_scene_with_role_context");
+    expect(buildCleanNarrationSystemPrompt()).toContain("one human-facing cue, one scene placement, and no filler opener");
     expect(buildCleanNarrationSystemPrompt()).toContain("let the actor label carry it when repeating the role would duplicate");
+    expect(buildCleanNarrationSystemPrompt()).toContain("without cue material, use neutral visibility wording");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player-local-condition surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the condition beat on condition/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Minor-POI surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the POI beat on label/kind/scene materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Device-surface surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep texture there and keep the device beat exact as the device/facet sentence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("playable_room_beat_line with scene_actor_inventory_then_exits");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_room_beat>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Direct room beats are played from the floor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("A direct scene page should normally begin with the accepted scene label doing physical work");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Pressure verbs attach to scene surfaces, air, light, fixtures, crowds, weather, doors, paths, and room shape");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The target shape is: scene pressure first, accepted labels woven second, playable handoff last");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Room-beat diction:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("interface phrases such as 'gives you a clear read'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Render the room itself instead");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Pressure verbs attach to scene surfaces, air, light");
+    expect(buildCleanNarrationSystemPrompt()).toContain("actor labels without accepted visible cue material stay as present/in-view labels");
+    expect(buildCleanNarrationSystemPrompt()).toContain("follow directScenePresentation and <worldforge_room_beat>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan should supply one playable_room_beat_line instead of separate actor, inventory, target, and route receipt lines");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Compose that sentence as one playable room beat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Start from the exact scene label, a single soft sensory strike, or scene pressure");
+    expect(buildCleanNarrationSystemPrompt()).toContain("not a catalog, but room pressure plus handles");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Shape examples only:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<scene> narrows; <actor> is in view");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<scene> smells of wet brick; <actor> is present");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Receipt grammar such as '<scene> has <actors> in view; you carry <items>' is a last-resort proof shape");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Prefer scene-pressure, neutral-presence-first, object-first, or emptiness-first prose");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("<scene> gives you <actors> to work with");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("<scene> leaves <actor> in view");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("<scene> leaves <actors> in view");
+    expect(buildCleanNarrationSystemPrompt()).toContain("inside the same playable_room_beat_line sentence text");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not use em dash or en dash to stitch room-state clauses together");
+    expect(buildCleanNarrationSystemPrompt()).toContain("inventory_labels supply the item words and inventory_status proves current custody only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Current_scene/current_location labels prove placement only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Visible actor labels support only neutral in-view/present phrasing");
+    expect(buildCleanNarrationSystemPrompt()).toContain("pressure verbs attach to the scene or visible material");
+    expect(buildCleanNarrationSystemPrompt()).toContain("receipt-source phrases such as actor presence, inventory status, and route choices as proof labels");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Direct-scene playable_room_beat pages use 1 object without texture or 2 objects with texture");
     expect(buildCleanNarrationSystemPrompt()).toContain("Scene-anchor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene labels function as exact placement tokens");
     expect(buildCleanNarrationSystemPrompt()).toContain("Concrete prose foundation:");
@@ -7162,7 +7553,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).not.toContain("choose a later texture fact");
   });
 
-  it("composes runtime through Stage 6 with only CleanNarratorView input", async () => {
+  it("composes runtime through Stage 6 with CleanNarratorView and style-only recent prose input", async () => {
     const inputFrame = frame();
     const read = gmRead(inputFrame);
     const eventTypes: string[] = [];
@@ -7208,6 +7599,7 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
     expect(narrationInputs).toHaveLength(1);
     expect(JSON.stringify(narrationInputs[0])).toContain("narratorView");
+    expect((narrationInputs[0] as { recentPlayerFacingText?: readonly string[] }).recentPlayerFacingText).toEqual([]);
     expect(JSON.stringify(narrationInputs[0])).not.toContain("receipts");
     expect(JSON.stringify(narrationInputs[0])).not.toContain("checklist");
   });
