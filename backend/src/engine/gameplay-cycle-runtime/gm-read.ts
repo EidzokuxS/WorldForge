@@ -10,6 +10,7 @@ import {
   cleanLocalObservationModeSchema,
   cleanLocalObservationSurfaceKindSchema,
   cleanMinorPoiKindSchema,
+  cleanSceneBeatKindSchema,
   cleanTimeAdvanceReasonKindSchema,
   gmReadSchema,
   gmReadActionInterpretationSchema,
@@ -82,6 +83,56 @@ const ITEM_TRANSFER_OPERATION_SHAPE: Record<CleanItemTransferOperation, {
 };
 
 const FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS = new Set(["hand", "give", "pass", "offer", "transfer"]);
+const VISIBLE_ACTOR_DIALOGUE_WORDS = new Set([
+  "ask",
+  "asked",
+  "asks",
+  "tell",
+  "told",
+  "tells",
+  "say",
+  "said",
+  "says",
+  "answer",
+  "answered",
+  "answers",
+  "greet",
+  "greeted",
+  "greets",
+  "threaten",
+  "threatened",
+  "threatens",
+  "bargain",
+  "bargained",
+  "bargains",
+  "request",
+  "requested",
+  "requests",
+]);
+const CARRIED_ITEM_READINESS_WORDS = new Set([
+  "above",
+  "against",
+  "clear",
+  "close",
+  "dry",
+  "grip",
+  "gripped",
+  "gripping",
+  "grips",
+  "high",
+  "hold",
+  "holding",
+  "holds",
+  "keep",
+  "keeping",
+  "keeps",
+  "protect",
+  "protected",
+  "protecting",
+  "ready",
+  "safe",
+  "steady",
+]);
 
 const gmReadGenerationItemTransferNeedSchema = z.object({
   actorRef: z.literal("Player"),
@@ -121,24 +172,39 @@ const gmReadGenerationLocalObservationNeedSchema = z.object({
   evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
 }).strict();
 
+const gmReadGenerationSceneBeatNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  beatKind: cleanSceneBeatKindSchema,
+  requestedBeatText: gmReadGenerationShortText,
+  anchorRef: gmReadGenerationModelSafeRef,
+  evidenceRefs: z.array(gmReadGenerationModelSafeRef).min(1).max(12),
+}).strict();
+
 const gmReadGenerationUncertaintySchema = z.object({
   present: z.boolean(),
   question: z.string().trim().max(500).nullable().optional(),
   basis: z.string().trim().max(500).nullable().optional(),
 }).strict();
 
+const gmReadGenerationActionInterpretationSchema = (
+  gmReadActionInterpretationSchema as unknown as {
+    safeExtend: (shape: Record<string, z.ZodType>) => z.ZodType;
+  }
+).safeExtend({
+  method: z.string().trim().max(500).nullable().optional(),
+  targetRefs: z.array(gmReadGenerationModelSafeRef).max(12).optional(),
+  itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
+  minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
+  timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
+  sceneBeatNeed: gmReadGenerationSceneBeatNeedSchema.nullable().optional(),
+  localObservationNeed: gmReadGenerationLocalObservationNeedSchema.nullable().optional(),
+});
+
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
   liveSceneQuestion: z.union([gmReadGenerationRepairableText, z.null()]),
   uncertainty: gmReadGenerationUncertaintySchema.optional(),
-  actionInterpretation: gmReadActionInterpretationSchema.extend({
-    method: z.string().trim().max(500).nullable().optional(),
-    targetRefs: z.array(gmReadGenerationModelSafeRef).max(12).optional(),
-    itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
-    minorPoiNeed: gmReadGenerationMinorPoiNeedSchema.nullable().optional(),
-    timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
-    localObservationNeed: gmReadGenerationLocalObservationNeedSchema.nullable().optional(),
-  }).strict(),
+  actionInterpretation: gmReadGenerationActionInterpretationSchema,
   interpretationRationale: gmReadGenerationRepairableText,
 }).passthrough();
 
@@ -181,16 +247,23 @@ export class CleanGmReadValidationError extends Error {
   }
 }
 
+function gmReadIssueSummary(issues: readonly GmReadValidationIssue[]): string {
+  return issues
+    .slice(0, 4)
+    .map((issue) => `${issue.path}: ${issue.message}`)
+    .join("; ");
+}
+
 export interface GmReadCandidateRequest {
   system: string;
   prompt: string;
-  repairOf?: {
-    candidate: unknown;
-    issues: GmReadValidationIssue[];
-  };
 }
 
 export type GmReadCandidateGenerator = (request: GmReadCandidateRequest) => Promise<unknown>;
+export interface GmReadRecentConversationMessage {
+  role: string;
+  content: string;
+}
 
 function normalizedKey(key: string): string {
   return key.replace(/[\s_-]/g, "").toLowerCase();
@@ -204,13 +277,56 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-function normalizedObservationQuery(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+function compactGmReadDiscourseText(value: string, maxLength = 700): string {
+  const oneLine = value
+    .replaceAll("\r", " ")
+    .replaceAll("\n", " ")
+    .replaceAll("\t", " ")
+    .trim();
+  if (oneLine.length <= maxLength) return oneLine;
+  return `${oneLine.slice(0, maxLength - 1).trim()}...`;
+}
+
+function gmReadRecentDiscourseCue(
+  recentConversation?: readonly GmReadRecentConversationMessage[],
+): string {
+  const entries = (recentConversation ?? [])
+    .slice(-6)
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : message.role === "user" ? "user" : "other",
+      content: compactGmReadDiscourseText(message.content),
+    }))
+    .filter((message) => message.content.length > 0);
+  if (entries.length === 0) {
+    return "Recent discourse context: none.";
+  }
+  return [
+    "Recent discourse context (non-authoritative):",
+    "Use this only to resolve pronouns and short references to immediately recent player-facing prose, such as the scrap, that stool, the loose brick, or the chair. It may identify a low-stakes current-scene discourse handle; it does not prove inventory, custody, hidden mechanisms, route truth, safety, damage, secrets, durable item state, or future availability.",
+    "For recent soft prop references that are not SceneFrame refs, keep targetRefs/targetRef to current scene refs or null. Use scene_local_beat for immediate use/readiness, and current_scene_observation with localObservationNeed.targetRef=null for visible or hidden-property checks.",
+    JSON.stringify(entries, null, 2),
+  ].join("\n");
 }
 
 function isGenericVisibleActorQuery(value: string): boolean {
-  const normalized = normalizedObservationQuery(value);
-  const words = new Set(normalized.split(/[^a-z0-9]+/u).filter(Boolean));
+  const words = new Set(asciiWordTokens(value));
+  const propertyQueryWords = [
+    "waiting",
+    "waits",
+    "seems",
+    "looking",
+    "holding",
+    "carrying",
+    "wearing",
+    "watching",
+    "guarding",
+    "following",
+    "expecting",
+    "courier",
+    "contact",
+    "commissioner",
+  ];
+  if (propertyQueryWords.some((word) => words.has(word))) return false;
   return (
     words.has("people")
     || words.has("person")
@@ -274,6 +390,61 @@ function isBroadRouteListSurface(surfaceKinds: readonly string[]): boolean {
   const kinds = uniqueStrings(surfaceKinds);
   return kinds.includes("movement_option")
     && kinds.every((surfaceKind) => allowedAnchorKinds.has(surfaceKind));
+}
+
+function normalizeGmReadBroadSceneOverviewObservation(input: {
+  frame: AuthoritativeSceneFrame;
+  read: GmRead;
+}): GmRead {
+  const { frame, read } = input;
+  const localObservationNeed = read.actionInterpretation.localObservationNeed ?? null;
+  if (read.actionInterpretation.interactionKind !== "current_scene_observation") return read;
+  if (!localObservationNeed) return read;
+  if (localObservationNeed.mode !== "list_surface") return read;
+  if (localObservationNeed.allowBoundedNegative) return read;
+
+  const kinds = uniqueStrings(localObservationNeed.surfaceKinds);
+  if (kinds.length === 0) return read;
+  const broadOverviewKinds = new Set([
+    "current_scene",
+    "current_location",
+    "visible_actor",
+    "visible_target",
+    "inventory_item",
+    "movement_option",
+    "visible_fact",
+  ]);
+  if (!kinds.every((surfaceKind) => broadOverviewKinds.has(surfaceKind))) {
+    return read;
+  }
+  const onlySceneAnchors = kinds.every((surfaceKind) => surfaceKind === "current_scene" || surfaceKind === "current_location");
+  const broadMixedOverview = kinds.length > 1 && !(
+    kinds.length === 1
+    || (kinds.length === 2 && kinds.includes("current_scene") && kinds.includes("current_location"))
+  );
+  if (!onlySceneAnchors && !broadMixedOverview) return read;
+
+  const sceneAnchors = new Set([
+    frame.scene.currentScene.ref,
+    frame.scene.currentScene.label,
+    frame.scene.currentLocation.ref,
+    frame.scene.currentLocation.label,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLocaleLowerCase("en-US")));
+  if (
+    localObservationNeed.targetRef !== null
+    && !sceneAnchors.has(localObservationNeed.targetRef.toLocaleLowerCase("en-US"))
+  ) {
+    return read;
+  }
+
+  return {
+    ...read,
+    actionInterpretation: {
+      ...read.actionInterpretation,
+      localObservationNeed: null,
+    },
+  };
 }
 
 function normalizeGmReadRouteListObservation(input: {
@@ -361,6 +532,21 @@ function normalizeGmReadTargetRefsCandidate(candidate: unknown): unknown {
   };
 }
 
+function normalizeGmReadRouteInquiryCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (actionInterpretation.interactionKind !== "route_inquiry") return candidate;
+  if (actionInterpretation.localObservationNeed == null) return candidate;
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      localObservationNeed: null,
+    },
+  };
+}
+
 function normalizeGmReadMethodCandidate(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const actionInterpretation = candidate.actionInterpretation;
@@ -379,7 +565,60 @@ function normalizeGmReadLocalObservationTargetCandidate(candidate: unknown): unk
   const actionInterpretation = candidate.actionInterpretation;
   if (!isRecord(actionInterpretation)) return candidate;
   const localObservationNeed = actionInterpretation.localObservationNeed;
-  if (!isRecord(localObservationNeed) || Object.hasOwn(localObservationNeed, "targetRef")) return candidate;
+  if (!isRecord(localObservationNeed)) return candidate;
+  if (localObservationNeed.mode === "list_surface") {
+    if (
+      localObservationNeed.targetRef === null
+      && Array.isArray(localObservationNeed.surfaceKinds)
+      && localObservationNeed.surfaceKinds.length === 1
+      && localObservationNeed.surfaceKinds[0] === "visible_actor"
+      && typeof localObservationNeed.queryText === "string"
+      && !isGenericVisibleActorQuery(localObservationNeed.queryText)
+    ) {
+      return {
+        ...candidate,
+        actionInterpretation: {
+          ...actionInterpretation,
+          localObservationNeed: {
+            ...localObservationNeed,
+            mode: "target_match",
+          },
+        },
+      };
+    }
+    if (localObservationNeed.targetRef === null) return candidate;
+    return {
+      ...candidate,
+      actionInterpretation: {
+        ...actionInterpretation,
+        localObservationNeed: {
+          ...localObservationNeed,
+          targetRef: null,
+        },
+      },
+    };
+  }
+  if (
+    localObservationNeed.mode === "target_match"
+    && localObservationNeed.targetRef === null
+    && Array.isArray(localObservationNeed.surfaceKinds)
+    && localObservationNeed.surfaceKinds.length === 1
+    && localObservationNeed.surfaceKinds[0] === "visible_actor"
+    && typeof localObservationNeed.queryText === "string"
+    && isGenericVisibleActorQuery(localObservationNeed.queryText)
+  ) {
+    return {
+      ...candidate,
+      actionInterpretation: {
+        ...actionInterpretation,
+        localObservationNeed: {
+          ...localObservationNeed,
+          mode: "list_surface",
+        },
+      },
+    };
+  }
+  if (Object.hasOwn(localObservationNeed, "targetRef")) return candidate;
   return {
     ...candidate,
     actionInterpretation: {
@@ -417,6 +656,182 @@ function normalizeGmReadLocalObservationListQueryCandidate(input: {
   };
 }
 
+function normalizeGmReadPlayerConditionObservationDriftCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (actionInterpretation.interactionKind !== "player_local_condition") return candidate;
+  if (!isRecord(actionInterpretation.localConditionNeed)) return candidate;
+  if (actionInterpretation.localObservationNeed == null) return candidate;
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      localObservationNeed: null,
+    },
+  };
+}
+
+function normalizeGmReadStrayLocalConditionKindCandidate(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const { candidate } = input;
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (!isRecord(actionInterpretation.localConditionNeed)) return candidate;
+  if (
+    actionInterpretation.interactionKind === "player_local_condition"
+    || actionInterpretation.interactionKind === "visible_actor_dialogue"
+  ) {
+    return candidate;
+  }
+  const competingPayloadKeys = [
+    "supportActorNeed",
+    "itemTransferNeed",
+    "minorPoiNeed",
+    "timePassageNeed",
+    "localObservationNeed",
+    "deviceObservationNeed",
+  ];
+  if (competingPayloadKeys.some((key) => actionInterpretation[key] != null)) return candidate;
+
+  const movementOptionRefs = new Set(input.frame.movementOptions.map((option) => option.ref.toLowerCase()));
+  const targetRefs = Array.isArray(actionInterpretation.targetRefs) ? actionInterpretation.targetRefs : [];
+  const targetsMovementOption = targetRefs.some((ref) =>
+    typeof ref === "string" && movementOptionRefs.has(ref.toLowerCase())
+  );
+  if (targetsMovementOption) return candidate;
+
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      interactionKind: "player_local_condition",
+    },
+  };
+}
+
+function normalizeGmReadStraySceneBeatKindCandidate(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const { candidate } = input;
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (!isRecord(actionInterpretation.sceneBeatNeed)) return candidate;
+  if (actionInterpretation.interactionKind === "scene_local_beat") return candidate;
+  const competingPayloadKeys = [
+    "supportActorNeed",
+    "itemTransferNeed",
+    "minorPoiNeed",
+    "timePassageNeed",
+    "localConditionNeed",
+    "localObservationNeed",
+    "deviceObservationNeed",
+  ];
+  if (competingPayloadKeys.some((key) => actionInterpretation[key] != null)) return candidate;
+
+  const movementOptionRefs = new Set(input.frame.movementOptions.map((option) => option.ref.toLowerCase()));
+  const targetRefs = Array.isArray(actionInterpretation.targetRefs) ? actionInterpretation.targetRefs : [];
+  const targetsMovementOption = targetRefs.some((ref) =>
+    typeof ref === "string" && movementOptionRefs.has(ref.toLowerCase())
+  );
+  if (targetsMovementOption) return candidate;
+
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      interactionKind: "scene_local_beat",
+    },
+  };
+}
+
+function normalizeGmReadUnsupportedGiveToVisibleActorNeedCandidate(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const { candidate, frame } = input;
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  const itemTransferNeed = actionInterpretation.itemTransferNeed;
+  if (!isRecord(itemTransferNeed)) return candidate;
+  if (itemTransferNeed.operation !== "give_to_visible_actor") return candidate;
+  if (giveToVisibleActorAdmissionCue(frame)) return candidate;
+
+  const targetRef = typeof itemTransferNeed.targetRef === "string" ? itemTransferNeed.targetRef : null;
+  const targetActorRef = targetRef && frame.actors.some((actor) => actor.ref.toLowerCase() === targetRef.toLowerCase())
+    ? targetRef
+    : null;
+
+  if (actionInterpretation.interactionKind === "visible_actor_dialogue") {
+    return {
+      ...candidate,
+      actionInterpretation: {
+        ...actionInterpretation,
+        targetRefs: targetActorRef ? [targetActorRef] : actionInterpretation.targetRefs,
+        itemTransferNeed: undefined,
+      },
+    };
+  }
+
+  if (
+    actionInterpretation.interactionKind === "item_transfer"
+    && targetActorRef
+    && playerActionHasDialogueCueToVisibleActor(frame, targetActorRef)
+  ) {
+    return {
+      ...candidate,
+      actionInterpretation: {
+        ...actionInterpretation,
+        interactionKind: "visible_actor_dialogue",
+        targetRefs: [targetActorRef],
+        itemTransferNeed: undefined,
+      },
+    };
+  }
+
+  return candidate;
+}
+
+function normalizeGmReadCompoundLocalConditionClarificationCandidate(input: {
+  candidate: unknown;
+  frame: AuthoritativeSceneFrame;
+}): unknown {
+  const { candidate, frame } = input;
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (actionInterpretation.interactionKind !== "player_local_condition") return candidate;
+  const localConditionNeed = actionInterpretation.localConditionNeed;
+  if (!isRecord(localConditionNeed)) return candidate;
+  if (localConditionNeed.conditionKey === "gripping_held_item") return candidate;
+
+  const readinessCue = carriedItemReadinessCue(frame);
+  if (!readinessCue) return candidate;
+
+  const conditionText = typeof localConditionNeed.conditionKey === "string"
+    ? localConditionNeed.conditionKey
+    : "the posture";
+  return {
+    ...candidate,
+    path: "clarification",
+    liveSceneQuestion: `Which posture/readiness should apply first: ${conditionText} or keeping ${readinessCue.itemLabel} ready?`,
+    actionInterpretation: {
+      ...actionInterpretation,
+      summary: "The player asked for more than one current-scene posture/readiness commitment.",
+      playerIntent: `Clarify whether to apply ${conditionText} or keep ${readinessCue.itemLabel} ready first.`,
+      targetRefs: Array.isArray(actionInterpretation.targetRefs) ? actionInterpretation.targetRefs : [],
+      interactionKind: "unsupported_or_unclear",
+      localConditionNeed: undefined,
+    },
+  };
+}
+
 function normalizeGmReadCandidateForValidation(input: {
   candidate: unknown;
   frame: AuthoritativeSceneFrame;
@@ -424,12 +839,31 @@ function normalizeGmReadCandidateForValidation(input: {
   const normalizedUncertainty = normalizeGmReadUncertaintyCandidate(input.candidate);
   const normalizedMethod = normalizeGmReadMethodCandidate(normalizedUncertainty);
   const normalizedTargetRefs = normalizeGmReadTargetRefsCandidate(normalizedMethod);
-  const normalizedLocalObservation = normalizeGmReadLocalObservationTargetCandidate(normalizedTargetRefs);
+  const normalizedRouteInquiry = normalizeGmReadRouteInquiryCandidate(normalizedTargetRefs);
+  const normalizedLocalObservation = normalizeGmReadLocalObservationTargetCandidate(normalizedRouteInquiry);
   const normalizedLocalObservationQuery = normalizeGmReadLocalObservationListQueryCandidate({
     candidate: normalizedLocalObservation,
     frame: input.frame,
   });
-  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedLocalObservationQuery);
+  const normalizedConditionObservationDrift =
+    normalizeGmReadPlayerConditionObservationDriftCandidate(normalizedLocalObservationQuery);
+  const normalizedStrayLocalCondition = normalizeGmReadStrayLocalConditionKindCandidate({
+    candidate: normalizedConditionObservationDrift,
+    frame: input.frame,
+  });
+  const normalizedStraySceneBeat = normalizeGmReadStraySceneBeatKindCandidate({
+    candidate: normalizedStrayLocalCondition,
+    frame: input.frame,
+  });
+  const normalizedUnsupportedGiveToActor = normalizeGmReadUnsupportedGiveToVisibleActorNeedCandidate({
+    candidate: normalizedStraySceneBeat,
+    frame: input.frame,
+  });
+  const normalizedCompoundConditionClarification = normalizeGmReadCompoundLocalConditionClarificationCandidate({
+    candidate: normalizedUnsupportedGiveToActor,
+    frame: input.frame,
+  });
+  const normalizedTransfer = normalizeGmReadItemTransferShapeCandidate(normalizedCompoundConditionClarification);
   if (!isRecord(normalizedTransfer) || normalizedTransfer.liveSceneQuestion !== null) return normalizedTransfer;
   return {
     ...normalizedTransfer,
@@ -577,6 +1011,17 @@ function frameMismatchIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRe
   return issues;
 }
 
+function closeGmReadRuntimeMetadata(read: GmRead, frame: AuthoritativeSceneFrame): GmRead {
+  if (read.frameId === frame.frameId && read.turnId === frame.turnId) {
+    return read;
+  }
+  return {
+    ...read,
+    frameId: frame.frameId,
+    turnId: frame.turnId,
+  };
+}
+
 interface GiveToVisibleActorAdmissionCue {
   itemRef: string;
   itemLabel: string;
@@ -625,10 +1070,38 @@ function actionMentionsSurface(tokens: string[], ref: string, label: string): bo
   return [ref, label].some((surfaceText) => containsTokenSequence(tokens, asciiWordTokens(surfaceText)));
 }
 
+function actionMentionsSurfaceLoosely(tokens: string[], surfaceText: string): boolean {
+  const surfaceTokens = asciiWordTokens(surfaceText);
+  if (surfaceTokens.length === 0) return false;
+  if (containsTokenSequence(tokens, surfaceTokens)) return true;
+  for (let index = 0; index < surfaceTokens.length - 1; index += 1) {
+    if (containsTokenSequence(tokens, surfaceTokens.slice(index, index + 2))) return true;
+  }
+  return surfaceTokens.some((token) => token.length >= 6 && tokens.includes(token));
+}
+
+function carriedItemReadinessCue(frame: AuthoritativeSceneFrame): { itemLabel: string } | null {
+  const actionTokens = asciiWordTokens(frame.playerAction);
+  if (!actionTokens.some((token) => CARRIED_ITEM_READINESS_WORDS.has(token))) return null;
+  const matchingItems = frame.inventory.filter((item) =>
+    [item.ref, item.label].some((surfaceText) => actionMentionsSurfaceLoosely(actionTokens, surfaceText))
+  );
+  if (matchingItems.length === 1) return { itemLabel: matchingItems[0].label };
+  if (matchingItems.length > 1) return { itemLabel: "a carried item" };
+  return null;
+}
+
 function hasFirstPersonGiveToVisibleActorCue(tokens: string[]): boolean {
   if (tokens.length === 0) return false;
   if (FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS.has(tokens[0])) return true;
   return tokens[0] === "i" && tokens.length > 1 && FIRST_PERSON_GIVE_TO_VISIBLE_ACTOR_WORDS.has(tokens[1]);
+}
+
+function playerActionHasDialogueCueToVisibleActor(frame: AuthoritativeSceneFrame, actorRef: string): boolean {
+  const actionTokens = asciiWordTokens(frame.playerAction);
+  if (!actionTokens.some((token) => VISIBLE_ACTOR_DIALOGUE_WORDS.has(token))) return false;
+  const actor = frame.actors.find((candidate) => candidate.ref.toLowerCase() === actorRef.toLowerCase());
+  return actor ? actionMentionsSurface(actionTokens, actor.ref, actor.label) : false;
 }
 
 function giveToVisibleActorAdmissionCue(frame: AuthoritativeSceneFrame): GiveToVisibleActorAdmissionCue | null {
@@ -747,6 +1220,17 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
   }
 
   if (
+    itemTransferNeed?.operation === "give_to_visible_actor"
+    && !giveToVisibleActorCue
+  ) {
+    issues.push({
+      code: "interaction_invalid",
+      path: "actionInterpretation.itemTransferNeed",
+      message: "give_to_visible_actor requires an explicit first-person physical handoff cue in the player action.",
+    });
+  }
+
+  if (
     hasInventoryToVisibleActorTargetPair
     && read.actionInterpretation.interactionKind !== "item_transfer"
     && read.actionInterpretation.interactionKind !== "visible_actor_dialogue"
@@ -802,6 +1286,16 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         code: "interaction_invalid",
         path: "actionInterpretation.localConditionNeed.targetKind",
         message: "gripping_held_item requires targetKind=inventory_item_readiness.",
+      });
+    }
+    if (
+      localConditionNeed.conditionKey !== "gripping_held_item"
+      && carriedItemReadinessCue(frame)
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed.conditionKey",
+        message: "A posture/readiness action that also asks to keep a carried item ready must clarify which condition applies first.",
       });
     }
   }
@@ -890,6 +1384,8 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     for (const surfaceKind of localObservationNeed.surfaceKinds) {
       if (surfaceKind === "current_scene") {
         localSurfaceRefs.add(frame.scene.currentScene.ref.toLowerCase());
+      } else if (surfaceKind === "player_status") {
+        localSurfaceRefs.add(frame.player.ref.toLowerCase());
       } else if (surfaceKind === "current_location") {
         localSurfaceRefs.add(frame.scene.currentLocation.ref.toLowerCase());
       } else if (surfaceKind === "visible_actor") {
@@ -1001,11 +1497,14 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "time_passage must not include supportActorNeed.",
       });
     }
-    if (read.actionInterpretation.localConditionNeed != null) {
+    if (
+      read.actionInterpretation.localConditionNeed != null
+      && read.actionInterpretation.localConditionNeed.operation !== "apply"
+    ) {
       issues.push({
         code: "interaction_invalid",
-        path: "actionInterpretation.localConditionNeed",
-        message: "time_passage must not include localConditionNeed.",
+        path: "actionInterpretation.localConditionNeed.operation",
+        message: "time_passage may include only an apply localConditionNeed for maintained Player posture/readiness.",
       });
     }
     if (read.actionInterpretation.itemTransferNeed != null) {
@@ -1298,11 +1797,26 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
         message: "item_transfer must not include supportActorNeed.",
       });
     }
-    if (read.actionInterpretation.localConditionNeed != null) {
+    if (
+      read.actionInterpretation.localConditionNeed != null
+      && read.actionInterpretation.localConditionNeed.operation !== "apply"
+    ) {
       issues.push({
         code: "interaction_invalid",
-        path: "actionInterpretation.localConditionNeed",
-        message: "item_transfer must not include localConditionNeed.",
+        path: "actionInterpretation.localConditionNeed.operation",
+        message: "item_transfer may include only an apply localConditionNeed for a separate maintained Player posture/readiness.",
+      });
+    }
+    if (
+      read.actionInterpretation.itemTransferNeed
+      && read.actionInterpretation.localConditionNeed?.targetRef
+      && read.actionInterpretation.localConditionNeed.targetRef.toLowerCase()
+        === read.actionInterpretation.itemTransferNeed.itemRef.toLowerCase()
+    ) {
+      issues.push({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localConditionNeed.targetRef",
+        message: "item_transfer localConditionNeed must not target the item whose custody/location/equip state is changing.",
       });
     }
     if (read.actionInterpretation.localObservationNeed != null) {
@@ -1440,7 +1954,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     issues.push({
       code: "interaction_invalid",
       path: "actionInterpretation.localConditionNeed",
-      message: "localConditionNeed is allowed only for player_local_condition or visible_actor_dialogue compound actions.",
+      message: "localConditionNeed is allowed only for player_local_condition, time_passage, or visible_actor_dialogue compound actions.",
     });
   }
   if (read.actionInterpretation.itemTransferNeed != null) {
@@ -1502,7 +2016,11 @@ export function validateGmReadCandidate(input: {
   } else {
     parsedRead = normalizeGmReadRouteListObservation({
       frame: input.frame,
-      read: parsed.data,
+      read: closeGmReadRuntimeMetadata(parsed.data, input.frame),
+    });
+    parsedRead = normalizeGmReadBroadSceneOverviewObservation({
+      frame: input.frame,
+      read: parsedRead,
     });
     parsedRead = normalizeGmReadDeviceNoSurfaceAdmission({
       frame: input.frame,
@@ -1591,11 +2109,14 @@ export function buildGmReadSystemPrompt(): string {
     "Path is a coarse interpretation signal only. procedural does not authorize a tool or effect. uncertain does not authorize an Oracle roll.",
     "Set actionInterpretation.interactionKind to exactly one of: current_scene_observation, route_inquiry, movement_intent, time_passage, scene_local_beat, visible_actor_dialogue, device_status_observation, ordinary_support_actor_needed, player_local_condition, item_transfer, minor_poi_create, unsupported_or_unclear.",
     "Use route_inquiry when the player asks whether a visible route/path/destination is open, legal, safe, reachable, connected, available, where it leads, or asks to list/show current routes/exits/options, including wording like without moving / do not go yet.",
-    "route_inquiry targetRefs must cite SceneFrame.movementOptions when the question targets one route, or stay empty for broad route-option questions.",
+    "route_inquiry targetRefs must cite SceneFrame.movementOptions when the question targets one exposed route, cite current scene/location refs for broad current-scene route questions, or stay empty. If the player names a destination that is not an exposed movementOptions ref/label, keep that name only in playerIntent, method, or liveSceneQuestion.",
+    "When the player asks Do I see / can I see / is there any physical access fixture such as a stair, ladder, lift, doorway, hatch, gate, rope, bridge, passage mouth, or barricade opening in the current scene, use current_scene_observation with localObservationNeed over current_scene and visible_target surfaces unless the player names an exact SceneFrame.movementOptions label.",
     "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, walk back to, return to, or otherwise change current scene/location.",
     "movement_intent requires exactly one targetRef copied from SceneFrame.movementOptions. If the destination is not an exposed movement option, use clarification or unsupported_or_unclear.",
-    "Use time_passage only when the player waits, rests, pauses, watches, stands by, or otherwise lets time pass in the current scene without movement or another state change. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
+    "When a player gives social color to a visible actor and also explicitly takes an exposed route or moves to an exposed destination, the route movement owns the turn. Put the destination movement option in targetRefs and do not choose visible_actor_dialogue unless the player requests a spoken answer or reaction before movement.",
+    "Use time_passage when the player waits, rests, pauses, watches, stands by, or otherwise lets time pass in the current scene without movement, item custody/equip change, dialogue, support actor creation, observation result, or other primary action. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
     "For time_passage, copy an explicit requested duration exactly into timePassageNeed.elapsedMinutes when the action gives minutes. For vague brief waits such as a few minutes, set elapsedMinutes=5 and requestedDurationText to the vague duration phrase.",
+    "If the player waits while explicitly maintaining a current-scene Player posture/readiness commitment, keep interactionKind=time_passage and fill localConditionNeed for that bounded maintained posture/readiness. This compound does not authorize item custody/equip changes, NPC actions, observations, route truth, or world facts.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",
@@ -1605,26 +2126,49 @@ export function buildGmReadSystemPrompt(): string {
     "For ordinary_support_actor_needed presence-only turns, omit supportActorNeed.dialogueRequestText or set it to null. For dependent dialogue turns, dialogueRequestText is the support actor's immediate response task, for example stand where I can see you, watch the small tea stall, or answer what changed today.",
     "Do not use ordinary_support_actor_needed for named people, key NPCs, faction leaders, secret contacts, remote actors, persistent actors, hidden actors, family members, campaign-critical roles, or broad world creation; use clarification or unsupported_or_unclear instead.",
     "Use player_local_condition only for uncontested first-person current-scene Player posture/readiness such as kneeling, crouched, prone, taking_cover as posture only, keeping_distance, stepped_back, braced, hands_visible, hands_raised, or gripping_held_item for an already-inventory item.",
+    "For phrases like keeping low while moving through the current passage, choose player_local_condition with conditionKey=crouched when no exact SceneFrame.movementOptions destination is named.",
+    "player_local_condition owns exactly one conditionKey. If the player asks for two independent posture/readiness conditions in one action, such as stepping back and keeping hands visible, or crouching/ducking while keeping a carried item dry/high/ready/close, use path=clarification with interactionKind=unsupported_or_unclear and ask which condition to apply first in natural player-facing wording, for example step back or keep your hands visible.",
+    "Use current_scene_observation with localObservationNeed surfaceKinds=[\"player_status\"] when the player only asks to check their own obvious injury, strain, pain, fatigue, visible condition, or how they are holding up without declaring a posture/readiness change.",
     "localConditionNeed does not authorize HP, damage, healing, injuries, combat status, NPC conditions, stealth success, cover effectiveness, movement, item custody/location/equip changes, tags, discovery, world facts, relationship, absence, no-change, or dialogue content.",
-    "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory. For visible_actor_distance, targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
+    "For gripping_held_item, localConditionNeed.targetKind must be inventory_item_readiness and targetRef must be copied from SceneFrame.inventory; requestedPostureText must preserve concrete handling such as hold Courier satchel high against chest above water, without adding item custody/location/equip-state change.",
+    "Keeping an already-inventory item close, high, in hand, against the chest, or ready never uses itemTransferNeed unless the player also asks to give, drop, pick up, equip, or unequip it.",
+    "For visible_actor_distance, localConditionNeed.targetRef must be one visible actor ref. For current_scene, targetRef may be null or current scene/location ref.",
     "Use item_transfer only for one uncontested Player item custody/location/equip-state transition: give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, equip_inventory_item, or unequip_inventory_item.",
+    "Requests to a visible actor about holding, keeping, watching, taking, or storing an inventory item route as visible_actor_dialogue with itemTransferNeed=null; itemTransferNeed is added only when the same action explicitly performs the physical handoff with hand/give/pass/offer/transfer.",
     "itemTransferNeed must cite itemRef from SceneFrame.inventory for give/drop/equip/unequip, or from SceneFrame.targets where kind=item for pickup. give_to_visible_actor targetRef must be a visible actor; drop targetRef must be current scene/location; pickup/equip/unequip targetRef must be Player.",
     "itemTransferNeed sourceKind/targetKind are fixed by operation: give/drop/equip/unequip sourceKind=player_inventory, pickup sourceKind=current_scene_item; give targetKind=visible_actor, drop targetKind=current_scene, pickup/unequip targetKind=player_inventory, equip targetKind=player_equipment.",
     "itemTransferNeed.equipSlot is the requested target equipment slot only: set it to \"equipped\" only for equip_inventory_item, and set it to null for give_to_visible_actor, drop_in_current_scene, pickup_from_current_scene, and unequip_inventory_item. Do not copy the inventory item's current equipState into equipSlot.",
     "item_transfer does not authorize item creation, discovery/search/inspection, item use/activation, damage/repair/consumption, barter/payment, container contents, NPC consent/reaction, stealing/planting, relationship, world facts, route/location/POI truth, HP/condition, dialogue, absence, or no-change.",
+    "Use scene_local_beat for an ordinary possible low-stakes current-scene interaction with a plausible public scene prop, fixture, or soft prose detail: touch it, lean on it, duck behind it, step onto it for a moment, balance on it lightly, kick it aside, break an unimportant chair in a scuffle, grab or hold a nearby stool/chair as immediate cover, or otherwise use it for the immediate beat. This records only the visible turn event through scene_beat_record; it does not create an inventory item, durable object row, route, hidden mechanism, resource, condition, relationship, or world fact.",
+    "A one-turn phrase such as grab it, hold it ready, keep it ready, use it as improvised cover/shield, step onto the loose board, balance on the brick, or set it between me and danger stays scene_local_beat when the object is an ordinary plausible current-scene prop and the action is bounded to the immediate beat.",
+    "When a scene_local_beat also mentions keeping an already-inventory item close/ready without changing custody or equipment, keep the item phrase inside sceneBeatNeed.requestedBeatText and leave itemTransferNeed null.",
+    "When the player simply asks whether an obvious mundane prop such as a stool, chair, cup, broom, curtain, counter, crate, or table is available in a location where it is plainly plausible, use scene_local_beat with a bounded availability/readiness beat instead of localObservationNeed over enumerated surfaces.",
+    "When the player listens, smells, feels air/temperature, or otherwise asks for ordinary ambient sensory texture from a current-scene surface, prop, fixture, or backdrop, use scene_local_beat with beatKind=local_interaction. This authorizes only a one-turn sensory beat for prose; it does not prove pressure, leaks, codes, hidden mechanisms, structural safety, danger, resources, routes, activation, or future availability.",
+    "For scene_local_beat, fill sceneBeatNeed. Use beatKind=ordinary_prop_availability when the player only checks whether a mundane prop is available. Use beatKind=ordinary_prop_readiness when the player grabs, holds, braces, or keeps an ordinary prop ready for the immediate beat. Use local_interaction for other one-turn ordinary prop/fixture interactions.",
+    "If the player wants durable carry/equip/storage, trade, hidden-property inspection, activation, repair, tracking, special mechanical advantage, future-important use, or a persistent named object, use the appropriate modeled primitive when a SceneFrame ref exists, or clarification/unsupported_or_unclear when it does not.",
     "If the player puts on, wears, straps on, slings onto shoulder/back, fastens onto themselves, or otherwise moves a carried inventory item into a worn/equipped state, use item_transfer with operation=equip_inventory_item.",
     "If the player unfastens, takes off, removes, unslings, or otherwise moves an equipped inventory item out of its worn/equipped slot, use item_transfer with operation=unequip_inventory_item even when the action also says the Player will hold, carry, or grip the item afterward.",
     "If the player merely grips, holds ready, keeps, or steadies an already-inventory item without custody/location/equip-state change, use player_local_condition with gripping_held_item, not item_transfer.",
     "If the player transfers an item and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill itemTransferNeed for the physical item-state part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
     "Spoken confirmation after transfer, such as \"Do you have it now?\", is visible_actor_dialogue with itemTransferNeed; playerIntent names the requested spoken confirmation.",
+    "If the player transfers one item while explicitly maintaining a separate current-scene Player posture/readiness condition, keep interactionKind=item_transfer and fill localConditionNeed for the bounded posture/readiness. localConditionNeed must not target the same item whose custody/location/equip state is changing.",
     "Use minor_poi_create only for one ordinary public visible current-scene place handle named or pointed out by the player: a stall, counter, bench, landmark, signage, cover, doorway, alcove, workstation, notice_board, or other_place. It creates/reuses only a SceneFrame target handle, not a location or route.",
     "minorPoiNeed.placeLabel is the visible handle label the player is establishing. minorPoiNeed.anchorRef must be the current scene/location ref from SceneFrame.citableRefs. placeKind must be allowed by SceneFrame.currentScenePlaceHandleSurface.allowedPlaceKinds.",
     "minor_poi_create does not authorize actors, services, inventory, business facts, readable sign text, hidden discovery, search result, absence, no-change, world fact, location reveal, movement option, legal destination, route truth, or dialogue content.",
     "If the player establishes a current-scene place handle and also addresses a visible actor, keep interactionKind=visible_actor_dialogue, fill minorPoiNeed for the handle part, and still put exactly one visible speaker ref in actionInterpretation.targetRefs.",
-    "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details. Broad route/exits/options lists over movement_option use route_inquiry.",
+    "Use current_scene_observation with localObservationNeed only for targeted read-only current-scene observation over exposed SceneFrame surfaces: player_status, current_scene, current_location, visible_actor, visible_target, inventory_item, visible_fact, or movement_option labels/details. Broad route/exits/options lists over movement_option use route_inquiry.",
     "For broad look/look around/what is visible without a concrete target query, use current_scene_observation without localObservationNeed so the existing observe_visible snapshot can handle it.",
+    "For inventory/kit/carrying lists such as what am I carrying or pat down my kit, use localObservationNeed mode=list_surface, surfaceKinds=[\"inventory_item\"], targetRef=null, and allowBoundedNegative=false.",
+    "For visible people, roles, ordinary clutter, cover, nearby props, or current-scene surface probes that may have no matching exposed entries, set allowBoundedNegative=true. A current_scene/current_location anchor alone is context, not a positive match for the requested people, object, cover, or prop.",
+    "For yes/no visible-surface checks phrased as look for X, any X, signs of X, or visible X, make localObservationNeed.queryText a grammatical whether-shaped query such as \"whether visible sparks, heat shimmer, or warning tags are present\". Do not leave queryText as a bare noun phrase that would make receipt prose read as answers visible sparks.",
+    "For harmless surface details, wear, marks, scratches, smell, or texture on an exposed item or target, use localObservationNeed over that exposed surface with targetRef copied from the known item/target. The queryText should ask only for ordinary visible/sensory surface texture. Clue meaning, hidden discovery, activation, and mechanism checks use the separate property/outcome route below.",
+    "When the player asks whether visible wear, marks, scratches, or handling detail on a known item/target reveals a hidden mechanism, secret, route, or useful clue, set localObservationNeed.targetRef=null and queryText to the requested property/outcome. A targetRef to the known item/target proves only that exposed entry exists; it must not answer hidden/mechanical/clue meaning.",
+    "When ordinary ambient listening/smelling/feeling asks only for scene texture, keep it scene_local_beat; when the same sensory wording asks whether the texture proves a consequential property or outcome such as pressure, leak source, code, hidden mechanism, safety, danger, activation, route truth, or a useful clue, use current_scene_observation with localObservationNeed targetRef=null and allowBoundedNegative=true.",
+    "For ordinary one-turn tactile or physical probes that explicitly ask to learn whether current-scene texture shifts, holds, reveals something, or has a property, such as nudging rubble, testing footing, touching a wall, or checking whether a loose surface shifts, use localObservationNeed mode=target_match, targetRef=null, surfaceKinds=[\"current_scene\"], and allowBoundedNegative=true. Do not use this observation route for the plain immediate action of stepping onto a plausible loose board, balancing on a brick, leaning on a crate, or ducking behind a counter; those stay scene_local_beat unless the player explicitly asks for a property/outcome check. Do not cite the current scene or location as targetRef merely because the probe happens there; the receipt owns only the bounded visible/sensory query, not a durable object, item pickup, mutation, hidden mechanism, or route discovery.",
     "For who/anyone/people/person/NPC visible nearby or here, use localObservationNeed mode=list_surface, surfaceKinds=[\"visible_actor\"], targetRef=null, and allowBoundedNegative=true.",
+    "For looking around or searching for a named person, role, or NPC in the current scene, use localObservationNeed mode=target_match, surfaceKinds=[\"visible_actor\"], targetRef=null, and queryText with the searched name or role. This produces a bounded visible-actor check and does not create the named actor.",
     "For Do I see X here? or a visible surface-entry inspection, fill localObservationNeed with mode=target_match, queryText copied as a concise visible target phrase, surfaceKinds to search, targetRef when an exact exposed ref is already known, and allowBoundedNegative=true only for bounded no-match against those enumerated surfaces.",
+    "player_status localObservationNeed reads only SceneFrame.player.visibleStatus; it may report bounded visible status labels or their absence in that surface, and it does not authorize HP changes, damage, healing, broad injury absence beyond that surface, posture changes, combat status, mutation, or no-change.",
     "localObservationNeed does not authorize hidden discovery, concealed search, thorough room search, broad absence, item use/effects, phone or device status/messages, POI/storefront/landmark truth unless already exposed by a SceneFrame surface, route truth beyond route option/check receipts, world facts, mutation, dialogue content, or private facts.",
     "Use device_status_observation with deviceObservationNeed only for checking citable Player-carried/equipped or current-scene visible device surfaces from SceneFrame.deviceStatusSurfaces.",
     "deviceObservationNeed facets are only screen_state, power_indicator, battery_indicator, signal_indicator, notification_indicator, message_indicator, or call_indicator. allowNoSurface=true means only bounded no-surface, not no signal/no message/no call/no instruction/no-change.",
@@ -1643,12 +2187,26 @@ export function buildGmReadSystemPrompt(): string {
   ].join("\n");
 }
 
-export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
+export function buildGmReadPrompt(
+  frame: AuthoritativeSceneFrame,
+  options: { recentConversation?: readonly GmReadRecentConversationMessage[] } = {},
+): string {
   const firstInventoryItem = frame.inventory[0]?.ref ?? null;
   const firstVisibleActor = frame.actors[0]?.ref ?? null;
   const itemTransferCue = firstInventoryItem && firstVisibleActor
     ? [
       "Current-frame item_transfer cue:",
+      "A request to hold, keep, watch, take, or store an inventory item is dialogue only until the player explicitly hands, gives, passes, offers, or transfers the item.",
+      "For this frame, a valid hold/keep request example shape is:",
+      JSON.stringify({
+        path: "procedural",
+        actionInterpretation: {
+          interactionKind: "visible_actor_dialogue",
+          playerIntent: `Ask whether ${firstVisibleActor} can hold ${firstInventoryItem}.`,
+          targetRefs: [firstVisibleActor],
+          itemTransferNeed: null,
+        },
+      }, null, 2),
       "When the player hands, gives, passes, offers, or transfers a SceneFrame.inventory item to a SceneFrame.actors visible non-player actor and also asks, tells, says, or requests spoken confirmation, choose interactionKind=visible_actor_dialogue.",
       "For compound transfer plus speech, use path=procedural, targetRefs=[speakerRef], and fill itemTransferNeed with operation=give_to_visible_actor, sourceKind=player_inventory, targetKind=visible_actor, equipSlot=null.",
       "Verification wording such as \"Do you have it now?\" counts as spoken confirmation.",
@@ -1699,7 +2257,9 @@ export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
     ? [
       "Current-frame movement cue:",
       "When the player says to walk, go, head, return, travel, enter, leave, follow, take a route, or move to a SceneFrame.movementOptions entry, choose interactionKind=movement_intent.",
-      "Use path=procedural, targetRefs=[destinationRef], and copy the destination ref exactly from movementOptions. Route-status questions with without moving / do not go yet use interactionKind=route_inquiry instead.",
+      "If the same action contains a courtesy such as thanking, nodding to, or saying farewell to a visible actor, keep movement_intent when the player still explicitly takes the route or heads to the exposed destination.",
+      "If the same movement action includes low-stakes manner text such as keeping a carried satchel close, holding an inventory item close, or keeping hands on a carried object while walking, keep movement_intent and place that wording in playerIntent/method only. Do not fill localConditionNeed for movement_intent; current-scene local conditions are for standalone posture/readiness commitments.",
+      "Use path=procedural, targetRefs=[destinationRef], and copy the destination ref exactly from movementOptions. Route-status questions with without moving / do not go yet use interactionKind=route_inquiry instead. If that question names a destination absent from movementOptions, use route_inquiry with targetRefs=[] or a current scene/location ref and keep the destination name only in text fields.",
       "For this frame, a valid movement example shape is:",
       JSON.stringify({
         path: "procedural",
@@ -1709,33 +2269,289 @@ export function buildGmReadPrompt(frame: AuthoritativeSceneFrame): string {
           method: "walk",
         },
       }, null, 2),
+      "For this frame, a valid movement-with-carried-item-manner example shape is:",
+      JSON.stringify({
+        path: "procedural",
+        actionInterpretation: {
+          interactionKind: "movement_intent",
+          targetRefs: [firstMovementOption],
+          playerIntent: `Walk to ${firstMovementOption} while keeping a carried item close`,
+          method: "walk while keeping carried item close",
+        },
+      }, null, 2),
     ].join("\n")
     : "Current-frame movement cue: no movement_intent target is available because SceneFrame.movementOptions is empty.";
+  const localConditionCue = [
+    "Current-frame Player local-condition cue:",
+    "When the player steadies, braces, kneels, crouches, raises hands, keeps hands visible, steps back, keeps distance, or checks themself while making an uncontested current-scene posture/readiness commitment, choose interactionKind=player_local_condition.",
+    "When the player only keeps an already-inventory item close, high, in hand, against the chest, or ready without giving, dropping, picking up, equipping, or unequipping it, choose player_local_condition with localConditionNeed.conditionKey=gripping_held_item and leave itemTransferNeed null.",
+    "When the player combines a body posture such as crouch, kneel, step back, or keep hands visible with carried-item readiness such as keeping the message tube dry, satchel high, or item close, ask which posture/readiness condition to apply first.",
+    "If the same wording asks whether the Player is hurt while also declaring posture/readiness, do not assert injury, no injury, HP, damage, or healing from GM Read; model only the supported posture/readiness receipt, such as conditionKey=braced for steady myself, and do not include localObservationNeed in that player_local_condition object.",
+    "For this frame, a valid steady/self-check example shape is:",
+    JSON.stringify({
+      path: "procedural",
+      actionInterpretation: {
+        interactionKind: "player_local_condition",
+        targetRefs: ["Player", frame.scene.currentScene.ref],
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "braced",
+          requestedPostureText: "steady myself",
+          targetKind: "visible_scene_anchor",
+          targetRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    "For this frame, a valid keep-low passage example shape is:",
+    JSON.stringify({
+      path: "procedural",
+      actionInterpretation: {
+        interactionKind: "player_local_condition",
+        targetRefs: ["Player", frame.scene.currentScene.ref],
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "crouched",
+          requestedPostureText: "keep low while moving through the passage",
+          targetKind: "visible_scene_anchor",
+          targetRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    ...(firstInventoryItem
+      ? [
+        "For this frame, a valid body-posture plus carried-item readiness clarification example shape is:",
+        JSON.stringify({
+          path: "clarification",
+          liveSceneQuestion: `Which posture/readiness should apply first: crouching or keeping ${firstInventoryItem} ready?`,
+          actionInterpretation: {
+            interactionKind: "unsupported_or_unclear",
+            playerIntent: `Clarify whether to crouch or keep ${firstInventoryItem} ready first.`,
+            targetRefs: ["Player", firstInventoryItem],
+          },
+        }, null, 2),
+      ]
+      : ["For this frame, no body-posture plus carried-item readiness clarification example is available because SceneFrame.inventory is empty."]),
+    ...(firstInventoryItem
+      ? [
+        "For this frame, a valid held-item readiness example shape is:",
+        JSON.stringify({
+          path: "procedural",
+          actionInterpretation: {
+            interactionKind: "player_local_condition",
+            targetRefs: ["Player", firstInventoryItem],
+            localConditionNeed: {
+              actorRef: "Player",
+              operation: "apply",
+              conditionKey: "gripping_held_item",
+              requestedPostureText: `keep ${firstInventoryItem} close`,
+              targetKind: "inventory_item_readiness",
+              targetRef: firstInventoryItem,
+              evidenceRefs: ["Player", firstInventoryItem, frame.scene.currentScene.ref],
+            },
+            itemTransferNeed: null,
+          },
+        }, null, 2),
+      ]
+      : ["For this frame, no held-item readiness example is available because SceneFrame.inventory is empty."]),
+  ].join("\n");
+  const playerStatusCue = [
+    "Current-frame Player visible-status observation cue:",
+    "When the player asks only whether they have any obvious injury, strain, pain, fatigue, visible condition, or asks how they are holding up, choose interactionKind=current_scene_observation with localObservationNeed over player_status.",
+    "This is a bounded read-only SceneFrame.player.visibleStatus check. It is not clarification and does not create a posture/readiness condition.",
+    "For this frame, a valid visible-status self-check example shape is:",
+    JSON.stringify({
+      path: "direct",
+      actionInterpretation: {
+        interactionKind: "current_scene_observation",
+        targetRefs: ["Player"],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "obvious injury or strain on Player",
+          targetRef: "Player",
+          surfaceKinds: ["player_status"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+  ].join("\n");
+  const accessFixtureObservationCue = [
+    "Current-frame access-fixture observation cue:",
+    "When the player asks whether they can see a physical access fixture such as a stair, lift, ladder, doorway, hatch, gate, rope, bridge, passage mouth, or barricade opening, choose current_scene_observation with localObservationNeed unless the target is an exact movementOptions label.",
+    "Do not substitute a different visible route label when the requested access fixture or destination is not exposed as a movement option.",
+    "For this frame, a valid physical-access observation example shape is:",
+    JSON.stringify({
+      path: "direct",
+      actionInterpretation: {
+        interactionKind: "current_scene_observation",
+        playerIntent: "Check whether an open stair, lift, ladder, or doorway to upper floors is visibly available.",
+        method: "visible access fixture check",
+        targetRefs: [frame.scene.currentScene.ref],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "open stair, lift, ladder, or doorway that clearly leads to upper floors",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_target"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+  ].join("\n");
+  const firstSurfaceItem = frame.inventory[0] ?? null;
+  const firstSurfaceTarget = frame.targets[0] ?? null;
+  const surfaceCueTarget = firstSurfaceItem
+    ? {
+      ref: firstSurfaceItem.ref,
+      label: firstSurfaceItem.label,
+      surfaceKinds: ["inventory_item", "visible_fact"],
+    }
+    : firstSurfaceTarget
+      ? {
+        ref: firstSurfaceTarget.ref,
+        label: firstSurfaceTarget.label,
+        surfaceKinds: ["visible_target", "visible_fact"],
+      }
+      : null;
+  const surfaceDetailCue = surfaceCueTarget
+    ? [
+      "Current-frame surface-detail observation cue:",
+      "When the player inspects harmless visible surface details, ordinary wear, marks, scratches, texture, or smell on an exposed item or target, choose interactionKind=current_scene_observation with localObservationNeed over that exposed surface.",
+      "When the player asks whether those visible details reveal hidden mechanism, secret, route, useful clue, activation, or meaning, keep interactionKind=current_scene_observation but set localObservationNeed.targetRef=null and queryText to that requested property/outcome.",
+      "This route asks only for current visible surface evidence. It does not authorize hidden mechanisms, secret inscriptions, item powers, discovery, item use, route truth, or world facts; those require separate accepted evidence.",
+      "For this frame, a valid harmless exposed-surface example shape is:",
+      JSON.stringify({
+        path: "direct",
+        actionInterpretation: {
+          interactionKind: "current_scene_observation",
+          targetRefs: [surfaceCueTarget.ref],
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: `visible surface details, ordinary wear, marks, or scratches on ${surfaceCueTarget.label}`,
+            targetRef: surfaceCueTarget.ref,
+            surfaceKinds: surfaceCueTarget.surfaceKinds,
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", surfaceCueTarget.ref, frame.scene.currentScene.ref],
+          },
+        },
+      }, null, 2),
+      "For this frame, a valid hidden/clue property question shape is:",
+      JSON.stringify({
+        path: "direct",
+        actionInterpretation: {
+          interactionKind: "current_scene_observation",
+          targetRefs: [surfaceCueTarget.ref],
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: `whether visible details on ${surfaceCueTarget.label} reveal a hidden mechanism or useful clue`,
+            targetRef: null,
+            surfaceKinds: surfaceCueTarget.surfaceKinds,
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", surfaceCueTarget.ref, frame.scene.currentScene.ref],
+          },
+        },
+      }, null, 2),
+      "A surface-detail meaning question over an exposed ref uses observation with bounded property/outcome evidence, not clarification.",
+    ].join("\n")
+    : "Current-frame surface-detail observation cue: no exposed inventory item or visible target example is available in this SceneFrame.";
+  const sceneLocalBeatCue = [
+    "Current-frame ordinary scene-prop beat cue:",
+    "When the player uses a plausible ordinary current-scene prop or fixture for this immediate beat, choose interactionKind=scene_local_beat even when the prop is not a SceneFrame target.",
+    "Priority: plain immediate action verbs such as step onto, balance on, lean on, duck behind, grab, hold, brace, kick aside, or set between stay scene_local_beat. Use current_scene_observation for a prop only when the player explicitly asks to check/test/inspect whether it shifts, holds, reveals something, has a hidden property, or proves an outcome.",
+    "If this immediate scene-prop beat also says to keep an already-inventory item close or ready, keep that phrase in sceneBeatNeed.requestedBeatText and do not fill itemTransferNeed.",
+    "When the player asks whether an obvious ordinary prop is available in a plausible place, choose interactionKind=scene_local_beat and phrase playerIntent as a bounded current-scene availability beat, for example Ordinary stool/chair is within easy reach for this beat.",
+    "When the player listens, smells, or feels for ordinary ambient scene texture from a surface, prop, fixture, or backdrop, choose interactionKind=scene_local_beat and phrase playerIntent as a natural sensory scene beat. Keep classifier terms such as harmless, low-stakes, soft prose, authority, or scene beat out of playerIntent and sceneBeatNeed.requestedBeatText because those fields may shape visible narration. Use current_scene_observation only when the player asks what the sensory detail proves about a consequential property, mechanism, route, danger, safety, resource, activation, code, or useful clue.",
+    "Examples include grabbing or holding a nearby stool/chair as improvised cover, stepping lightly onto a loose board/brick, bracing a door with a loose chair, kicking a crate aside, ducking behind a counter, or breaking an unimportant chair during a scuffle.",
+    "This shape records a visible turn event only. It does not create inventory, durable object state, cover effectiveness, hidden mechanisms, combat advantage, resource change, world facts, or future availability.",
+    "For this frame, a valid immediate ordinary prop beat example shape is:",
+    JSON.stringify({
+      path: "procedural",
+      actionInterpretation: {
+        interactionKind: "scene_local_beat",
+        playerIntent: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+        method: "immediate scene-prop interaction",
+        targetRefs: [frame.scene.currentScene.ref],
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "ordinary_prop_readiness",
+          requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+          anchorRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    "For this frame, a valid immediate loose footing beat example shape is:",
+    JSON.stringify({
+      path: "procedural",
+      actionInterpretation: {
+        interactionKind: "scene_local_beat",
+        playerIntent: "Step onto a loose board or brick for this immediate beat",
+        method: "immediate scene-prop interaction",
+        targetRefs: [frame.scene.currentScene.ref],
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "local_interaction",
+          requestedBeatText: "Step onto a loose board or brick for this immediate beat",
+          anchorRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    "For this frame, a valid ordinary prop availability example shape is:",
+    JSON.stringify({
+      path: "direct",
+      actionInterpretation: {
+        interactionKind: "scene_local_beat",
+        playerIntent: "Ordinary stool or chair is within easy reach for this beat",
+        method: "ordinary scene-prop availability",
+        targetRefs: [frame.scene.currentScene.ref],
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "ordinary_prop_availability",
+          requestedBeatText: "Ordinary stool or chair is within easy reach for this beat",
+          anchorRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    "For this frame, a valid ordinary ambient sensory example shape is:",
+    JSON.stringify({
+      path: "direct",
+      actionInterpretation: {
+        interactionKind: "scene_local_beat",
+        playerIntent: "Listen to ordinary pipes for their current sound in the damp cellar",
+        method: "ambient sensory check",
+        targetRefs: [frame.scene.currentScene.ref],
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "local_interaction",
+          requestedBeatText: "Listen to ordinary pipes for their current sound in the damp cellar",
+          anchorRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+  ].join("\n");
   return [
     "Interpret the player action against this authoritative SceneFrame.",
     "Return gm-read.v1 JSON. Do not add extra fields.",
     itemTransferCue,
     movementCue,
+    localConditionCue,
+    playerStatusCue,
+    accessFixtureObservationCue,
+    surfaceDetailCue,
+    sceneLocalBeatCue,
+    gmReadRecentDiscourseCue(options.recentConversation),
     JSON.stringify(promptFrame(frame), null, 2),
-  ].join("\n\n");
-}
-
-function buildGmReadRepairPrompt(input: {
-  frame: AuthoritativeSceneFrame;
-  candidate: unknown;
-  issues: GmReadValidationIssue[];
-}): string {
-  return [
-    "Repair the GM Read candidate so it satisfies gm-read.v1.",
-    "Do not add executable, admission, mutation, Oracle, checklist, receipt, narration, or state-delta fields.",
-    "Use only refs from SceneFrame.citableRefs.",
-    itemTransferRepairCard(input.frame),
-    "Validation issues:",
-    JSON.stringify(input.issues, null, 2),
-    "Original candidate:",
-    JSON.stringify(input.candidate, null, 2),
-    "Authoritative SceneFrame:",
-    JSON.stringify(promptFrame(input.frame), null, 2),
   ].join("\n\n");
 }
 
@@ -1763,9 +2579,12 @@ export async function runCleanGmRead(input: {
   frame: AuthoritativeSceneFrame;
   provider: ProviderConfig;
   generateCandidate?: GmReadCandidateGenerator;
+  recentConversation?: readonly GmReadRecentConversationMessage[];
 }): Promise<GmReadRunResult> {
   const system = buildGmReadSystemPrompt();
-  const prompt = buildGmReadPrompt(input.frame);
+  const prompt = buildGmReadPrompt(input.frame, {
+    recentConversation: input.recentConversation,
+  });
   const generateCandidate =
     input.generateCandidate
     ?? ((request: GmReadCandidateRequest) => generateGmReadCandidate({
@@ -1797,41 +2616,8 @@ export async function runCleanGmRead(input: {
     };
   }
 
-  try {
-    const repairCandidate = await generateCandidate({
-      system,
-      prompt: buildGmReadRepairPrompt({
-        frame: input.frame,
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-      }),
-      repairOf: {
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-      },
-    });
-    const repairValidation = validateGmReadCandidate({
-      frame: input.frame,
-      candidate: repairCandidate,
-    });
-    if (repairValidation.status === "accepted") {
-      return {
-        status: "accepted",
-        read: repairValidation.read,
-        issues: [],
-        repairAttempted: true,
-      };
-    }
-    throw new CleanGmReadValidationError(
-      "Clean GM Read validation failed after repair.",
-      [...firstValidation.issues, ...repairValidation.issues],
-    );
-  } catch (error) {
-    if (error instanceof CleanGmReadValidationError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw new CleanGmReadGenerationError(
-      `Clean GM Read repair generation failed: ${message.slice(0, 300)}`,
-      error,
-    );
-  }
+  throw new CleanGmReadValidationError(
+    `Clean GM Read validation failed. ${gmReadIssueSummary(firstValidation.issues)}`,
+    firstValidation.issues,
+  );
 }

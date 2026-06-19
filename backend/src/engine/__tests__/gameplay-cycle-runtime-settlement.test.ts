@@ -798,11 +798,24 @@ function buildPacket(input: {
 
 describe("clean Stage 5 settlement contracts", () => {
   it("settles accepted movement with post-resolution scene texture evidence", () => {
-    const inputFrame = frame();
+    const inputFrame = frame({
+      privateGuards: {
+        forbiddenActorLabels: ["North Clerk"],
+        forbiddenPrivateTerms: [],
+      },
+    });
     const inputChecklist = checklist(inputFrame);
     const packet = buildPacket({
       frame: inputFrame,
-      postResolutionFrame: postMovementFrame(),
+      postResolutionFrame: postMovementFrame({
+        actors: [{
+          ref: "North Clerk",
+          label: "North Clerk",
+          role: "support",
+          visibleStatus: { hp: null, conditions: [] },
+        }],
+        citableRefs: ["Player", "North Hall", "North Clerk"],
+      }),
       checklist: inputChecklist,
       execution: stage4([movementReceipt(inputFrame, inputChecklist)], inputFrame),
     });
@@ -813,11 +826,14 @@ describe("clean Stage 5 settlement contracts", () => {
     const scene = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("current_scene"));
     const texture = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("scene_texture"));
     const movement = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("player_location_change"));
+    const actor = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("visible_actor"));
     expect(scene?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene placement: You are at North Hall.",
       "Scene label: North Hall.",
       "Place label: North Hall.",
     ]);
+    expect(actor?.text).toBe("North Clerk is present here.");
+    expect(packet.privateGuards.forbiddenActorLabels).toEqual([]);
     expect(texture?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: North Hall narrows beneath a row of iron lamps.",
     ]);
@@ -852,6 +868,113 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("edge-market-north");
     expect(JSON.stringify(view)).not.toContain("privateResult");
     expect(movement?.limits.doesNotProve).toContain("no-change");
+  });
+
+  it("settles movement into a scene whose raw description mentions private actors by keeping only public scene_texture", () => {
+    const baseFrame = frame();
+    const inputFrame = frame({
+      scene: {
+        ...baseFrame.scene,
+        currentLocation: {
+          ref: "Resonance Tower",
+          label: "Resonance Tower",
+          description: "A rusted iron spire rises above the rooftops.",
+        },
+        currentScene: {
+          ref: "Resonance Tower",
+          label: "Resonance Tower",
+          description: "A rusted iron spire rises above the rooftops.",
+        },
+      },
+      movementOptions: [{
+        ref: "Ground-Floor Barricade",
+        label: "Ground-Floor Barricade",
+        connected: true,
+        travelCost: 1,
+      }],
+      citableRefs: ["Player", "Resonance Tower", "Ground-Floor Barricade"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = movementReceipt(inputFrame, inputChecklist);
+    const groundFloorReceipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: "You move to Ground-Floor Barricade.",
+        visibleRefs: ["Player", "Ground-Floor Barricade"],
+        locationChange: {
+          type: "location_change",
+          locationName: "Ground-Floor Barricade",
+          travelCost: 1,
+          path: ["Resonance Tower", "Ground-Floor Barricade"],
+        },
+      },
+      privateResult: {
+        ...baseReceipt.privateResult,
+        destinationLocationId: "loc-ground-floor-barricade",
+        edgeIds: ["edge-resonance-ground-floor"],
+        stateDeltaRefs: ["player-location-stage4-receipt-ground-floor"],
+      },
+    });
+    const postFrameBase = postMovementFrame();
+    const packet = buildPacket({
+      frame: inputFrame,
+      postResolutionFrame: postMovementFrame({
+        scene: {
+          currentLocation: {
+            ref: "Resonance Tower",
+            label: "Resonance Tower",
+            description: "A rusted iron spire rises twelve stories above the mid-city rooftops.",
+          },
+          currentScene: {
+            ref: "Ground-Floor Barricade",
+            label: "Ground-Floor Barricade",
+            description: [
+              "Overturned relay cabinets and iron signal drums form a ten-foot barricade across the Resonance Tower's ground-floor archway.",
+              "Watch-Captain Ilara Rost keeps a folding camp desk behind the barrier.",
+              "Venn the Borrowed passed through this checkpoint before expulsion from the Watch.",
+            ].join(" "),
+          },
+          visibleFacts: [],
+          recentLocalFacts: [],
+        },
+        actors: [],
+        movementOptions: [{
+          ref: "Resonance Tower",
+          label: "Resonance Tower",
+          connected: true,
+          travelCost: 1,
+        }],
+        citableRefs: ["Player", "Resonance Tower", "Ground-Floor Barricade"],
+        privateGuards: {
+          forbiddenActorLabels: ["Watch-Captain Ilara Rost", "Venn the Borrowed"],
+          forbiddenPrivateTerms: [],
+        },
+        forecast: {
+          ...postFrameBase.forecast,
+          forbiddenPrivateTerms: [],
+        },
+      }),
+      checklist: inputChecklist,
+      execution: stage4([groundFloorReceipt], inputFrame),
+    });
+    const view = buildCleanNarratorView(packet);
+    const texture = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("scene_texture"));
+    const movement = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("player_location_change"));
+    const publicPacketJson = JSON.stringify(packet.acceptedEvidence);
+    const viewJson = JSON.stringify(view.acceptedEvidence);
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+    expect(movement?.text).toBe("After 1 minute, you reach Ground-Floor Barricade.");
+    expect(texture?.backendFacts.map((entry) => entry.value)).toEqual([
+      "Overturned relay cabinets and iron signal drums form a ten-foot barricade across the Resonance Tower's ground-floor archway.",
+      "A rusted iron spire rises twelve stories above the mid-city rooftops.",
+    ]);
+    expect(publicPacketJson).not.toContain("Watch-Captain Ilara Rost");
+    expect(publicPacketJson).not.toContain("Venn the Borrowed");
+    expect(viewJson).not.toContain("Watch-Captain Ilara Rost");
+    expect(viewJson).not.toContain("Venn the Borrowed");
   });
 
   it("builds narrator view with explicit language metadata instead of raw player action", () => {
@@ -966,6 +1089,26 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("SceneFrame");
   });
 
+  it("bounds settled backend fact text and value before packet schema assertion", () => {
+    const longInventoryLabel = `completion chit - assignment WCM-07 ${"Cellar Stores inspection ".repeat(30)}`;
+    const inputFrame = frame({
+      inventory: [{ ref: longInventoryLabel, label: longInventoryLabel, equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "North Hall", longInventoryLabel],
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      gmRead: directGmRead(inputFrame),
+      checklist: null,
+      execution: null,
+    });
+    const inventoryEvidence = packet.acceptedEvidence.find((entry) => entry.claimKinds.includes("inventory_status"));
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(inventoryEvidence?.backendFacts.every((entry) => entry.text.length <= 500)).toBe(true);
+    expect(inventoryEvidence?.backendFacts.every((entry) => (entry.value?.length ?? 0) <= 500)).toBe(true);
+    expect(inventoryEvidence?.backendFacts.some((entry) => entry.text.endsWith("..."))).toBe(true);
+  });
+
   it("settles public scene descriptions as bounded scene_texture evidence", () => {
     const baseFrame = frame();
     const inputFrame = frame({
@@ -1002,17 +1145,48 @@ describe("clean Stage 5 settlement contracts", () => {
     });
     expect(textureEvidence?.backendFacts.map((entry) => entry.text)).toEqual([
       "Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.",
-      "Scene texture: Brass bells tremble above the ticket window.",
     ]);
     expect(textureEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
       "Lantern smoke clings to the ticket counter beside the wet stone floor.",
-      "Brass bells tremble above the ticket window.",
     ]);
     expect(textureEvidence?.limits.proves).toEqual(["public current-scene description texture"]);
     expect(textureEvidence?.limits.doesNotProve).toContain("route truth");
     expect(textureEvidence?.limits.doesNotProve).toContain("actor presence");
     expect(JSON.stringify(view)).toContain("Scene texture: Lantern smoke clings to the ticket counter beside the wet stone floor.");
-    expect(JSON.stringify(view)).toContain("Scene texture: Brass bells tremble above the ticket window.");
+    expect(JSON.stringify(view)).not.toContain("Scene texture: Brass bells tremble above the ticket window.");
+  });
+
+  it("omits ellipsized scene texture fragments from exact evidence", () => {
+    const baseFrame = frame();
+    const inputFrame = frame({
+      playerAction: "I wait and watch the room.",
+      scene: {
+        ...baseFrame.scene,
+        currentScene: {
+          ...baseFrame.scene.currentScene,
+          description: [
+            "A squat stone tavern sits wedged between two brick sluice gates.",
+            "Off-duty night couriers crowd the bar stools around a copper-topped counter.",
+            "Three couriers who sold forged seals bearing names fro...",
+          ].join(" "),
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      gmRead: directGmRead(inputFrame),
+      checklist: null,
+      execution: null,
+    });
+    const textureEvidence = packet.acceptedEvidence.find((entry) =>
+      entry.claimKinds.includes("scene_texture")
+    );
+
+    expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
+    expect(textureEvidence?.backendFacts.map((entry) => entry.value)).toEqual([
+      "A squat stone tavern sits wedged between two brick sluice gates.",
+    ]);
+    expect(JSON.stringify(textureEvidence)).not.toContain("fro...");
   });
 
   it("settles clarification as an explicit player-facing request before scene snapshot context", () => {
@@ -1282,6 +1456,78 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("player-1");
   });
 
+  it("settles item-readiness condition with concrete requested posture text", () => {
+    const inputFrame = frame({
+      playerAction: "I hold the Courier satchel high against my chest above the water.",
+      citableRefs: ["Player", "Market", "Courier satchel"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = playerLocalConditionReceipt(inputFrame, inputChecklist);
+    const postureText = "hold Courier satchel high against chest above water";
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([{
+        ...receipt,
+        publicResult: {
+          ...receipt.publicResult,
+          summary: `You ${postureText} at Market.`,
+          visibleRefs: ["Player", "Market", "Courier satchel"],
+          condition: {
+            ...receipt.publicResult.condition!,
+            conditionKey: "gripping_held_item",
+            conditionLabel: "gripping held item",
+            requestedPostureText: postureText,
+            targetKind: "inventory_item_readiness",
+            targetLabel: "Courier satchel",
+          },
+        },
+      }], inputFrame),
+    });
+
+    const condition = packet.acceptedEvidence.find((entry) => entry.authority === "player_local_condition_receipt");
+    expect(condition?.backendFacts[0]?.value).toBe("You hold Courier satchel high against chest above water at Market.");
+    expect(condition?.backendFacts.map((entry) => entry.text)).toContain("Condition key: gripping_held_item.");
+    expect(condition?.limits.doesNotProve).toContain("item custody or equip state");
+  });
+
+  it("renders item-readiness posture phrases as player-facing finite actions", () => {
+    const inputFrame = frame({
+      playerAction: "I show the message tube while keeping it in hand.",
+      citableRefs: ["Player", "Market", "Sealed lacquer message tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const receipt = playerLocalConditionReceipt(inputFrame, inputChecklist);
+    const postureText = "keeping the Sealed lacquer message tube in my hand while showing it";
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([{
+        ...receipt,
+        publicResult: {
+          ...receipt.publicResult,
+          summary: `Player is ${postureText} at Market.`,
+          visibleRefs: ["Player", "Market", "Sealed lacquer message tube"],
+          condition: {
+            ...receipt.publicResult.condition!,
+            conditionKey: "gripping_held_item",
+            conditionLabel: "gripping held item",
+            requestedPostureText: postureText,
+            targetKind: "inventory_item_readiness",
+            targetLabel: "Sealed lacquer message tube",
+          },
+        },
+      }], inputFrame),
+    });
+
+    const condition = packet.acceptedEvidence.find((entry) => entry.authority === "player_local_condition_receipt");
+    expect(condition?.backendFacts[0]?.value)
+      .toBe("You keep the Sealed lacquer message tube in your hand while showing it at Market.");
+    expect(condition?.backendFacts[0]?.value).not.toContain("You keeping");
+    expect(condition?.backendFacts[0]?.value).not.toContain("my hand");
+    expect(condition?.text).not.toContain("You keeping");
+  });
+
   it("settles item_transfer receipts as item_state evidence only", () => {
     const inputFrame = frame({
       playerAction: "I hand the Brass Tube to Guide.",
@@ -1444,6 +1690,92 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(view)).not.toContain("secret");
   });
 
+  it("settles whether-shaped local_observation no-match without denying the soft surface detail", () => {
+    const query = "whether faint canal damp on the Sealed lacquer message tube shows tampering or a hidden sign";
+    const inputFrame = frame({
+      playerAction: "I check whether the faint canal damp on the message tube shows tampering.",
+      scene: {
+        currentLocation: { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", description: null },
+        currentScene: { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      movementOptions: [],
+      citableRefs: ["Player", "Lowwater Bazaar", "Brass Tube"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const expectedBeat = "No visible sign at Lowwater Bazaar settles whether faint canal damp on the Sealed lacquer message tube shows tampering or a hidden sign.";
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: `No visible evidence answers "${query}" among inventory items and visible facts.`,
+        visibleRefs: ["Player", "Lowwater Bazaar", "Brass Tube"],
+        localObservation: {
+          ...baseReceipt.publicResult.localObservation!,
+          queryText: query,
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          anchorSceneLabel: "Lowwater Bazaar",
+          anchorLocationLabel: "Lowwater Bazaar",
+          summary: `No visible evidence answers "${query}" among inventory items and visible facts.`,
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
+    expect(observation?.text).toBe(expectedBeat);
+    expect(observation?.backendFacts.map((entry) => entry.text)).toContain(`Local observation beat: ${expectedBeat}`);
+    expect(observation?.backendFacts.map((entry) => entry.value)).toContain(expectedBeat);
+    expect(observation?.text).not.toContain("No visible canal damp");
+  });
+
+  it("settles person-property local_observation no-match as a visible-person match failure", () => {
+    const query = "anyone in the scene who seems to be waiting for a courier";
+    const inputFrame = frame({
+      playerAction: "I look around for anyone who seems to be waiting for a courier.",
+      citableRefs: ["Player", "Market", "Guide"],
+      actors: [{ ref: "Guide", label: "Guide", role: "support", visibleStatus: { hp: null, conditions: [] } }],
+      targets: [{ ref: "Guide", label: "Guide", kind: "actor" }],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const expectedBeat = "No visible person seems to be waiting for a courier at Market.";
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: `No match for "${query}" stands out among visible actors.`,
+        visibleRefs: ["Player", "Market", "Guide"],
+        localObservation: {
+          ...baseReceipt.publicResult.localObservation!,
+          queryText: query,
+          targetLabel: null,
+          searchedSurfaceKinds: ["visible_actor"],
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          summary: `No match for "${query}" stands out among visible actors.`,
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.text).toBe(expectedBeat);
+    expect(observation?.backendFacts.map((entry) => entry.value)).toContain(expectedBeat);
+  });
+
   it("settles local_observation movement-option facts with player-safe display labels", () => {
     const routeLabels = [
       "North Hall",
@@ -1516,6 +1848,158 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
     expect(JSON.stringify(observation)).not.toContain("SceneFrame");
+  });
+
+  it("settles mixed local_observation as player-facing scene prose instead of visible-set wording", () => {
+    const inputFrame = frame({
+      playerAction: "Look for who is present and what ordinary clutter or cover is close at hand.",
+      scene: {
+        currentLocation: { ref: "Resonance Tower", label: "Resonance Tower", description: null },
+        currentScene: { ref: "Resonance Tower", label: "Resonance Tower", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      inventory: [
+        { ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] },
+        { ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] },
+      ],
+      movementOptions: [
+        { ref: "Ground-Floor Barricade", label: "Ground-Floor Barricade", connected: true, travelCost: 1 },
+        { ref: "Transmission Basement", label: "Transmission Basement", connected: true, travelCost: 1 },
+      ],
+      targets: [
+        { ref: "Brass Tube", label: "Brass Tube", kind: "item" },
+        { ref: "Courier satchel", label: "Courier satchel", kind: "item" },
+        { ref: "Ground-Floor Barricade", label: "Ground-Floor Barricade", kind: "location" },
+        { ref: "Transmission Basement", label: "Transmission Basement", kind: "location" },
+      ],
+      citableRefs: [
+        "Player",
+        "Resonance Tower",
+        "Brass Tube",
+        "Courier satchel",
+        "Ground-Floor Barricade",
+        "Transmission Basement",
+      ],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: "Current visible actors, the current scene, and visible targets include modeled current entries.",
+        visibleRefs: [
+          "Player",
+          "Resonance Tower",
+          "Brass Tube",
+          "Courier satchel",
+          "Ground-Floor Barricade",
+          "Transmission Basement",
+        ],
+        localObservation: {
+          type: "local_observation",
+          surfaceVersion: "scene_frame_current_observation_surface.v1",
+          resultKind: "positive_list",
+          mode: "list_surface",
+          queryText: "who is present and what ordinary clutter or cover is close at hand",
+          targetLabel: null,
+          matchedEntries: [
+            { surfaceKind: "current_scene", label: "Resonance Tower", detail: null },
+            { surfaceKind: "visible_target", label: "Brass Tube", detail: "item target" },
+            { surfaceKind: "visible_target", label: "Courier satchel", detail: "item target" },
+            { surfaceKind: "visible_target", label: "Ground-Floor Barricade", detail: "location target" },
+            { surfaceKind: "visible_target", label: "Transmission Basement", detail: "location target" },
+          ],
+          searchedSurfaceKinds: ["visible_actor", "current_scene", "visible_target"],
+          anchorSceneLabel: "Resonance Tower",
+          anchorLocationLabel: "Resonance Tower",
+          boundedNegative: false,
+          summary: "Current visible actors, the current scene, and visible targets include modeled current entries.",
+          claimStatus: "bounded_current_scene_observation_only",
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.text).toBe(
+      "At Resonance Tower, you can see Brass Tube, Courier satchel, Ground-Floor Barricade, and Transmission Basement.",
+    );
+    expect(observation?.backendFacts[0]?.value).toBe(observation?.text);
+    expect(JSON.stringify(observation)).not.toContain("visible set");
+    expect(JSON.stringify(observation)).not.toContain("current visible set");
+  });
+
+  it("settles player-status local_observation as bounded current player status evidence", () => {
+    const inputFrame = frame({
+      playerAction: "Check whether I have any obvious injury or strain.",
+      player: {
+        ref: "Player",
+        label: "Mira Voss",
+        visibleStatus: { hp: 5, conditions: [] },
+      },
+      citableRefs: ["Player", "Market"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: "No obvious injury or strain is visible on Mira Voss.",
+        visibleRefs: ["Player", "Market"],
+        localObservation: {
+          type: "local_observation",
+          surfaceVersion: "scene_frame_current_observation_surface.v1",
+          resultKind: "positive_match",
+          mode: "target_match",
+          queryText: "obvious injury or strain on Player",
+          targetLabel: "Mira Voss",
+          matchedEntries: [{
+            surfaceKind: "player_status",
+            label: "Mira Voss",
+            detail: "no obvious injury or strain",
+          }],
+          searchedSurfaceKinds: ["player_status"],
+          anchorSceneLabel: "Market",
+          anchorLocationLabel: "Market",
+          boundedNegative: false,
+          summary: "No obvious injury or strain is visible on Mira Voss.",
+          claimStatus: "bounded_current_scene_observation_only",
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.claimKinds).toEqual(["local_observation"]);
+    expect(observation?.text).toBe("No obvious injury or strain is visible on Mira Voss at Market.");
+    expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
+      "Local observation beat: No obvious injury or strain is visible on Mira Voss at Market.",
+      "Searched visible surfaces: player visible status.",
+      "Observation query: obvious injury or strain on Player.",
+      "Observed entry labels: Mira Voss.",
+      "Observed entry surfaces: player status Mira Voss.",
+      "Anchor scene: Market.",
+      "Anchor location: Market.",
+    ]);
+    expect(observation?.limits.proves).toEqual(["matching current visible entries"]);
+    expect(observation?.limits.doesNotProve).toEqual(expect.arrayContaining([
+      "broad absence",
+      "world fact",
+      "mutation",
+      "no-change",
+    ]));
+    expect(JSON.stringify(observation)).not.toMatch(/braced|clarify|SceneFrame|worldVersion/iu);
   });
 
   it("settles inventory local_observation as carried inventory evidence", () => {

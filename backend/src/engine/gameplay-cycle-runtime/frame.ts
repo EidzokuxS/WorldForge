@@ -38,6 +38,12 @@ function firstText(...values: unknown[]): string {
   return "current_scene";
 }
 
+function shortFrameText(value: unknown, fallback: string): string {
+  const text = firstText(value, fallback);
+  if (text.length <= 500) return text;
+  return `${text.slice(0, 497).trimEnd()}...`;
+}
+
 function uniqueRefs(refs: readonly string[]): string[] {
   return refs.filter((ref, index, allRefs) => refs.indexOf(ref) === index);
 }
@@ -274,9 +280,9 @@ function deviceKindForPublicItem(input: {
 
 function eventRows(frame: SceneFrame): AuthoritativeSceneFrame["scene"]["recentLocalFacts"] {
   return frame.recentEvents.slice(0, 24).map((event, index) => ({
-    factId: firstText(event.id, `recent-${index + 1}`),
-    summary: firstText(event.summary, "Recent local event."),
-    source: firstText(event.source, "location_recent_event"),
+    factId: shortFrameText(event.id, `recent-${index + 1}`),
+    summary: shortFrameText(event.summary, "Recent local event."),
+    source: shortFrameText(event.source, "location_recent_event"),
     tick: typeof event.tick === "number" ? event.tick : null,
   }));
 }

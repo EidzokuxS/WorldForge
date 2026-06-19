@@ -237,6 +237,7 @@ const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
   "future non-discoverability",
   "item use or effects",
   "item state change",
+  "condition or HP change",
   "phone or device status",
   "route truth beyond route option/check receipts",
   "location reveal",
@@ -248,6 +249,7 @@ const LOCAL_OBSERVATION_DOES_NOT_PROVE = [
 
 function localObservationSurfaceKindLabel(kind: string): string {
   switch (kind) {
+    case "player_status": return "player status";
     case "current_scene": return "current scene";
     case "current_location": return "current location";
     case "visible_actor": return "visible actor";
@@ -261,6 +263,7 @@ function localObservationSurfaceKindLabel(kind: string): string {
 
 function localObservationSurfaceKindPluralLabel(kind: string): string {
   switch (kind) {
+    case "player_status": return "player visible status";
     case "current_scene": return "the current scene";
     case "current_location": return "the current location";
     case "visible_actor": return "visible actors";
@@ -280,6 +283,26 @@ function localObservationSurfaceEntryLabels(entries: readonly { surfaceKind: str
   return entries.map(localObservationSurfaceEntryLabel);
 }
 
+const CLEAR_PLAYER_STATUS_DETAIL = "no obvious injury or strain";
+const VISIBLE_PLAYER_STATUS_PREFIX = "visible signs: ";
+
+function playerStatusObservationStoryBeat(input: {
+  label: string;
+  detail: string | null | undefined;
+  anchorSceneLabel: string;
+}): string {
+  const detail = input.detail?.trim() ?? "";
+  if (detail === CLEAR_PLAYER_STATUS_DETAIL) {
+    return `No obvious injury or strain is visible on ${input.label} at ${input.anchorSceneLabel}.`;
+  }
+  if (detail.startsWith(VISIBLE_PLAYER_STATUS_PREFIX)) {
+    return `Visible signs on ${input.label} at ${input.anchorSceneLabel}: ${detail.slice(VISIBLE_PLAYER_STATUS_PREFIX.length)}.`;
+  }
+  return detail.length > 0
+    ? `Visible condition on ${input.label} at ${input.anchorSceneLabel}: ${detail}.`
+    : `${input.label}'s visible condition is readable at ${input.anchorSceneLabel}.`;
+}
+
 function evidenceEnglishList(labels: readonly string[]): string {
   const values = uniqueStrings(labels);
   if (values.length === 0) return "Nothing";
@@ -296,23 +319,67 @@ function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneLabel: string): string {
+  const query = queryText.trim();
+  if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
+    const questionBody = query.slice("whether ".length).trim();
+    if (questionBody.length > 0) {
+      return `No visible sign at ${anchorSceneLabel} settles whether ${questionBody}.`;
+    }
+    return `No visible sign at ${anchorSceneLabel} settles that question.`;
+  }
+  const lowerQuery = query.toLocaleLowerCase("en-US");
+  const personPropertyPrefixes = [
+    "anyone in the scene who ",
+    "anyone who ",
+    "someone who ",
+    "somebody who ",
+    "people who ",
+    "person who ",
+  ];
+  for (const prefix of personPropertyPrefixes) {
+    if (lowerQuery.startsWith(prefix)) {
+      return `No visible person ${query.slice(prefix.length)} at ${anchorSceneLabel}.`;
+    }
+  }
+  if (
+    lowerQuery.startsWith("anyone ")
+    || lowerQuery.startsWith("someone ")
+    || lowerQuery.startsWith("somebody ")
+    || lowerQuery.startsWith("person ")
+    || lowerQuery.startsWith("people ")
+    || lowerQuery.startsWith("npc ")
+  ) {
+    return `No visible person matching "${query}" stands out at ${anchorSceneLabel}.`;
+  }
+  return `${query} does not stand out in the visible scene at ${anchorSceneLabel}.`;
+}
+
 function localObservationStoryBeat(observation: {
   resultKind: string;
   queryText: string;
-  matchedEntries: readonly { surfaceKind: string; label: string }[];
+  matchedEntries: readonly { surfaceKind: string; label: string; detail?: string | null }[];
   searchedSurfaceKinds: readonly string[];
   anchorSceneLabel: string;
 }): string {
   if (observation.resultKind === "bounded_no_match") {
-    return `${observation.queryText} does not stand out in the visible scene at ${observation.anchorSceneLabel}.`;
+    return localObservationBoundedNoMatchStoryBeat(observation.queryText, observation.anchorSceneLabel);
   }
   if (observation.matchedEntries.length === 0) {
     throw new Error("Local observation story evidence requires matched entries for non-negative results.");
   }
   const labels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
+  const onlyPlayerStatusMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "player_status");
   const onlyInventoryMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
   const onlyVisibleActorMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_actor");
   const onlyVisibleTargetMatches = observation.matchedEntries.every((entry) => entry.surfaceKind === "visible_target");
+  if (onlyPlayerStatusMatches) {
+    return playerStatusObservationStoryBeat({
+      label: labels[0] ?? "Player",
+      detail: observation.matchedEntries[0]?.detail,
+      anchorSceneLabel: observation.anchorSceneLabel,
+    });
+  }
   if (onlyInventoryMatches) {
     if (observation.resultKind === "positive_match") {
       return inventoryPresenceBeat(labels, observation.anchorSceneLabel);
@@ -332,7 +399,9 @@ function localObservationStoryBeat(observation: {
     return inventoryCustodyBeat(labels, observation.anchorSceneLabel);
   }
   if (observation.resultKind === "positive_list") {
-    return `${evidenceEnglishList(labels)} ${labels.length === 1 ? "is" : "are"} in the current visible set.`;
+    const labelsBeyondAnchor = labels.filter((label) => label !== observation.anchorSceneLabel);
+    const visibleLabels = labelsBeyondAnchor.length > 0 ? labelsBeyondAnchor : labels;
+    return `At ${observation.anchorSceneLabel}, you can see ${evidenceEnglishList(visibleLabels)}.`;
   }
   if (observation.resultKind === "ambiguous_match") {
     return `Current visible matches are ${evidenceLabelList(localObservationSurfaceEntryLabels(observation.matchedEntries))}.`;
@@ -480,6 +549,35 @@ function nextEvidenceId(evidence: readonly CleanSettledEvidence[]): string {
 
 type CleanSettledBackendFactRole = NonNullable<CleanSettledEvidence["backendFacts"][number]["role"]>;
 
+function boundedFactString(value: string): string {
+  const compact = value.trim();
+  if (compact.length <= 500) return compact;
+  return `${compact.slice(0, 497).trimEnd()}...`;
+}
+
+function boundedVisibleRef(value: string): string {
+  const compact = value.trim();
+  if (compact.length <= 200) return compact;
+  return `${compact.slice(0, 197).trimEnd()}...`;
+}
+
+function boundedSettledEvidence(evidence: readonly CleanSettledEvidence[]): CleanSettledEvidence[] {
+  return evidence.map((entry) => ({
+    ...entry,
+    text: boundedFactString(entry.text),
+    visibleRefs: entry.visibleRefs.map(boundedVisibleRef),
+    backendFacts: entry.backendFacts.map((backendFact) => ({
+      ...backendFact,
+      value: backendFact.value ? boundedFactString(backendFact.value) : undefined,
+      text: boundedFactString(backendFact.text),
+    })),
+    limits: {
+      proves: entry.limits.proves.map(boundedFactString),
+      doesNotProve: entry.limits.doesNotProve.map(boundedFactString),
+    },
+  }));
+}
+
 function fact(
   evidenceId: string,
   index: number,
@@ -490,8 +588,8 @@ function fact(
   return {
     factRef: `${evidenceId}.f${index}`,
     role,
-    ...(value ? { value } : {}),
-    text,
+    ...(value ? { value: boundedFactString(value) } : {}),
+    text: boundedFactString(text),
     exact: true,
   };
 }
@@ -511,9 +609,69 @@ function minorPoiBeatSubject(label: string): string {
 
 type PlayerLocalConditionResult = NonNullable<CleanStage4Receipt["publicResult"]["condition"]>;
 
+function replaceLeadingWord(value: string, from: string, to: string): string | null {
+  const lower = value.toLocaleLowerCase("en-US");
+  if (lower === from) return to;
+  if (lower.startsWith(`${from} `)) return `${to}${value.slice(from.length)}`;
+  return null;
+}
+
+function isAsciiLetter(value: string | undefined): boolean {
+  if (!value) return false;
+  const code = value.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function secondPersonPosturePhrase(value: string): string {
+  const replacements = new Map([
+    ["my", "your"],
+    ["mine", "yours"],
+    ["me", "you"],
+    ["myself", "yourself"],
+  ]);
+  let result = "";
+  let index = 0;
+  while (index < value.length) {
+    const current = value[index]!;
+    if (!isAsciiLetter(current)) {
+      result += current;
+      index += 1;
+      continue;
+    }
+
+    let end = index + 1;
+    while (end < value.length && isAsciiLetter(value[end])) end += 1;
+    const token = value.slice(index, end);
+    result += replacements.get(token.toLocaleLowerCase("en-US")) ?? token;
+    index = end;
+  }
+  return result;
+}
+
+function playerFacingPostureVerbPhrase(value: string): string {
+  const replacements: Array<[string, string]> = [
+    ["holding", "hold"],
+    ["keeping", "keep"],
+    ["showing", "show"],
+    ["gripping", "grip"],
+    ["steadying", "steady"],
+    ["raising", "raise"],
+    ["bracing", "brace"],
+    ["carrying", "carry"],
+    ["presenting", "present"],
+    ["pressing", "press"],
+  ];
+  for (const [from, to] of replacements) {
+    const replaced = replaceLeadingWord(value, from, to);
+    if (replaced) return secondPersonPosturePhrase(replaced);
+  }
+  return secondPersonPosturePhrase(value);
+}
+
 function playerLocalConditionStateText(condition: PlayerLocalConditionResult): string {
   const anchor = condition.anchorSceneLabel;
   const target = condition.targetLabel;
+  const requestedPostureText = condition.requestedPostureText?.trim();
   switch (condition.conditionKey) {
     case "kneeling":
       return `You are kneeling at ${anchor}.`;
@@ -538,6 +696,7 @@ function playerLocalConditionStateText(condition: PlayerLocalConditionResult): s
     case "hands_raised":
       return `Your hands are raised at ${anchor}.`;
     case "gripping_held_item":
+      if (requestedPostureText) return `You keep this posture at ${anchor}: ${requestedPostureText}.`;
       return target
         ? `You keep ${target} in hand at ${anchor}.`
         : `You keep the held item in hand at ${anchor}.`;
@@ -547,6 +706,7 @@ function playerLocalConditionStateText(condition: PlayerLocalConditionResult): s
 function playerLocalConditionAppliedText(condition: PlayerLocalConditionResult): string {
   const anchor = condition.anchorSceneLabel;
   const target = condition.targetLabel;
+  const requestedPostureText = condition.requestedPostureText?.trim();
   switch (condition.conditionKey) {
     case "kneeling":
       return `You kneel at ${anchor}.`;
@@ -571,6 +731,7 @@ function playerLocalConditionAppliedText(condition: PlayerLocalConditionResult):
     case "hands_raised":
       return `You raise your hands at ${anchor}.`;
     case "gripping_held_item":
+      if (requestedPostureText) return `You ${playerFacingPostureVerbPhrase(requestedPostureText)} at ${anchor}.`;
       return target
         ? `You grip ${target} at ${anchor}.`
         : `You grip the held item at ${anchor}.`;
@@ -719,11 +880,13 @@ function routeChoiceLabelsBeat(originLabel: string, labels: readonly string[]): 
   return `From ${originLabel}, visible route choices are ${evidenceLabelList(routeLabels)}.`;
 }
 
+const MAX_SCENE_TEXTURE_CLAUSE_CHARS = 420;
+
 function compactSceneTexture(value: string | null | undefined): string | null {
   if (!value) return null;
   const compact = compactInlineWhitespace(value);
   if (compact.length === 0) return null;
-  return compact.length <= 420 ? compact : `${compact.slice(0, 417).trimEnd()}...`;
+  return compact;
 }
 
 function isInlineWhitespace(value: string): boolean {
@@ -756,6 +919,34 @@ function sentenceTextureMaterial(value: string): string {
   return lastCharacter && isSentenceTerminal(lastCharacter) ? compact : `${compact}.`;
 }
 
+function hasAsciiEllipsisSuffix(value: string): boolean {
+  const compact = value.trim();
+  return compact.endsWith("...");
+}
+
+function usableSceneTextureClause(value: string): boolean {
+  const compact = compactInlineWhitespace(value);
+  if (compact.length === 0) return false;
+  if (compact.length > MAX_SCENE_TEXTURE_CLAUSE_CHARS) return false;
+  return !hasAsciiEllipsisSuffix(compact);
+}
+
+function privateSceneTextureTerms(frame: AuthoritativeSceneFrame): string[] {
+  return uniqueStrings([
+    ...frame.privateGuards.forbiddenActorLabels,
+    ...frame.privateGuards.forbiddenPrivateTerms,
+    ...frame.forecast.forbiddenPrivateTerms,
+  ]);
+}
+
+function containsPrivateSceneTextureTerm(value: string, privateTerms: readonly string[]): boolean {
+  const compact = compactInlineWhitespace(value).toLowerCase();
+  return privateTerms.some((term) => {
+    const normalizedTerm = compactInlineWhitespace(term).toLowerCase();
+    return normalizedTerm.length > 0 && compact.includes(normalizedTerm);
+  });
+}
+
 function splitSceneTextureClauses(value: string): string[] {
   const compact = compactInlineWhitespace(value);
   const clauses: string[] = [];
@@ -785,14 +976,25 @@ function splitSceneTextureClauses(value: string): string[] {
   return uniqueStrings(clauses);
 }
 
+function publicSceneTextureClauses(value: string | null, privateTerms: readonly string[]): string[] {
+  if (!value) return [];
+  return splitSceneTextureClauses(value)
+    .filter(usableSceneTextureClause)
+    .filter((clause) => !containsPrivateSceneTextureTerm(clause, privateTerms))
+    .slice(0, 1);
+}
+
 function sceneTextureFacts(frame: AuthoritativeSceneFrame): string[] {
+  const privateTerms = privateSceneTextureTerms(frame);
   const textures = [
     compactSceneTexture(frame.scene.currentScene.description),
     frame.scene.currentScene.label === frame.scene.currentLocation.label
       ? null
       : compactSceneTexture(frame.scene.currentLocation.description),
   ].filter((value): value is string => value !== null);
-  return uniqueStrings(textures.flatMap(splitSceneTextureClauses)).slice(0, 6);
+  return uniqueStrings(textures.flatMap((texture) =>
+    publicSceneTextureClauses(texture, privateTerms)
+  )).slice(0, 4);
 }
 
 function sceneEvidence(frame: AuthoritativeSceneFrame, evidence: CleanSettledEvidence[]): void {
@@ -1194,19 +1396,28 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const localBeat = localObservationStoryBeat(observation);
       const surfaceGroup = localObservationSurfaceGroupLabel(observation.searchedSurfaceKinds);
       const observedLabels = uniqueStrings(observation.matchedEntries.map((entry) => entry.label));
+      const observedActorLabels = uniqueStrings(observation.matchedEntries
+        .filter((entry) => entry.surfaceKind === "visible_actor")
+        .map((entry) => entry.label));
       const observedSurfaceLabels = localObservationSurfaceEntryLabels(observation.matchedEntries);
       const observedInventoryLabels = uniqueStrings(observation.matchedEntries
         .filter((entry) => entry.surfaceKind === "inventory_item")
         .map((entry) => entry.label));
       const observedLabelList = evidenceSemicolonList(observedLabels);
+      const observedActorLabelList = evidenceSemicolonList(observedActorLabels);
       const observedInventoryLabelList = evidenceSemicolonList(observedInventoryLabels);
       const isInventoryObservation = !boundedNegative
         && observedInventoryLabels.length > 0
         && observation.matchedEntries.every((entry) => entry.surfaceKind === "inventory_item");
+      const isPlayerStatusObservation = !boundedNegative
+        && observation.matchedEntries.length > 0
+        && observation.matchedEntries.every((entry) => entry.surfaceKind === "player_status");
       const claimKinds: CleanSettledEvidence["claimKinds"] = boundedNegative
         ? ["local_observation", "bounded_visibility_negative"]
         : isInventoryObservation
           ? ["local_observation", "inventory_status"]
+          : isPlayerStatusObservation
+          ? ["local_observation"]
           : observation.resultKind === "positive_list"
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
@@ -1216,6 +1427,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         { role: "observation_query", text: `Observation query: ${observation.queryText}.`, value: observation.queryText },
         ...(observedLabels.length > 0
           ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${observedLabelList}.`, value: observedLabelList }]
+          : []),
+        ...(observedActorLabels.length > 0
+          ? [{ role: "observed_visible_actor_labels" as const, text: `Observed visible actor labels: ${observedActorLabelList}.`, value: observedActorLabelList }]
           : []),
         ...(observedInventoryLabels.length > 0
           ? [{ role: "observed_inventory_item_labels" as const, text: `Observed inventory item labels: ${observedInventoryLabelList}.`, value: observedInventoryLabelList }]
@@ -1337,6 +1551,7 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const targetLabels = beat.targetLabels.slice(0, 4);
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
         { role: "scene_beat", text: `Scene beat: ${beat.summary}`, value: beat.summary },
+        { role: "scene_beat_kind", text: `Scene beat kind: ${beat.beatKind}.`, value: beat.beatKind },
         ...(targetLabels.length > 0
           ? [{ role: "scene_beat_target_labels" as const, text: `Scene beat target labels: ${evidenceSemicolonList(targetLabels)}.` }]
           : []),
@@ -1668,6 +1883,7 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
   const sceneFrameForEvidence = hasTerminalMovement
     ? input.postResolutionFrame ?? null
     : input.frame;
+  const privateGuardFrame = sceneFrameForEvidence ?? input.frame;
   if (kind === "clarification") {
     clarificationEvidence({
       frame: input.frame,
@@ -1708,7 +1924,7 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
     base: input.frame.base,
     result: resultClock({ frame: input.frame, stage4Execution: input.stage4Execution }),
     settlementKind: kind,
-    acceptedEvidence,
+    acceptedEvidence: boundedSettledEvidence(acceptedEvidence),
     stepAudit: stepAudit({
       checklist: input.actionChecklist,
       stage4Execution: input.stage4Execution,
@@ -1721,9 +1937,9 @@ export function buildCleanSettledTurnPacket(input: BuildCleanSettlementInput): C
       checklistPlanningOnly: Boolean(input.actionChecklist),
     },
     privateGuards: {
-      forbiddenActorLabels: input.frame.privateGuards.forbiddenActorLabels,
-      forbiddenPrivateTerms: input.frame.privateGuards.forbiddenPrivateTerms,
-      forecastForbiddenPrivateTerms: input.frame.forecast.forbiddenPrivateTerms,
+      forbiddenActorLabels: privateGuardFrame.privateGuards.forbiddenActorLabels,
+      forbiddenPrivateTerms: privateGuardFrame.privateGuards.forbiddenPrivateTerms,
+      forecastForbiddenPrivateTerms: privateGuardFrame.forecast.forbiddenPrivateTerms,
     },
     narrationContract: narrationContract(),
   });

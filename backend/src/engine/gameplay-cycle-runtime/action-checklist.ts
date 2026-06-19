@@ -468,6 +468,32 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
         message: "itemTransferPlan is allowed only on item_transfer steps.",
       });
     }
+    if (step.intended.kind === "scene_beat_record") {
+      if (!step.intended.sceneBeatPlan) {
+        issues.push({
+          code: "step_invalid",
+          path: `steps.${index}.intended.sceneBeatPlan`,
+          message: "scene_beat_record steps require a typed sceneBeatPlan.",
+        });
+      }
+      const plan = step.intended.sceneBeatPlan;
+      if (plan) {
+        const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
+        if (!stepRefs.includes(plan.anchorRef.toLowerCase())) {
+          issues.push({
+            code: "step_invalid",
+            path: `steps.${index}.intended.sceneBeatPlan.anchorRef`,
+            message: "sceneBeatPlan.anchorRef must be included in step target/evidence refs.",
+          });
+        }
+      }
+    } else if (step.intended.sceneBeatPlan) {
+      issues.push({
+        code: "step_invalid",
+        path: `steps.${index}.intended.sceneBeatPlan`,
+        message: "sceneBeatPlan is allowed only on scene_beat_record steps.",
+      });
+    }
     if (step.intended.kind === "minor_poi_create") {
       if (!step.intended.minorPoiPlan) {
         issues.push({
@@ -886,6 +912,7 @@ function stepFor(input: {
   evidenceRefs: readonly string[];
   dependsOnStepIds?: readonly GmActionChecklistStepId[];
   dependencyBindings?: ReadonlyArray<NonNullable<GmActionChecklist["steps"][number]["dependencyBindings"]>[number]>;
+  sceneBeatPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["sceneBeatPlan"]>;
   localConditionPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>;
   itemTransferPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["itemTransferPlan"]>;
   minorPoiPlan?: NonNullable<GmActionChecklist["steps"][number]["intended"]["minorPoiPlan"]>;
@@ -915,6 +942,9 @@ function stepFor(input: {
     requiredCapabilityId: capability,
     summary: input.intendedSummary ?? `Stage 4 must resolve ${input.kind} before any world-state claim is accepted.`,
   };
+  if (input.sceneBeatPlan) {
+    intended.sceneBeatPlan = input.sceneBeatPlan;
+  }
   if (input.localConditionPlan) {
     intended.localConditionPlan = input.localConditionPlan;
   }
@@ -1055,6 +1085,7 @@ export function buildDeterministicGmActionChecklist(input: {
         actorRef: "Player",
         operation: localConditionNeed.operation,
         conditionKey: localConditionNeed.conditionKey,
+        requestedPostureText: localConditionNeed.requestedPostureText,
         conditionScope: "current_scene",
         anchorRef: sceneRef,
         targetKind: localConditionNeed.targetKind,
@@ -1093,6 +1124,7 @@ export function buildDeterministicGmActionChecklist(input: {
       actorRef,
       targetRefs: targetRefs.length > 0 ? targetRefs : [itemTransferNeed.itemRef, itemTransferNeed.targetRef],
       evidenceRefs: itemEvidenceRefs,
+      dependsOnStepIds: localConditionStepId ? [localConditionStepId] : [],
       itemTransferPlan: {
         actorRef: "Player",
         operation: itemTransferNeed.operation,
@@ -1253,15 +1285,14 @@ export function buildDeterministicGmActionChecklist(input: {
     && !movementTarget
   ) {
     steps.push(stepFor({
-      index: 1,
+      index: steps.length + 1,
       kind: "route_options",
       actorRef,
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
   } else if (
-    steps.length === 0
-    && !dialogueSpeaker
+    !dialogueSpeaker
     && allowed.has("time_advance")
     && sceneRef
     && input.gmRead.actionInterpretation.interactionKind === "time_passage"
@@ -1275,7 +1306,7 @@ export function buildDeterministicGmActionChecklist(input: {
       ...evidenceRefs,
     ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
     steps.push(stepFor({
-      index: 1,
+      index: steps.length + 1,
       kind: "time_advance",
       actorRef,
       targetRefs: [sceneRef],
@@ -1290,6 +1321,7 @@ export function buildDeterministicGmActionChecklist(input: {
       purpose: `Plan Player time passage for ${timePassageNeed.requestedDurationText}.`,
       intendedSummary: `Stage 4 must advance only the world clock by ${timePassageNeed.elapsedMinutes} minute(s) before narration may claim elapsed time. This does not authorize movement, scene changes, item state, dialogue, NPC reactions, world facts, absence, or no-change.`,
       expectedVisibleSummary: `If accepted, only ${timePassageNeed.elapsedMinutes} minute(s) of elapsed time may be visible.`,
+      dependsOnStepIds: localConditionStepId ? [localConditionStepId] : [],
     }));
   } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
     const dialogueStepInput: Parameters<typeof stepFor>[0] = {
@@ -1430,15 +1462,38 @@ export function buildDeterministicGmActionChecklist(input: {
       targetRefs: [sceneRef],
       evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
     }));
-  } else if (allowed.has("scene_beat_record") && sceneRef) {
+  } else if (
+    allowed.has("scene_beat_record")
+    && sceneRef
+    && input.gmRead.actionInterpretation.interactionKind === "scene_local_beat"
+  ) {
+    const sceneBeatNeed = input.gmRead.actionInterpretation.sceneBeatNeed ?? null;
+    const requestedBeatText = trimTerminalIntentPunctuation(
+      sceneBeatNeed?.requestedBeatText ?? input.gmRead.actionInterpretation.playerIntent,
+    );
+    const anchorRef = sceneBeatNeed?.anchorRef ?? sceneRef;
+    const beatKind = sceneBeatNeed?.beatKind ?? "local_interaction";
     steps.push(stepFor({
-      index: 1,
+      index: steps.length + 1,
       kind: "scene_beat_record",
       actorRef,
-      targetRefs: input.gmRead.actionInterpretation.targetRefs
-        .filter((ref) => citable.has(ref.toLowerCase()))
-        .slice(0, 4),
-      evidenceRefs: uniqueStrings([actorRef, sceneRef, ...evidenceRefs]),
+      targetRefs: uniqueStrings([
+        anchorRef,
+        ...input.gmRead.actionInterpretation.targetRefs
+          .filter((ref) => citable.has(ref.toLowerCase()))
+          .slice(0, 4),
+      ]),
+      evidenceRefs: uniqueStrings([actorRef, anchorRef, ...(sceneBeatNeed?.evidenceRefs ?? []), ...evidenceRefs]),
+      sceneBeatPlan: {
+        actorRef: "Player",
+        beatKind,
+        requestedBeatText,
+        anchorRef,
+        persistenceScope: "turn_event_only",
+      },
+      purpose: `Record one non-mutating current-scene beat: ${requestedBeatText}.`,
+      intendedSummary: "Stage 4 must settle one visible current-scene local interaction as a turn event only. This does not create inventory, route truth, hidden discovery, durable object state, resource change, condition, relationship, dialogue, absence, or no-change.",
+      expectedVisibleSummary: `${requestedBeatText} may be narrated only as a local current-scene beat.`,
     }));
   }
 

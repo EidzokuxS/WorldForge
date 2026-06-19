@@ -9,6 +9,7 @@ import {
   type GmRead,
   type JudgeUncertainty,
 } from "./contracts.js";
+import { oracleOutcomeMeaningIssues } from "./oracle-settlement.js";
 
 const FORBIDDEN_SETTLEMENT_KEYS = new Set([
   "args",
@@ -57,30 +58,30 @@ const NORMALIZED_FORBIDDEN_SETTLEMENT_KEYS = new Set(
 
 const UUID_LIKE_REF = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const BACKEND_REF_PREFIX = /^(actor|campaign|edge|fact|frame|item|location|npc|packet|receipt|route|scene|turn|world)[_:]/i;
-const judgeGenerationRepairableText = z.string().trim().min(1).max(2000);
+const judgeGenerationText = z.string().trim().min(1).max(500);
 
 const judgeDifficultyGenerationSchema = judgeUncertaintySchema.shape.difficulty.unwrap().extend({
-  basis: judgeGenerationRepairableText,
+  basis: judgeGenerationText,
 });
 
 const judgeOracleAdmissionGenerationSchema = judgeUncertaintySchema.shape.oracleAdmission.unwrap().extend({
-  question: judgeGenerationRepairableText,
-  stakes: judgeGenerationRepairableText,
+  question: judgeGenerationText,
+  stakes: judgeGenerationText,
   outcomeMeanings: judgeUncertaintySchema.shape.oracleAdmission.unwrap().shape.outcomeMeanings.extend({
-    strong_hit: judgeGenerationRepairableText,
-    weak_hit: judgeGenerationRepairableText,
-    miss: judgeGenerationRepairableText,
+    strong_hit: judgeGenerationText,
+    weak_hit: judgeGenerationText,
+    miss: judgeGenerationText,
   }),
 });
 
 const judgeNoRollReasonGenerationSchema = judgeUncertaintySchema.shape.noRollReason.unwrap().extend({
-  explanation: judgeGenerationRepairableText,
+  explanation: judgeGenerationText,
 });
 
 export const judgeUncertaintyGenerationSchema = judgeUncertaintySchema
   .extend({
-    possibilityRationale: judgeGenerationRepairableText,
-    checkRationale: judgeGenerationRepairableText,
+    possibilityRationale: judgeGenerationText,
+    checkRationale: judgeGenerationText,
     difficulty: judgeDifficultyGenerationSchema.nullable(),
     oracleAdmission: judgeOracleAdmissionGenerationSchema.nullable(),
     noRollReason: judgeNoRollReasonGenerationSchema.nullable(),
@@ -96,6 +97,7 @@ export interface JudgeUncertaintyValidationIssue {
   code:
     | "backend_ref"
     | "branch_invalid"
+    | "forbidden_claim"
     | "frame_mismatch"
     | "private_term"
     | "schema_invalid"
@@ -131,13 +133,16 @@ export class CleanJudgeUncertaintyValidationError extends Error {
   }
 }
 
+function judgeUncertaintyIssueSummary(issues: readonly JudgeUncertaintyValidationIssue[]): string {
+  return issues
+    .slice(0, 4)
+    .map((issue) => `${issue.path}: ${issue.message}`)
+    .join("; ");
+}
+
 export interface JudgeUncertaintyCandidateRequest {
   system: string;
   prompt: string;
-  repairOf?: {
-    candidate: unknown;
-    issues: JudgeUncertaintyValidationIssue[];
-  };
 }
 
 export type JudgeUncertaintyCandidateGenerator =
@@ -439,6 +444,8 @@ function typedPrimitiveNeedsBackendReceipt(input: {
     case "time_passage":
       return hasAllowedCapability(frame, "time_advance")
         && gmRead.actionInterpretation.timePassageNeed != null;
+    case "scene_local_beat":
+      return hasAllowedCapability(frame, "scene_beat_record");
     default:
       return false;
   }
@@ -577,6 +584,11 @@ function branchIssues(input: {
         path: "oracleAdmission.evidenceRefs",
         message: "Oracle evidenceRefs must be included in top-level evidenceRefs",
       }));
+      issues.push(...oracleOutcomeMeaningIssues(judgment.oracleAdmission.outcomeMeanings).map((issue) => ({
+        code: "forbidden_claim" as const,
+        path: issue.path,
+        message: issue.message,
+      })));
     }
   } else {
     if (judgment.oracleAdmission) {
@@ -750,6 +762,17 @@ function branchIssues(input: {
     );
   }
   if (
+    gmRead.actionInterpretation.interactionKind === "scene_local_beat"
+    && hasAllowedCapability(frame, "scene_beat_record")
+    && !["impossible", "underspecified"].includes(judgment.physicalPossibility)
+    && (judgment.nextStep !== "action_plan" || judgment.checkNeed !== "backend_action_plan_needed")
+  ) {
+    add(
+      "checkNeed",
+      "Current-scene local beats require backend_action_plan_needed so Stage 4 can issue a non-mutating scene beat receipt before narration.",
+    );
+  }
+  if (
     judgment.checkNeed === "backend_action_plan_needed"
     && judgment.noRollReason?.code !== "backend_receipt_required"
   ) {
@@ -861,8 +884,10 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "This layer decides physical possibility, check need, difficulty, stakes, and optional Oracle admission only.",
     "It must not narrate, mutate state, call tools, create checklist steps, emit receipts, roll dice, calculate chance, or choose an Oracle result.",
     "Accepted GM Read is the typed player-intent and interaction contract for this layer. Use it with SceneFrame capabilities and refs to choose admission.",
+    "Keep possibilityRationale, checkRationale, noRollReason.explanation, difficulty.basis, and Oracle outcome meanings concise; each field must fit the final <=500 character packet contract.",
     "GM Read is interpretation context only. gm-read uncertain is a signal, not permission to roll.",
     "Use nextStep=oracle_roll only for true visible uncertainty that needs a random outcome before downstream consequences.",
+    "Oracle outcome meanings may describe only the immediate visible attempt quality or visible reaction; they must not claim movement, arrival, discovery, item custody, condition changes, world facts, private knowledge, actor creation, or broad no-change.",
     "Use nextStep=action_plan for backend-owned consequences; do not include effect kinds, tool names, checklist steps, or payloads.",
     "When GM Read path is procedural and SceneFrame shows allowed receipt-required backend capabilities, do not use settle_no_roll; admit backend_action_plan_needed with noRollReason.code=backend_receipt_required unless a true Oracle roll or combat boundary is required.",
     "When GM Read actionInterpretation.interactionKind is visible_actor_dialogue, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible speaker response receipt.",
@@ -875,7 +900,9 @@ export function buildJudgeUncertaintySystemPrompt(): string {
     "When GM Read actionInterpretation.interactionKind is minor_poi_create and the SceneFrame exposes minor_poi_create plus currentScenePlaceHandleSurface for the requested kind, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the visible current-scene place-handle receipt. Do not call Oracle for ordinary public current-scene handle creation.",
     "If minor_poi_create is missing from SceneFrame.capabilities, currentScenePlaceHandleSurface is absent, or the requested placeKind is not allowed, block or ask clarification; do not admit action_plan.",
     "When GM Read actionInterpretation.interactionKind is current_scene_observation with localObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the local observation receipt. Do not call Oracle for targeted visible SceneFrame surface observations or bounded no-match over enumerated current-scene surfaces.",
+    "When the observation asks whether harmless visible surface details matter as a clue, still use backend_action_plan_needed for the local observation receipt; do not call Oracle to create discovery/finds/hidden-meaning outcome text.",
     "When GM Read actionInterpretation.interactionKind is device_status_observation with deviceObservationNeed, use backend_action_plan_needed with noRollReason.code=backend_receipt_required; Stage 4 owns the device surface observation receipt. Do not call Oracle for checking modeled public device surface indicators or bounded no-surface results.",
+    "When GM Read actionInterpretation.interactionKind is scene_local_beat, use backend_action_plan_needed with noRollReason.code=backend_receipt_required for possible current-scene low-stakes interactions; Stage 4 owns a non-mutating scene beat receipt.",
     "Every actorRefs, targetRefs, evidenceRefs, difficulty evidence ref, noRollReason evidence ref, and oracleAdmission ref must be copied exactly from SceneFrame.citableRefs.",
     "For non-Oracle branches, oracleAdmission and difficulty must be null and noRollReason must be present.",
     "For Oracle branches, include difficulty plus oracleAdmission with strong_hit, weak_hit, and miss meanings; do not include noRollReason.",
@@ -891,27 +918,6 @@ export function buildJudgeUncertaintyPrompt(input: {
   return [
     "Judge the accepted GM Read against this authoritative SceneFrame.",
     "Return judge-uncertainty.v1 JSON. Do not add extra fields.",
-    "Authoritative SceneFrame:",
-    JSON.stringify(promptFrame(input.frame), null, 2),
-    "Accepted GM Read:",
-    JSON.stringify(input.gmRead, null, 2),
-  ].join("\n\n");
-}
-
-function buildJudgeUncertaintyRepairPrompt(input: {
-  frame: AuthoritativeSceneFrame;
-  gmRead: GmRead;
-  candidate: unknown;
-  issues: JudgeUncertaintyValidationIssue[];
-}): string {
-  return [
-    "Repair the Judge/Uncertainty candidate so it satisfies judge-uncertainty.v1.",
-    "Do not add tool, checklist, mutation, receipt, narration, roll, chance, Oracle result, or state-delta fields.",
-    "Use only refs from SceneFrame.citableRefs.",
-    "Validation issues:",
-    JSON.stringify(input.issues, null, 2),
-    "Original candidate:",
-    JSON.stringify(input.candidate, null, 2),
     "Authoritative SceneFrame:",
     JSON.stringify(promptFrame(input.frame), null, 2),
     "Accepted GM Read:",
@@ -1007,44 +1013,8 @@ export async function runCleanJudgeUncertainty(input: {
     };
   }
 
-  try {
-    const repairCandidate = await generateCandidate({
-      system,
-      prompt: buildJudgeUncertaintyRepairPrompt({
-        frame: input.frame,
-        gmRead: input.gmRead,
-        candidate: firstCandidateForValidation,
-        issues: firstValidation.issues,
-      }),
-      repairOf: {
-        candidate: firstCandidateForValidation,
-        issues: firstValidation.issues,
-      },
-    });
-    const repairCandidateForValidation = normalizeNullableBranchFields(repairCandidate);
-    const repairValidation = validateJudgeUncertaintyCandidate({
-      frame: input.frame,
-      gmRead: input.gmRead,
-      candidate: repairCandidateForValidation,
-    });
-    if (repairValidation.status === "accepted") {
-      return {
-        status: "accepted",
-        judgment: repairValidation.judgment,
-        issues: [],
-        repairAttempted: true,
-      };
-    }
-    throw new CleanJudgeUncertaintyValidationError(
-      "Clean Judge/Uncertainty validation failed after repair.",
-      [...firstValidation.issues, ...repairValidation.issues],
-    );
-  } catch (error) {
-    if (error instanceof CleanJudgeUncertaintyValidationError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw new CleanJudgeUncertaintyGenerationError(
-      `Clean Judge/Uncertainty repair generation failed: ${message.slice(0, 300)}`,
-      error,
-    );
-  }
+  throw new CleanJudgeUncertaintyValidationError(
+    `Clean Judge/Uncertainty validation failed. ${judgeUncertaintyIssueSummary(firstValidation.issues)}`,
+    firstValidation.issues,
+  );
 }

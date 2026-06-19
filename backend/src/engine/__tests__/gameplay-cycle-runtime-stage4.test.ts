@@ -295,6 +295,17 @@ function checklistForKind(
             },
           }
           : {}),
+        ...(kind === "scene_beat_record"
+          ? {
+            sceneBeatPlan: {
+              actorRef: "Player" as const,
+              beatKind: "local_interaction" as const,
+              requestedBeatText: "Nod to the market crowd without leaving",
+              anchorRef: "Market",
+              persistenceScope: "turn_event_only" as const,
+            },
+          }
+          : {}),
         ...(kind === "support_actor_create"
           ? {
             supportActorPlan: {
@@ -356,8 +367,10 @@ function checklistForKind(
 function conditionChecklist(input: {
   frame: AuthoritativeSceneFrame;
   operation?: "apply" | "clear";
-  conditionKey?: "kneeling" | "crouched" | "prone" | "braced";
+  conditionKey?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>["conditionKey"];
+  targetKind?: NonNullable<GmActionChecklist["steps"][number]["intended"]["localConditionPlan"]>["targetKind"];
   targetRef?: string | null;
+  requestedPostureText?: string;
   replacementPolicy?: "replace_same_condition_group" | "no_replacement";
   dependsOnStepIds?: GmActionChecklist["steps"][number]["dependsOnStepIds"];
   dependencyBindings?: GmActionChecklist["steps"][number]["dependencyBindings"];
@@ -376,9 +389,10 @@ function conditionChecklist(input: {
           actorRef: "Player",
           operation: input.operation ?? "apply",
           conditionKey: input.conditionKey ?? "kneeling",
+          requestedPostureText: input.requestedPostureText,
           conditionScope: "current_scene",
           anchorRef: "Market",
-          targetKind: "current_scene",
+          targetKind: input.targetKind ?? "current_scene",
           targetRef: input.targetRef ?? "Market",
           replacementPolicy: input.replacementPolicy ?? (input.operation === "clear" ? "no_replacement" : "replace_same_condition_group"),
         },
@@ -1087,6 +1101,65 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(sceneFrame.citableRefs).not.toContain("Sibling Scene Broker");
   });
 
+  it("keeps long recent local event summaries inside the authoritative frame text bound", async () => {
+    const now = Date.now();
+    const longSummary = `Bazaar clerks repeated a long public handover note. ${"Public ledger detail. ".repeat(40)}`;
+    exec(
+      `INSERT INTO location_recent_events (
+        id,
+        campaign_id,
+        location_id,
+        event_type,
+        summary,
+        visibility,
+        tick,
+        importance,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      "recent-long-public-note",
+      CAMPAIGN_ID,
+      "loc-market",
+      "public_note",
+      longSummary,
+      "player_perceivable",
+      1,
+      1,
+      now,
+    );
+
+    const sceneFrame = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-long-recent-event",
+      playerAction: {
+        submitted: "I look around.",
+        normalized: "I look around.",
+        source: "typed",
+      },
+      base: {
+        tick: 1,
+        worldVersion: 0,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: tempRoot,
+          capturedAt: now,
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+      idempotencyKey: "long-recent-event-clean-frame",
+    });
+
+    const fact = sceneFrame.scene.recentLocalFacts.find((entry) => entry.factId === "recent-long-public-note");
+    expect(fact?.summary.length).toBeLessThanOrEqual(500);
+    expect(fact?.summary).toContain("Bazaar clerks repeated a long public handover note.");
+    expect(fact?.summary.endsWith("...")).toBe(true);
+  });
+
   it("exposes exact current-scene NPCs after the player moves into a sublocation", async () => {
     const now = Date.now();
     exec(
@@ -1776,6 +1849,159 @@ describe("clean Stage 4 executor DB contracts", () => {
       equippedItemRefs: [],
       signatureItems: [],
     });
+  });
+
+  it("executes a maintained item-readiness condition before a separate item transfer with refreshed frame state", async () => {
+    insertItem({
+      id: "item-courier-satchel",
+      name: "Courier satchel",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "equipped",
+      equippedSlot: "equipped",
+      tags: ["starting-loadout", "equipped"],
+    });
+    insertItem({
+      id: "item-message-tube",
+      name: "Message Tube",
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "equipped",
+      equippedSlot: "equipped",
+      tags: ["starting-loadout", "equipped"],
+    });
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...itemTransferFrame(),
+      frameId: "frame-stage4-condition-then-drop",
+      turnId: "clean-turn-stage4-condition-then-drop",
+      playerAction: "I set the Courier satchel down while keeping the Message Tube in my hand.",
+      actors: [],
+      targets: [],
+      inventory: [
+        {
+          ref: "Courier satchel",
+          label: "Courier satchel",
+          equipState: "equipped",
+          tags: ["starting-loadout", "equipped"],
+        },
+        {
+          ref: "Message Tube",
+          label: "Message Tube",
+          equipState: "equipped",
+          tags: ["starting-loadout", "equipped"],
+        },
+      ],
+      capabilities: [
+        ...itemTransferFrame().capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+    };
+    const conditionStep = conditionChecklist({
+      frame: inputFrame,
+      conditionKey: "gripping_held_item",
+      targetKind: "inventory_item_readiness",
+      targetRef: "Message Tube",
+      requestedPostureText: "keeping the Message Tube in my hand",
+    }).steps[0]!;
+    const itemBase = checklistForKind("item_transfer", inputFrame);
+    const itemStep = itemBase.steps[0]!;
+    const compoundChecklist: GmActionChecklist = {
+      ...itemBase,
+      turnIntent: {
+        playerIntent: "Set Courier satchel down while keeping Message Tube in hand.",
+        admittedConsequenceNeed: "The maintained item-readiness condition must refresh SceneFrame before the separate item transfer.",
+      },
+      steps: [
+        {
+          ...conditionStep,
+          targetRefs: ["Message Tube", "Market"],
+          evidenceRefs: ["Player", "Message Tube", "Market"],
+          expectedVisibleEffect: {
+            summary: "Accepted Player item-readiness condition only.",
+            visibleRefs: ["Player", "Message Tube", "Market"],
+          },
+        },
+        {
+          ...itemStep,
+          stepId: "step-2",
+          dependsOnStepIds: ["step-1"],
+          targetRefs: ["Courier satchel", "Market"],
+          evidenceRefs: ["Player", "Courier satchel", "Market"],
+          intended: {
+            kind: "item_transfer",
+            stateOrEvidence: "state",
+            requiredCapabilityId: "item_transfer",
+            summary: "Stage 4 must move Courier satchel from Player inventory to the current scene after the refreshed condition frame.",
+            itemTransferPlan: {
+              actorRef: "Player",
+              operation: "drop_in_current_scene",
+              itemRef: "Courier satchel",
+              sourceKind: "player_inventory",
+              targetKind: "current_scene",
+              targetRef: "Market",
+              targetEquipState: "carried",
+              targetEquippedSlot: null,
+              anchorRef: "Market",
+            },
+          },
+          expectedVisibleEffect: {
+            summary: "Accepted item transfer receipt only.",
+            visibleRefs: ["Player", "Courier satchel", "Market"],
+          },
+        },
+      ],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: compoundChecklist,
+      refreshFrameAfterReceipt: async ({ receipt }) => buildAuthoritativeSceneFrame(refreshedTurnInput({
+        receipt,
+        playerAction: inputFrame.playerAction,
+      })),
+    });
+
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["condition_set", "accepted"],
+      ["item_transfer", "accepted"],
+    ]);
+    expect(result.execution?.frameChain).toEqual([
+      expect.objectContaining({
+        source: "initial",
+        base: { tick: 0, worldVersion: 0, worldTimeMinutes: 0 },
+      }),
+      expect.objectContaining({
+        source: "post_dependency_scene_frame",
+        base: { tick: 0, worldVersion: 1, worldTimeMinutes: 0 },
+      }),
+    ]);
+    expect(result.execution?.receipts[1]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 2, worldTimeMinutes: 0, mutationApplied: true },
+      publicResult: {
+        itemTransfer: {
+          resultKind: "dropped_in_scene",
+          itemLabel: "Courier satchel",
+        },
+      },
+    });
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-courier-satchel")).toEqual({
+        ownerId: null,
+        locationId: "loc-market",
+        equipState: "carried",
+        equippedSlot: null,
+      });
+    expect(getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState FROM items WHERE id = ?")
+      .get("item-message-tube")).toEqual({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+      });
   });
 
   it("equips and unequips a Player inventory item through clean item_transfer authority", async () => {
@@ -2600,6 +2826,89 @@ describe("clean Stage 4 executor DB contracts", () => {
     });
   });
 
+  it("preserves concrete item-readiness posture text in condition receipts and refreshed frames", async () => {
+    insertItem({
+      id: "item-courier-satchel-condition",
+      name: "Courier satchel",
+      ownerId: "player-1",
+      equipState: "carried",
+    });
+    const postureText = "hold Courier satchel high against chest above water";
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      turnId: "clean-turn-stage4-condition-item-readiness",
+      playerAction: "I hold the Courier satchel high against my chest above the water.",
+      inventory: [{ ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "condition_set" as const, evidenceAuthority: "receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Courier satchel"],
+    };
+
+    const applied = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: conditionChecklist({
+        frame: inputFrame,
+        conditionKey: "gripping_held_item",
+        targetKind: "inventory_item_readiness",
+        targetRef: "Courier satchel",
+        requestedPostureText: postureText,
+      }),
+    });
+
+    expect(applied.execution?.receipts[0]).toMatchObject({
+      capabilityId: "condition_set",
+      status: "accepted",
+      publicResult: {
+        condition: {
+          resultKind: "applied",
+          conditionKey: "gripping_held_item",
+          conditionLabel: "gripping held item",
+          requestedPostureText: postureText,
+          targetKind: "inventory_item_readiness",
+          targetLabel: "Courier satchel",
+        },
+      },
+    });
+    expect(applied.publicEvents[0]).toMatchObject({
+      type: "state_update",
+      data: {
+        conditionKey: "gripping_held_item",
+        requestedPostureText: postureText,
+        targetLabel: "Courier satchel",
+      },
+    });
+
+    const refreshed = await buildAuthoritativeSceneFrame({
+      version: "gameplay-runtime.turn-input.v1",
+      route: "/api/chat/action",
+      campaignId: CAMPAIGN_ID,
+      turnId: "clean-turn-stage4-condition-item-readiness-next",
+      idempotencyKey: "next-frame-condition-item-readiness-proof",
+      playerAction: {
+        submitted: "I keep the satchel high.",
+        normalized: "I keep the satchel high.",
+        source: "typed",
+      },
+      base: {
+        tick: 0,
+        worldVersion: 1,
+        worldTimeMinutes: 0,
+        chatHistoryLengthBeforeTurn: 0,
+        preTurnSnapshot: {
+          bundleDir: path.join(tempRoot, "snapshot-condition-item-readiness-next"),
+          capturedAt: Date.now(),
+        },
+      },
+      providers: {
+        judge: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+        storyteller: { id: "test", model: "test-model", baseUrl: "https://example.invalid/v1" },
+      },
+    });
+    expect(refreshed.player.visibleStatus.conditions).toContain(postureText);
+  });
+
   it("accepts observation and route-options receipts without mutating world clock", async () => {
     const inputFrame = {
       ...frame(),
@@ -2672,6 +2981,34 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
   });
 
+  it("bounds observe_visible receipt summary before typed receipt validation", async () => {
+    const longInventory = Array.from({ length: 12 }, (_, index) => ({
+      ref: `long-item-${index}`,
+      label: `Municipal Stores assignment chit ${index} with an unusually long public-facing label`,
+      owner: "player" as const,
+      equipState: "carried" as const,
+      tags: [],
+    }));
+    const inputFrame = {
+      ...frame(),
+      inventory: longInventory,
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "observe_visible" as const, evidenceAuthority: "observation_only" as const, allowed: true },
+      ],
+    };
+
+    const observation = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: checklistForKind("observe_visible", inputFrame),
+    });
+
+    const summary = observation.execution?.receipts[0]?.publicResult.summary ?? "";
+    expect(observation.execution?.receipts[0]?.capabilityId).toBe("observe_visible");
+    expect(summary.length).toBeLessThanOrEqual(500);
+    expect(summary).toContain("Inventory includes");
+  });
+
   it("produces local_observation positive and bounded-no-match receipts without mutating world state", async () => {
     const inputFrame: AuthoritativeSceneFrame = {
       ...frame(),
@@ -2723,6 +3060,50 @@ describe("clean Stage 4 executor DB contracts", () => {
       "Current visible match: visible actor Guide.",
     );
 
+    const actorPropertyFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-actor-property",
+      turnId: "clean-turn-stage4-local-observation-actor-property",
+      playerAction: "I watch Guide for any obvious visible reaction to my open hands.",
+    };
+    const actorPropertyChecklist = checklistForKind("local_observation", actorPropertyFrame);
+    actorPropertyChecklist.steps[0] = {
+      ...actorPropertyChecklist.steps[0]!,
+      targetRefs: ["Guide", "Market"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      intended: {
+        ...actorPropertyChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "obvious visible reaction from Guide to Player's open hands",
+          targetRef: "Guide",
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const actorProperty = await runCleanStage4Execution({
+      frame: actorPropertyFrame,
+      checklist: actorPropertyChecklist,
+    });
+    expect(actorProperty.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No match for \"obvious visible reaction from Guide to Player's open hands\" stands out among visible actors.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "obvious visible reaction from Guide to Player's open hands",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["visible_actor"],
+          boundedNegative: true,
+        },
+      },
+    });
+
     const inventoryFrame: AuthoritativeSceneFrame = {
       ...inputFrame,
       frameId: "frame-stage4-local-observation-inventory-target",
@@ -2769,6 +3150,65 @@ describe("clean Stage 4 executor DB contracts", () => {
         },
       },
     });
+
+    const playerStatusFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-player-status",
+      turnId: "clean-turn-stage4-local-observation-player-status",
+      playerAction: "Check whether I have any obvious injury or strain.",
+      actors: [],
+      targets: [],
+      inventory: [],
+      player: {
+        ...inputFrame.player,
+        visibleStatus: { hp: 5, conditions: [] },
+      },
+      citableRefs: ["Player", "Market"],
+    };
+    const playerStatusChecklist = checklistForKind("local_observation", playerStatusFrame);
+    playerStatusChecklist.steps[0] = {
+      ...playerStatusChecklist.steps[0]!,
+      targetRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...playerStatusChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "obvious injury or strain on Player",
+          targetRef: "Player",
+          surfaceKinds: ["player_status"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const playerStatus = await runCleanStage4Execution({
+      frame: playerStatusFrame,
+      checklist: playerStatusChecklist,
+    });
+    expect(playerStatus.execution?.mutationApplied).toBe(false);
+    expect(playerStatus.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 0, worldTimeMinutes: 0, mutationApplied: false },
+      publicResult: {
+        summary: "No obvious injury or strain is visible on Mira Voss.",
+        localObservation: {
+          resultKind: "positive_match",
+          queryText: "obvious injury or strain on Player",
+          targetLabel: "Mira Voss",
+          matchedEntries: [expect.objectContaining({
+            surfaceKind: "player_status",
+            label: "Mira Voss",
+            detail: "no obvious injury or strain",
+          })],
+          searchedSurfaceKinds: ["player_status"],
+          boundedNegative: false,
+        },
+      },
+    });
+    expect(playerStatus.execution?.receipts[0]?.publicResult.summary).not.toMatch(/condition labels|braced|clarify|SceneFrame|worldVersion/iu);
 
     const routeLabels = [
       "North Hall",
@@ -2827,6 +3267,89 @@ describe("clean Stage 4 executor DB contracts", () => {
       listSurface.execution?.receipts[0]?.publicResult.localObservation?.matchedEntries
         .map((entry) => `${entry.surfaceKind}:${entry.label}`),
     ).toEqual(routeLabels.map((label) => `movement_option:${label}`));
+
+    const anchorOnlyFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-anchor-only-mixed",
+      turnId: "clean-turn-stage4-local-observation-anchor-only-mixed",
+      playerAction: "I look for who is openly present and what ordinary clutter or cover is close at hand.",
+      actors: [],
+      targets: [],
+      scene: {
+        currentLocation: { ref: "Market", label: "Market", description: "A public market." },
+        currentScene: { ref: "Market", label: "Market", description: "A public market." },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      citableRefs: ["Player", "Market"],
+    };
+    const anchorOnlyChecklist = checklistForKind("local_observation", anchorOnlyFrame);
+    anchorOnlyChecklist.steps[0] = {
+      ...anchorOnlyChecklist.steps[0]!,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...anchorOnlyChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "who is openly present and what ordinary clutter or cover is close at hand",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "current_scene"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const anchorOnly = await runCleanStage4Execution({
+      frame: anchorOnlyFrame,
+      checklist: anchorOnlyChecklist,
+    });
+    expect(anchorOnly.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "who is openly present and what ordinary clutter or cover is close at hand",
+          matchedEntries: [],
+          searchedSurfaceKinds: ["visible_actor", "current_scene"],
+          boundedNegative: true,
+        },
+      },
+    });
+    expect(anchorOnly.execution?.receipts[0]?.publicResult.summary).toBe(
+      "No match for \"who is openly present and what ordinary clutter or cover is close at hand\" stands out among visible actors and the current scene.",
+    );
+
+    const anchorOnlyWithoutNegativeFrame: AuthoritativeSceneFrame = {
+      ...anchorOnlyFrame,
+      frameId: "frame-stage4-local-observation-anchor-only-mixed-no-negative",
+      turnId: "clean-turn-stage4-local-observation-anchor-only-mixed-no-negative",
+    };
+    const anchorOnlyWithoutNegativeChecklist = checklistForKind("local_observation", anchorOnlyWithoutNegativeFrame);
+    anchorOnlyWithoutNegativeChecklist.steps[0] = {
+      ...anchorOnlyChecklist.steps[0]!,
+      intended: {
+        ...anchorOnlyChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          ...anchorOnlyChecklist.steps[0]!.intended.localObservationPlan!,
+          allowBoundedNegative: false,
+        },
+      },
+    };
+    const anchorOnlyWithoutNegative = await runCleanStage4Execution({
+      frame: anchorOnlyWithoutNegativeFrame,
+      checklist: anchorOnlyWithoutNegativeChecklist,
+    });
+    expect(anchorOnlyWithoutNegative.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "failed",
+      failure: {
+        kind: "insufficient_grounding",
+        hiddenMutationApplied: false,
+      },
+    });
 
     const placeHandleFrame: AuthoritativeSceneFrame = {
       ...inputFrame,
@@ -2925,9 +3448,100 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
     expect(noMatch.execution?.receipts[0]?.publicResult.summary).toBe(
-      "Current visible actors and visible targets show no match for \"Violet Astrolabe\".",
+      "No match for \"Violet Astrolabe\" stands out among visible actors and visible targets.",
     );
     expect(noMatch.execution?.receipts[0]?.publicResult.summary).not.toMatch(/SceneFrame|worldVersion/u);
+
+    const physicalProbeFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-physical-probe",
+      turnId: "clean-turn-stage4-local-observation-physical-probe",
+      playerAction: "I press my boot against a loose slab of rubble and check whether it shifts.",
+    };
+    const physicalProbeChecklist = checklistForKind("local_observation", physicalProbeFrame);
+    physicalProbeChecklist.steps[0] = {
+      ...physicalProbeChecklist.steps[0]!,
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      intended: {
+        ...physicalProbeChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether loose rubble shifts under light pressure",
+          targetRef: null,
+          surfaceKinds: ["current_scene"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const physicalProbe = await runCleanStage4Execution({
+      frame: physicalProbeFrame,
+      checklist: physicalProbeChecklist,
+    });
+    expect(physicalProbe.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No visible evidence answers \"whether loose rubble shifts under light pressure\" in the current scene.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "whether loose rubble shifts under light pressure",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["current_scene"],
+          boundedNegative: true,
+        },
+      },
+    });
+
+    const hiddenMeaningFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-hidden-meaning",
+      turnId: "clean-turn-stage4-local-observation-hidden-meaning",
+      playerAction: "I check whether visible wear on the Brass Tube reveals a hidden mechanism or useful clue.",
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Brass Tube"],
+    };
+    const hiddenMeaningChecklist = checklistForKind("local_observation", hiddenMeaningFrame);
+    hiddenMeaningChecklist.steps[0] = {
+      ...hiddenMeaningChecklist.steps[0]!,
+      targetRefs: ["Brass Tube", "Market"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      intended: {
+        ...hiddenMeaningChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether visible wear on Brass Tube reveals a hidden mechanism or useful clue",
+          targetRef: "Brass Tube",
+          surfaceKinds: ["inventory_item", "visible_fact"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const hiddenMeaning = await runCleanStage4Execution({
+      frame: hiddenMeaningFrame,
+      checklist: hiddenMeaningChecklist,
+    });
+    expect(hiddenMeaning.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No visible evidence answers \"whether visible wear on Brass Tube reveals a hidden mechanism or useful clue\" among inventory items and visible facts.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "whether visible wear on Brass Tube reveals a hidden mechanism or useful clue",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          boundedNegative: true,
+        },
+      },
+    });
+    expect(hiddenMeaning.execution?.receipts[0]?.publicResult.summary).not.toContain("No visible wear");
 
     const emptyVisibleActorsFrame: AuthoritativeSceneFrame = {
       ...inputFrame,
@@ -3204,6 +3818,71 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(refreshed.citableRefs).toContain("Local Vendor");
   });
 
+  it("renders support actor visible cue slots as natural player-facing prose", async () => {
+    const inputFrame = {
+      ...frame(),
+      playerAction: "I look for someone working nearby.",
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "support_actor_create" as const, evidenceAuthority: "terminal_receipt_required" as const, allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall"],
+    };
+    const baseChecklist = checklistForKind("support_actor_create", inputFrame);
+    const baseStep = baseChecklist.steps[0]!;
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: {
+        ...baseChecklist,
+        steps: [{
+          ...baseStep,
+          intended: {
+            ...baseStep.intended,
+            summary: "Stage 4 may materialize one ordinary temporary current-scene support actor with roleKind=laborer; requested role text: local laborer.",
+            supportActorPlan: {
+              actorRef: "Player",
+              roleKind: "laborer",
+              requestedRoleText: "local laborer",
+              anchorRef: "Market",
+              intendedUse: "presence_only",
+              reusePolicy: "reuse_matching_temporary_current_scene_or_create",
+            },
+          },
+        }],
+      },
+      generateSupportActorRequest: async () => ({
+        ...supportActorEffect("vendor"),
+        roleKind: "laborer",
+        roleLabel: "laborer",
+        publicPresentation: {
+          presentationMode: "visible_presence_only",
+          visibleCueProfile: {
+            placement: "near_public_fixture",
+            bearing: "standing_in_view",
+            detail: "plain_work_clothes",
+          },
+          voiceHint: null,
+        },
+        reason: "The player requested an ordinary local laborer.",
+        evidenceRefs: ["Player", "Market"],
+      }),
+    });
+
+    expect(result.status).toBe("executed");
+    const receipt = result.execution?.receipts[0];
+    const supportActor = receipt?.publicResult.supportActor;
+    expect(supportActor).toMatchObject({
+      actorLabel: "Local Laborer",
+      roleKind: "laborer",
+      publicSummary: "An ordinary local laborer stands nearby in public view at Market, wearing plain local work clothes.",
+      visibleCue: "A local laborer stands nearby in public view, wearing plain local work clothes.",
+    });
+    const publicPayload = JSON.stringify(receipt?.publicResult);
+    expect(publicPayload).not.toContain("public fixture");
+    expect(publicPayload).not.toContain("plain local clothes");
+  });
+
   it("builds support actor request prompts from typed plan without raw player action", async () => {
     const rawMarker = "RAW_STAGE4_SUPPORT_MARKER_NEVER_PROMPT";
     const inputFrame = {
@@ -3235,8 +3914,8 @@ describe("clean Stage 4 executor DB contracts", () => {
     expect(prompts[0]).not.toContain('"playerAction"');
   });
 
-  it("keeps support actor repair prompts on the typed plan contract", async () => {
-    const rawMarker = "RAW_STAGE4_SUPPORT_REPAIR_MARKER_NEVER_PROMPT";
+  it("rejects invalid support actor requests in one pass on the typed plan contract", async () => {
+    const rawMarker = "RAW_STAGE4_SUPPORT_MARKER_NEVER_PROMPT";
     const inputFrame = {
       ...frame(),
       playerAction: `I ask for a local vendor while saying ${rawMarker}.`,
@@ -3247,25 +3926,27 @@ describe("clean Stage 4 executor DB contracts", () => {
       citableRefs: ["Player", "Market", "North Hall"],
     };
     const prompts: string[] = [];
-    let callCount = 0;
 
     const result = await runCleanStage4Execution({
       frame: inputFrame,
       checklist: checklistForKind("support_actor_create", inputFrame),
       generateSupportActorRequest: async (request) => {
         prompts.push(request.prompt);
-        callCount += 1;
-        return callCount === 1
-          ? supportActorEffect("guide")
-          : supportActorEffect("vendor");
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
+        }
+        return supportActorEffect("guide");
       },
     });
 
     expect(result.status).toBe("executed");
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain("Support actor task card");
-    expect(prompts[1]).toContain('"supportActorPlan"');
-    expect(prompts[1]).toContain('"roleKind": "vendor"');
+    expect(result.execution?.failedStepIds).toEqual(["step-1"]);
+    expect(result.execution?.receipts[0]?.status).toBe("failed");
+    expect(JSON.stringify(result.execution?.receipts[0]?.failure)).toContain("roleKind");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Support actor task card");
+    expect(prompts[0]).toContain('"supportActorPlan"');
+    expect(prompts[0]).toContain('"roleKind": "vendor"');
     for (const prompt of prompts) {
       expect(prompt).not.toContain(rawMarker);
       expect(prompt).not.toContain('"playerAction"');
@@ -4059,10 +4740,146 @@ describe("clean Stage 4 executor DB contracts", () => {
     });
   });
 
-  it("accepts scene-beat receipts as non-mutating visible acknowledgement", async () => {
+  it("executes item-readiness condition then visible dialogue when the refreshed frame still exposes the held item", async () => {
+    const inputFrame: AuthoritativeSceneFrame = {
+      ...frame(),
+      playerAction: "I keep the message tube high and ask Dorin what the key is doing.",
+      actors: [{
+        ref: "Dorin",
+        label: "Relay-Tech Dorin",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      inventory: [{
+        ref: "Message Tube",
+        label: "Sealed lacquer message tube",
+        equipState: "equipped",
+        tags: [],
+      }],
+      capabilities: [
+        ...frame().capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "North Hall", "Dorin", "Message Tube"],
+    };
+    const first = conditionChecklist({
+      frame: inputFrame,
+      conditionKey: "gripping_held_item",
+      targetKind: "inventory_item_readiness",
+      targetRef: "Message Tube",
+      requestedPostureText: "keep the message tube high",
+    }).steps[0]!;
+    const dependentChecklist: GmActionChecklist = {
+      ...conditionChecklist({
+        frame: inputFrame,
+        conditionKey: "gripping_held_item",
+        targetKind: "inventory_item_readiness",
+        targetRef: "Message Tube",
+        requestedPostureText: "keep the message tube high",
+      }),
+      steps: [
+        first,
+        {
+          ...first,
+          stepId: "step-2",
+          purpose: "Record visible dialogue only after accepted Player item-readiness is still grounded in a refreshed SceneFrame.",
+          targetRefs: ["Dorin"],
+          evidenceRefs: ["Player", "Dorin", "Market", "Message Tube"],
+          intended: {
+            kind: "dialogue_record",
+            stateOrEvidence: "terminal_player_visible",
+            requiredCapabilityId: "dialogue_record",
+            summary: "Stage 4 may record dialogue only after a post-condition authoritative SceneFrame keeps the readied item with the Player.",
+            dialoguePlan: {
+              actorRef: "Player",
+              speakerSource: "existing_visible_actor",
+              speakerRef: "Dorin",
+              materializedSpeakerBindingId: null,
+              addresseeRef: "Player",
+              playerIntent: "Ask Relay-Tech Dorin what the telegraph key is doing",
+              responseScope: "visible_speaker_response_only",
+            },
+          },
+          dependsOnStepIds: ["step-1"],
+          dependencyBindings: [{
+            bindingId: "player_local_condition",
+            fromStepId: "step-1",
+            requiredCapabilityId: "condition_set",
+            requiredReceiptAuthority: "player_local_condition_receipt",
+            sourcePath: "publicResult.condition.conditionKey",
+            resolveIn: "post_dependency_scene_frame",
+            requiredFramePresence: "player_visibleStatus.conditions",
+          }],
+          expectedVisibleEffect: {
+            summary: "If the Player item-readiness condition is accepted and refreshed into SceneFrame inventory grounding, one visible Dorin response may be recorded.",
+            visibleRefs: ["Player", "Dorin", "Message Tube"],
+          },
+        },
+      ],
+    };
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: dependentChecklist,
+      refreshFrameAfterReceipt: async ({ receipt }) => ({
+        ...inputFrame,
+        frameId: "frame-post-item-readiness-condition",
+        base: {
+          tick: receipt.result.tick,
+          worldVersion: receipt.result.worldVersion,
+          worldTimeMinutes: receipt.result.worldTimeMinutes,
+        },
+        player: {
+          ...inputFrame.player,
+          visibleStatus: {
+            ...inputFrame.player.visibleStatus,
+            conditions: [],
+          },
+        },
+      }),
+      generateDialogueRequest: async () => ({
+        kind: "dialogue_record",
+        authorityKind: "existing_visible_actor",
+        speakerRef: "Dorin",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answer",
+        response: {
+          kind: "speech",
+          quotedSpeech: "The key is tapping names in batches.",
+          summary: "Dorin answers from the visible scene.",
+        },
+        languageBasis: {
+          responseLanguage: "match_player_action",
+          source: "turn_language_profile",
+        },
+        evidenceRefs: ["Player", "Dorin", "Market"],
+        stateEffects: {
+          appliesState: false,
+        },
+      }),
+    });
+
+    expect(result.execution?.receipts.map((receipt) => [receipt.capabilityId, receipt.status])).toEqual([
+      ["condition_set", "accepted"],
+      ["dialogue_record", "accepted"],
+    ]);
+    expect(result.execution?.receipts[1]).toMatchObject({
+      frameId: "frame-post-item-readiness-condition",
+      base: { worldVersion: 1 },
+      publicResult: {
+        dialogue: {
+          speakerLabel: "Relay-Tech Dorin",
+          quotedSpeech: "The key is tapping names in batches.",
+        },
+      },
+    });
+  });
+
+  it("accepts ordinary improvised-shield scene beats as non-mutating visible acknowledgement", async () => {
     const inputFrame = {
       ...frame(),
-      playerAction: "I nod to the market crowd without leaving.",
+      playerAction: "If there is an ordinary stool or chair within easy reach, I grab it and keep it ready as an improvised shield.",
       actors: [{
         ref: "Guide",
         label: "Guide",
@@ -4075,10 +4892,19 @@ describe("clean Stage 4 executor DB contracts", () => {
       ],
       citableRefs: ["Player", "Market", "North Hall", "Guide"],
     };
+    const sceneBeatChecklist = checklistForKind("scene_beat_record", inputFrame);
+    sceneBeatChecklist.steps[0]!.purpose = "Resolve immediate ordinary scene-prop beat.";
+    sceneBeatChecklist.steps[0]!.intended.sceneBeatPlan = {
+      actorRef: "Player",
+      beatKind: "ordinary_prop_readiness",
+      requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+      anchorRef: "Market",
+      persistenceScope: "turn_event_only",
+    };
 
     const result = await runCleanStage4Execution({
       frame: inputFrame,
-      checklist: checklistForKind("scene_beat_record", inputFrame),
+      checklist: sceneBeatChecklist,
     });
 
     expect(result.status).toBe("executed");
@@ -4094,7 +4920,9 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
       publicResult: {
         sceneBeat: {
-          beatKind: "generic_scene_beat",
+          beatKind: "ordinary_prop_readiness",
+          requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+          summary: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat at Market.",
         },
       },
     });

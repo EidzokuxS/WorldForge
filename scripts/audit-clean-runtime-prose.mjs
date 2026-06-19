@@ -39,7 +39,7 @@ const patterns = {
   flatDeviceSurface: /^[\p{L}\p{N}' -]+(?:'s)? visible surface shows no requested [^.]+\.$/iu,
   bareDialogueQuote: /^[\p{L}\p{N}' -]+ says:\s*"[^"]+[.!?]?"\.?$/iu,
   directSceneDigest: /^You are at [^.]+\. (?:[\p{L}\p{N}' ,&-]+ (?:is|are) here\. )?(?:You have [^.]+\. )?(?:[\p{L}\p{N}' ,&-]+ (?:is|are) visible\. )?(?:Visible routes lead to|A visible route leads to)/iu,
-  directSceneImpliedAction: /\b(?:waits? in|stands? in|rides? at your side|at hand|set where it can be read|useful things? in reach)\b/iu,
+  directSceneImpliedAction: /\b(?:waits? in|stands? in (?!view\b)|rides? at your side|at hand|set where it can be read|useful things? in reach)\b/iu,
   stockRouteOptions: /\bFrom here,\s+the visible ways? leads? to\b[\s\S]*\b(?:Each takes|It takes)\b/iu,
   stockMovementSummary: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? of travel brings you to [^.]+\.$|^(?:(?:after|in) (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?, [^.]+ becomes (?:your|the) current place|[^.]+ becomes (?:your|the) current place after (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes?)\.$/iu,
   stockElapsedSummary: /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) minutes? pass(?: at| in)?(?: [^.]+)?\.$/iu,
@@ -71,6 +71,21 @@ function topCounts(map, limit) {
     .filter(([, count]) => count > 1)
     .sort((left, right) => right[1] - left[1])
     .slice(0, limit);
+}
+
+function directSceneImpliedActionSupportedByPlayerAction(row) {
+  const text = row.text;
+  const action = String(row.action ?? "");
+  if (/^You stand in [^.!?]+[.!?,]/iu.test(text)) {
+    return true;
+  }
+  if (/\bstands? in (?!view\b)/iu.test(text) && /\bstand(?:s|ing)?\b/iu.test(action)) {
+    return true;
+  }
+  if (/\bwaits? in\b/iu.test(text) && /\bwait(?:s|ing)?\b/iu.test(action)) {
+    return true;
+  }
+  return false;
 }
 
 const rows = [];
@@ -111,6 +126,9 @@ for (const row of rows) {
   }
 
   for (const [key, pattern] of Object.entries(patterns)) {
+    if (key === "directSceneImpliedAction" && directSceneImpliedActionSupportedByPlayerAction(row)) {
+      continue;
+    }
     if (pattern.test(row.text)) {
       hits[key] += 1;
       if (examples[key].length < 5) {

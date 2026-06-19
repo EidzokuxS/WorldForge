@@ -354,6 +354,7 @@ export async function* processCleanGameplayTurnFromInput(
     frame,
     provider: options.judgeProvider,
     generateCandidate: options.gmReadCandidateGenerator,
+    recentConversation: getChatHistory(turn.campaignId).slice(-6),
   });
   let judgeUncertainty: JudgeUncertaintyRunResult | undefined;
   let oracleSettlement: OracleSettlementRunResult | undefined;

@@ -7,6 +7,97 @@ function normalizedContractRef(value: string): string {
   return value.trim().toLowerCase();
 }
 
+const BACKEND_REF_PREFIXES = new Set([
+  "actor",
+  "campaign",
+  "edge",
+  "fact",
+  "frame",
+  "item",
+  "knowledge",
+  "loc",
+  "location",
+  "npc",
+  "packet",
+  "player",
+  "route",
+  "scene",
+  "turn",
+  "world",
+]);
+
+function isAsciiAlphaNumeric(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isHexToken(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    const isHex =
+      (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 70)
+      || (code >= 97 && code <= 102);
+    if (!isHex) return false;
+  }
+  return value.length > 0;
+}
+
+function tokenishValues(value: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  const flush = (): void => {
+    if (current.length > 0) tokens.push(current);
+    current = "";
+  };
+
+  for (const char of value) {
+    if (isAsciiAlphaNumeric(char) || char === ":" || char === "_" || char === "-") {
+      current += char;
+    } else {
+      flush();
+    }
+  }
+  flush();
+  return tokens;
+}
+
+function isUuidLikeBackendIdToken(token: string): boolean {
+  const parts = token.split("-");
+  return parts.length === 5
+    && parts[0]?.length === 8
+    && parts[1]?.length === 4
+    && parts[2]?.length === 4
+    && parts[3]?.length === 4
+    && parts[4]?.length === 12
+    && parts.every(isHexToken);
+}
+
+function isBackendRefToken(token: string): boolean {
+  const lower = token.toLowerCase();
+  const colonIndex = lower.indexOf(":");
+  if (colonIndex > 0 && BACKEND_REF_PREFIXES.has(lower.slice(0, colonIndex)) && colonIndex < lower.length - 1) {
+    return true;
+  }
+
+  if (lower.startsWith("pdto_")) return true;
+
+  const underscoreIndex = lower.indexOf("_");
+  if (underscoreIndex > 0 && BACKEND_REF_PREFIXES.has(lower.slice(0, underscoreIndex)) && underscoreIndex < lower.length - 1) {
+    return true;
+  }
+
+  return false;
+}
+
+function containsUuidLikeBackendId(value: string): boolean {
+  return tokenishValues(value).some(isUuidLikeBackendIdToken);
+}
+
+function containsBackendRefToken(value: string): boolean {
+  return tokenishValues(value).some(isBackendRefToken);
+}
+
 export const gameplayRuntimeProviderSummarySchema = z.object({
   id: shortText,
   model: shortText.nullable(),
@@ -462,6 +553,7 @@ function validateItemTransferOperationContract(
 }
 
 export const cleanLocalObservationSurfaceKindSchema = z.enum([
+  "player_status",
   "current_scene",
   "current_location",
   "visible_actor",
@@ -494,6 +586,33 @@ export const cleanTimeAdvanceReasonKindSchema = z.enum([
   "wait",
   "short_rest",
 ]);
+
+export const cleanSceneBeatKindSchema = z.enum([
+  "gesture",
+  "posture",
+  "local_interaction",
+  "ordinary_prop_availability",
+  "ordinary_prop_readiness",
+  "generic_scene_beat",
+]);
+
+export const gmReadLocalObservationNeedSchema = z.object({
+  actorRef: z.literal("Player"),
+  mode: cleanLocalObservationModeSchema,
+  queryText: shortText,
+  targetRef: modelSafeRef.nullable(),
+  surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
+  allowBoundedNegative: z.boolean(),
+  evidenceRefs: z.array(modelSafeRef).min(1).max(12),
+}).strict().superRefine((need, ctx) => {
+  if (need.mode === "list_surface" && need.targetRef !== null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["targetRef"],
+      message: "list_surface local observations must use targetRef=null.",
+    });
+  }
+});
 
 export const gmReadActionInterpretationSchema = z.object({
   summary: shortText,
@@ -576,15 +695,14 @@ export const gmReadActionInterpretationSchema = z.object({
     requestedDurationText: shortText,
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
-  localObservationNeed: z.object({
+  sceneBeatNeed: z.object({
     actorRef: z.literal("Player"),
-    mode: cleanLocalObservationModeSchema,
-    queryText: shortText,
-    targetRef: modelSafeRef.nullable(),
-    surfaceKinds: z.array(cleanLocalObservationSurfaceKindSchema).min(1).max(7),
-    allowBoundedNegative: z.boolean(),
+    beatKind: cleanSceneBeatKindSchema,
+    requestedBeatText: shortText,
+    anchorRef: modelSafeRef,
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
+  localObservationNeed: gmReadLocalObservationNeedSchema.nullable().optional(),
   deviceObservationNeed: z.object({
     actorRef: z.literal("Player"),
     deviceRef: modelSafeRef,
@@ -594,7 +712,23 @@ export const gmReadActionInterpretationSchema = z.object({
     allowNoSurface: z.boolean(),
     evidenceRefs: z.array(modelSafeRef).min(1).max(12),
   }).strict().nullable().optional(),
-}).strict();
+}).strict().superRefine((interpretation, ctx) => {
+  const hasSceneBeatNeed = interpretation.sceneBeatNeed !== undefined && interpretation.sceneBeatNeed !== null;
+  if (interpretation.interactionKind === "scene_local_beat" && !hasSceneBeatNeed) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sceneBeatNeed"],
+      message: "scene_local_beat requires a typed sceneBeatNeed.",
+    });
+  }
+  if (interpretation.interactionKind !== "scene_local_beat" && hasSceneBeatNeed) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sceneBeatNeed"],
+      message: "sceneBeatNeed is allowed only for scene_local_beat.",
+    });
+  }
+});
 
 export const gmReadUncertaintySchema = z.object({
   present: z.boolean(),
@@ -894,6 +1028,7 @@ export const gmActionChecklistDependencyBindingSchema = z.discriminatedUnion("bi
 ]);
 
 const gmActionChecklistTypedPlanRequirements = [
+  { kind: "scene_beat_record", planKey: "sceneBeatPlan" },
   { kind: "time_advance", planKey: "timeAdvancePlan" },
   { kind: "support_actor_create", planKey: "supportActorPlan" },
   { kind: "dialogue_record", planKey: "dialoguePlan" },
@@ -915,10 +1050,18 @@ export const gmActionChecklistStepSchema = z.object({
     stateOrEvidence: gmActionChecklistStateOrEvidenceSchema,
     requiredCapabilityId: gameplayRuntimeCapabilityIdSchema,
     summary: shortText,
+    sceneBeatPlan: z.object({
+      actorRef: z.literal("Player"),
+      beatKind: cleanSceneBeatKindSchema,
+      requestedBeatText: shortText,
+      anchorRef: modelSafeRef,
+      persistenceScope: z.literal("turn_event_only"),
+    }).strict().nullable().optional(),
     localConditionPlan: z.object({
       actorRef: z.literal("Player"),
       operation: z.enum(["apply", "clear"]),
       conditionKey: cleanLocalConditionKeySchema,
+      requestedPostureText: shortText.optional(),
       conditionScope: z.literal("current_scene"),
       anchorRef: modelSafeRef,
       targetKind: cleanLocalConditionTargetKindSchema,
@@ -1270,6 +1413,7 @@ export const cleanStage4LocalConditionSetEffectSchema = z.object({
   anchorRef: modelSafeRef,
   operation: z.enum(["apply", "clear"]),
   conditionKey: cleanLocalConditionKeySchema,
+  requestedPostureText: shortText.optional(),
   target: z.object({
     targetKind: cleanLocalConditionTargetKindSchema,
     targetRef: modelSafeRef.nullable(),
@@ -1305,6 +1449,7 @@ export const cleanStage4PlayerLocalConditionResultSchema = z.object({
   operation: z.enum(["apply", "clear"]),
   conditionKey: cleanLocalConditionKeySchema,
   conditionLabel: shortText,
+  requestedPostureText: shortText.optional(),
   conditionScope: z.literal("current_scene"),
   anchorSceneLabel: shortText,
   anchorLocationLabel: shortText,
@@ -1595,7 +1740,7 @@ export const cleanStage4RequestSchema = z.object({
       actorRef: z.literal("Player"),
       sceneRef: modelSafeRef,
       targetRefs: z.array(modelSafeRef).max(8),
-      beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
+      beatKind: cleanSceneBeatKindSchema,
       evidenceRefs: z.array(modelSafeRef).min(1).max(12),
     }).strict(),
     cleanStage4DialogueRequestEffectSchema,
@@ -1766,8 +1911,9 @@ export const cleanStage4ReceiptSchema = z.object({
     deviceSurfaceObservation: cleanStage4DeviceSurfaceObservationResultSchema.nullable().optional(),
     sceneBeat: z.object({
       type: z.literal("scene_beat"),
-      beatKind: z.enum(["gesture", "posture", "local_interaction", "generic_scene_beat"]),
+      beatKind: cleanSceneBeatKindSchema,
       summary: shortText,
+      requestedBeatText: shortText.optional(),
       targetLabels: z.array(shortText).max(8),
     }).strict().nullable(),
     dialogue: z.object({
@@ -2242,6 +2388,29 @@ const cleanSettledClaimKindSchema = z.enum([
 ]);
 
 const cleanNarrationHardClaimKindSchema = z.enum([
+  "current_scene",
+  "current_location",
+  "scene_texture",
+  "visible_fact",
+  "visible_actor",
+  "visible_target",
+  "local_observation",
+  "bounded_visibility_negative",
+  "device_surface_observation",
+  "device_surface_unavailable",
+  "inventory_status",
+  "movement_option",
+  "route_status",
+  "scene_beat",
+  "dialogue_response",
+  "support_actor_materialization",
+  "player_local_condition",
+  "item_state",
+  "minor_poi_handle",
+  "player_location_change",
+  "elapsed_time",
+  "oracle_outcome",
+  "clarification_request",
   "movement",
   "item_custody",
   "route",
@@ -2266,13 +2435,14 @@ const cleanNarrationSoftProseKindSchema = z.enum([
   "small_gesture",
   "ambient_motion",
   "non_mechanical_object_surface",
+  "ordinary_scene_prop",
 ]);
 
 const cleanNarratorHardFactContractSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-hard-fact-contract.v1"),
   source: z.literal("accepted_evidence_required"),
   strict: z.literal(true),
-  categories: z.array(cleanNarrationHardClaimKindSchema).min(10).max(10),
+  categories: z.array(cleanNarrationHardClaimKindSchema).min(33).max(33),
 }).strict();
 
 const cleanNarratorSoftProseBudgetSchema = z.object({
@@ -2280,7 +2450,7 @@ const cleanNarratorSoftProseBudgetSchema = z.object({
   mayInventLowStakesVisibleSensoryDetail: z.literal(true),
   becomesWorldStateAuthority: z.literal(false),
   laterPlayerUseRequiresAdjudication: z.literal(true),
-  allowedKinds: z.array(cleanNarrationSoftProseKindSchema).min(11).max(11),
+  allowedKinds: z.array(cleanNarrationSoftProseKindSchema).min(12).max(12),
 }).strict();
 
 const cleanSettledEvidenceAuthoritySchema = z.enum([
@@ -2336,6 +2506,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "minor_poi_operation",
   "observed_device_facets",
   "observed_entry_labels",
+  "observed_visible_actor_labels",
   "observed_entry_surfaces",
   "observed_inventory_item_labels",
   "observation_query",
@@ -2355,6 +2526,7 @@ const cleanSettledBackendFactRoleSchema = z.enum([
   "route_origin",
   "route_status",
   "scene_beat",
+  "scene_beat_kind",
   "scene_beat_target_labels",
   "scene_label",
   "scene_placement",
@@ -2766,6 +2938,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "result_beat_line",
       "route_status_line",
       "scene_anchor_line",
+      "scene_beat_surface_line",
       "scene_custody_beat_line",
       "scene_exit_choice_line",
       "support_actor_presence_line",
@@ -2816,6 +2989,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "actor_role_with_scene_anchor",
       "actor_presence_with_scene_role_context",
       "actor_visible_cue_with_scene_role_context",
+      "accepted_beat_plus_sensory_texture",
       "scene_anchor_tokens",
       "single_core_material",
       "time_with_scene_anchor",
@@ -2834,6 +3008,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "actor_then_role_then_scene",
       "actor_then_scene_with_role_context",
       "actor_then_visible_cue_then_scene",
+      "accepted_beat_then_sensory_stop",
       "result_only",
       "result_then_preserved_tokens",
       "route_status_then_label",
@@ -2855,6 +3030,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "result_beat_cadence",
       "result_with_anchor_cadence",
       "route_status_cadence",
+      "scene_beat_surface_cadence",
       "scene_exit_handoff_cadence",
       "scene_anchor_cadence",
       "scene_custody_cadence",
@@ -2902,6 +3078,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "mark_elapsed_time_clock_beat",
       "mark_elapsed_time_pressure_clock_beat",
       "place_player_in_context",
+      "weave_scene_beat_surface",
       "weave_item_custody_scene_beat",
       "weave_minor_poi_scene_handle",
       "weave_support_actor_scene_presence",
@@ -2917,6 +3094,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "local_observation_beat_sentence",
       "minor_poi_handle_sentence",
       "route_status_beat_sentence",
+      "scene_beat_surface_sentence",
       "scene_custody_beat_sentence",
       "scene_exit_choice_sentence",
       "support_presence_beat_sentence",
@@ -2934,6 +3112,7 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "route_exit_grouping",
       "route_status_focus",
       "settled_state_focus",
+      "scene_beat_surface_focus",
       "support_actor_presence_focus",
       "visible_speaker_frame",
     ])).min(1).max(4),
@@ -3203,16 +3382,17 @@ export const cleanNarratorViewSchema = z.object({
     forbiddenPrivateTerms: z.array(shortText).max(128),
   }).strict(),
 }).strict().superRefine((view, ctx) => {
-  const visibleJson = JSON.stringify({
-    acceptedEvidence: view.acceptedEvidence,
-    stepAuditForGrounding: view.stepAuditForGrounding,
-    guard: view.guard,
-  });
-  if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(visibleJson)) {
+  const publicTexts = [
+    ...view.acceptedEvidence.flatMap((evidence) => [
+      evidence.text,
+      ...evidence.backendFacts.flatMap((fact) => [fact.text, fact.value ?? ""]),
+    ]),
+    ...view.stepAuditForGrounding.map((step) => step.publicReason),
+  ];
+  if (publicTexts.some(containsUuidLikeBackendId)) {
     ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose UUID-like backend ids." });
   }
-  if (/\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|route|scene|turn|world|loc|player):[^\s",.]+/i.test(visibleJson)
-    || /\b(?:actor|campaign|edge|fact|frame|item|knowledge|location|npc|packet|route|scene|turn|world|loc|player)-[a-z0-9][a-z0-9-]*\b/i.test(visibleJson)) {
+  if (publicTexts.some(containsBackendRefToken)) {
     ctx.addIssue({ code: "custom", path: ["acceptedEvidence"], message: "Narrator view must not expose backend refs." });
   }
 });
@@ -3235,13 +3415,13 @@ export const cleanNarratorPromptInputSchema = z.object({
 }).strict();
 
 export const cleanNarrationSentenceSchema = z.object({
-  kind: z.enum(["accepted_evidence", "audit_notice"]),
-  text: z.string().trim().min(1).max(500),
+  kind: shortText,
+  text: z.string().trim().min(1).max(900),
   evidenceRefs: z.array(shortText).max(12),
   backendFactRefs: z.array(shortText).max(12),
-  claimKinds: z.array(cleanSettledClaimKindSchema).max(6),
-  hardClaims: z.array(cleanNarrationHardClaimKindSchema).max(10).default([]),
-  softProseKinds: z.array(cleanNarrationSoftProseKindSchema).max(11).default([]),
+  claimKinds: z.array(shortText).max(6),
+  hardClaims: z.array(shortText).max(10).default([]),
+  softProseKinds: z.array(shortText).max(12).default([]),
   pageMoveRefs: z.array(shortText).max(4).default([]),
   sentencePlanRefs: z.array(shortText).max(4).default([]),
   auditStepIds: z.array(gmActionChecklistStepIdSchema).max(6).default([]),

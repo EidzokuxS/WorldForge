@@ -226,10 +226,6 @@ type Stage4DialogueDependencyResolution = {
 export interface Stage4DialogueRequestCandidateRequest {
   system: string;
   prompt: string;
-  repairOf?: {
-    candidate: unknown;
-    issues: Stage4DialogueRequestValidationIssue[];
-  };
 }
 
 export type Stage4DialogueRequestGenerator =
@@ -250,10 +246,6 @@ export interface Stage4DialogueRequestValidationIssue {
 export interface Stage4SupportActorRequestCandidateRequest {
   system: string;
   prompt: string;
-  repairOf?: {
-    candidate: unknown;
-    issues: Stage4SupportActorRequestValidationIssue[];
-  };
 }
 
 export type Stage4SupportActorRequestGenerator =
@@ -439,7 +431,7 @@ function cleanStage4CapabilityForKind(kind: Step["intended"]["kind"]): CleanStag
   if (kind === "condition_set") return "condition_set";
   if (kind === "time_advance") return "time_advance";
   if (kind === "scene_beat_record") return "scene_beat_record";
-  return "scene_beat_record";
+  throw new Error(`Unsupported clean Stage4 checklist kind: ${kind}`);
 }
 
 function requestEffectForStep(input: {
@@ -575,6 +567,7 @@ function requestEffectForStep(input: {
       anchorRef: plan.anchorRef,
       operation: plan.operation,
       conditionKey: plan.conditionKey,
+      requestedPostureText: plan.requestedPostureText,
       target: {
         targetKind: plan.targetKind,
         targetRef: plan.targetRef,
@@ -681,14 +674,86 @@ function requestEffectForStep(input: {
       },
     };
   }
-  return {
-    kind: "scene_beat_record",
-    actorRef: "Player",
-    sceneRef: input.frame.scene.currentScene.ref,
-    targetRefs: input.step.targetRefs,
-    beatKind: "generic_scene_beat",
-    evidenceRefs: input.step.evidenceRefs,
-  };
+  if (input.capabilityId === "scene_beat_record") {
+    const plan = input.step.intended.sceneBeatPlan;
+    if (!plan) {
+      throw new Error("scene_beat_record Stage4 request requires checklist intended.sceneBeatPlan.");
+    }
+    return {
+      kind: "scene_beat_record",
+      actorRef: "Player",
+      sceneRef: plan.anchorRef,
+      targetRefs: input.step.targetRefs,
+      beatKind: plan.beatKind,
+      evidenceRefs: input.step.evidenceRefs,
+    };
+  }
+  throw new Error(`Unsupported clean Stage4 capability: ${input.capabilityId}`);
+}
+
+function sceneBeatSummary(input: {
+  frame: AuthoritativeSceneFrame;
+  plan: NonNullable<Step["intended"]["sceneBeatPlan"]>;
+  targetLabels: readonly string[];
+}): string {
+  const requested = trimTerminalSentencePunctuation(input.plan.requestedBeatText);
+  const targetText = input.targetLabels.length > 0
+    ? ` with ${input.targetLabels.join(", ")}`
+    : "";
+  return `${requested} at ${input.frame.scene.currentScene.label}${targetText}.`;
+}
+
+function trimTerminalSentencePunctuation(value: string): string {
+  let end = value.trim().length;
+  const trimmed = value.trim();
+  while (end > 0) {
+    const char = trimmed[end - 1];
+    if (char !== "." && char !== "!" && char !== "?") break;
+    end -= 1;
+  }
+  return trimmed.slice(0, end).trim() || trimmed;
+}
+
+function sceneBeatRequestIsBoundToPlan(input: {
+  effect: Extract<CleanStage4Request["effect"], { kind: "scene_beat_record" }>;
+  plan: NonNullable<Step["intended"]["sceneBeatPlan"]>;
+}): boolean {
+  return input.effect.actorRef === input.plan.actorRef
+    && normalizedRef(input.effect.sceneRef) === normalizedRef(input.plan.anchorRef)
+    && input.effect.beatKind === input.plan.beatKind;
+}
+
+function sceneBeatRequestFailure(input: {
+  frame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  request: CleanStage4Request;
+  store: CleanStage4ReceiptStore;
+  message: string;
+}): CleanStage4Receipt {
+  const receipt = failReceipt({
+    frame: input.frame,
+    checklist: input.checklist,
+    step: input.step,
+    request: input.request,
+    capabilityId: "scene_beat_record",
+    kind: "invalid_backend_request",
+    message: input.message,
+  });
+  input.store.insert(receipt);
+  return receipt;
+}
+
+function sceneBeatEffectForRequest(
+  request: CleanStage4Request,
+): Extract<CleanStage4Request["effect"], { kind: "scene_beat_record" }> | null {
+  return request.effect.kind === "scene_beat_record" ? request.effect : null;
+}
+
+function sceneBeatPlanForStep(
+  step: Step,
+): NonNullable<Step["intended"]["sceneBeatPlan"]> | null {
+  return step.intended.sceneBeatPlan ?? null;
 }
 
 function baseReceipt(input: {
@@ -954,6 +1019,14 @@ function localConditionLabel(key: LocalConditionSetEffect["conditionKey"]): stri
   return labels[key];
 }
 
+function localConditionStorageLabel(effect: LocalConditionSetEffect): string {
+  const requested = effect.requestedPostureText?.trim();
+  if (effect.conditionKey === "gripping_held_item" && requested && requested.length > 0) {
+    return requested;
+  }
+  return localConditionLabel(effect.conditionKey);
+}
+
 function localConditionGroup(key: LocalConditionSetEffect["conditionKey"]): string {
   if (["kneeling", "crouched", "prone", "taking_cover", "stepped_back"].includes(key)) {
     return "player_local_posture";
@@ -1018,6 +1091,7 @@ function localConditionResult(input: {
     operation: input.effect.operation,
     conditionKey: input.effect.conditionKey,
     conditionLabel: localConditionLabel(input.effect.conditionKey),
+    requestedPostureText: input.effect.requestedPostureText,
     conditionScope: "current_scene",
     anchorSceneLabel: input.frame.scene.currentScene.label,
     anchorLocationLabel: input.frame.scene.currentLocation.label,
@@ -1786,6 +1860,12 @@ function promptFrameForDialogue(frame: AuthoritativeSceneFrame): unknown {
       role: actor.role,
       visibleStatus: actor.visibleStatus,
     })),
+    movementOptions: frame.movementOptions.map((option) => ({
+      ref: option.ref,
+      label: option.label,
+      connected: option.connected,
+      travelCost: option.travelCost,
+    })),
     targets: frame.targets.map((target) => ({
       ref: target.ref,
       label: target.label,
@@ -1922,38 +2002,6 @@ export function buildStage4DialogueRequestPrompt(input: {
               "The visible current-scene place handle has already been accepted by Stage 4 and the authoritative SceneFrame below is post-dependency.",
             ].join("\n")
           : "No post-dependency SceneFrame binding is active for this dialogue step.",
-    "Accepted checklist step:",
-    JSON.stringify(input.step, null, 2),
-    "Authoritative SceneFrame:",
-    JSON.stringify(promptFrameForDialogue(input.frame), null, 2),
-  ].join("\n\n");
-}
-
-function buildStage4DialogueRepairPrompt(input: {
-  frame: AuthoritativeSceneFrame;
-  step: Step;
-  candidate: unknown;
-  issues: Stage4DialogueRequestValidationIssue[];
-  dependencyResolution?: Stage4DialogueDependencyResolution | null;
-}): string {
-  return [
-    "Repair the dialogue_record effect so it satisfies the clean P65 dialogue contract.",
-    "Use the Dialogue task card fields as the complete job contract for the repaired effect.",
-    "Dialogue task card:",
-    JSON.stringify(dialogueTaskCard(input), null, 2),
-    input.dependencyResolution?.materializedSpeaker
-      ? `This is dependent support-actor dialogue; speakerRef must be ${input.dependencyResolution.materializedSpeaker.actorRef}.`
-      : input.dependencyResolution?.playerLocalCondition
-        ? "This dialogue follows an accepted player-local-condition dependency; do not restate or mutate that condition beyond accepted evidence."
-        : input.dependencyResolution?.itemTransfer
-          ? "This dialogue follows an accepted item-transfer dependency; do not restate or mutate item state beyond accepted evidence."
-          : input.dependencyResolution?.minorPoi
-            ? "This dialogue follows an accepted minor-POI-handle dependency; cite the refreshed place handle only as a visible current-scene target."
-          : "This dialogue step has no post-dependency SceneFrame binding.",
-    "Validation issues:",
-    JSON.stringify(input.issues, null, 2),
-    "Original candidate:",
-    JSON.stringify(input.candidate, null, 2),
     "Accepted checklist step:",
     JSON.stringify(input.step, null, 2),
     "Authoritative SceneFrame:",
@@ -2117,58 +2165,11 @@ async function buildDialogueRequest(input: {
     };
   }
 
-  try {
-    const repairCandidate = await generator({
-      system,
-      prompt: buildStage4DialogueRepairPrompt({
-        frame: input.frame,
-        step: input.step,
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-        dependencyResolution: input.dependencyResolution,
-      }),
-      repairOf: {
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-      },
-    });
-    const repairValidation = validateDialogueRequestEffectCandidate({
-      frame: input.frame,
-      step: input.step,
-      candidate: repairCandidate,
-      dependencyResolution: input.dependencyResolution,
-    });
-    if (repairValidation.status === "accepted") {
-      return {
-        status: "accepted",
-        request: dialogueRequestFromEffect({
-          frame: input.frame,
-          checklist: input.checklist,
-          step: input.step,
-          effect: repairValidation.effect,
-        }),
-        issues: [],
-      };
-    }
-    return {
-      status: "failed",
-      request: placeholderDialogueRequest(input),
-      issues: [...firstValidation.issues, ...repairValidation.issues],
-    };
-  } catch (error) {
-    return {
-      status: "failed",
-      request: placeholderDialogueRequest(input),
-      issues: [
-        ...firstValidation.issues,
-        {
-          code: "schema_invalid",
-          path: "<repair>",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      ],
-    };
-  }
+  return {
+    status: "failed",
+    request: placeholderDialogueRequest(input),
+    issues: firstValidation.issues,
+  };
 }
 
 const SUPPORT_ROLE_LABELS: Record<SupportActorRoleKind, { actorLabel: string; roleLabel: string }> = {
@@ -2197,7 +2198,7 @@ const SUPPORT_CUE_PLACEMENTS: Record<SupportActorVisibleCueProfile["placement"],
   beside_mooring_or_railing: "beside a mooring line or rail",
   by_door_or_threshold: "by a public doorway or threshold",
   in_open_view: "in open view",
-  near_public_fixture: "near a public fixture",
+  near_public_fixture: "nearby in public view",
   under_public_cover: "under visible cover",
 };
 
@@ -2214,7 +2215,7 @@ const SUPPORT_CUE_DETAILS: Record<NonNullable<SupportActorVisibleCueProfile["det
   canvas_awning: "beneath canvas",
   market_basket: "near a basket",
   mooring_rope: "near a mooring rope",
-  plain_work_clothes: "in plain local clothes",
+  plain_work_clothes: "wearing plain local work clothes",
   satchel_or_pouch: "with a small pouch visible",
   weathered_coat: "in a weathered coat",
   wooden_counter: "against worn counter boards",
@@ -2496,29 +2497,6 @@ export function buildStage4SupportActorRequestPrompt(input: {
   ].join("\n\n");
 }
 
-function buildStage4SupportActorRepairPrompt(input: {
-  frame: AuthoritativeSceneFrame;
-  step: Step;
-  candidate: unknown;
-  issues: Stage4SupportActorRequestValidationIssue[];
-}): string {
-  return [
-    "Repair the support_actor_create effect so it satisfies the clean P66 support actor contract.",
-    "Set publicPresentation.presentationMode to visible_presence_only and provide visibleCueProfile placement/bearing/detail enum slots; backend renders publicSummary/visibleCue strings.",
-    "Do not add unsupported fields, old tool ids, backend refs, dialogue, world facts, relationships, item state, route truth, future relevance, private knowledge, or durable events.",
-    "Validation issues:",
-    JSON.stringify(input.issues, null, 2),
-    "Original candidate:",
-    JSON.stringify(input.candidate, null, 2),
-    "Accepted checklist step:",
-    JSON.stringify(input.step, null, 2),
-    "Support actor task card:",
-    JSON.stringify(supportActorTaskCard({ step: input.step }), null, 2),
-    "Authoritative SceneFrame:",
-    JSON.stringify(promptFrameForSupportActor(input.frame), null, 2),
-  ].join("\n\n");
-}
-
 async function generateSupportActorEffectCandidate(input: {
   provider: ProviderConfig;
   request: Stage4SupportActorRequestCandidateRequest;
@@ -2694,56 +2672,11 @@ async function buildSupportActorRequest(input: {
     };
   }
 
-  try {
-    const repairCandidate = await generator({
-      system,
-      prompt: buildStage4SupportActorRepairPrompt({
-        frame: input.frame,
-        step: input.step,
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-      }),
-      repairOf: {
-        candidate: firstCandidate,
-        issues: firstValidation.issues,
-      },
-    });
-    const repairValidation = validateSupportActorRequestEffectCandidate({
-      frame: input.frame,
-      step: input.step,
-      candidate: repairCandidate,
-    });
-    if (repairValidation.status === "accepted") {
-      return {
-        status: "accepted",
-        request: supportActorRequestFromEffect({
-          frame: input.frame,
-          checklist: input.checklist,
-          step: input.step,
-          effect: repairValidation.effect,
-        }),
-        issues: [],
-      };
-    }
-    return {
-      status: "failed",
-      request: placeholderSupportActorRequest(input),
-      issues: [...firstValidation.issues, ...repairValidation.issues],
-    };
-  } catch (error) {
-    return {
-      status: "failed",
-      request: placeholderSupportActorRequest(input),
-      issues: [
-        ...firstValidation.issues,
-        {
-          code: "schema_invalid",
-          path: "<repair>",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      ],
-    };
-  }
+  return {
+    status: "failed",
+    request: placeholderSupportActorRequest(input),
+    issues: firstValidation.issues,
+  };
 }
 
 function clockLedgerReasonKind(reasonKind: "brief_local_action" | "wait" | "short_rest"): string {
@@ -2775,6 +2708,7 @@ function executeObserveVisible(input: {
     movementOptions.length > 0 ? `Visible routes include ${movementOptions.join(", ")}.` : null,
     inventory.length > 0 ? `Inventory includes ${inventory.join(", ")}.` : null,
   ].filter((part): part is string => Boolean(part)).join(" ");
+  const boundedSummary = shortObservationText(summary) ?? "Current visible scene observed.";
   const receipt = baseReceipt({
     frame: input.frame,
     checklist: input.checklist,
@@ -2782,7 +2716,7 @@ function executeObserveVisible(input: {
     request: input.request,
     status: "accepted",
     capabilityId: "observe_visible",
-    summary,
+    summary: boundedSummary,
     visibleRefs: ["Player", input.frame.scene.currentScene.ref, ...input.frame.actors.map((actor) => actor.ref)].slice(0, 12),
     visibleObservation: {
       type: "visible_observation",
@@ -2804,12 +2738,45 @@ function shortObservationText(value: string | null | undefined): string | null {
   return trimmed.slice(0, 500);
 }
 
+const CLEAR_PLAYER_STATUS_DETAIL = "no obvious injury or strain";
+const VISIBLE_PLAYER_STATUS_PREFIX = "visible signs: ";
+
+function playerStatusSurfaceDetail(conditions: readonly string[]): string {
+  return conditions.length > 0
+    ? `${VISIBLE_PLAYER_STATUS_PREFIX}${conditions.join(", ")}`
+    : CLEAR_PLAYER_STATUS_DETAIL;
+}
+
+function playerStatusObservationSummary(label: string, detail: string | null | undefined): string {
+  const trimmed = detail?.trim() ?? "";
+  if (trimmed === CLEAR_PLAYER_STATUS_DETAIL) {
+    return `No obvious injury or strain is visible on ${label}.`;
+  }
+  if (trimmed.startsWith(VISIBLE_PLAYER_STATUS_PREFIX)) {
+    return `Visible signs on ${label}: ${trimmed.slice(VISIBLE_PLAYER_STATUS_PREFIX.length)}.`;
+  }
+  return trimmed.length > 0
+    ? `Visible condition on ${label}: ${trimmed}.`
+    : `${label}'s visible condition is readable from here.`;
+}
+
 function localObservationSurface(input: {
   frame: AuthoritativeSceneFrame;
   surfaceKinds: readonly LocalObservationSurfaceKind[];
 }): LocalObservationSurfaceEntry[] {
   const requested = new Set(input.surfaceKinds);
   const entries: LocalObservationSurfaceEntry[] = [];
+  if (requested.has("player_status")) {
+    const conditions = input.frame.player.visibleStatus.conditions
+      .map((condition) => condition.trim())
+      .filter(Boolean);
+    entries.push({
+      surfaceKind: "player_status",
+      ref: input.frame.player.ref,
+      label: input.frame.player.label,
+      detail: shortObservationText(playerStatusSurfaceDetail(conditions)),
+    });
+  }
   if (requested.has("current_scene")) {
     entries.push({
       surfaceKind: "current_scene",
@@ -2885,6 +2852,7 @@ function normalizeObservationMatch(value: string): string {
 
 function localObservationSurfaceKindLabel(kind: LocalObservationSurfaceKind): string {
   switch (kind) {
+    case "player_status": return "player status";
     case "current_scene": return "current scene";
     case "current_location": return "current location";
     case "visible_actor": return "visible actor";
@@ -2897,6 +2865,7 @@ function localObservationSurfaceKindLabel(kind: LocalObservationSurfaceKind): st
 
 function localObservationSurfaceKindPluralLabel(kind: LocalObservationSurfaceKind): string {
   switch (kind) {
+    case "player_status": return "player visible status";
     case "current_scene": return "the current scene";
     case "current_location": return "the current location";
     case "visible_actor": return "visible actors";
@@ -2909,6 +2878,10 @@ function localObservationSurfaceKindPluralLabel(kind: LocalObservationSurfaceKin
 
 function localObservationSurfaceEntryLabel(entry: Pick<LocalObservationSurfaceEntry, "surfaceKind" | "label">): string {
   return `${localObservationSurfaceKindLabel(entry.surfaceKind)} ${entry.label}`;
+}
+
+function isAnchorObservationSurfaceKind(kind: LocalObservationSurfaceKind | string): boolean {
+  return kind === "current_scene" || kind === "current_location";
 }
 
 function localObservationSurfaceGroupLabel(kinds: readonly LocalObservationSurfaceKind[]): string {
@@ -2934,6 +2907,15 @@ function localObservationEntryList(entries: readonly LocalObservationSurfaceEntr
   return entries.map(localObservationSurfaceEntryLabel).join(", ");
 }
 
+function localObservationNoMatchSummary(surfaceGroup: string, queryText: string): string {
+  const preposition = surfaceGroup.startsWith("the ") ? "in" : "among";
+  const query = queryText.trim();
+  if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
+    return `No visible evidence answers "${query}" ${preposition} ${surfaceGroup}.`;
+  }
+  return `No match for "${query}" stands out ${preposition} ${surfaceGroup}.`;
+}
+
 function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
   return kinds.length === 1 && kinds[0] === "visible_actor";
 }
@@ -2946,6 +2928,10 @@ function isOnlyInventoryItemSurface(kinds: readonly LocalObservationSurfaceKind[
   return kinds.length === 1 && kinds[0] === "inventory_item";
 }
 
+function isOnlyPlayerStatusSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
+  return kinds.length === 1 && kinds[0] === "player_status";
+}
+
 function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: string): boolean {
   const query = normalizeObservationMatch(queryText);
   if (query.length === 0) return false;
@@ -2954,9 +2940,39 @@ function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: strin
     entry.detail ?? "",
     entry.surfaceKind.replace(/_/gu, " "),
   ].map(normalizeObservationMatch).filter((value) => value.length > 0);
-  return haystacks.some((value) =>
-    value.includes(query) || (query.length >= 3 && query.includes(value))
-  );
+  return haystacks.some((value) => value.includes(query));
+}
+
+function localObservationRequiresSurfaceContentProof(effect: LocalObservationEffect): boolean {
+  if (effect.mode !== "target_match") return false;
+  if (!effect.targetRef || !effect.allowBoundedNegative) return false;
+  const query = normalizeObservationMatch(effect.queryText);
+  return [
+    "hidden mechanism",
+    "mechanism",
+    "useful clue",
+    "visible clue",
+    "secret",
+    "unlock",
+    "activate",
+    "activation",
+    "reveals a route",
+    "reveal a route",
+    "means anything",
+    "mean anything",
+    "meaning",
+  ].some((marker) => query.includes(marker));
+}
+
+function localObservationTargetRefCanUseIdentityMatch(
+  effect: LocalObservationEffect,
+  entries: readonly LocalObservationSurfaceEntry[],
+): boolean {
+  if (!effect.targetRef) return false;
+  if (!isOnlyVisibleActorSurface(effect.surfaceKinds)) return true;
+  const targetEntries = entries.filter((entry) => normalizedRef(entry.ref) === normalizedRef(effect.targetRef ?? ""));
+  if (targetEntries.length === 0) return true;
+  return targetEntries.some((entry) => entryMatchesQuery(entry, effect.queryText));
 }
 
 function uniqueObservationEntries(entries: readonly LocalObservationSurfaceEntry[]): LocalObservationSurfaceEntry[] {
@@ -2972,14 +2988,20 @@ function localObservationSummary(input: {
   effect: LocalObservationEffect;
   resultKind: LocalObservationResult["resultKind"];
   matchedEntries: readonly LocalObservationSurfaceEntry[];
+  availableEntryCount: number;
 }): string {
   const surfaceGroup = localObservationSurfaceGroupLabel(input.effect.surfaceKinds);
   if (input.resultKind === "bounded_no_match") {
     return isOnlyVisibleActorSurface(input.effect.surfaceKinds)
+      && (input.effect.mode === "list_surface" || input.availableEntryCount === 0)
       ? "No visible non-player actors are present in the current scene."
-      : `Current ${surfaceGroup} show no match for "${input.effect.queryText}".`;
+      : localObservationNoMatchSummary(surfaceGroup, input.effect.queryText);
   }
   const labels = localObservationLabelList(input.matchedEntries);
+  if (labels.length > 0 && isOnlyPlayerStatusSurface(input.effect.surfaceKinds)) {
+    const detail = input.matchedEntries[0]?.detail?.trim();
+    return playerStatusObservationSummary(input.matchedEntries[0]?.label ?? "Player", detail);
+  }
   if (labels.length > 0 && isOnlyInventoryItemSurface(input.effect.surfaceKinds)) {
     const itemCount = uniqueStrings(input.matchedEntries.map((entry) => entry.label)).length;
     const itemLabels = localObservationNaturalLabelList(input.matchedEntries);
@@ -3018,6 +3040,7 @@ function localObservationResult(input: {
   effect: LocalObservationEffect;
   resultKind: LocalObservationResult["resultKind"];
   matchedEntries: readonly LocalObservationSurfaceEntry[];
+  availableEntryCount: number;
 }): LocalObservationResult {
   const summary = localObservationSummary(input);
   const firstMatch = input.matchedEntries[0] ?? null;
@@ -3096,7 +3119,11 @@ function executeLocalObservation(input: {
   if (effect.mode === "list_surface") {
     matchedEntries = entries.slice(0, 12);
     resultKind = matchedEntries.length > 0 ? "positive_list" : "bounded_no_match";
-  } else if (effect.targetRef) {
+  } else if (
+    effect.targetRef
+    && !localObservationRequiresSurfaceContentProof(effect)
+    && localObservationTargetRefCanUseIdentityMatch(effect, entries)
+  ) {
     matchedEntries = uniqueObservationEntries(entries.filter((entry) =>
       normalizedRef(entry.ref) === normalizedRef(effect.targetRef ?? "")
     )).slice(0, 12);
@@ -3112,6 +3139,14 @@ function executeLocalObservation(input: {
       : matchedEntries.length === 1
         ? "positive_match"
         : "ambiguous_match";
+  }
+  if (effect.mode === "list_surface" && resultKind === "positive_list") {
+    const requestedSubstantiveSurface = effect.surfaceKinds.some((kind) => !isAnchorObservationSurfaceKind(kind));
+    const substantiveEntries = matchedEntries.filter((entry) => !isAnchorObservationSurfaceKind(entry.surfaceKind));
+    if (requestedSubstantiveSurface && substantiveEntries.length === 0) {
+      matchedEntries = [];
+      resultKind = "bounded_no_match";
+    }
   }
 
   if (resultKind === "bounded_no_match" && !effect.allowBoundedNegative) {
@@ -3130,6 +3165,7 @@ function executeLocalObservation(input: {
     effect,
     resultKind,
     matchedEntries,
+    availableEntryCount: entries.length,
   });
   const receipt = baseReceipt({
     frame: input.frame,
@@ -3489,10 +3525,35 @@ function executeSceneBeat(input: {
   request: CleanStage4Request;
   store: CleanStage4ReceiptStore;
 }): CleanStage4Receipt {
-  const targetLabels = input.step.targetRefs.map((ref) => labelForRef(input.frame, ref)).slice(0, 8);
-  const summary = targetLabels.length > 0
-    ? `Player's local visible beat is acknowledged in ${input.frame.scene.currentScene.label} with ${targetLabels.join(", ")}.`
-    : `Player's local visible beat is acknowledged in ${input.frame.scene.currentScene.label}.`;
+  const effect = sceneBeatEffectForRequest(input.request);
+  const plan = sceneBeatPlanForStep(input.step);
+  if (!effect) {
+    return sceneBeatRequestFailure({
+      ...input,
+      message: "Stage 4 scene_beat_record request effect did not match capability.",
+    });
+  }
+  if (!plan) {
+    return sceneBeatRequestFailure({
+      ...input,
+      message: "Stage 4 scene_beat_record requires a typed backend sceneBeatPlan.",
+    });
+  }
+  if (!sceneBeatRequestIsBoundToPlan({ effect, plan })) {
+    return sceneBeatRequestFailure({
+      ...input,
+      message: "Stage 4 scene_beat_record request does not match the accepted checklist sceneBeatPlan.",
+    });
+  }
+  const anchorRefs = new Set([
+    normalizedRef(input.frame.scene.currentScene.ref),
+    normalizedRef(input.frame.scene.currentLocation.ref),
+  ]);
+  const targetLabels = input.step.targetRefs
+    .filter((ref) => !anchorRefs.has(normalizedRef(ref)))
+    .map((ref) => labelForRef(input.frame, ref))
+    .slice(0, 8);
+  const summary = sceneBeatSummary({ frame: input.frame, plan, targetLabels });
   const receipt = baseReceipt({
     frame: input.frame,
     checklist: input.checklist,
@@ -3504,8 +3565,9 @@ function executeSceneBeat(input: {
     visibleRefs: ["Player", input.frame.scene.currentScene.ref, ...input.step.targetRefs].slice(0, 12),
     sceneBeat: {
       type: "scene_beat",
-      beatKind: "generic_scene_beat",
+      beatKind: plan.beatKind,
       summary,
+      requestedBeatText: plan.requestedBeatText,
       targetLabels,
     },
   });
@@ -4447,7 +4509,7 @@ async function executePlayerLocalConditionSet(input: {
         input.frame.campaignId,
         player.id,
         effect.conditionKey,
-        localConditionLabel(effect.conditionKey),
+        localConditionStorageLabel(effect),
         conditionGroup,
         currentLocation.id,
         currentScene.id,
@@ -5928,6 +5990,17 @@ function refreshedPlayerConditionMatches(input: {
   const label = input.condition.conditionLabel.trim().toLowerCase();
   const present = labels.includes(key) || labels.includes(label);
   if (input.condition.resultKind === "cleared") return !present;
+  if (
+    !present
+    && input.condition.conditionKey === "gripping_held_item"
+    && input.condition.targetKind === "inventory_item_readiness"
+    && input.condition.targetLabel
+  ) {
+    const target = normalizedRef(input.condition.targetLabel);
+    return input.frame.inventory.some((item) =>
+      normalizedRef(item.ref) === target || normalizedRef(item.label) === target
+    );
+  }
   return present;
 }
 
@@ -6318,6 +6391,49 @@ async function resolveDialogueDependencies(input: {
   };
 }
 
+async function refreshFrameForAcceptedMutationDependencies(input: {
+  initialFrame: AuthoritativeSceneFrame;
+  currentFrame: AuthoritativeSceneFrame;
+  checklist: GmActionChecklist;
+  step: Step;
+  receipts: readonly CleanStage4Receipt[];
+  refreshFrameAfterReceipt?: Stage4FrameRefresh;
+}): Promise<{
+  frame: AuthoritativeSceneFrame;
+  refreshed: boolean;
+  afterReceiptId: string | null;
+}> {
+  if (!input.refreshFrameAfterReceipt || input.step.dependsOnStepIds.length === 0) {
+    return { frame: input.currentFrame, refreshed: false, afterReceiptId: null };
+  }
+  const dependencyIds = new Set(input.step.dependsOnStepIds);
+  const dependency = [...input.receipts]
+    .reverse()
+    .find((receipt) =>
+      dependencyIds.has(receipt.stepId)
+      && receipt.status === "accepted"
+      && receipt.result.mutationApplied
+    );
+  if (!dependency) {
+    return { frame: input.currentFrame, refreshed: false, afterReceiptId: null };
+  }
+  if (
+    input.currentFrame.base.tick === dependency.result.tick
+    && input.currentFrame.base.worldVersion === dependency.result.worldVersion
+    && input.currentFrame.base.worldTimeMinutes === dependency.result.worldTimeMinutes
+  ) {
+    return { frame: input.currentFrame, refreshed: false, afterReceiptId: null };
+  }
+  const refreshed = await input.refreshFrameAfterReceipt({
+    initialFrame: input.initialFrame,
+    currentFrame: input.currentFrame,
+    checklist: input.checklist,
+    step: input.step,
+    receipt: dependency,
+  });
+  return { frame: refreshed, refreshed: true, afterReceiptId: dependency.receiptId };
+}
+
 export async function runCleanStage4Execution(input: {
   frame: AuthoritativeSceneFrame;
   checklist: GmActionChecklist;
@@ -6456,6 +6572,24 @@ export async function runCleanStage4Execution(input: {
       });
       receipts.push(receipt);
       continue;
+    }
+
+    const dependencyFrame = await refreshFrameForAcceptedMutationDependencies({
+      initialFrame,
+      currentFrame,
+      checklist: input.checklist,
+      step,
+      receipts,
+      refreshFrameAfterReceipt: input.refreshFrameAfterReceipt,
+    });
+    if (dependencyFrame.refreshed) {
+      currentFrame = dependencyFrame.frame;
+      frameChain.push({
+        frameId: currentFrame.frameId,
+        base: currentFrame.base,
+        source: "post_dependency_scene_frame",
+        afterReceiptId: dependencyFrame.afterReceiptId,
+      });
     }
 
     if (step.intended.kind === "support_actor_create") {

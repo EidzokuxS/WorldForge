@@ -1,5 +1,111 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-15 - P335 Long-Run Prose Endurance Acceptance
+
+Goal:
+- Prove P334/P335 Stage 6 hard/soft truth contract across at least 2 fresh zero-turn clean-runtime worlds, 60 turns each.
+
+Plan:
+- [x] Inspect current worktree, prior P334 proof, existing Phase95 setup/verifier/evidence scripts, and acceptance lessons.
+- [x] Build P335 diagnostic runner/collector that starts stable clean-runtime backend, creates fresh zero-turn lanes, and stores per-turn SSE, narrative, done, receipts, clean turn record, DB/public snapshot, state.json, transcript, and progress JSONL.
+- [x] Add a manual-play transport path that sends one Codex-chosen action at a time after inspecting the actual post-turn state; it may collect evidence, but it must not choose gameplay actions.
+- [x] Add/extend prose/endurance audit so 60-turn lanes prove hard facts do not drift, soft prose does not become state authority, mechanical affordances are not invented, legacy/restores/replays stay zero, and narration avoids receipts/status dump.
+- [x] Manually play lane A to 60 turns from a fresh zero-turn world; choose each action after reading the current transcript/state, and treat transport/provider failures as invalid proof attempts rather than gameplay/prose failures.
+- [x] Manually play lane B to 60 turns on a different fresh zero-turn world/source; same gates.
+- [x] Run prose audit, typecheck, focused tests, and expanded clean-runtime tests.
+- [x] Run GitNexus detect_changes, then commit/push if the scope is clean.
+
+Review:
+- P334 proof was contract/unit/live-smoke only; P335 adds the required two 60-turn long-run acceptance lanes.
+- Existing reusable pieces: `scripts/phase95-clone-adaptive-setup.ts`, `scripts/phase95-build-run-evidence.mjs`, `scripts/phase95-verify-adaptive-run.mjs`, `scripts/audit-clean-runtime-prose.mjs`.
+- Built a P335 diagnostic runner/collector for early smoke runs. Automated action selection stayed diagnostic-only and is excluded from the final commit path.
+- P335 automated smoke passed for 2 fresh lanes x 2 turns at `output/clean-runtime-p335-endurance-p335-smoke-2turn-20260615T095852`; diagnostic only.
+- P335 automated smoke passed for 2 fresh lanes x 4 turns at `output/clean-runtime-p335-endurance-p335-smoke-4turn-20260615T101358`, including soft-detail follow-up adjudication; diagnostic only.
+- Corrected acceptance rule after user feedback: the 60-turn prose/endurance proof must be played manually, one action at a time, with Codex selecting each next action from the observed post-turn state.
+- Added `scripts/p335-manual-turn.mjs`: `init` creates a fresh clean-start lane, and `turn` requires an explicit `--action` for each player move while recording SSE, world/history, DB snapshot, transcript, manual note, and structural issues.
+- Manual lane A tranche started at `output/clean-runtime-p335-manual-lane-a-20260618T141137`: 10 manually chosen turns, 0 structural issues, 0 old-store writes, 0 restore ledger writes, movement/time/inventory/dialogue hard facts stayed grounded.
+- Manual lane A finding: turn 10 physical low-stakes probe (`nudge loose rubble to check footing`) reached `local_observation` with the correct observation query, but accepted/player-facing beat collapsed to generic visibility (`Upper Dam Ruins is in view here.`). This is a local physical adjudication gap, not an automated-run failure and not a provider/transport failure.
+- Fixed the turn-10 finding at the typed task-card boundary: GM Read now instructs current-scene tactile/physical probes to use `localObservationNeed` with `targetRef=null`, `surfaceKinds=["current_scene"]`, and bounded negative authority instead of citing the current scene as a positive target match.
+- Verified live on the same manual lane after backend restart: turn 11 and turn 12 both settled as bounded `local_observation` queries over current-scene texture, with no mutation, no durable rubble/item state, no hidden/mechanical affordance, no old-store writes, and player-facing text saying the requested shifting/slab detail did not stand out.
+- Continued manual lane A to 15 turns after the fix: turns 13-15 covered time passage, player visible-status check, and return movement to Lowwater Bazaar. Structural issues remained 0; old-store writes and restore ledger stayed 0; clock advanced only on wait/movement; inventory custody stayed stable.
+- Fresh-postfix diagnostic lane `output/clean-runtime-p335-manual-lane-a-fresh-postfix-20260618T142859` exposed a second issue: a hidden/clue follow-up over Brass Tube visible wear still entered Stage4 as inventory `positive_match`, leaving the negative hidden/mechanical adjudication to Stage 6 prose.
+- Fixed that at Stage4 typed ownership: hard-meaning property queries (`hidden mechanism`, `clue`, `secret`, activation/route/meaning terms) require surface-content proof instead of identity-only `targetRef` matching, so a known item label inside a longer property question cannot satisfy the query by itself.
+- Verified live after restart on the diagnostic lane turn 5: accepted evidence now carries bounded no-match for `whether visible wear on the Brass Tube reveals a hidden mechanism or useful clue`, no mutation, no old-store writes, and player-facing prose projects `No hidden mechanism or useful clue stands out...`.
+- Re-verified after the hidden/clue property-query fix: expanded clean-runtime suite passed again (410 tests) and `npm --prefix backend run typecheck` passed.
+- Verified focused/expanded tests after the manual finding fix: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (262 passed), expanded clean-runtime suite (410 passed), and `npm --prefix backend run typecheck`.
+- Prose audit on the full manual root intentionally records the pre-fix diagnostic turn 10 hit; post-fix audit `output/clean-runtime-p335-manual-lane-a-20260618T141137/prose-audit-postfix-turns-11-15.json` passed for turns 11-15 with all hit counters 0.
+- Fresh acceptance-after-fixes lane `output/clean-runtime-p335-manual-lane-a-acceptance-after-fixes-20260618T143724` found a regression on turn 2: harmless Brass Tube surface inspection collapsed to bounded no-match. That lane is diagnostic-invalid for acceptance.
+- Fixed the harmless-surface regression by narrowing the GM Read surface prompt to ordinary visible/sensory texture and by keeping hard property-query routing to hidden mechanism/useful clue/secret/activation/route/meaning checks.
+- Verified focused tests after the harmless-surface fix: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (262 passed).
+- Verified expanded tests and typecheck after the harmless-surface fix: expanded clean-runtime suite (410 passed) and `npm --prefix backend run typecheck`.
+- Manual live mini-proof `output/clean-runtime-p335-manual-brass-mini-20260618T144407` on fresh clone `clean-runtime-p335-manual-20260618-114456-brass-mini`: turn 1 was chosen after reading state and accepted harmless Brass Tube soft surface prose (`its rim dulled by faint scratches...`) with mutation=false, old stores 0, restore ledger 0, and Brass Tube still carried by Player.
+- Same mini-proof turn 2 was chosen from the turn-1 soft prose detail and asked whether those scratches reveal a hidden mechanism or useful clue; accepted evidence carried `local_observation` + `bounded_visibility_negative`, `publicReason` was a no-match over inventory/visible facts, mutation=false, old stores 0, restore ledger 0, and the item remained carried.
+- Prose audit `output/clean-runtime-p335-manual-brass-mini-20260618T144407/prose-audit.json` passed for 2 narratives with all hit counters 0.
+- Fresh manual lane A post-fix `output/clean-runtime-p335-manual-lane-a-postfix-20260618T145000` is diagnostic-invalid for acceptance. Turn 10 action `I take one step back from the bar and keep my hands visible.` accepted only `stepped_back`; the `hands visible` condition was omitted from receipt/state/prose. This is a hard-condition compound-action gap, so the lane must stop instead of being counted toward 60-turn acceptance.
+- Fixed the compound-condition gap at the GM Read task-card boundary: `player_local_condition` owns exactly one conditionKey, so two independent posture/readiness conditions in one action route to clarification instead of partial success.
+- Live proof `output/clean-runtime-p335-compound-condition-proof-r2-20260618T145930`: action `I take one step back from the nearest stall and keep my hands visible.` produced player-facing clarification `Which posture condition should apply first: stepping back or keeping hands visible?`, wrote no Stage4 receipt, kept worldVersion/time/tick at 0, kept item custody stable, old stores 0, restore ledger 0, and prose audit passed with all hit counters 0.
+- Fresh manual lane A acceptance r2 `output/clean-runtime-p335-manual-lane-a-acceptance-r2-20260618T150100` is diagnostic-invalid. Turn 3 followed the turn-2 soft scratches with `whether they reveal a hidden mechanism or useful clue`, but the runtime repeated the harmless surface line instead of producing bounded hidden/mechanical no-match.
+- Fixed the Brass hidden follow-up regression at the GM Read current-frame cue boundary: harmless exposed-surface examples now omit clue-like wording, and hidden/clue/meaning checks use `targetRef=null` with a property/outcome query.
+- Live proof `output/clean-runtime-p335-brass-hidden-proof-r2-20260618T150500`: harmless Brass Tube surface turn produced soft scratches with mutation=false, then the hidden/useful-clue follow-up accepted `local_observation` + `bounded_visibility_negative`, `publicReason` no-match over inventory/visible facts, mutation=false, old stores 0, restore ledger 0, item custody stable, and prose audit all hit counters 0.
+- Verified after the compound-condition and Brass hidden-follow-up fixes: `npm --prefix backend run typecheck` passed and expanded clean-runtime suite passed (410 tests).
+- Fresh manual lane A r3 `output/clean-runtime-p335-manual-lane-a-acceptance-r3-20260618T150700` reached 10/60 turns: Brass soft surface, hidden follow-up bounded negative, dialogue, route status, movement, physical probe, condition set, and player-status observation all settled cleanly. Interim prose audit `prose-audit-turns-1-10.json` has all hit counters 0; DB snapshot at turn 10 has clean records 10, Stage4 receipts 9, old stores 0, restore ledger 0, Brass Tube still carried.
+- Lane A r3 is diagnostic-invalid for acceptance after turn 14. Ordinary support actor materialization succeeded structurally, but player-facing prose included `near a public fixture`, which reads like an internal placeholder rather than world prose.
+- Fixed the support-actor prose gap at the typed public renderer: internal `near_public_fixture` now renders as `nearby in public view`, and `plain_work_clothes` renders as `wearing plain local work clothes`; no regex/prose banlist/validator cleanup was added.
+- Added Stage4 contract coverage for support actor visible-cue slots: `near_public_fixture` + `plain_work_clothes` must produce natural public summary/visible cue text and must not leak `public fixture` or the old clothing phrase.
+- Verified after the support cue fix: focused Stage4 suite passed (42 tests), expanded clean-runtime suite passed (411 tests), and `npm --prefix backend run typecheck` passed.
+- Disposable support-cue proof `output/clean-runtime-p335-support-cue-proof-20260618T152300` is invalid: backend env launched the old runtime, so it wrote legacy turn stores and counts as 0 live proof.
+- Fresh live proof `output/clean-runtime-p335-support-cue-proof-r2-20260618T152700`: one manually chosen support-actor request after reading state settled through `gameplay-cycle-runtime` with no structural issues, old stores 0, visible `Local Laborer`, and player-facing prose `A Local Laborer comes into view beside a mooring line, wearing plain local work clothes.` Grep audit found no `public fixture`, old clothing phrase, runtime mismatch, old-store, unsettled, or missing-clean-record markers.
+- Fresh manual lane A final r1 `output/clean-runtime-p335-manual-lane-a-final-r1-20260618T153100` is diagnostic-invalid for acceptance. It reached 22 clean manually chosen turns, then turn 23 item-transfer action failed after settled-packet construction because Stage 6 still enforced old exact-copy custody sentence validation.
+- Fixed the item-state narration contract away from exact custody sentence copy: `custody_change` / `settled_custody` now provide phraseable custody proof material, while validation preserves hard item custody through structured evidence refs plus exact item/target labels and cited scene anchor tokens.
+- Verified after the item-state exact-copy fix: narration focused suite passed (122 tests), expanded clean-runtime suite passed (411 tests), and `npm --prefix backend run typecheck` passed.
+- Repair proof on the restored r1 state, turn 24: the same manually chosen action `I hand the Brass Tube to Tap-Keeper Brost.` settled cleanly through `gameplay-cycle-runtime`; `Brass Tube` left player inventory, one accepted `item_transfer` receipt mutated worldVersion 9 -> 10, old stores 0, and narration preserved source/target/scene as `The Brass Tube passes from Mira Voss to Tap-Keeper Brost at The Copper Tap; Tap-Keeper Brost carries it now.`
+- Fresh manual lane A final r2 `output/clean-runtime-p335-manual-lane-a-final-r2-20260618T155300` is diagnostic-invalid for acceptance. Turn 10 followed soft `canal damp` prose with a `whether ... tampering/hidden sign` check; the bounded negative settled structurally, but player-facing prose denied the soft surface wording as if `canal damp` itself was absent.
+- Fixed the `whether` bounded-negative surface at the settlement and Stage6 prompt boundary: accepted `local_observation_beat` now says visible evidence does not answer the question, and the Stage6 prompt tells narration to phrase whether-shaped queries as unresolved by visible evidence while preserving the query words as checked material.
+- Verified after the `whether` no-match fix: focused settlement/narration suite passed (149 tests), expanded clean-runtime suite passed (412 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-whether-negative-proof-r3-20260618T161300`: one manually chosen turn after reading a fresh zero-turn clone settled through `gameplay-cycle-runtime`; narrative was `Nothing visible at Lowwater Bazaar answers whether faint canal damp on the Sealed lacquer message tube reveals tampering or a hidden sign.`, clean records 1, Stage4 receipts 1, old stores 0, restore ledger 0, mutation=false, worldVersion/time unchanged, and prose audit hit counters all 0.
+- Fresh manual lane A r4 `output/clean-runtime-p335-manual-lane-a-r4-20260618T161500` is diagnostic-invalid for acceptance. It reached 6 clean manually chosen turns, then turn 7 `I keep low as I move through the passage.` restored before settlement because GM Read emitted `localConditionNeed` beside a non-condition `interactionKind`.
+- Fixed the GM Read kind-drift boundary: when a candidate carries a single `localConditionNeed`, no competing need payloads, and no exact exposed movement-option target, validation canonicalizes it to `player_local_condition`; the prompt now explicitly treats keeping low while moving through the current passage as `conditionKey=crouched` when no route destination is named.
+- Verified after the GM Read kind-drift fix: focused contracts suite passed (222 tests), expanded clean-runtime suite passed (413 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-local-condition-kind-proof-20260618T162400`: after a manual setup move to Silt Warrens, `I keep low as I move through the passage.` settled as `player_local_condition` / `crouched`, mutation=true with worldVersion 1 -> 2 and worldTime unchanged, clean records 2, Stage4 receipts 2, old stores 0, restore ledger 0, and prose audit hit counters all 0. The proof also surfaced repeated scene-texture opening across the two turns; monitor this during long-run prose.
+- Fresh manual lane A r5 `output/clean-runtime-p335-manual-lane-a-r5-20260618T162700` is diagnostic-invalid for acceptance. It reached 5 clean manually chosen turns, then turn 6 `I look around for Old Pell, the records keeper.` settled as a generic clarification asking what visible detail to check; this is structurally safe but weak TTRPG adjudication for a named-person search.
+- Fixed GM Read guidance for named-person searches: looking around for a named person, role, or NPC now routes to `current_scene_observation` with `localObservationNeed` over `visible_actor`, `targetRef=null`, and bounded no-match, while named actor creation remains outside this route.
+- Verified after the named-person search fix: focused contracts suite passed (223 tests), expanded clean-runtime suite passed (414 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-named-person-search-proof-20260618T163300`: after a manual setup move to Auditor Spire, `I look around for Old Pell, the records keeper.` settled as `local_observation` + `bounded_visibility_negative`, mutation=false, no support actor materialization, clean records 2, Stage4 receipts 2, old stores 0, restore ledger 0, and prose audit hit counters all 0. The proof again repeated the exact scene-texture opener, so long-run prose must still watch repetition.
+- Fresh manual lane A r6 `output/clean-runtime-p335-manual-lane-a-r6-20260618T163700` is diagnostic-invalid for acceptance. Turn 2 `I look around for anyone who seems to be waiting for a courier.` exposed visible-actor property-search drift: first as a restored target-match/list-surface mismatch, then as semantic collapse into listing `Guide`, then as awkward no-match wording.
+- Fixed visible-person property search at the GM Read normalization and settlement wording boundary: generic visible-actor presence stays `list_surface`, property-bearing person searches stay bounded `target_match`, and person-property no-match renders as `No visible person seems to be waiting for a courier at <scene>.`
+- Verified after the visible-person property-search fix: focused contracts/settlement/narration suite passed (375 tests), expanded clean-runtime suite passed (417 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-visible-actor-property-proof-r4-20260618T165200`: after a manual setup dialogue, `I look around for anyone who seems to be waiting for a courier.` settled through `gameplay-cycle-runtime` as bounded visible-person no-match, mutation=false, clean records 2, Stage4 receipts 2, old stores 0, restore ledger 0, and narrative `No visible person seems to be waiting for a courier at Lowwater Bazaar.` with prose audit hit counters all 0.
+- Corrected playtest discipline after user feedback: long-run acceptance is actual Codex play. Each next action must be chosen after reading the latest narrative/receipts/state and must record a local human reason; scripts are only transport/artifact collectors and never action selectors.
+- Fresh manual lane A r7 `output/clean-runtime-p335-manual-lane-a-r7-20260618T165550` is diagnostic-invalid for acceptance because turn 4 was corrupted by PowerShell quoting before it reached the backend. `request.json` shows submitted `playerAction` as `I ask Guide, \`, so the resulting clarification was a transport/operator error rather than a runtime dialogue failure. Future dialogue turns must inspect `request.json` and use safe shell quoting.
+- Fresh manual lane A r8 `output/clean-runtime-p335-manual-lane-a-r8-20260618T165934` is diagnostic-invalid for acceptance. It reached 14 clean manually chosen turns, then turn 15 `I watch Guide for any obvious visible reaction to my open hands.` exposed a real Stage4 authority gap: the receipt accepted `positive_match` for `Guide` presence even though actor presence does not prove visible reaction, emotion, or relationship response.
+- Fixed the actor-property observation boundary in Stage4: a visible-actor `targetRef` proves identity/presence only when the query matches that actor surface; property/reaction queries require content proof and otherwise settle as bounded no-match. Actor no-match summaries now distinguish no actors present from actor-present/property-unproven.
+- Verified after the actor-property fix: Stage4 suite passed (42 tests), focused clean-runtime suite passed (417 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-actor-reaction-proof-20260618T171205`: after applying visible-hands condition, the follow-up `I watch Guide for any obvious visible reaction to my open hands.` settled as `local_observation` + `bounded_no_match`, mutation=false, clean records 2, Stage4 receipts 2, old stores 0, restore ledger 0, and did not promote Guide presence into reaction/relationship evidence. Prose audit counters were all 0, with repeated exact scene opener still logged as a long-run prose watch item.
+- Fresh manual lane A r9 `output/clean-runtime-p335-manual-lane-a-r9-20260618T171347` is diagnostic-invalid for acceptance. It reached 7 clean manually chosen turns, then turn 8 `I hold the Courier satchel high against my chest above the water.` accepted only generic `gripping_held_item`; the concrete high/above-water readiness intent was lost from receipt/state/prose.
+- Fixed the item-readiness local-condition path: GM Read `requestedPostureText` now flows through checklist, Stage4 request, condition result, persisted current-scene condition label for refreshed frames, and settlement evidence. `conditionKey` remains canonical, while the concrete posture text stays typed evidence rather than soft narrator invention.
+- Verified after the item-readiness fix: focused clean-runtime suite passed (419 tests) and `npm --prefix backend run typecheck` passed.
+- Fresh live proof `output/clean-runtime-p335-item-readiness-proof-20260618T172729`: after moving to Transmission Basement, `I hold the Courier satchel high against my chest above the water.` settled through `condition_set` with `requestedPostureText=hold Courier satchel high against chest above water`, mutation=true worldVersion 2 -> 3, time/tick unchanged, item custody/equip/location unchanged, clean records 3, Stage4 receipts 3, old stores 0, restore ledger 0, and prose preserved `high against your chest` / `above the water line`. Prose audit counters were all 0, with repeated scene opener still logged as a long-run prose watch item.
+- Fresh manual lane A r50 `output/clean-runtime-p335-acceptance-lane-a-r50-20260619T003754` is diagnostic-invalid for acceptance. Turn 22 `I ask Tap-Keeper Brost if he can hold the Brass Tube...` incorrectly produced both `item_transfer` and `dialogue_record`, mutating Brass Tube custody before the player physically handed it over.
+- Fixed the request-to-hold custody boundary at GM Read: requests to a visible actor about holding/keeping/storing an inventory item route as `visible_actor_dialogue` with `itemTransferNeed=null`; `give_to_visible_actor` requires explicit first-person physical handoff wording. Overclaimed dialogue candidates are normalized to dialogue-only, while pure hard transfer claims without the handoff cue are rejected.
+- Fresh live proof `output/clean-runtime-p335-hold-request-smoke-r51-20260619T005840`: after moving to The Copper Tap, the manually chosen request `I ask Tap-Keeper Brost if he can hold the Brass Tube...` settled as one `dialogue_record` step with Brass Tube still carried, worldVersion/time/tick unchanged; the follow-up `I hand the Brass Tube to Tap-Keeper Brost.` settled as one `item_transfer` step, worldVersion 1 -> 2, and Brass Tube left carried inventory. Prose audit passed for 3 narratives with all hit counters 0.
+- Verified after the request-to-hold fix: focused contracts suite passed (245 tests), expanded clean-runtime suite passed (446 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh manual lane A r52 `output/clean-runtime-p335-acceptance-lane-a-r52-20260619T010130` is diagnostic-invalid for acceptance. It reached 5 clean turns proving soft loose-brick detail and hidden-catch adjudication, then turn 6 `I keep low as I move through the passage.` over-clarified for a destination instead of applying current-scene crouched posture.
+- Fixed the keep-low cue at GM Read prompt ownership: the current-frame local-condition cue now includes a concrete `player_local_condition` / `conditionKey=crouched` example for `keep low while moving through the passage`, so the movement phrase does not route to destination clarification when no movement option is named.
+- Fresh live proof `output/clean-runtime-p335-keep-low-smoke-r53-20260619T010620`: after moving to Silt Warrens, the same manually chosen action settled as one `condition_set` step with authority `player_local_condition_receipt`, worldVersion 1 -> 2, worldTime/tick stable, inventory stable, and prose audit passed for 2 narratives with all hit counters 0.
+- Verified after the keep-low prompt fix: focused contracts suite passed (245 tests), expanded clean-runtime suite passed (446 tests), and `npm --prefix backend run typecheck` passed.
+- Fresh manual lane A r54 `output/clean-runtime-p335-acceptance-lane-a-r54-20260619T010816` reached 49 settled clean turns plus one provider connect-timeout retry that left restore ledger 0 and old stores 0; it is diagnostic-invalid for acceptance after turn 50. Turn 50 `I crouch behind a broken granite block ... and keep the message tube dry` accepted only `crouched`, dropping the carried-item readiness intent.
+- Adjusted the prose audit script after r54 turn 19 exposed a false positive: `stands in view` for accepted visible-actor presence no longer counts as `directSceneImpliedAction`. Re-run audit over r54 done turns 1-40 had all hit counters 0.
+- Fixed the posture-plus-carried-item partial admission at GM Read: if a player combines body posture with carried-item readiness/dry/high/close in one action and the model admits only one `player_local_condition`, validation canonicalizes it to a clarification asking which posture/readiness to apply first; a validation backstop rejects the partial hard condition if canonicalization is bypassed.
+- Fresh live proof `output/clean-runtime-p335-compound-item-readiness-smoke-r55-20260619T013927`: after moving to Upper Dam Ruins, `I crouch behind a broken granite block for a moment and keep the message tube dry.` produced player-facing clarification `Which posture/readiness should apply first: crouching or keeping the message tube dry?`, wrote no Stage4 step, kept worldVersion/time stable, kept inventory stable, and prose audit passed with all hit counters 0.
+- Verified after the compound readiness fix: focused contracts suite passed (246 tests), expanded clean-runtime suite passed (447 tests), and `npm --prefix backend run typecheck` passed.
+- Final accepted lane A: `output/clean-runtime-p335-acceptance-lane-a-r67-20260619T005106`, 60/60 manually chosen clean-runtime turns, final DB snapshot has 60 clean turn records, 60 Stage4 receipts, restore ledger 0, and all legacy stores 0.
+- Final accepted lane B: `output/clean-runtime-p335-acceptance-lane-b-r70-20260619T013759`, 60/60 manually chosen clean-runtime turns, final DB snapshot has 60 clean turn records, 60 Stage4 receipts, restore ledger 0, and all legacy stores 0.
+- Aggregate prose audit: `output/p335-aggregate-r67-r70-prose-audit.json`, 120 narratives, average 37.87 words, no one-token outputs, and all hard/soft drift hit counters 0.
+- Verified after final runtime patch: `npm --prefix backend run typecheck`; focused narration/contracts tests, 373 passed; expanded contracts/stage4/settlement/narration suite, 450 passed; `git diff --check`.
+- Oracle/GPT-5.5 Pro consultation was attempted earlier for the narrative simplification question, but the browser path lacked a usable ChatGPT session. Per user instruction, that infrastructure failure was recorded as non-blocking.
+- GitNexus staged `detect_changes` reported CRITICAL breadth because the slice intentionally touches the central GM Read -> Stage4 -> Settlement -> Stage6 clean-runtime turn loop: 131 changed symbols, 26 affected flow groups, 18 changed files. Reviewed `runCleanNarration`, `runCleanStage4Execution`, and `runCleanGmRead` contexts; affected process names match the exercised clean-runtime flows.
+- P335 full long-run acceptance is satisfied pending commit/push.
+
 ## Current Session Focus 2026-06-15 - P334 Stage 6 Soft Prose Contract
 
 Goal:
@@ -8967,3 +9073,191 @@ Session: `gm-v1-consequenc-slice`.
     - Verified proof artifact `output/clean-runtime-p333-inventory-single-match-proof-20260615T065808`: `Look at the Brass Tube.` produced accepted `local_observation` evidence with `Local observation beat: Brass Tube is with you at Lowwater Bazaar.` and player-facing narration `Courier satchels here now carry sealed manifests listing names pulled from the Resonance Tower, and buyers pay triple for unmarked deliveries. Brass Tube is with you at Lowwater Bazaar.`
     - Verified prose audit `output/clean-runtime-p333-inventory-single-match-proof-20260615T065808/prose-audit.json`: one narrative, 29 words, zero one-token output, zero list-like starts, and all hit counters 0.
     - Verified GitNexus all-scope `detect_changes`: LOW scope, 7 changed files, and 0 affected execution flows.
+
+- P335 manual proof restore: private actor labels inside raw scene descriptions:
+  - Diagnosis:
+    - [x] Manual lane r10 turn 9 invalidated the clone: moving from `Resonance Tower` to `Ground-Floor Barricade` emitted `state_update`, then settlement failed with `Settled evidence must not expose private guard terms`.
+    - [x] Root cause: `sceneEvidence()` accepted raw post-movement scene description clauses as `scene_texture`; the location description contained private actor/lore text such as `Venn the Borrowed` and detention ledger material.
+    - [x] This was a settlement evidence-boundary bug, not a narrator/prose-quality bug and not an action-selection bug.
+  - Plan:
+    - [x] Run GitNexus impact for `sceneTextureFacts`, `sceneEvidence`, and `buildCleanSettledTurnPacket` before editing.
+    - [x] Keep `scene_texture` as a bounded public surface cue: first safe clause from current scene and, when distinct, first safe parent-location clause.
+    - [x] Filter scene texture candidates against typed private guard terms before accepted evidence; leave private labels in guard sidecars only.
+    - [x] Add settlement regression proving movement still settles while private actor/lore text stays out of accepted evidence and narrator view facts.
+    - [x] Run focused tests, typecheck, live proof/audit.
+  - Success criteria:
+    - [x] Hard movement to `Ground-Floor Barricade` settles through clean runtime.
+    - [x] Accepted `scene_texture` contains only public surface texture, not hidden/private actor/lore clauses from raw location description.
+    - [x] No regex prose banlist, gameplay fallback, repair loop, or deterministic narrator replacement was added.
+  - Review:
+    - Changed `sceneTextureFacts()` in `backend/src/engine/gameplay-cycle-runtime/settlement.ts` to derive bounded public texture clauses before packet creation.
+    - Added regression in `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` for movement into a scene whose raw description mentions private actors.
+    - Verified settlement suite: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` (30 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (420 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p335-private-scene-texture-proof-20260618T174400`: zero-turn clone, manual moves to `Resonance Tower` then `Ground-Floor Barricade`, turn 2 `done.runtime=gameplay-cycle-runtime`, `settled=true`, `mutationApplied=true`, zero structural issues, zero restore ledger rows, zero legacy stores.
+    - Verified turn 2 accepted evidence/narrative does not contain `Venn the Borrowed` or `detention`; accepted `scene_texture` is only `Overturned relay cabinets and iron signal drums form a ten-foot barricade across the Resonance Tower's ground-floor archway.`
+    - Verified prose audit `output/clean-runtime-p335-private-scene-texture-proof-20260618T174400/prose-audit.json`: 2 narratives, zero one-token output, zero list-like starts, and all hit counters 0.
+
+- P335 manual proof readability: item-readiness grammar in accepted condition evidence:
+  - Diagnosis:
+    - [x] Manual lane r11 reached turn 28 cleanly, but player-facing prose said `You keeping the Sealed lacquer message tube in hand...`.
+    - [x] Receipt/settlement showed the bug lived in accepted `player_local_condition` evidence: settlement framed model-extracted `requestedPostureText` directly after `You`.
+    - [x] First live proof of the fix caught the next layer, `You keep ... in my hand`, so first-person posture pronouns also needed renderer ownership.
+  - Plan:
+    - [x] Run GitNexus impact for `playerLocalConditionAppliedText`, `playerLocalConditionStateText`, and `playerLocalConditionOperationText` before editing.
+    - [x] Add a small settlement renderer that converts common progressive item-readiness openings to finite second-person action phrases and converts first-person posture pronouns when settlement owns the `You ...` frame.
+    - [x] Add a focused settlement regression for `keeping ... in my hand` -> `You keep ... in your hand`.
+    - [x] Run focused/expanded tests, typecheck, live proof/audit.
+  - Success criteria:
+    - [x] Accepted condition evidence never emits `You keeping`.
+    - [x] Accepted condition evidence uses second-person posture grammar when the player action used first-person phrasing.
+    - [x] The fix stays in typed operation rendering, not narrator regex cleanup, prose banlists, fallback, or repair loop.
+  - Review:
+    - Added `playerFacingPostureVerbPhrase()` and second-person posture phrase rendering in `backend/src/engine/gameplay-cycle-runtime/settlement.ts`.
+    - Added regression in `backend/src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts`.
+    - Verified settlement suite: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` (31 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (421 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p335-condition-grammar-proof-r2-20260618T181400`: fresh clone, 3 manual turns, final action `I show Watch-Captain Ilara Rost the Sealed lacquer message tube while keeping it in my hand.`, `done.runtime=gameplay-cycle-runtime`, `settled=true`, zero structural issues, zero restore ledger rows, zero legacy stores.
+    - Verified accepted condition fact and narrative contain `You keep the Sealed lacquer message tube in hand at Ground-Floor Barricade.`, and do not contain `You keeping` or `my hand`.
+    - Verified prose audit `output/clean-runtime-p335-condition-grammar-proof-r2-20260618T181400/prose-audit.json`: 3 narratives, zero one-token output, zero list-like starts, and all hit counters 0.
+
+- P335 manual proof dialogue route/access affordance boundary:
+  - Diagnosis:
+    - [x] Manual lane r12 reached turn 29 cleanly, then `Clerk Aldris` gave directions through an unlisted `north stairwell`, `arched corridor`, `sealed double doors`, and `desk`.
+    - [x] Turn 33 local observation correctly failed to find the `north stairwell`, proving the dialogue quote had leaked route/access affordance text beyond public route evidence.
+    - [x] This is a Stage 4 dialogue task-card boundary bug: settlement already marks dialogue as speaker-response-only and route truth as backend-owned.
+  - Plan:
+    - [x] Mark r12 as diagnostic; keep the API-closure turn 24 as transport noise, not gameplay evidence.
+    - [x] Run GitNexus impact for `buildStage4DialogueRequestSystemPrompt`, `promptFrameForDialogue`, and `dialogueTaskCard`.
+    - [x] Give Stage 4 dialogue prompt/task card the current `movementOptions` and a positive `routeAccessBoundary`.
+    - [x] Add prompt contract tests proving route/access answers are bounded to visible movement options while current item-holder evidence remains available.
+    - [x] Run focused/expanded tests, typecheck, restart backend, and verify a fresh live dialogue proof before restarting 60-turn acceptance.
+  - Success criteria:
+    - [x] Dialogue may quote a visible actor response, but route/access/office/door/stair/desk/credential directions stay bounded to `movementOptions` or explicit uncertainty/redirect.
+    - [x] New route/location/access affordances still require route checks, local observation, movement receipts, or typed Stage 4 state receipts.
+    - [x] No regex prose banlist, gameplay fallback, repair loop, or deterministic narrator replacement is added.
+  - Review:
+    - Marked manual lane `output/clean-runtime-p335-manual-lane-a-r12-20260618T181700` diagnostic after turn 33: Aldris's dialogue invented route/access details that local observation later failed to find.
+    - Added `movementOptions` to the Stage 4 dialogue prompt frame and a `routeAccessBoundary` task-card section with next-visible-route plus later-local-check answer shape.
+    - Added prompt contract assertions in Stage4 and contracts tests for `routeAccessBoundary`, `visibleMovementOptions`, and route/access response shape.
+    - Verified focused tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (268 passed).
+    - Verified expanded clean-runtime tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (421 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - First live proof `output/clean-runtime-p335-dialogue-route-boundary-proof-20260618T184619` showed the initial boundary was too soft; Aldris still named unlisted access details.
+    - Verified live proof `output/clean-runtime-p335-dialogue-route-boundary-proof-r2-20260618T185219`: 4/4 manual turns clean, `done.runtime=gameplay-cycle-runtime`, `settled=true`, zero structural issues. Aldris names only `Auditor Spire` as the next route and says later records-office access must be observed/checked locally.
+    - Verified proof r2 narrative contains no `north stairwell`, `north exit`, `desk`, or `sealed double doors`; turn 4 local observation adjudicates records-office access as not visible.
+    - Verified prose audit `output/clean-runtime-p335-dialogue-route-boundary-proof-r2-20260618T185219/prose-audit.json`: 4 narratives, zero one-token output, zero list-like starts, and all hit counters 0.
+    - Superseded after user correction: the `routeAccessBoundary` prompt/task-card slice over-constrained visible actor speech and turned prose/dialogue into a runtime defect source. Treat these artifacts as diagnostic only. The next slice restores dialogue/prose as soft presentation and moves later player use of any soft detail to normal judge/typed-receipt adjudication.
+
+- P335 Stage 6 narrative authority correction: ordinary props and NSFW style remain prose, not world authority:
+  - Diagnosis:
+    - [x] Consulted Oracle/GPT-5.5 Pro via browser on the Stage 6 hard/soft truth boundary; saved memo at `output/oracle-worldforge-narrative-authority.md`.
+    - [x] Accepted the core recommendation: Settlement/accepted receipts are the truth source; Stage 6 is the telling.
+    - [x] Confirmed NSFW donor material stays in scope as an explicit style/rating layer, while hard facts still require accepted evidence.
+  - Plan:
+    - [x] Extend Stage 6 soft prose budget with `ordinary_scene_prop`.
+    - [x] Update prompt contract so harmless chairs, mugs, stools, ropes, crates, awnings, puddles, cloth, and scene clutter can appear as low-stakes visible texture.
+    - [x] Keep hidden/mechanical/valuable/useful affordances in hard-claim territory: important object/affordance, secret/world fact, route, item state, resource, injury/condition, relationship, etc.
+    - [x] Keep validation focused on schema, refs, hard claims, private/internal leaks, and exact hard tokens; do not add regex/prose banlists, repair loop, or deterministic narrator replacement for normal turns.
+  - Review:
+    - Added `ordinary_scene_prop` to `cleanNarrationSoftProseKindSchema`, `cleanNarratorSoftProseBudget()`, and candidate `softProseKinds` bounds.
+    - Updated Stage 6 prompt text to describe ordinary props as soft present/sensory scene dressing and to name hidden latches, weaponizable legs, traps, route-opening doors, valuable items, clues, and mechanical uses as hard evidence territory.
+    - Updated Stage 6 prompt to keep Zetta `Balanced NSFW` as a style/rating donor, not a discarded mode and not a hard-fact source.
+    - Added narration regressions accepting `Brass Tube` harmless surface prose plus a loose stool as `ordinary_scene_prop`, while rejecting a hidden prop mechanism/knife and hidden Brass Tube affordance as unsupported hard claims.
+    - Verified focused Stage 6 narration tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (122 passed).
+    - Verified expanded clean-runtime subset: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts` (422 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified `git diff --check` clean except line-ending warnings.
+    - Not final acceptance: P335 still needs actual Codex-played 2 fresh worlds x 60 manual turns to prove prose readability and soft-detail adjudication over distance.
+
+- P335 ordinary scene-prop admission correction:
+  - Diagnosis:
+    - [x] Manual lane r25 turn 6-7 exposed the remaining TTRPG-feel bug: `If there is an ordinary stool or chair ... grab it ... as an improvised shield` became clarification, then `I look for an ordinary stool or chair` became enumerated `bounded_no_match`.
+    - [x] Root cause lived before narration: GM Read treated `keep ready` as durable carry/equip/future use and treated obvious mundane tavern props as only enumerated SceneFrame surfaces.
+    - [x] Consulted Oracle/GPT-5.5 Pro via browser on the ordinary-prop boundary; it recommended ordinary props as low-stakes affordances, with plausible obvious props allowed without DB rows and hidden/mechanical uses adjudicated separately.
+  - Plan:
+    - [x] Keep the existing `scene_local_beat -> scene_beat_record -> persistenceScope=turn_event_only` owner.
+    - [x] Tighten GM Read positive task-card text: immediate `grab/hold/keep ready` stool/chair as improvised cover/shield is a scene-local beat when bounded to the current beat.
+    - [x] Add ordinary prop availability as a bounded scene beat for obvious mundane props in plausible locations, not a local-observation no-match over missing DB entries.
+    - [x] Preserve hard boundaries for hidden/mechanical affordance, durable item custody/equip/storage, special leverage, trade, repair, tracking, future-important use, and persistent named objects.
+  - Review:
+    - Updated `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` prompt/cue text only; no regex, fallback, repair loop, or deterministic action classifier was added.
+    - Added contract tests for immediate improvised-shield use, ordinary prop availability, and hidden ordinary-prop mechanism checks staying on bounded observation authority.
+    - Updated Stage4 scene-beat regression to the stool/chair improvised-shield case and verified no mutation.
+    - Verified focused tests: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts` (279 passed).
+    - Verified expanded clean-runtime subset: `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts src/engine/__tests__/gameplay-cycle-runtime-narration.test.ts src/engine/__tests__/gameplay-cycle-runtime-stage4.test.ts src/engine/__tests__/gameplay-cycle-runtime-settlement.test.ts` (433 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Verified live proof `output/clean-runtime-p335-manual-ordinary-prop-r26-20260618T220657`: turn 2 exact failed action accepted as `scene_beat_record`, `mutationApplied=false`, `worldVersion=1`, `restoreLedgerCount=0`, old stores zero, DB items still only Brass Tube, Courier satchel, and Sealed lacquer message tube.
+    - Verified live follow-up in r26 turn 3: hidden latch/spring/code/mechanism check settled as `local_observation` bounded negative, `mutationApplied=false`, no item row or hidden affordance.
+    - Verified live proof `output/clean-runtime-p335-manual-ordinary-prop-r27-20260618T221145`: pure `I look for an ordinary stool or chair within easy reach at The Copper Tap` accepted as `scene_beat_record`, narrated `A stool rests within easy reach`, `mutationApplied=false`, `worldVersion=1`, `restoreLedgerCount=0`, old stores zero, and no stool/chair item row.
+    - Not final acceptance: r26/r27 are diagnostic/live-smoke proofs. P335 still needs 2 fresh zero-turn worlds x 60 manual Codex-played turns after all current fixes.
+
+- P335 route/access fixture admission correction:
+  - Diagnosis:
+    - [x] Manual acceptance attempt r29 is diagnostic-only after turn 25: `Do I see any open stair, lift, ladder, or doorway that clearly leads to upper floors?` settled structurally clean but answered the exposed route `Resonance Tower` instead of the requested physical access fixture.
+    - [x] Root cause: GM Read route guidance over-weighted `open` / `leads to` wording and allowed physical fixture visibility questions to become broad route-options receipt output.
+  - Plan:
+    - [x] Keep route authority for exact `SceneFrame.movementOptions` labels and broad route/exits/options lists.
+    - [x] Route physical access fixtures (`stair`, `lift`, `ladder`, `doorway`, `hatch`, `gate`, `rope`, `bridge`, `passage mouth`, `barricade opening`) through `current_scene_observation.localObservationNeed` unless the player names an exact movement option.
+    - [x] Add prompt/example tests and live smoke.
+  - Review:
+    - Updated `backend/src/engine/gameplay-cycle-runtime/gm-read.ts` with an access-fixture observation cue and an explicit "do not substitute route label" boundary.
+    - Added contract regression in `backend/src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts`.
+    - Added narration metadata regression for stacked hard-claim punctuation (`visible_actor.;`, `inventory_status.;`, `movement_option.;`) after r28 diagnostic exposed the same live shape.
+    - Verified focused tests: contracts (235 passed), narration (123 passed).
+    - Verified expanded clean-runtime subset after the metadata regression: contracts/narration/stage4/settlement (434 passed) and typecheck.
+    - Verified live smoke on diagnostic r29 turn 26: exact access-fixture query settled as bounded local observation, `No open stair, lift, ladder, or doorway ... stands out`, not route options.
+    - Not final acceptance: r29 is diagnostic-only; fresh lanes must restart from zero-turn clones.
+
+- P335 scene-beat availability narration correction:
+  - Diagnosis:
+    - [x] Fresh acceptance attempt r30 turn 7 showed a semantic overstep: accepted evidence only said an ordinary stool/chair was within reach, but Stage 6 narrated the player settling onto a stool.
+    - [x] First fix attempt r31 proved the wrong boundary: exact-copy full-sentence validation stopped the turn and restored pre-turn state, creating a runtime defect.
+  - Plan:
+    - [x] Add typed `sceneBeatNeed.beatKind` to GM Read for `scene_local_beat`.
+    - [x] Carry `ordinary_prop_availability` / `ordinary_prop_readiness` through checklist, Stage4 receipt, settlement backend facts, and Stage6 prompt input.
+    - [x] Keep validation to schema/refs/hard-claim ownership; avoid regex, prose banlists, repair loops, gameplay fallback, and exact-copy availability gates.
+    - [x] Add regression tests for typed availability/readiness scene beats and harmless availability prose acceptance.
+  - Review:
+    - Updated `contracts.ts`, `gm-read.ts`, `action-checklist.ts`, `stage4-execution` contract surfaces via schema, `settlement.ts`, and `narration.ts`.
+    - Verified focused tests: contracts/narration/stage4 (404 passed).
+    - Verified expanded clean-runtime subset: contracts/narration/stage4/settlement (436 passed).
+    - Verified typecheck: `npm --prefix backend run typecheck`.
+    - Marked r31 diagnostic-only: exact-copy validator caused `CleanNarrationValidationError` and route restore.
+    - Verified live smoke `output/clean-runtime-p335-acceptance-lane-a-r32-20260618T230354`: turn 3 availability-only stool request settled as `scene_beat_receipt` with `scene_beat_kind=ordinary_prop_availability`, mutation false, no stool/chair item row, and narration `A stool sits within easy reach...` without player sitting/grabbing.
+    - Verified r32 turn 4 soft-detail follow-up adjudicated normally as bounded `local_observation_receipt`, mutation false, no hidden affordance/item rows.
+    - Verified r32 turn 5 actual grab/hold readiness settled as `scene_beat_receipt` with `scene_beat_kind=ordinary_prop_readiness`, mutation false, no stool/chair item row.
+    - Marked r32 turns 19-20 diagnostic-only: held-item-plus-cover prose exposed GM Read typed-need drift (`sceneBeatNeed` emitted under the wrong `interactionKind`).
+    - Added prompt guidance and schema-path normalization for typed `sceneBeatNeed` drift when no competing typed payload exists; this preserves the scene-local primitive instead of restoring the turn for harmless enum mismatch.
+    - Verified r32 turn 21 after the drift fix: `duck behind one of the iron signal drums ... keeping the Brass Tube close` settled as `scene_beat_receipt` with `scene_beat_kind=ordinary_prop_readiness`, limits exclude item/world/condition facts, and DB has no new signal-drum/cover item row.
+    - Marked r33 turn 13 and r34 turn 3 diagnostic-only: prompt-only generic guidance let GM Read recast `step onto the loose board/brick` as bounded property observation, producing clinical prose instead of immediate scene action.
+    - Consulted existing GPT-5.5 Pro Oracle session `p335-ordinary-prop-boundary`; it supports ordinary props as low-stakes action handles that usually say yes to plausible immediate use, while hidden/property checks stay separately adjudicated.
+    - Added a current-frame GM Read JSON example for `Step onto a loose board or brick for this immediate beat` and a regression preserving the split between plain footing action (`scene_local_beat`) and explicit `check whether it shifts/holds/reveals` (`current_scene_observation`).
+    - Verified live smoke `output/clean-runtime-p335-acceptance-lane-a-r35-20260618T233704`: turn 3 settled as `scene_beat_receipt` with `scene_beat_kind=local_interaction`, `scene_beat_record`, mutation false, no board/brick item row, restore ledger zero, and old stores zero.
+    - Marked r36 diagnostic-only after turn 3: `walk to Upper Dam Ruins, keeping the Courier satchel tucked close` caused `CleanGmReadValidationError` because GLM emitted forbidden `movement_intent + localConditionNeed`.
+    - Kept movement validator strict and added current-frame GM Read prompt/test coverage for movement-with-carried-item-manner: the travel stays `movement_intent`, while satchel closeness remains manner text rather than a current-scene local condition.
+    - Verified live smoke `output/clean-runtime-p335-acceptance-lane-a-r37-20260618T234425`: turn 1 settled as accepted `movement`, mutation true, worldVersion 0 -> 1, route/time updated, no condition receipt, item states unchanged, restore ledger zero, and old stores zero.
+    - Marked r37/r38 diagnostic for prose readability: noun-phrase visible checks produced awkward `Nothing visible ... answers visible sparks...` narration.
+    - Rejected the first exact-copy validation fix after r39 restored the turn; exact-copy validation on normal Stage 6 prose protected grammar by creating a runtime defect.
+    - Moved the fix upstream into GM Read query ownership: yes/no visible-surface checks now prompt `localObservationNeed.queryText` as a grammatical `whether...` fragment instead of a bare noun phrase.
+    - Verified live smoke `output/clean-runtime-p335-acceptance-lane-a-r40-20260618T235836`: turn 2 settled as accepted non-mutating `local_observation`, queryText/receipt use `whether visible sparks...`, narration is grammatical, restore ledger zero, and old stores zero.
+    - Marked r41 diagnostic-only after turn 7: route question from Silt Warrens named `Upper Dam Ruins`, which was not in current `SceneFrame.movementOptions`; GLM emitted it as a `route_inquiry.targetRef`, and validation correctly restored the turn.
+    - Tightened GM Read prompt/test coverage for unavailable named destinations in route questions: keep destination names in intent/text fields, while `route_inquiry.targetRefs` cite only exposed movement options, current scene/location refs, or stay empty.
+    - Verified focused/expanded tests after the route-ref fix: contracts (241 passed), contracts/narration/stage4/settlement (442 passed), and `npm --prefix backend run typecheck`.
+    - Verified live smoke `output/clean-runtime-p335-route-smoke-r42-20260619T000920`: turn 2 exact r41 route question settled as accepted non-mutating `route_options_receipt`, listed only current Silt Warrens exits, mutation false, restore/fallback/repair events zero.
+    - Marked r43 diagnostic-only after turn 8: hard contract remained clean, but bounded-negative local-observation prose still rendered as the service-like formula `Nothing visible ... answers whether...`, failing the long-run readability bar.
+    - Moved the fix to accepted evidence/page-task ownership: whether-shaped bounded no-match beats now use `No visible sign at <scene> settles whether <question-body>.`, and Stage 6 prompt no longer teaches the old `answers whether` construction.
+    - Verified focused/expanded tests after the negative-prose fix: settlement (32 passed), narration (124 passed), contracts/narration/stage4/settlement (442 passed), and `npm --prefix backend run typecheck`.
+    - Verified live smoke `output/clean-runtime-p335-negative-prose-smoke-r44-20260619T001941`: explicit hidden/mechanical loose-brick check settled as non-mutating `local_observation_receipt` + `bounded_visibility_negative`, player-facing text used `No visible sign ... settles whether...`, and restore/fallback/repair events were zero.
+    - Marked r45 diagnostic-only after turn 1: broad overview was admitted as a local-observation self-ref and narrated `the current scene offers little beyond the bazaar itself` despite visible Guide/items/routes.
+    - Marked r46 diagnostic-only after turn 1: the self-ref prose improved, but broad mixed-surface local observation truncated the route context and omitted `The Copper Tap` / `Upper Dam Ruins` while saying `ways outward`.
+    - Added structured GM Read normalization for broad non-negative multi-surface/current-scene overviews: drop stray `localObservationNeed` so the existing direct-scene/observe-visible snapshot owns the page; targeted actors/items/access fixtures/hidden checks keep their typed receipt owners.
+    - Verified contracts after the broad-overview fix: 243 passed.
+    - Verified live smoke `output/clean-runtime-p335-broad-look-smoke-r47-20260619T002745`: exact broad-look action settled as `direct_scene`, `judgeNextStep=settle_no_roll`, no local-observation receipt, all 8 route labels included, restore/fallback/repair events zero.
+    - Marked r48 diagnostic-only after turn 5: the player chained onto prior soft prose `the scrap`, but clean GM Read lacked recent discourse context and asked a clarification instead of adjudicating the soft handle.
+    - Added non-authoritative recent discourse context to clean GM Read prompts from the last chat messages. This resolves immediate pronouns/short refs to soft prose handles without adding DB/world-state authority; recent soft prop checks use `targetRef=null` and normal typed owners.
+    - Verified contracts/expanded tests after the recent-discourse fix: contracts (244 passed), contracts/narration/stage4/settlement (445 passed), and `npm --prefix backend run typecheck`.
+    - Verified live smoke `output/clean-runtime-p335-soft-handle-smoke-r49-20260619T003608`: `the scrap` from prior prose resolved, hidden ink/code/needle check settled as non-mutating bounded `local_observation_receipt`, no scrap/cloth item row, restore/fallback/repair events zero.
+    - Not final acceptance: still needs 2 fresh zero-turn worlds x 60 Codex-played turns for long-run prose readability.

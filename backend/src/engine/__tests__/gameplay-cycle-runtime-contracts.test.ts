@@ -180,6 +180,67 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
     expect(parsed.sentences[0]?.evidenceRefs).toHaveLength(12);
   });
 
+  it("allows narrator evidence ids and public docket labels while rejecting actual backend refs in visible text", () => {
+    const view = {
+      version: "gameplay-runtime.narrator-view.v1",
+      packetId: "cgpacket_test",
+      campaignId: "campaign-test",
+      turnId: "clean-turn-1",
+      responseLanguage: "match_player_action",
+      language: "en",
+      languageSource: "derived_from_player_action_without_prompting_raw_action",
+      preserveLabelsVerbatim: true,
+      acceptedEvidence: [{
+        ref: "stage4-receipt-item-transfer",
+        authority: "item_transfer_receipt",
+        claimKinds: ["item_state"],
+        text: "You now carry the fee-remission petition for CRN-7843-V.",
+        backendFacts: [{
+          factRef: "stage4-receipt-item-transfer.f1",
+          role: "item_label",
+          value: "fee-remission petition for CRN-7843-V",
+          text: "Item label: fee-remission petition for CRN-7843-V.",
+          exact: true,
+        }],
+        limits: {
+          proves: ["current item custody"],
+          doesNotProve: ["item inspection result", "future relevance"],
+        },
+      }],
+      stepAuditForGrounding: [],
+      guard: {
+        mayCallTools: false,
+        mayInferNewFacts: false,
+        mayUseFailedOrSkippedAsTruth: false,
+        mayNarrateNoChangeWithoutExplicitEvidence: false,
+      },
+      privateGuardSidecar: {
+        forbiddenActorLabels: [],
+        forbiddenPrivateTerms: [],
+      },
+    };
+
+    expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
+
+    const backendRefLeak = {
+      ...view,
+      acceptedEvidence: [{
+        ...view.acceptedEvidence[0],
+        text: "The public text leaked actor:abc.",
+      }],
+    };
+    const uuidLeak = {
+      ...view,
+      acceptedEvidence: [{
+        ...view.acceptedEvidence[0],
+        text: "The public text leaked 10c36343-4582-4504-ad00-7f0658c07a58.",
+      }],
+    };
+
+    expect(cleanNarratorViewSchema.safeParse(backendRefLeak).success).toBe(false);
+    expect(cleanNarratorViewSchema.safeParse(uuidLeak).success).toBe(false);
+  });
+
   it("accepts a Primitive 0 turn input without legacy intent/method or tool payloads", () => {
     const parsed = gameplayRuntimeTurnInputSchema.parse({
       version: "gameplay-runtime.turn-input.v1",
@@ -1432,6 +1493,124 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["inventory_item"]);
   });
 
+  it("drops broad current-scene self-ref localObservationNeed so overview stays observe_visible-owned", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I take in the bazaar carefully before choosing a route.",
+      citableRefs: ["Player", "Market", "Guide", "North Hall"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "direct",
+      liveSceneQuestion: "Which current-scene overview is visible?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player broadly takes in the current scene before choosing a route.",
+        playerIntent: "Take in the bazaar carefully before choosing a route.",
+        method: "look around",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "Take in the bazaar carefully before choosing a route.",
+          targetRef: "Market",
+          surfaceKinds: ["current_scene"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The player asks for a broad current-scene overview, not a targeted receipt.",
+    };
+
+    expect(buildGmReadSystemPrompt()).toContain("broad look/look around/what is visible without a concrete target query");
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "current_scene_observation",
+      localObservationNeed: null,
+    });
+  });
+
+  it("drops broad mixed-surface localObservationNeed so overview does not truncate route context", () => {
+    const frame = actionPlanFrame({
+      playerAction: "I take in the bazaar carefully before choosing a route.",
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "direct",
+      liveSceneQuestion: "Which current-scene overview is visible?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player broadly takes in the scene before choosing a route.",
+        playerIntent: "Take in the bazaar carefully before choosing a route.",
+        method: "look around",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "Take in the bazaar carefully before choosing a route.",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "inventory_item", "visible_target", "movement_option"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "A broad multi-surface overview should use the current snapshot instead of a truncated local-observation receipt.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeNull();
+  });
+
+  it("canonicalizes explicit list_surface localObservationNeed targetRef to null before strict GM Read validation", () => {
+    const frame = localObservationFrame({
+      playerAction: "Pat down my kit and name the things I carry.",
+      inventory: [{ ref: "Brass Tube", label: "Brass Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    });
+    const candidate = {
+      ...localObservationGmRead(frame),
+      focalRefs: ["Player", "Market", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        summary: "The player asks for carried inventory.",
+        playerIntent: "List carried inventory.",
+        targetRefs: ["Brass Tube"],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "Pat down my kit and name the things I carry.",
+          targetRef: "Brass Tube",
+          surfaceKinds: ["inventory_item"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market", "Brass Tube"],
+        },
+      },
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.targetRefs).toEqual(["Brass Tube"]);
+  });
+
   it("canonicalizes omitted list-surface localObservationNeed queryText from the current player action", () => {
     const frame = localObservationFrame({
       playerAction: "What am I carrying?",
@@ -1639,6 +1818,72 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     }).status).toBe("rejected");
   });
 
+  it("keeps unavailable named destinations out of route_inquiry targetRefs", () => {
+    const frame = actionPlanFrame({
+      playerAction: "Can I go directly to Upper Dam Ruins from here without backtracking?",
+      scene: {
+        currentLocation: { ref: "Silt Warrens", label: "Silt Warrens", description: null },
+        currentScene: { ref: "Silt Warrens", label: "Silt Warrens", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [
+        { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", connected: true, travelCost: 1 },
+        { ref: "Resonance Tower", label: "Resonance Tower", connected: true, travelCost: 1 },
+        { ref: "Slip Twelve", label: "Slip Twelve", connected: true, travelCost: 1 },
+      ],
+      citableRefs: ["Player", "Silt Warrens", "Lowwater Bazaar", "Resonance Tower", "Slip Twelve", "Upper Dam Ruins"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Can the Player go directly to Upper Dam Ruins from Silt Warrens without backtracking?",
+      focalRefs: ["Player", "Silt Warrens"],
+      evidenceRefs: ["Player", "Silt Warrens"],
+      actionInterpretation: {
+        summary: "The player asks whether a direct route exists from the current scene to a named unavailable destination.",
+        playerIntent: "Check whether Upper Dam Ruins is directly reachable from here without backtracking.",
+        method: "route-status question about Upper Dam Ruins",
+        targetRefs: [],
+        interactionKind: "route_inquiry",
+      },
+      interpretationRationale: "The named destination is not an exposed movement option, so the inquiry stays scoped to current route options.",
+    };
+
+    expect(buildGmReadSystemPrompt()).toContain("destination that is not an exposed movementOptions ref/label");
+    expect(prompt).toContain("destination absent from movementOptions");
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "route_inquiry",
+      targetRefs: [],
+    });
+
+    const unavailableDestinationRef = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...candidate,
+        actionInterpretation: {
+          ...candidate.actionInterpretation,
+          targetRefs: ["Upper Dam Ruins"],
+        },
+      },
+    });
+
+    expect(unavailableDestinationRef.status).toBe("rejected");
+    if (unavailableDestinationRef.status !== "rejected") throw new Error("expected rejected");
+    expect(unavailableDestinationRef.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.targetRefs",
+      }),
+    ]));
+  });
+
   it("accepts broad route_inquiry anchored on the current scene ref", () => {
     const frame = actionPlanFrame({
       playerAction: "I list the routes I can take from Market now.",
@@ -1723,6 +1968,54 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
   });
 
+  it("canonicalizes route_inquiry that carries a stray localObservationNeed", () => {
+    const frame = actionPlanFrame({
+      playerAction: "Which ways can I go from here?",
+      movementOptions: [
+        { ref: "Canal Bridge", label: "Canal Bridge", connected: true, travelCost: 1 },
+        { ref: "North Hall", label: "North Hall", connected: true, travelCost: 1 },
+      ],
+      citableRefs: ["Player", "Market", "Guide", "Canal Bridge", "North Hall"],
+    });
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      liveSceneQuestion: "Which current route options can be listed?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player asks for visible routes from the current scene.",
+        playerIntent: "List current route options.",
+        method: "list routes",
+        targetRefs: ["Market"],
+        interactionKind: "route_inquiry",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "Which ways can I go from here?",
+          targetRef: "Market",
+          surfaceKinds: ["movement_option", "current_scene"],
+          allowBoundedNegative: false,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The model chose the correct route branch and also carried a stray surface-list field.",
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation).toMatchObject({
+      interactionKind: "route_inquiry",
+      targetRefs: ["Market"],
+      localObservationNeed: null,
+    });
+  });
+
   it("requires time_passage to carry a typed elapsed-minute need before checklist planning", () => {
     const frame = minimalFrame({
       playerAction: "I wait here for 3 minutes.",
@@ -1775,6 +2068,68 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(accepted.status).toBe("accepted");
   });
 
+  it("accepts time_passage with bounded maintained Player item-readiness condition", () => {
+    const frame = minimalFrame({
+      playerAction: "I wait a few minutes while keeping the sealed tube above the water.",
+      inventory: [{ ref: "Sealed Tube", label: "Sealed Tube", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Sealed Tube"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player lets a few current-scene minutes pass while maintaining a carried item posture.",
+      liveSceneQuestion: "How much time passes, and what bounded Player item-readiness condition is maintained?",
+      evidenceRefs: ["Player", "Market", "Sealed Tube"],
+      actionInterpretation: {
+        summary: "The player waits a few minutes while holding the sealed tube above the water.",
+        playerIntent: "Wait a few minutes while keeping the sealed tube above the water.",
+        method: "wait while holding item high",
+        targetRefs: ["Market", "Sealed Tube"],
+        interactionKind: "time_passage",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "keep the sealed tube above the water",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Sealed Tube",
+          evidenceRefs: ["Player", "Market", "Sealed Tube"],
+        },
+        timePassageNeed: {
+          actorRef: "Player",
+          elapsedMinutes: 5,
+          reasonKind: "wait",
+          requestedDurationText: "a few minutes",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+    expect(accepted.status).toBe("accepted");
+
+    const rejected = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...candidate,
+        actionInterpretation: {
+          ...candidate.actionInterpretation,
+          localConditionNeed: {
+            ...candidate.actionInterpretation.localConditionNeed!,
+            operation: "clear",
+          },
+        },
+      },
+    });
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "actionInterpretation.localConditionNeed.operation",
+      }),
+    ]));
+  });
+
   it.each([
     ["hand", "I hand the Brass Tube to Guide."],
     ["give", "I give the Brass Tube to Guide."],
@@ -1799,6 +2154,77 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         equipSlot: null,
       },
     });
+  });
+
+  it("accepts item_transfer with a separate maintained Player item-readiness condition", () => {
+    const frame = minimalFrame({
+      playerAction: "I set down the courier satchel while keeping the message tube in my hand.",
+      inventory: [
+        { ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] },
+        { ref: "Message Tube", label: "Message Tube", equipState: "carried", tags: [] },
+      ],
+      citableRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player changes one item custody/location state while maintaining another carried item posture.",
+      liveSceneQuestion: "Which item changes location, and what separate item-readiness condition is maintained?",
+      focalRefs: ["Player", "Courier satchel", "Message Tube"],
+      evidenceRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+      actionInterpretation: {
+        summary: "The player sets the courier satchel down while keeping the message tube in hand.",
+        playerIntent: "Set down the courier satchel while keeping the message tube in hand.",
+        method: "set down and keep holding",
+        targetRefs: ["Market", "Courier satchel", "Message Tube"],
+        interactionKind: "item_transfer",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "keep the message tube in hand",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Message Tube",
+          evidenceRefs: ["Player", "Market", "Message Tube"],
+        },
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "drop_in_current_scene",
+          itemRef: "Courier satchel",
+          sourceKind: "player_inventory",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          equipSlot: null,
+          requestedItemText: "courier satchel",
+          evidenceRefs: ["Player", "Market", "Courier satchel"],
+        },
+      },
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+    expect(accepted.status).toBe("accepted");
+
+    const sameItemCondition = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...candidate,
+        actionInterpretation: {
+          ...candidate.actionInterpretation,
+          localConditionNeed: {
+            ...candidate.actionInterpretation.localConditionNeed!,
+            targetRef: "Courier satchel",
+            evidenceRefs: ["Player", "Market", "Courier satchel"],
+          },
+        },
+      },
+    });
+    expect(sameItemCondition.status).toBe("rejected");
+    if (sameItemCondition.status !== "rejected") throw new Error("expected rejected");
+    expect(sameItemCondition.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "actionInterpretation.localConditionNeed.targetRef",
+      }),
+    ]));
   });
 
   it("rejects a supported inventory-to-visible-actor target pair when GM Read labels it unsupported", () => {
@@ -1857,6 +2283,84 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         path: "actionInterpretation.itemTransferNeed",
       }),
     ]));
+  });
+
+  it("keeps a request for a visible actor to hold an inventory item as dialogue-only", async () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I ask Guide if he can hold the Brass Tube for a minute while I check the room.",
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const overclaimedTransfer = itemTransferGmRead(frame).actionInterpretation.itemTransferNeed!;
+    const overclaimedDialogue: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player asks a visible actor a spoken question about holding an inventory item.",
+      liveSceneQuestion: "How does Guide visibly respond?",
+      focalRefs: ["Player", "Guide", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      actionInterpretation: {
+        summary: "The player asks Guide whether he can hold Brass Tube.",
+        playerIntent: "Ask Guide whether he can hold Brass Tube for a minute.",
+        method: "ask",
+        targetRefs: ["Guide", "Brass Tube"],
+        interactionKind: "visible_actor_dialogue",
+        itemTransferNeed: overclaimedTransfer,
+      },
+      interpretationRationale: "The spoken request needs dialogue authority; custody changes only after a physical handoff.",
+    };
+
+    expect(buildGmReadSystemPrompt()).toContain("Requests to a visible actor about holding");
+    expect(prompt).toContain("valid hold/keep request example shape");
+    expect(prompt).toContain("\"itemTransferNeed\": null");
+
+    const acceptedDialogue = validateGmReadCandidate({ frame, candidate: overclaimedDialogue });
+
+    expect(acceptedDialogue.status).toBe("accepted");
+    if (acceptedDialogue.status !== "accepted") throw new Error("expected accepted");
+    expect(acceptedDialogue.read.actionInterpretation.interactionKind).toBe("visible_actor_dialogue");
+    expect(acceptedDialogue.read.actionInterpretation.targetRefs).toEqual(["Guide"]);
+    expect(acceptedDialogue.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+
+    const pureTransferNearMiss: GmRead = {
+      ...overclaimedDialogue,
+      actionInterpretation: {
+        ...overclaimedDialogue.actionInterpretation,
+        interactionKind: "item_transfer",
+        targetRefs: ["Brass Tube", "Guide"],
+        itemTransferNeed: overclaimedTransfer,
+      },
+    };
+    const acceptedPureNearMiss = validateGmReadCandidate({ frame, candidate: pureTransferNearMiss });
+
+    expect(acceptedPureNearMiss.status).toBe("accepted");
+    if (acceptedPureNearMiss.status !== "accepted") throw new Error("expected accepted");
+    expect(acceptedPureNearMiss.read.actionInterpretation.interactionKind).toBe("visible_actor_dialogue");
+    expect(acceptedPureNearMiss.read.actionInterpretation.targetRefs).toEqual(["Guide"]);
+    expect(acceptedPureNearMiss.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, acceptedDialogue.read),
+      actorRefs: ["Player"],
+      targetRefs: ["Guide"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      checkRationale: "Visible actor dialogue needs a terminal dialogue receipt before narration.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Visible actor dialogue needs a terminal dialogue receipt before narration.",
+        evidenceRefs: ["Player", "Guide", "Brass Tube"],
+      },
+    };
+    const checklist = await runCleanGmActionChecklist({
+      frame,
+      gmRead: acceptedDialogue.read,
+      judgment,
+      checklistId: "gm-action-checklist-hold-request-dialogue",
+    });
+
+    expect(checklist.status).toBe("accepted");
+    if (checklist.status !== "accepted") throw new Error("expected accepted");
+    expect(checklist.checklist.steps.map((step) => step.intended.kind)).toEqual(["dialogue_record"]);
+    expect(checklist.checklist.steps.map((step) => step.intended.kind)).not.toContain("item_transfer");
   });
 
   it("keeps carried equipSlot as a model-generation near-miss, not an accepted item_transfer contract", () => {
@@ -2109,7 +2613,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
   });
 
-  it("keeps overlong GM Read rationale as a model-generation near-miss for repair only", () => {
+  it("keeps overlong GM Read rationale as a model-generation near-miss while final packets stay strict", () => {
     const frame = deviceSurfaceFrame();
     const nearMiss = {
       ...deviceSurfaceGmRead(frame),
@@ -2145,6 +2649,13 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I grip the Brass Tube.",
     });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(buildGmReadSystemPrompt()).toContain("Keeping an already-inventory item close");
+    expect(prompt).toContain("held-item readiness example shape");
+    expect(prompt).toContain("itemTransferNeed");
+    expect(prompt).toContain("null");
+
     const candidate: GmRead = {
       ...validGmRead(frame),
       path: "procedural",
@@ -2177,6 +2688,93 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     if (result.status !== "accepted") throw new Error("expected accepted");
     expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
     expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+  });
+
+  it("keeps scene-local cover plus held-item closeness out of item_transfer", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I duck behind one of the iron signal drums while keeping the Brass Tube close.",
+      citableRefs: ["Player", "Market", "Brass Tube"],
+      targets: [],
+      movementOptions: [],
+      actors: [],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("If this immediate scene-prop beat also says to keep an already-inventory item close or ready");
+    expect(buildGmReadSystemPrompt()).toContain("keep the item phrase inside sceneBeatNeed.requestedBeatText");
+
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player uses current-scene cover while keeping an already-carried item close.",
+      liveSceneQuestion: "Can this current-scene prop beat be recorded without item transfer?",
+      focalRefs: ["Player", "Market", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Brass Tube"],
+      actionInterpretation: {
+        summary: "The player ducks behind an ordinary fixture and keeps Brass Tube close for the immediate beat.",
+        playerIntent: "Duck behind an iron signal drum while keeping Brass Tube close for this beat",
+        method: "immediate scene-prop cover beat with held item close",
+        targetRefs: ["Market"],
+        interactionKind: "scene_local_beat",
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "local_interaction",
+          requestedBeatText: "Duck behind an iron signal drum while keeping Brass Tube close for this beat",
+          anchorRef: "Market",
+          evidenceRefs: ["Player", "Market", "Brass Tube"],
+        },
+      },
+      interpretationRationale: "Keeping an already-carried item close in a one-turn cover beat does not change custody or equipment.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+  });
+
+  it("canonicalizes stray sceneBeatNeed kind drift into scene_local_beat", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I duck behind one of the iron signal drums.",
+      citableRefs: ["Player", "Market", "Brass Tube"],
+      targets: [],
+      movementOptions: [],
+      actors: [],
+    });
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player uses an ordinary current-scene fixture for an immediate beat.",
+      liveSceneQuestion: "Can the typed scene beat be recorded?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player ducks behind an ordinary fixture for the immediate beat.",
+        playerIntent: "Duck behind an iron signal drum for this beat",
+        method: "immediate scene-prop cover beat",
+        targetRefs: ["Market"],
+        interactionKind: "player_local_condition",
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "local_interaction",
+          requestedBeatText: "Duck behind an iron signal drum for this beat",
+          anchorRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The typed sceneBeatNeed owns the current-scene local beat.",
+    };
+
+    expect(gmReadSchema.safeParse(candidate).success).toBe(false);
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.sceneBeatNeed?.requestedBeatText)
+      .toBe("Duck behind an iron signal drum for this beat");
   });
 
   it("canonicalizes nullable GM Read liveSceneQuestion before player_local_condition validation", async () => {
@@ -2225,6 +2823,281 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.repairAttempted).toBe(false);
   });
 
+  it("passes recent soft-prose handles to GM Read as non-authoritative discourse context", async () => {
+    const frame = minimalFrame({
+      playerAction: "I check whether visible details on the scrap reveal hidden ink, stitched codes, or a concealed needle.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "direct",
+      situationSummary: "The player checks a recent soft scene prop for hidden visible details.",
+      liveSceneQuestion: "Which bounded visible property check should be resolved?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player checks whether a recent scrap reveals hidden marks or a concealed needle.",
+        playerIntent: "Check the recent scrap for hidden visible details.",
+        method: "look over scrap",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether visible details on the recent loose scrap reveal hidden ink, stitched codes, or a concealed needle",
+          targetRef: null,
+          surfaceKinds: ["current_scene"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The recent scrap is a discourse handle, not a SceneFrame item ref.",
+    };
+    let capturedPrompt = "";
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      recentConversation: [
+        { role: "assistant", content: "A loose scrap folds around the Sealed lacquer message tube for this crossing at Lowwater Bazaar." },
+      ],
+      generateCandidate: async (request) => {
+        capturedPrompt = request.prompt;
+        return candidate;
+      },
+    });
+
+    expect(capturedPrompt).toContain("Recent discourse context (non-authoritative)");
+    expect(capturedPrompt).toContain("A loose scrap folds around the Sealed lacquer message tube");
+    expect(capturedPrompt).toContain("localObservationNeed.targetRef=null");
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toContain("recent loose scrap");
+  });
+
+  it("canonicalizes stray localConditionNeed kind drift into player_local_condition", async () => {
+    const frame = minimalFrame({
+      playerAction: "I keep low as I move through the passage.",
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player is keeping a low posture in the current scene.",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player keeps low while moving through the current passage.",
+        playerIntent: "Keep low while moving locally.",
+        method: "keep low",
+        targetRefs: ["Player", "Market"],
+        interactionKind: "current_scene_observation",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "crouched",
+          requestedPostureText: "keep low",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The supported consequence is a current-scene Player posture condition.",
+    };
+
+    expect(prompt).toContain("valid keep-low passage example shape");
+    expect(prompt).toContain("\"conditionKey\": \"crouched\"");
+    expect(prompt).toContain("keep low while moving through the passage");
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => candidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("crouched");
+    expect(result.repairAttempted).toBe(false);
+  });
+
+  it("turns posture plus carried-item readiness partial admission into clarification", () => {
+    const frame = minimalFrame({
+      playerAction: "I crouch behind a broken granite block for a moment and keep the message tube dry.",
+      inventory: [{
+        ref: "Sealed lacquer message tube",
+        label: "Sealed lacquer message tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Sealed lacquer message tube"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const overEagerCrouch: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Market", "Sealed lacquer message tube"],
+      evidenceRefs: ["Player", "Market", "Sealed lacquer message tube"],
+      actionInterpretation: {
+        summary: "The player crouches while keeping a carried message tube dry.",
+        playerIntent: "Crouch behind a block and keep the message tube dry.",
+        method: "crouch and keep carried item dry",
+        targetRefs: ["Player", "Market", "Sealed lacquer message tube"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "crouched",
+          requestedPostureText: "crouch behind a broken granite block",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "This over-eager candidate accepted only the body posture and dropped carried-item readiness.",
+    };
+
+    expect(prompt).toContain("body-posture plus carried-item readiness clarification example");
+    expect(prompt).toContain("keeping Sealed lacquer message tube ready");
+
+    const result = validateGmReadCandidate({ frame, candidate: overEagerCrouch });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.path).toBe("clarification");
+    expect(result.read.liveSceneQuestion).toContain("keeping Sealed lacquer message tube ready");
+    expect(result.read.actionInterpretation.interactionKind).toBe("unsupported_or_unclear");
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
+  it("exposes steady self-check as a Player local-condition cue without injury truth", () => {
+    const frame = minimalFrame({
+      playerAction: "Steady myself and check whether I am hurt.",
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("Current-frame Player local-condition cue");
+    expect(prompt).toContain("\"interactionKind\": \"player_local_condition\"");
+    expect(prompt).toContain("\"conditionKey\": \"braced\"");
+    expect(prompt).toContain("do not assert injury");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        actionInterpretation: {
+          summary: "The player steadies themself in the current scene while checking their own condition.",
+          playerIntent: "Steady themself and make a bounded self-check.",
+          method: "steady",
+          targetRefs: ["Player", "Market"],
+          interactionKind: "player_local_condition",
+          localConditionNeed: {
+            actorRef: "Player",
+            operation: "apply",
+            conditionKey: "braced",
+            requestedPostureText: "steady myself",
+            targetKind: "visible_scene_anchor",
+            targetRef: "Market",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The supported receipt is current-scene Player bracing; injury truth requires separate accepted evidence.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
+  it("normalizes over-eager player_local_condition self-check observation drift before strict GM Read validation", () => {
+    const frame = minimalFrame({
+      playerAction: "Steady myself and check whether I am hurt.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      actionInterpretation: {
+        summary: "The player steadies themself and checks their condition.",
+        playerIntent: "Steady themself while taking stock.",
+        method: "steady",
+        targetRefs: ["Player", "Market"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "braced",
+          requestedPostureText: "steady myself",
+          targetKind: "visible_scene_anchor",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether Player is hurt",
+          targetRef: "Player",
+          surfaceKinds: ["player_status"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The authoritative route is a current-scene Player bracing receipt; injury truth is not admitted by GM Read.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("braced");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeNull();
+  });
+
+  it("exposes pure obvious-injury self-check as player-status observation instead of clarification", () => {
+    const frame = minimalFrame({
+      playerAction: "Check whether I have any obvious injury or strain.",
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("Current-frame Player visible-status observation cue");
+    expect(prompt).toContain("\"player_status\"");
+    expect(prompt).toContain("It is not clarification and does not create a posture/readiness condition.");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        actionInterpretation: {
+          summary: "The player checks their current visible status for obvious injury or strain.",
+          playerIntent: "Check current visible player status for obvious injury or strain.",
+          method: "visible status check",
+          targetRefs: ["Player"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "obvious injury or strain on Player",
+            targetRef: "Player",
+            surfaceKinds: ["player_status"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The action is a bounded read-only player visible-status check; it does not ask for posture mutation or clarification.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.path).toBe("direct");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["player_status"]);
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
   it("accepts targeted current-scene local observation without turning it into item, movement, or scene beat authority", () => {
     const frame = localObservationFrame();
     const candidate = localObservationGmRead(frame);
@@ -2249,7 +3122,570 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
   });
 
-  it("rejects generic visible-actor observation when GM Read models it as target matching", () => {
+  it("accepts named-person searches as bounded visible-actor observations", () => {
+    const frame = minimalFrame({
+      playerAction: "I look around for Old Pell, the records keeper.",
+      scene: {
+        currentLocation: { ref: "Auditor Spire", label: "Auditor Spire", description: null },
+        currentScene: { ref: "Auditor Spire", label: "Auditor Spire", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Auditor Spire"],
+    });
+    const prompt = buildGmReadSystemPrompt();
+    expect(prompt).toContain("searching for a named person, role, or NPC");
+    expect(prompt).toContain("bounded visible-actor check");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player searches the visible scene for a named records keeper.",
+        focalRefs: ["Player", "Auditor Spire"],
+        evidenceRefs: ["Player", "Auditor Spire"],
+        actionInterpretation: {
+          summary: "The player looks around for Old Pell, the records keeper.",
+          playerIntent: "Look for Old Pell in the current scene.",
+          method: "look around",
+          targetRefs: [],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "Old Pell, the records keeper",
+            targetRef: null,
+            surfaceKinds: ["visible_actor"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Auditor Spire"],
+          },
+        },
+        interpretationRationale: "The named person is searched as a bounded visible actor query; actor creation requires a separate support-actor route.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["visible_actor"]);
+  });
+
+  it("routes visible physical access fixture checks through local observation instead of substituting route options", () => {
+    const frame = minimalFrame({
+      playerAction: "From where I stand, do I see any open stair, lift, ladder, or doorway that clearly leads to upper floors?",
+      scene: {
+        currentLocation: { ref: "Ground-Floor Barricade", label: "Ground-Floor Barricade", description: null },
+        currentScene: { ref: "Ground-Floor Barricade", label: "Ground-Floor Barricade", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [{
+        ref: "Resonance Tower",
+        label: "Resonance Tower",
+        connected: true,
+        travelCost: 1,
+      }],
+      actors: [],
+      targets: [{ ref: "Resonance Tower", label: "Resonance Tower", kind: "location" }],
+      citableRefs: ["Player", "Ground-Floor Barricade", "Resonance Tower"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("Current-frame access-fixture observation cue");
+    expect(prompt).toContain("Do not substitute a different visible route label");
+    expect(buildGmReadSystemPrompt()).toContain("physical access fixture");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player checks visible current-scene access fixtures rather than asking for broad route options.",
+        focalRefs: ["Player", "Ground-Floor Barricade"],
+        evidenceRefs: ["Player", "Ground-Floor Barricade"],
+        actionInterpretation: {
+          summary: "The player looks for an open stair, lift, ladder, or doorway that clearly leads to upper floors.",
+          playerIntent: "Check whether an open stair, lift, ladder, or doorway to upper floors is visibly available.",
+          method: "visible access fixture check",
+          targetRefs: ["Ground-Floor Barricade"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "open stair, lift, ladder, or doorway that clearly leads to upper floors",
+            targetRef: null,
+            surfaceKinds: ["current_scene", "visible_target"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Ground-Floor Barricade"],
+          },
+        },
+        interpretationRationale: "A physical stair/lift/ladder/doorway check is a bounded current-scene observation unless an exact movement option label is named.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.surfaceKinds).toEqual(["current_scene", "visible_target"]);
+  });
+
+  it("prompts yes/no visible-surface checks to use grammatical whether-shaped queryText", () => {
+    const frame = minimalFrame({
+      playerAction: "I look for visible sparks, heat shimmer, warning tags, or other surface signs that the pylon chain is dangerous to touch.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(buildGmReadSystemPrompt()).toContain("make localObservationNeed.queryText a grammatical whether-shaped query");
+    expect(buildGmReadSystemPrompt()).toContain("whether visible sparks, heat shimmer, or warning tags are present");
+    expect(buildGmReadSystemPrompt()).toContain("Do not leave queryText as a bare noun phrase");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player checks for visible danger signs on current-scene surfaces.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        actionInterpretation: {
+          summary: "The player looks for visible sparks, heat shimmer, warning tags, or other surface signs.",
+          playerIntent: "Look for visible surface signs that the pylon chain is dangerous to touch",
+          method: "bounded visible-surface observation",
+          targetRefs: ["Market"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "whether visible sparks, heat shimmer, warning tags, or other surface signs are present",
+            targetRef: null,
+            surfaceKinds: ["current_scene", "visible_target"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The action asks for a yes/no visible-surface check, so queryText is a grammatical whether-shaped fragment for receipt and narration prose.",
+      },
+    });
+
+    expect(prompt).toContain("visible sparks");
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toBe("whether visible sparks, heat shimmer, warning tags, or other surface signs are present");
+  });
+
+  it("exposes surface-detail meaning checks as current-scene observation instead of clarification", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "Check whether scratches on Brass Tube actually mean anything.",
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("Current-frame surface-detail observation cue");
+    expect(prompt).toContain("valid harmless exposed-surface example shape");
+    expect(prompt).toContain("valid hidden/clue property question shape");
+    expect(prompt).toContain("targetRef\": null");
+    expect(prompt).toContain("bounded property/outcome evidence");
+    expect(prompt).toContain("\"targetRef\": \"Brass Tube\"");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        actionInterpretation: {
+          summary: "The player checks visible surface details on the carried Brass Tube.",
+          playerIntent: "Check whether visible surface marks on Brass Tube matter.",
+          method: "inspect",
+          targetRefs: ["Brass Tube"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "visible surface marks on Brass Tube",
+            targetRef: "Brass Tube",
+            surfaceKinds: ["inventory_item", "visible_fact"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market", "Brass Tube"],
+          },
+        },
+        interpretationRationale: "The action is a bounded visible surface read over an exposed inventory item, with no hidden mechanism or clue authority.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.path).toBe("direct");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+  });
+
+  it("exposes immediate ordinary prop shield use as scene_local_beat without durable item authority", () => {
+    const frame = minimalFrame({
+      playerAction: "If there is an ordinary stool or chair within easy reach, I grab it and keep it ready as an improvised shield without swinging it yet.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("Current-frame ordinary scene-prop beat cue");
+    expect(prompt).toContain("Grab a nearby stool or chair and keep it ready as an improvised shield for this beat");
+    expect(prompt).toContain("It does not create inventory, durable object state, cover effectiveness");
+    expect(buildGmReadSystemPrompt()).toContain("hold it ready");
+    expect(buildGmReadSystemPrompt()).toContain("improvised cover/shield");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        situationSummary: "The player uses a plausible ordinary current-scene prop for immediate protection posture.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        liveSceneQuestion: "Can this low-stakes current-scene prop beat be recorded as a turn event only?",
+        actionInterpretation: {
+          summary: "The player grabs a nearby stool or chair and keeps it ready as an improvised shield for the immediate beat.",
+          playerIntent: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+          method: "immediate scene-prop interaction",
+          targetRefs: ["Market"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "ordinary_prop_readiness",
+            requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+            anchorRef: "Market",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The stool/chair is an ordinary plausible current-scene prop for one immediate beat; it is not inventory, equipment, hidden mechanism, or durable world state.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("ordinary_prop_readiness");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeUndefined();
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
+  });
+
+  it("keeps stepping onto a plausible loose board as scene_local_beat unless the player asks for a property check", () => {
+    const frame = minimalFrame({
+      playerAction: "I step onto the loose board for a moment and keep my weight light.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(buildGmReadSystemPrompt()).toContain("step onto the loose board");
+    expect(buildGmReadSystemPrompt()).toContain("plain immediate action of stepping onto a plausible loose board");
+    expect(prompt).toContain("Current-frame ordinary scene-prop beat cue");
+    expect(prompt).toContain("valid immediate loose footing beat example shape");
+    expect(prompt).toContain("Step onto a loose board or brick for this immediate beat");
+
+    const beatResult = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "procedural",
+        situationSummary: "The player uses a plausible loose board for immediate footing.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        liveSceneQuestion: "Can this low-stakes current-scene footing beat be recorded as turn-event only?",
+        actionInterpretation: {
+          summary: "The player steps onto a plausible loose board for the immediate beat.",
+          playerIntent: "Step onto the loose board for a moment and keep weight light",
+          method: "immediate scene-prop interaction",
+          targetRefs: ["Market"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "local_interaction",
+            requestedBeatText: "Step onto the loose board for a moment and keep weight light",
+            anchorRef: "Market",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The board is a plausible ordinary current-scene prop used for this beat only; no hidden property, durable item, or mutation is claimed.",
+      },
+    });
+
+    expect(beatResult.status).toBe("accepted");
+    if (beatResult.status !== "accepted") throw new Error("expected accepted");
+    expect(beatResult.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(beatResult.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("local_interaction");
+    expect(beatResult.read.actionInterpretation.localObservationNeed).toBeUndefined();
+
+    const checkFrame = minimalFrame({
+      playerAction: "I check whether the loose board shifts, holds, or reveals anything when I step on it.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const checkResult = validateGmReadCandidate({
+      frame: checkFrame,
+      candidate: {
+        ...validGmRead(checkFrame),
+        path: "direct",
+        situationSummary: "The player asks for a bounded property/outcome check against current-scene texture.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        actionInterpretation: {
+          summary: "The player checks whether the loose board shifts, holds, or reveals anything.",
+          playerIntent: "Check whether the loose board shifts, holds, or reveals anything",
+          method: "bounded current-scene property observation",
+          targetRefs: ["Market"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "whether the loose board shifts, holds, or reveals anything",
+            targetRef: null,
+            surfaceKinds: ["current_scene"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The player asks for a property/outcome answer, so the typed owner is bounded local observation.",
+      },
+    });
+
+    expect(checkResult.status).toBe("accepted");
+    if (checkResult.status !== "accepted") throw new Error("expected accepted");
+    expect(checkResult.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(checkResult.read.actionInterpretation.localObservationNeed?.allowBoundedNegative).toBe(true);
+  });
+
+  it("exposes obvious ordinary prop availability as a bounded scene beat instead of enumerated no-match", () => {
+    const frame = minimalFrame({
+      playerAction: "I look for an ordinary stool or chair within easy reach in the tavern.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(prompt).toContain("ordinary prop availability example shape");
+    expect(prompt).toContain("Ordinary stool or chair is within easy reach for this beat");
+    expect(buildGmReadSystemPrompt()).toContain("obvious mundane prop");
+    expect(buildGmReadSystemPrompt()).toContain("bounded availability/readiness beat");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player checks for an obvious ordinary current-scene prop in a plausible place.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        liveSceneQuestion: "Can a plausible ordinary current-scene prop be presented as a bounded scene beat?",
+        actionInterpretation: {
+          summary: "An ordinary stool or chair is available within easy reach for the immediate beat.",
+          playerIntent: "Ordinary stool or chair is within easy reach for this beat",
+          method: "ordinary scene-prop availability",
+          targetRefs: ["Market"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "ordinary_prop_availability",
+            requestedBeatText: "Ordinary stool or chair is within easy reach for this beat",
+            anchorRef: "Market",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "The action asks for an obvious low-stakes prop in a plausible tavern-like scene; the answer is a turn-scoped affordance, not a durable object row.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("ordinary_prop_availability");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeUndefined();
+  });
+
+  it("routes harmless ambient sensory checks as scene beats while keeping consequential sensory meaning bounded", () => {
+    const frame = minimalFrame({
+      playerAction: "I listen to the rusted pipes without touching them.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(buildGmReadSystemPrompt()).toContain("ordinary ambient sensory texture");
+    expect(buildGmReadSystemPrompt()).toContain("pressure, leaks, codes, hidden mechanisms");
+    expect(prompt).toContain("valid ordinary ambient sensory example shape");
+    expect(prompt).toContain("Listen to ordinary pipes for their current sound in the damp cellar");
+
+    const sensoryBeat = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player listens for harmless ambient sound from ordinary current-scene pipes.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        liveSceneQuestion: "Can this be presented as harmless current-scene sensory texture?",
+        actionInterpretation: {
+          summary: "The player listens to ordinary pipes for current-scene ambient sound.",
+          playerIntent: "Listen to ordinary pipes for their current sound in the damp cellar",
+          method: "ambient sensory check",
+          targetRefs: ["Market"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "local_interaction",
+            requestedBeatText: "Listen to ordinary pipes for their current sound in the damp cellar",
+            anchorRef: "Market",
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "Ambient listening asks for low-stakes sensory texture only; it records a turn-scoped scene beat without proving pipe mechanics or hidden state.",
+      },
+    });
+
+    expect(sensoryBeat.status).toBe("accepted");
+    if (sensoryBeat.status !== "accepted") throw new Error("expected accepted");
+    expect(sensoryBeat.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(sensoryBeat.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("local_interaction");
+    expect(sensoryBeat.read.actionInterpretation.localObservationNeed).toBeUndefined();
+
+    const meaningFrame = minimalFrame({
+      playerAction: "I listen to the rusted pipes to tell whether pressure is building behind the wall.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const meaningCheck = validateGmReadCandidate({
+      frame: meaningFrame,
+      candidate: {
+        ...validGmRead(meaningFrame),
+        path: "direct",
+        situationSummary: "The player listens for a consequential pressure clue in current-scene pipes.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        actionInterpretation: {
+          summary: "The player checks whether pipe sounds prove pressure building behind the wall.",
+          playerIntent: "Listen to the rusted pipes to tell whether pressure is building behind the wall",
+          method: "bounded current-scene sensory property observation",
+          targetRefs: ["Market"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "whether pipe sounds prove pressure building behind the wall",
+            targetRef: null,
+            surfaceKinds: ["current_scene"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "Pressure behind a wall is a consequential property, so it needs bounded observation evidence rather than soft sensory prose.",
+      },
+    });
+
+    expect(meaningCheck.status).toBe("accepted");
+    if (meaningCheck.status !== "accepted") throw new Error("expected accepted");
+    expect(meaningCheck.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(meaningCheck.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(meaningCheck.read.actionInterpretation.localObservationNeed?.allowBoundedNegative).toBe(true);
+  });
+
+  it("keeps hidden ordinary-prop affordance checks on bounded observation authority", () => {
+    const frame = minimalFrame({
+      playerAction: "I check whether a nearby stool hides a latch or spring blade I can use.",
+      actors: [],
+      targets: [],
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player checks a possible hidden mechanical affordance on an unmodeled ordinary prop.",
+        focalRefs: ["Player", "Market"],
+        evidenceRefs: ["Player", "Market"],
+        actionInterpretation: {
+          summary: "The player checks whether an ordinary stool hides a latch or spring blade.",
+          playerIntent: "Check whether a nearby stool hides a latch or spring blade I can use",
+          method: "bounded hidden-affordance observation",
+          targetRefs: ["Market"],
+          interactionKind: "current_scene_observation",
+          localObservationNeed: {
+            actorRef: "Player",
+            mode: "target_match",
+            queryText: "whether a nearby stool hides a latch or spring blade I can use",
+            targetRef: null,
+            surfaceKinds: ["current_scene"],
+            allowBoundedNegative: true,
+            evidenceRefs: ["Player", "Market"],
+          },
+        },
+        interpretationRationale: "Hidden or mechanical affordance truth needs bounded observation evidence; scene_local_beat can record local action but cannot create useful hidden mechanisms.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.allowBoundedNegative).toBe(true);
+  });
+
+  it("closes GM Read runtime ids from the authoritative frame while preserving strict refs", () => {
+    const frame = localObservationFrame();
+    const accepted = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...localObservationGmRead(frame),
+        frameId: "stale-frame-id",
+        turnId: "stale-turn-id",
+      },
+    });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.frameId).toBe(frame.frameId);
+    expect(accepted.read.turnId).toBe(frame.turnId);
+
+    const rejected = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...localObservationGmRead(frame),
+        frameId: "stale-frame-id",
+        turnId: "stale-turn-id",
+        actionInterpretation: {
+          ...localObservationGmRead(frame).actionInterpretation,
+          targetRefs: ["missing-visible-ref"],
+        },
+      },
+    });
+
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues.map((issue) => issue.code)).toContain("uncited_ref");
+  });
+
+  it("normalizes generic visible-actor observation target-match drift to list_surface", () => {
     const frame = localObservationFrame({
       playerAction: "I look to see whether any people are visibly nearby.",
     });
@@ -2274,14 +3710,75 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
 
     const result = validateGmReadCandidate({ frame, candidate });
 
-    expect(result.status).toBe("rejected");
-    if (result.status !== "rejected") throw new Error("expected rejected");
-    expect(result.issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        code: "interaction_invalid",
-        path: "actionInterpretation.localObservationNeed.mode",
-      }),
-    ]));
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.mode).toBe("list_surface");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toBe("people visibly nearby");
+  });
+
+  it("keeps property-bearing visible-actor searches as bounded target matching", () => {
+    const frame = localObservationFrame({
+      playerAction: "I look around for anyone who seems to be waiting for a courier.",
+    });
+    const candidate: GmRead = {
+      ...localObservationGmRead(frame),
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        summary: "The player looks for a visible person matching a courier-waiting cue.",
+        playerIntent: "Find whether anyone visible seems to be waiting for a courier.",
+        targetRefs: [],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "anyone who seems to be waiting for a courier",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.mode).toBe("target_match");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toBe("anyone who seems to be waiting for a courier");
+  });
+
+  it("normalizes property-bearing visible-actor list drift to bounded target matching", () => {
+    const frame = localObservationFrame({
+      playerAction: "I look around for anyone who seems to be waiting for a courier.",
+    });
+    const candidate: GmRead = {
+      ...localObservationGmRead(frame),
+      actionInterpretation: {
+        ...localObservationGmRead(frame).actionInterpretation,
+        summary: "The player looks for a visible person matching a courier-waiting cue.",
+        playerIntent: "Find whether anyone visible seems to be waiting for a courier.",
+        targetRefs: [],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "anyone who seems to be waiting for a courier",
+          targetRef: null,
+          surfaceKinds: ["visible_actor"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.localObservationNeed?.mode).toBe("target_match");
+    expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText).toBe("anyone who seems to be waiting for a courier");
   });
 
   it("accepts device_status_observation only from exposed SceneFrame device surfaces", () => {
@@ -2590,9 +4087,128 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("must not");
     expect(prompt).toContain("call tools");
     expect(prompt).toContain("Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself.");
+    expect(prompt).toContain("the route movement owns the turn");
+    expect(prompt).toContain("do not choose visible_actor_dialogue unless the player requests a spoken answer or reaction before movement");
     expect(prompt).toContain("procedural does not authorize");
     expect(prompt).toContain("uncertain does not authorize");
     expect(prompt).toContain("Do not copy the inventory item's current equipState into equipSlot.");
+    expect(prompt).toContain("inventory/kit/carrying lists");
+    expect(prompt).toContain("ordinary clutter, cover, nearby props");
+    expect(prompt).toContain("A current_scene/current_location anchor alone is context");
+    expect(prompt).toContain("player_local_condition owns exactly one conditionKey");
+    expect(prompt).toContain("keeping low while moving through the current passage");
+    expect(prompt).toContain("use path=clarification with interactionKind=unsupported_or_unclear");
+    expect(prompt).toContain("natural player-facing wording");
+    expect(prompt).toContain("surface details");
+    expect(prompt).toContain("targetRef copied from the known item/target");
+    expect(prompt).toContain("ordinary visible/sensory surface texture");
+    expect(prompt).toContain("Clue meaning, hidden discovery, activation, and mechanism checks use the separate property/outcome route below.");
+    expect(prompt).toContain("A targetRef to the known item/target proves only that exposed entry exists");
+    expect(prompt).toContain("ordinary one-turn tactile or physical probes");
+    expect(prompt).toContain("Do not cite the current scene or location as targetRef merely because the probe happens there");
+    expect(prompt).toContain("not a durable object, item pickup, mutation, hidden mechanism, or route discovery");
+  });
+
+  it("keeps social courtesy plus explicit route taking owned by movement_intent", async () => {
+    const frame = minimalFrame({
+      playerAction: "I thank Guide and take the open route from Market to North Hall.",
+      capabilities: [
+        { capabilityId: "movement", evidenceAuthority: "receipt_required", allowed: true },
+        { capabilityId: "dialogue_record", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player gives Guide brief social color while committing to an exposed route.",
+      liveSceneQuestion: "Which exposed route movement must Stage 4 settle?",
+      focalRefs: ["Player", "North Hall"],
+      evidenceRefs: ["Player", "Market", "North Hall"],
+      actionInterpretation: {
+        summary: "The player thanks Guide and takes the exposed route to North Hall.",
+        playerIntent: "Thank Guide and move to North Hall.",
+        method: "walk",
+        targetRefs: ["North Hall"],
+        interactionKind: "movement_intent",
+      },
+      interpretationRationale: "The terminal consequence is route movement; the courtesy does not request a spoken response.",
+    };
+
+    expect(prompt).toContain("Current-frame movement cue");
+    expect(prompt).toContain("courtesy such as thanking");
+    expect(prompt).toContain("keep movement_intent");
+    expect(gmReadModelGenerationSchema.safeParse(candidate).success).toBe(true);
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => candidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("movement_intent");
+    expect(result.read.actionInterpretation.targetRefs).toEqual(["North Hall"]);
+    expect(result.repairAttempted).toBe(false);
+  });
+
+  it("keeps carried-item manner text inside movement_intent instead of localConditionNeed", () => {
+    const frame = minimalFrame({
+      playerAction: "I walk to North Hall, keeping the Courier satchel tucked close against my chest.",
+      inventory: [{
+        ref: "Courier satchel",
+        label: "Courier satchel",
+        equipState: "carried",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "North Hall", "Courier satchel"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const acceptedCandidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player moves to an exposed route while describing low-stakes carried-item manner.",
+      liveSceneQuestion: "Which exposed route movement must Stage 4 settle?",
+      focalRefs: ["Player", "North Hall", "Courier satchel"],
+      evidenceRefs: ["Player", "Market", "North Hall", "Courier satchel"],
+      actionInterpretation: {
+        summary: "The player walks to North Hall while keeping Courier satchel close.",
+        playerIntent: "Walk to North Hall while keeping Courier satchel tucked close.",
+        method: "walk while keeping carried item close",
+        targetRefs: ["North Hall"],
+        interactionKind: "movement_intent",
+      },
+      interpretationRationale: "The terminal consequence is movement; carried-item closeness is manner text and does not create a current-scene local condition.",
+    };
+    const rejectedCandidate: GmRead = {
+      ...acceptedCandidate,
+      actionInterpretation: {
+        ...acceptedCandidate.actionInterpretation,
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "keep Courier satchel tucked close against chest while walking",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Courier satchel",
+          evidenceRefs: ["Player", "Market", "Courier satchel"],
+        },
+      },
+    };
+
+    expect(prompt).toContain("movement-with-carried-item-manner example shape");
+    expect(prompt).toContain("Do not fill localConditionNeed for movement_intent");
+    expect(validateGmReadCandidate({ frame, candidate: acceptedCandidate }).status).toBe("accepted");
+    const rejected = validateGmReadCandidate({ frame, candidate: rejectedCandidate });
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "actionInterpretation.localConditionNeed",
+        message: "movement_intent must not include localConditionNeed.",
+      }),
+    ]));
   });
 
   it("exposes a current-frame cue for visible actor inventory handoffs", () => {
@@ -2661,27 +4277,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(prompt).toContain("\"equipSlot\": null");
   });
 
-  it("repairs once locally, then accepts only a validated GM Read", async () => {
+  it("rejects invalid GM Read first pass without a local repair turn", async () => {
     const frame = minimalFrame();
     const calls: string[] = [];
-    const result = await runCleanGmRead({
+    await expect(runCleanGmRead({
       frame,
       provider,
       generateCandidate: async (request) => {
-        calls.push(request.repairOf ? "repair" : "initial");
-        if (!request.repairOf) {
-          return {
-            ...validGmRead(frame),
-            payload: { toolId: "movement" },
-          };
+        calls.push("initial");
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
         }
-        return validGmRead(frame);
+        return {
+          ...validGmRead(frame),
+          payload: { toolId: "movement" },
+        };
       },
-    });
+    })).rejects.toThrow(CleanGmReadValidationError);
 
-    expect(calls).toEqual(["initial", "repair"]);
-    expect(result.status).toBe("accepted");
-    expect(result.repairAttempted).toBe(true);
+    expect(calls).toEqual(["initial"]);
   });
 
   it("canonicalizes omitted GM-read method as null for visible actor observations", async () => {
@@ -2729,49 +4343,41 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(gmReadSchema.parse(result.read).actionInterpretation.method).toBeNull();
   });
 
-  it("repairs an exact current-frame handoff into typed item_transfer admission", async () => {
+  it("rejects exact current-frame handoff misses without rewriting them into item_transfer", async () => {
     const frame = itemTransferActionPlanFrame();
     const calls: string[] = [];
     const prompts: string[] = [];
-    const result = await runCleanGmRead({
+    await expect(runCleanGmRead({
       frame,
       provider,
       generateCandidate: async (request) => {
-        calls.push(request.repairOf ? "repair" : "initial");
+        calls.push("initial");
         prompts.push(request.prompt);
-        if (!request.repairOf) {
-          return {
-            ...validGmRead(frame),
-            path: "procedural",
-            focalRefs: ["Player", "Guide"],
-            evidenceRefs: ["Player", "Guide", "Market"],
-            actionInterpretation: {
-              summary: "The player gives a carried item to Guide.",
-              playerIntent: "Give the Brass Tube to Guide.",
-              method: "give",
-              targetRefs: ["Guide"],
-              interactionKind: "unsupported_or_unclear",
-            },
-            interpretationRationale: "The action names a visible actor but omits the item-state contract.",
-          };
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
         }
-        return itemTransferGmRead(frame);
+        return {
+          ...validGmRead(frame),
+          path: "procedural",
+          focalRefs: ["Player", "Guide"],
+          evidenceRefs: ["Player", "Guide", "Market"],
+          actionInterpretation: {
+            summary: "The player gives a carried item to Guide.",
+            playerIntent: "Give the Brass Tube to Guide.",
+            method: "give",
+            targetRefs: ["Guide"],
+            interactionKind: "unsupported_or_unclear",
+          },
+          interpretationRationale: "The action names a visible actor but omits the item-state contract.",
+        };
       },
-    });
+    })).rejects.toThrow(CleanGmReadValidationError);
 
-    expect(calls).toEqual(["initial", "repair"]);
-    expect(prompts[1]).toContain("Current-frame item_transfer admission card");
-    expect(prompts[1]).toContain("\"itemRef\": \"Brass Tube\"");
-    expect(prompts[1]).toContain("\"targetRef\": \"Guide\"");
-    expect(result.repairAttempted).toBe(true);
-    expect(result.read.actionInterpretation).toMatchObject({
-      interactionKind: "item_transfer",
-      itemTransferNeed: {
-        operation: "give_to_visible_actor",
-        itemRef: "Brass Tube",
-        targetRef: "Guide",
-      },
-    });
+    expect(calls).toEqual(["initial"]);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Current-frame item_transfer cue");
+    expect(prompts[0]).toContain("\"itemRef\": \"Brass Tube\"");
+    expect(prompts[0]).toContain("\"targetRef\": \"Guide\"");
   });
 
   it("surfaces GM Read generation transport errors before settled clarification", async () => {
@@ -2793,7 +4399,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     })).rejects.toThrow("Clean GM Read generation failed before validation");
   });
 
-  it("surfaces GM Read repair generation transport errors before settled clarification", async () => {
+  it("routes GM Read validation failure directly to strict rejection", async () => {
     const frame = minimalFrame();
     const calls: string[] = [];
 
@@ -2801,17 +4407,17 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       frame,
       provider,
       generateCandidate: async (request) => {
-        calls.push(request.repairOf ? "repair" : "initial");
-        if (request.repairOf) {
-          throw new Error("repair provider unavailable");
+        calls.push("initial");
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
         }
         return {
           ...validGmRead(frame),
           payload: { toolId: "movement" },
         };
       },
-    })).rejects.toThrow("Clean GM Read repair generation failed");
-    expect(calls).toEqual(["initial", "repair"]);
+    })).rejects.toThrow("Clean GM Read validation failed.");
+    expect(calls).toEqual(["initial"]);
   });
 
   it("rejects GM Read validation exhaustion before settled gameplay semantics", async () => {
@@ -2832,7 +4438,7 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         ...validGmRead(frame),
         toolInput: { effect: "smuggled" },
       }),
-    })).rejects.toThrow("Clean GM Read validation failed after repair.");
+    })).rejects.toThrow("Clean GM Read validation failed.");
   });
 
   it("runs GM Read after SceneFrame and before Judge/Uncertainty events", async () => {
@@ -2935,14 +4541,14 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(JSON.stringify(candidate)).not.toContain("effectKind");
   });
 
-  it("keeps overlong Judge rationale repairable during model generation while final packets stay strict", () => {
+  it("keeps Judge generation text under the final packet text bounds", () => {
     const frame = itemTransferActionPlanFrame();
     const gmRead = itemTransferGmRead(frame);
     const longRationale = [
       "The player is asking for a backend-owned item custody transition involving a visible actor and a visible item.",
       "The runtime must not narrate this from scene-frame evidence alone because the item owner and holder state require an item_transfer receipt before player-facing narration may claim completion.",
-      "This text is intentionally verbose enough to exceed the final shortText contract so generation can pass it to validation and repair before settled clarification.",
-      "The repaired candidate should preserve the action_plan branch and shorten the prose.",
+      "This text is intentionally verbose enough to exceed the final shortText contract so generation can pass it to validation before settled clarification.",
+      "A valid candidate preserves the action_plan branch and shortens the prose.",
     ].join(" ");
     const candidate: JudgeUncertainty = {
       ...actionPlanJudge(frame, gmRead),
@@ -2958,7 +4564,7 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     };
 
     expect(longRationale.length).toBeGreaterThan(500);
-    expect(judgeUncertaintyGenerationSchema.safeParse(candidate).success).toBe(true);
+    expect(judgeUncertaintyGenerationSchema.safeParse(candidate).success).toBe(false);
     expect(judgeUncertaintySchema.safeParse(candidate).success).toBe(false);
     expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate }).status).toBe("rejected");
   });
@@ -3225,11 +4831,22 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     const frame = localObservationFrame();
     const gmRead = localObservationGmRead(frame);
     const noRoll = validJudgeUncertainty(frame, gmRead);
+    const oracle = validOracleJudgeUncertainty(frame, gmRead);
 
     expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
     const rejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
     expect(rejected.status).toBe("rejected");
     expect(rejected.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "branch_invalid",
+          path: "checkNeed",
+        }),
+      ]),
+    );
+    const oracleRejected = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: oracle });
+    expect(oracleRejected.status).toBe("rejected");
+    expect(oracleRejected.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: "branch_invalid",
@@ -3505,6 +5122,32 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(JSON.stringify(candidate)).not.toContain("outcomeTier");
   });
 
+  it("rejects Oracle outcome meanings that claim discovery before rolling", () => {
+    const frame = minimalFrame();
+    const gmRead = {
+      ...validGmRead(frame),
+      path: "uncertain" as const,
+    };
+    const candidate: JudgeUncertainty = {
+      ...validOracleJudgeUncertainty(frame, gmRead),
+      oracleAdmission: {
+        ...validOracleJudgeUncertainty(frame, gmRead).oracleAdmission!,
+        outcomeMeanings: {
+          strong_hit: "The player discovers the hidden clue.",
+          weak_hit: "The player notices a visible reaction.",
+          miss: "The attempt is visibly rebuffed.",
+        },
+      },
+    };
+
+    const result = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate });
+
+    expect(result.status).toBe("rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "forbidden_claim" && issue.path === "admission.outcomeMeanings.strong_hit"
+    )).toBe(true);
+  });
+
   it("accepts gm-read uncertain as a signal without forcing an Oracle admission", () => {
     const frame = minimalFrame();
     const gmRead = {
@@ -3719,6 +5362,8 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(prompt).toContain("roll dice");
     expect(prompt).toContain("gm-read uncertain is a signal");
     expect(prompt).toContain("backend-owned consequences");
+    expect(prompt).toContain("harmless visible surface details matter as a clue");
+    expect(prompt).toContain("do not call Oracle to create discovery");
   });
 
   it("builds Judge/Uncertainty prompts from accepted GM Read without raw player action", async () => {
@@ -3745,64 +5390,58 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
     expect(prompts[0]).not.toContain('"playerAction"');
   });
 
-  it("keeps Judge/Uncertainty repair prompts on accepted GM Read instead of raw player action", async () => {
-    const rawMarker = "RAW_JUDGE_REPAIR_MARKER_NEVER_PROMPT";
+  it("rejects invalid Judge/Uncertainty first pass while keeping prompts on accepted GM Read", async () => {
+    const rawMarker = "RAW_JUDGE_MARKER_NEVER_PROMPT";
     const frame = minimalFrame({ playerAction: `I ask while saying ${rawMarker}.` });
     const gmRead = validGmRead(frame);
     const prompts: string[] = [];
-    let callCount = 0;
 
-    const result = await runCleanJudgeUncertainty({
+    await expect(runCleanJudgeUncertainty({
       frame,
       gmRead,
       provider,
       generateCandidate: async (request) => {
         prompts.push(request.prompt);
-        callCount += 1;
-        if (callCount === 1) {
-          return {
-            ...validJudgeUncertainty(frame, gmRead),
-            toolInput: { effect: "smuggled" },
-          };
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
         }
-        return validJudgeUncertainty(frame, gmRead);
+        return {
+          ...validJudgeUncertainty(frame, gmRead),
+          toolInput: { effect: "smuggled" },
+        };
       },
-    });
+    })).rejects.toThrow(CleanJudgeUncertaintyValidationError);
 
-    expect(result.status).toBe("accepted");
-    expect(result.repairAttempted).toBe(true);
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain("Accepted GM Read");
-    expect(prompts[1]).toContain(gmRead.actionInterpretation.playerIntent);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Accepted GM Read");
+    expect(prompts[0]).toContain(gmRead.actionInterpretation.playerIntent);
     for (const prompt of prompts) {
       expect(prompt).not.toContain(rawMarker);
       expect(prompt).not.toContain('"playerAction"');
     }
   });
 
-  it("repairs once locally, then accepts only a validated Judge/Uncertainty packet", async () => {
+  it("rejects invalid Judge/Uncertainty packet without a local repair turn", async () => {
     const frame = minimalFrame();
     const gmRead = validGmRead(frame);
     const calls: string[] = [];
-    const result = await runCleanJudgeUncertainty({
+    await expect(runCleanJudgeUncertainty({
       frame,
       gmRead,
       provider,
       generateCandidate: async (request) => {
-        calls.push(request.repairOf ? "repair" : "initial");
-        if (!request.repairOf) {
-          return {
-            ...validJudgeUncertainty(frame, gmRead),
-            toolInput: { effect: "smuggled" },
-          };
+        calls.push("initial");
+        if ("repairOf" in request) {
+          throw new Error("repair request must not be issued");
         }
-        return validJudgeUncertainty(frame, gmRead);
+        return {
+          ...validJudgeUncertainty(frame, gmRead),
+          toolInput: { effect: "smuggled" },
+        };
       },
-    });
+    })).rejects.toThrow(CleanJudgeUncertaintyValidationError);
 
-    expect(calls).toEqual(["initial", "repair"]);
-    expect(result.status).toBe("accepted");
-    expect(result.repairAttempted).toBe(true);
+    expect(calls).toEqual(["initial"]);
   });
 
   it("rejects Judge/Uncertainty validation exhaustion before settled gameplay semantics", async () => {
@@ -3826,7 +5465,7 @@ describe("gameplay-cycle-runtime primitive 3 Judge/Uncertainty contracts", () =>
         ...validJudgeUncertainty(frame, gmRead),
         oracleResult: { tier: "strong_hit" },
       }),
-    })).rejects.toThrow("Clean Judge/Uncertainty validation failed after repair.");
+    })).rejects.toThrow("Clean Judge/Uncertainty validation failed.");
   });
 
   it("stops before Judge/Uncertainty when GM Read validation is exhausted", async () => {
@@ -3939,6 +5578,7 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           actorRef: "Player" as const,
           operation: "apply" as const,
           conditionKey: "kneeling" as const,
+          requestedPostureText: "kneel near the stall",
           conditionScope: "current_scene" as const,
           anchorRef: "Market",
           targetKind: "current_scene" as const,
@@ -4472,6 +6112,97 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
     });
   });
 
+  it("deterministically keeps a maintained item-readiness condition before time passage", async () => {
+    const base = actionPlanFrame();
+    const frame = actionPlanFrame({
+      playerAction: "I give Dorin a few minutes while keeping the message tube above the water.",
+      movementOptions: [],
+      inventory: [{
+        ref: "Message Tube",
+        label: "Message Tube",
+        equipState: "carried",
+        tags: [],
+      }],
+      capabilities: [
+        ...base.capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "Message Tube"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      path: "procedural",
+      evidenceRefs: ["Player", "Market", "Message Tube"],
+      liveSceneQuestion: "How should the maintained item-readiness posture settle before time advances?",
+      actionInterpretation: {
+        summary: "The player waits a few minutes while keeping a carried message tube above the water.",
+        playerIntent: "Give Dorin a few minutes while keeping the message tube above the water.",
+        method: "wait while holding item high",
+        targetRefs: ["Market", "Message Tube"],
+        interactionKind: "time_passage",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "keep the message tube above the water",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Message Tube",
+          evidenceRefs: ["Player", "Market", "Message Tube"],
+        },
+        timePassageNeed: {
+          actorRef: "Player",
+          elapsedMinutes: 5,
+          reasonKind: "wait",
+          requestedDurationText: "a few minutes",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["Market", "Message Tube"],
+      evidenceRefs: ["Player", "Market", "Message Tube"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Maintained item-readiness and elapsed time both require backend receipts before narration may claim them.",
+        evidenceRefs: ["Player", "Market", "Message Tube"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-wait-with-item-readiness",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "condition_set",
+      "time_advance",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      dependsOnStepIds: ["step-1"],
+      intended: {
+        kind: "time_advance",
+        requiredCapabilityId: "time_advance",
+        timeAdvancePlan: {
+          actorRef: "Player",
+          sceneRef: "Market",
+          elapsedMinutes: 5,
+          reasonKind: "wait",
+          requestedDurationText: "a few minutes",
+        },
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("deterministically produces route_options checklist from implemented clean capability only", async () => {
     const frame = actionPlanFrame({
       playerAction: "I ask for the current choices from here.",
@@ -4845,6 +6576,107 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       .toBe("accepted");
   });
 
+  it("deterministically keeps a separate item-readiness condition before item transfer", async () => {
+    const base = actionPlanFrame();
+    const frame = actionPlanFrame({
+      playerAction: "I set the Courier satchel down while keeping the message tube in my hand.",
+      movementOptions: [],
+      targets: [],
+      inventory: [
+        { ref: "Courier satchel", label: "Courier satchel", equipState: "carried", tags: [] },
+        { ref: "Message Tube", label: "Message Tube", equipState: "carried", tags: [] },
+      ],
+      capabilities: [
+        ...base.capabilities,
+        { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+      citableRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Courier satchel", "Message Tube"],
+      evidenceRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+      liveSceneQuestion: "Which item custody change and separate item-readiness condition need backend receipts?",
+      actionInterpretation: {
+        summary: "The player sets down the courier satchel while keeping the message tube in hand.",
+        playerIntent: "Set the Courier satchel down while keeping the message tube in hand.",
+        method: "set down and keep holding",
+        targetRefs: ["Market", "Courier satchel", "Message Tube"],
+        interactionKind: "item_transfer",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "gripping_held_item",
+          requestedPostureText: "keep the message tube in hand",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Message Tube",
+          evidenceRefs: ["Player", "Market", "Message Tube"],
+        },
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "drop_in_current_scene",
+          itemRef: "Courier satchel",
+          sourceKind: "player_inventory",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          equipSlot: null,
+          requestedItemText: "Courier satchel",
+          evidenceRefs: ["Player", "Market", "Courier satchel"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Market", "Courier satchel", "Message Tube"],
+      evidenceRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "The item transfer and separate maintained item-readiness condition both need backend receipts before narration.",
+        evidenceRefs: ["Player", "Market", "Courier satchel", "Message Tube"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-transfer-with-item-readiness",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "condition_set",
+      "item_transfer",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      dependsOnStepIds: ["step-1"],
+      intended: {
+        kind: "item_transfer",
+        requiredCapabilityId: "item_transfer",
+        itemTransferPlan: {
+          actorRef: "Player",
+          operation: "drop_in_current_scene",
+          itemRef: "Courier satchel",
+          sourceKind: "player_inventory",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          targetEquipState: "carried",
+          targetEquippedSlot: null,
+          anchorRef: "Market",
+        },
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
   it("requires item_transfer checklist plans to carry operation-owned equip fields", async () => {
     const frame = itemTransferActionPlanFrame();
     const gmRead = itemTransferGmRead(frame);
@@ -5093,6 +6925,106 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       },
       disposition: {
         kind: "stage4_backend_resolution_required",
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("routes plausible soft scene-prop follow-up through a non-mutating scene beat receipt plan", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "If there is an ordinary stool or chair within easy reach in the tavern, I grab it and keep it ready as an improvised shield without swinging it yet.",
+      citableRefs: ["Player", "Market"],
+      movementOptions: [],
+      actors: [],
+      targets: [],
+    });
+    const gmRead: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player uses a plausible nearby scene prop for an immediate local beat.",
+      liveSceneQuestion: "Can this low-stakes current-scene interaction be recorded without durable object state?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player grabs a plausible nearby stool or chair and keeps it ready as an improvised shield for the immediate beat.",
+        playerIntent: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+        method: "immediate scene-prop interaction",
+        targetRefs: ["Market"],
+        interactionKind: "scene_local_beat",
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "ordinary_prop_readiness",
+          requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+          anchorRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The stool/chair is a plausible soft scene prop for the immediate beat, not a modeled inventory item, durable cover object, hidden mechanism, or world fact.",
+    };
+    const noRoll = {
+      ...validJudgeUncertainty(frame, gmRead),
+      checkNeed: "no_roll_needed" as const,
+      nextStep: "settle_no_roll" as const,
+      noRollReason: {
+        code: "deterministic_scene_truth" as const,
+        explanation: "This old path would let prose own the beat.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    const rejectedNoRoll = validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: noRoll });
+    expect(rejectedNoRoll.status).toBe("rejected");
+    if (rejectedNoRoll.status !== "rejected") throw new Error("expected rejected");
+    expect(rejectedNoRoll.issues.some((issue) =>
+      issue.message.includes("scene beat receipt")
+    )).toBe(true);
+
+    const judgment: JudgeUncertainty = {
+      ...validJudgeUncertainty(frame, gmRead),
+      source: {
+        sceneFrameVersion: "scene-frame.v1",
+        gmReadVersion: "gm-read.v1",
+        gmReadPath: "procedural",
+      },
+      checkNeed: "backend_action_plan_needed",
+      nextStep: "action_plan",
+      actorRefs: ["Player"],
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      checkRationale: "The local beat needs a typed non-mutating receipt before narration.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Scene-local beat needs a scene_beat_record receipt.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-soft-prop-beat",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps).toHaveLength(1);
+    expect(result.checklist.steps[0]).toMatchObject({
+      targetRefs: ["Market"],
+      intended: {
+        kind: "scene_beat_record",
+        stateOrEvidence: "evidence",
+        requiredCapabilityId: "scene_beat_record",
+        sceneBeatPlan: {
+          actorRef: "Player",
+          beatKind: "ordinary_prop_readiness",
+          requestedBeatText: "Grab a nearby stool or chair and keep it ready as an improvised shield for this beat",
+          anchorRef: "Market",
+          persistenceScope: "turn_event_only",
+        },
       },
     });
     expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
@@ -6886,7 +8818,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
     expect(oracleEvent?.data).toEqual({ outcome: "strong_hit" });
   });
 
-  it("stops before settled packet when admitted Oracle settlement is rejected", async () => {
+  it("stops before Oracle roll when admitted Oracle meanings claim hard outcomes", async () => {
     const frame = minimalFrame();
     const gmRead = {
       ...validGmRead(frame),
@@ -6928,7 +8860,7 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       })) {
         events.push(event);
       }
-    })()).rejects.toThrow(CleanGameplayRuntimeInvariantError);
+    })()).rejects.toThrow(CleanJudgeUncertaintyValidationError);
 
     expect(events.map((event) =>
       event.type === "scene-settling" && typeof event.data === "object" && event.data
@@ -6938,7 +8870,6 @@ describe("gameplay-cycle-runtime primitive 4 Oracle Roll/Settlement contracts", 
       "scene-frame",
       "gm-read",
       "judge-uncertainty",
-      "oracle-roll",
     ]);
     expect(events.some((event) => event.type === "oracle_result")).toBe(false);
     expect(events.some((event) => event.type === "narrative")).toBe(false);

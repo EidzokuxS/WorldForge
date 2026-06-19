@@ -217,13 +217,16 @@ function privateTermIssues(input: {
 }
 
 function forbiddenClaimIssues(settlement: OracleSettlement): OracleSettlementValidationIssue[] {
-  const meanings = settlement.admission.outcomeMeanings;
+  return oracleOutcomeMeaningIssues(settlement.admission.outcomeMeanings);
+}
+
+export function oracleOutcomeMeaningIssues(
+  meanings: { strong_hit: string; weak_hit: string; miss: string },
+): OracleSettlementValidationIssue[] {
   const textByPath = {
     "admission.outcomeMeanings.strong_hit": meanings.strong_hit,
     "admission.outcomeMeanings.weak_hit": meanings.weak_hit,
     "admission.outcomeMeanings.miss": meanings.miss,
-    "selectedMeaning.text": settlement.selectedMeaning.text,
-    "visibleOutcome.selectedMeaning": settlement.visibleOutcome.selectedMeaning,
   };
   const issues: OracleSettlementValidationIssue[] = [];
   for (const [path, value] of Object.entries(textByPath)) {

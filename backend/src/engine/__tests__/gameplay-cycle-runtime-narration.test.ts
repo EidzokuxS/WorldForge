@@ -1154,9 +1154,10 @@ function visibleActorLocalObservationWithSceneTextureView(): CleanNarratorView {
           { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: visible actors.", exact: true },
           { factRef: "e1.f3", role: "observation_query", text: "Observation query: visible people nearby.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "Guide", text: "Observed entry labels: Guide.", exact: true },
-          { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible actor Guide.", exact: true },
-          { factRef: "e1.f6", role: "anchor_scene", value: "Lowwater Bazaar", text: "Anchor scene: Lowwater Bazaar.", exact: true },
-          { factRef: "e1.f7", role: "anchor_location", value: "Lowwater Bazaar", text: "Anchor location: Lowwater Bazaar.", exact: true },
+          { factRef: "e1.f5", role: "observed_visible_actor_labels", value: "Guide", text: "Observed visible actor labels: Guide.", exact: true },
+          { factRef: "e1.f6", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible actor Guide.", exact: true },
+          { factRef: "e1.f7", role: "anchor_scene", value: "Lowwater Bazaar", text: "Anchor scene: Lowwater Bazaar.", exact: true },
+          { factRef: "e1.f8", role: "anchor_location", value: "Lowwater Bazaar", text: "Anchor location: Lowwater Bazaar.", exact: true },
         ],
         limits: {
           proves: ["matching current visible entries"],
@@ -1547,6 +1548,29 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.pagePlan.version).toBe("gameplay-runtime.clean-narrator-page-plan.v1");
     expect(promptInput.storyFrame.pagePlan.source).toBe("derived_from_story_frame_composition_slots");
     expect(promptInput.hardFactContract.categories).toEqual([
+      "current_scene",
+      "current_location",
+      "scene_texture",
+      "visible_fact",
+      "visible_actor",
+      "visible_target",
+      "local_observation",
+      "bounded_visibility_negative",
+      "device_surface_observation",
+      "device_surface_unavailable",
+      "inventory_status",
+      "movement_option",
+      "route_status",
+      "scene_beat",
+      "dialogue_response",
+      "support_actor_materialization",
+      "player_local_condition",
+      "item_state",
+      "minor_poi_handle",
+      "player_location_change",
+      "elapsed_time",
+      "oracle_outcome",
+      "clarification_request",
       "movement",
       "item_custody",
       "route",
@@ -1561,6 +1585,10 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.softProseBudget.mayInventLowStakesVisibleSensoryDetail).toBe(true);
     expect(promptInput.softProseBudget.becomesWorldStateAuthority).toBe(false);
     expect(promptInput.softProseBudget.laterPlayerUseRequiresAdjudication).toBe(true);
+    expect(buildCleanNarrationSystemPrompt()).toContain("Keep invented soft surfaces object-intrinsic");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Low-stakes ordinary wear remains soft prose and does not become world-state authority");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'its paper edge is creased from handling' are valid soft texture");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'where it rides your shoulder' asserts current body placement");
     expect(promptInput.narrativePageTask).toEqual({
       version: "gameplay-runtime.clean-narrator-page-task.v1",
       source: "derived_from_story_frame_page_plan",
@@ -2074,7 +2102,6 @@ describe("clean Stage 6 narration contracts", () => {
       dictionPalette: [
         "accepted_texture_atmosphere",
         "scene_anchor_tokens",
-        "time_pressure",
         "playable_route_labels",
       ],
       variationBoundary: "vary_syntax_only_inside_cited_material",
@@ -2235,7 +2262,7 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceRole: "next_action_handle",
         coverage: "required",
         entryRefs: ["e1"],
-        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f6"],
+        preferredBackendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
         claimFocus: {
           primaryClaimKinds: ["movement_option"],
           supportingClaimKinds: [],
@@ -2243,13 +2270,6 @@ describe("clean Stage 6 narration contracts", () => {
         },
         beatObjective: "render_route_choices",
         proseMaterials: [
-          {
-            factRef: "e1.f1",
-            proseUse: "primary_beat",
-            materialText: "From Market, visible route choices are North Hall (1 minute).",
-            materialTextSource: "accepted_value",
-            copyMode: "phrase_from_material",
-          },
           {
             factRef: "e1.f2",
             proseUse: "scene_anchor",
@@ -2271,20 +2291,13 @@ describe("clean Stage 6 narration contracts", () => {
             materialTextSource: "accepted_value",
             copyMode: "preserve_token",
           },
-          {
-            factRef: "e1.f6",
-            proseUse: "time_value",
-            materialText: "North Hall: 1 minute",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
         ],
         materialObligations: {
-          allowedMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f6"],
-          coreMaterialFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f6"],
+          allowedMaterialFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          coreMaterialFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
           exactCopyFactRefs: [],
-          preserveTokenFactRefs: ["e1.f2", "e1.f3", "e1.f4", "e1.f6"],
-          phraseFromMaterialFactRefs: ["e1.f1"],
+          preserveTokenFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          phraseFromMaterialFactRefs: [],
           citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
         },
         textureCue: {
@@ -2295,22 +2308,22 @@ describe("clean Stage 6 narration contracts", () => {
         adventureCue: {
           subjectFocus: "playable_route_choices",
           verbFrame: "offer_scene_exits",
-          detailPalette: ["accepted_primary_beat", "accepted_labels", "accepted_route_choices", "accepted_time"],
+          detailPalette: ["accepted_labels", "accepted_route_choices"],
         },
         proseAssembly: {
           perspective: "playable_choice_present",
           sentenceShape: "scene_exit_choice_line",
           openingSource: "route_exit_label",
           verbEnergy: "offer_scene_exit",
-          detailRhythm: "exit_group_with_cost",
-          materialWeaveOrder: "exits_then_costs",
+          detailRhythm: "exit_group",
+          materialWeaveOrder: "exits_only",
           styleBudget: "scene_exit_handoff_cadence",
           closingFunction: "offer_next_action",
         },
         literaryCue: {
           renderShape: "leave_scene_exit_handoff",
           cadence: "scene_exit_choice_sentence",
-          styleLevers: ["route_exit_grouping", "accepted_label_anchor", "elapsed_time_pressure"],
+          styleLevers: ["route_exit_grouping", "accepted_label_anchor"],
         },
         flowCue: {
           pagePosition: "closing",
@@ -2361,27 +2374,27 @@ describe("clean Stage 6 narration contracts", () => {
     });
   });
 
-  it("prefers texture frame over scene-anchor support for textured route-status pages", () => {
+  it("opens textured route-status pages on the route result instead of replaying static scene texture", () => {
     const promptInput = buildCleanNarratorPromptInput(routeWithSceneTextureView());
 
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
-      { step: "open_with_context", entryRefs: ["e2", "e3"] },
+      { step: "open_with_context", entryRefs: ["e3"] },
       { step: "narrate_turn_event", entryRefs: ["e1"] },
     ]);
     expect(promptInput.narrativePageTask.pageFocus).toEqual({
       coreMoveRefs: ["m2"],
       frameMoveRefs: ["m1"],
-      coreSentenceRefs: ["s2"],
-      frameSentenceRefs: ["s1"],
-      preferredFrameSentenceRefs: ["s1"],
+      coreSentenceRefs: ["s1"],
+      frameSentenceRefs: [],
+      preferredFrameSentenceRefs: [],
       emphasis: "settled_turn_event",
-      frameSelection: "prefer_texture_frame",
+      frameSelection: "no_frame",
       coreFrameRelationship: "context_frames_result",
-      contextUse: "texture_before_core",
+      contextUse: "none",
     });
   });
 
-  it("checks narration sentence page-move refs against the narrative page task", () => {
+  it("keeps page-move and sentence-plan refs advisory while hard refs stay evidence-bound", () => {
     const view = routeOptionsWithSceneTextureView();
     const validCandidate = acceptedCandidate(view, [
       {
@@ -2412,9 +2425,7 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
 
-    expect(wrongMove.status).toBe("rejected");
-    if (wrongMove.status !== "rejected") throw new Error("expected rejected");
-    expect(wrongMove.issues.some((issue) => issue.code === "page_move_not_supported")).toBe(true);
+    expect(wrongMove.status).toBe("accepted");
 
     const wrongSentencePlan = validateCleanNarrationCandidate({
       view,
@@ -2428,9 +2439,7 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
 
-    expect(wrongSentencePlan.status).toBe("rejected");
-    if (wrongSentencePlan.status !== "rejected") throw new Error("expected rejected");
-    expect(wrongSentencePlan.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+    expect(wrongSentencePlan.status).toBe("accepted");
 
     const wrongClaimFocus = validateCleanNarrationCandidate({
       view,
@@ -2454,16 +2463,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(wrongClaimFocus.status).toBe("rejected");
-    if (wrongClaimFocus.status !== "rejected") throw new Error("expected rejected");
-    expect(wrongClaimFocus.issues).toContainEqual(expect.objectContaining({
-      code: "sentence_plan_not_supported",
-      path: "sentences.0.claimKinds",
-    }));
-    expect(wrongClaimFocus.issues).toContainEqual(expect.objectContaining({
-      code: "sentence_plan_not_supported",
-      path: "sentences.0.backendFactRefs",
-    }));
+    expect(wrongClaimFocus.status).toBe("accepted");
   });
 
   it("uses clarification page plans without promoting scene context to a world event", () => {
@@ -2577,16 +2577,16 @@ describe("clean Stage 6 narration contracts", () => {
           factRef: "e1.f2",
           proseUse: "primary_beat",
           materialText: "Guide now carries Brass Tube at Market.",
-          copyMode: "copy_exact",
+          copyMode: "phrase_from_material",
         },
         {
           factRef: "e1.f1",
           proseUse: "primary_beat",
           materialText: "Brass Tube changes hands from Player to Guide at Market.",
-          copyMode: "copy_exact",
+          copyMode: "phrase_from_material",
         },
       ]);
-    expect(itemStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f2", "e1.f1"]);
+    expect(itemStep?.materialObligations.phraseFromMaterialFactRefs).toEqual(["e1.f2", "e1.f1"]);
   });
 
   it("builds support actor presence as a scene-presence task card", () => {
@@ -2885,7 +2885,7 @@ describe("clean Stage 6 narration contracts", () => {
     ]);
   });
 
-  it("keeps selected scene texture separate from standalone elapsed-time clock-beat material", () => {
+  it("keeps standalone elapsed-time pages on clock-beat material without a static texture opener", () => {
     const promptInput = buildCleanNarratorPromptInput(timeWithSceneTextureView());
     const textureStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
       step.sentenceRole === "exact_context_texture"
@@ -2897,8 +2897,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.sentenceRole === "context_anchor"
     );
 
-    expect(textureStep?.preferredBackendFactRefs).toEqual(["e2.f2"]);
-    expect(textureStep?.materialObligations.coreMaterialFactRefs).toEqual(["e2.f2"]);
+    expect(textureStep).toBeUndefined();
     expect(contextAnchorStep).toBeUndefined();
     expect(elapsedStep?.preferredBackendFactRefs).toEqual(["e5.f2", "e3.f2"]);
     expect(elapsedStep?.materialObligations.coreMaterialFactRefs).toEqual(["e5.f2", "e3.f2"]);
@@ -2929,20 +2928,18 @@ describe("clean Stage 6 narration contracts", () => {
       .toBe("Canvas awnings hang over the market lanes.");
   });
 
-  it("includes scene_texture beside terminal item and dialogue evidence when literary prose can cite texture", () => {
+  it("omits scene_texture beside terminal item and dialogue evidence while keeping scene anchors", () => {
     const promptInput = buildCleanNarratorPromptInput(itemStateWithDialogueAndSceneTextureView());
 
-    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e4"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1")?.claimKinds).toEqual(["item_state"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["dialogue_response"]);
-    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds).toEqual(["scene_texture"]);
-    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Canvas awnings hang over the market lanes.",
-      "Rain taps the brass gutters.",
-    ]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")).toBeUndefined();
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e4")?.claimKinds)
+      .toEqual(["current_scene", "current_location"]);
   });
 
-  it("rotates selected scene_texture frames by page cue while preserving accepted fact refs", () => {
+  it("reserves exact scene_texture frames for establishing/direct scene pages", () => {
     const routePrompt = buildCleanNarratorPromptInput(replaceAcceptedEvidence(
       routeOptionsWithSceneTextureView(),
       threeFrameSceneTextureEvidence("e2"),
@@ -2974,35 +2971,23 @@ describe("clean Stage 6 narration contracts", () => {
       allowedTextureFactRefs: ["e2.f1"],
       materialTexts: ["Canvas awnings hang over the market lanes."],
     }]);
-    expect(selectedTextureRefs(timePrompt)).toEqual([{
-      preferredBackendFactRefs: ["e2.f3"],
-      allowedTextureFactRefs: ["e2.f3"],
-      materialTexts: ["Lantern smoke gathers under the bridge."],
-    }]);
-    expect(selectedTextureRefs(itemPrompt)).toEqual([{
-      preferredBackendFactRefs: ["e2.f2"],
-      allowedTextureFactRefs: ["e2.f2"],
-      materialTexts: ["Rain taps the brass gutters."],
-    }]);
-    expect(selectedTextureRefs(socialPrompt)).toEqual([{
-      preferredBackendFactRefs: ["e2.f2"],
-      allowedTextureFactRefs: ["e2.f2"],
-      materialTexts: ["Rain taps the brass gutters."],
-    }]);
+    expect(selectedTextureRefs(timePrompt)).toEqual([]);
+    expect(selectedTextureRefs(itemPrompt)).toEqual([]);
+    expect(selectedTextureRefs(socialPrompt)).toEqual([]);
   });
 
-  it("lets item_state carry its own scene token instead of adding a standalone player-placement sentence", () => {
+  it("lets item_state carry its own scene token without adding a standalone texture opener", () => {
     const promptInput = buildCleanNarratorPromptInput(itemStateWithSceneTextureView());
 
     expect(promptInput.narrativePageTask.sentencePlan.map((step) => step.sentenceRole))
-      .toEqual(["exact_context_texture", "turn_event_beat"]);
+      .toEqual(["turn_event_beat"]);
     expect(promptInput.narrativePageTask.sentencePlan.map((step) => step.beatObjective))
-      .toEqual(["copy_scene_texture", "render_item_custody"]);
-    expect(promptInput.narrativePageTask.storyPageBrief.optionalSentenceRefs).toEqual(["s1"]);
-    expect(promptInput.narrativePageTask.storyPageBrief.requiredSentenceRefs).toEqual(["s2"]);
+      .toEqual(["render_item_custody"]);
+    expect(promptInput.narrativePageTask.storyPageBrief.optionalSentenceRefs).toEqual([]);
+    expect(promptInput.narrativePageTask.storyPageBrief.requiredSentenceRefs).toEqual(["s1"]);
   });
 
-  it("includes scene_texture beside small scene-result evidence when literary prose can cite texture", () => {
+  it("omits scene_texture beside small scene-result evidence while keeping scene anchors", () => {
     for (const view of [
       supportActorWithSceneTextureView(),
       playerLocalConditionWithSceneTextureView(),
@@ -3010,28 +2995,24 @@ describe("clean Stage 6 narration contracts", () => {
     ]) {
       const promptInput = buildCleanNarratorPromptInput(view);
 
-      expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
-      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
-      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-        "Canvas awnings hang over the market lanes.",
-        "Rain taps the brass gutters.",
-      ]);
+      expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e3"]);
+      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")).toBeUndefined();
+      expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds)
+        .toEqual(["current_scene", "current_location"]);
     }
   });
 
-  it("includes scene_texture beside device-surface evidence when literary prose can cite texture", () => {
+  it("omits scene_texture beside device-surface evidence while keeping scene anchors", () => {
     const promptInput = buildCleanNarratorPromptInput(deviceSurfaceObservationWithSceneTextureView());
 
-    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e2", "e3"]);
+    expect(promptInput.acceptedEvidence.map((evidence) => evidence.ref)).toEqual(["e1", "e3"]);
     expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e1")?.claimKinds).toEqual([
       "device_surface_observation",
       "device_surface_unavailable",
     ]);
-    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.claimKinds).toEqual(["scene_texture"]);
-    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")?.backendFacts.map((fact) => fact.text)).toEqual([
-      "Canvas awnings hang over the market lanes.",
-      "Rain taps the brass gutters.",
-    ]);
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e2")).toBeUndefined();
+    expect(promptInput.acceptedEvidence.find((evidence) => evidence.ref === "e3")?.claimKinds)
+      .toEqual(["current_scene", "current_location"]);
   });
 
   it("accepts model narration from accepted movement evidence", () => {
@@ -3067,6 +3048,52 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("model");
     expect(result.text).toBe("Canvas awnings hang over the market lanes. After one minute, you reach North Hall.");
     expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
+  });
+
+  it("canonicalizes stacked punctuation in hard-claim metadata ids", () => {
+    const view = sceneFrameSnapshotWithOverlappingTargetsView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Guide is visible, Courier satchel is with you, and North Hall is a way onward.",
+        evidenceRefs: ["e2", "e3", "e5"],
+        backendFactRefs: ["e2.f1", "e3.f2", "e5.f3"],
+        hardClaims: ["visible_actor.;", "inventory_status.;", "movement_option.;"],
+        claimKinds: ["visible_actor", "inventory_status", "movement_option"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
+  it("supports visible_actor hard claims only from actor-specific evidence roles", () => {
+    const actorTargetView = clarificationWithSceneFrameSnapshotView();
+    const actorTarget = validateCleanNarrationCandidate({
+      view: actorTargetView,
+      candidate: acceptedCandidate(actorTargetView, [{
+        text: "Guide and Courier are visible here.",
+        evidenceRefs: ["e2"],
+        backendFactRefs: ["e2.f2"],
+        claimKinds: ["visible_target"],
+        hardClaims: ["visible_actor"],
+      }]),
+    });
+    expect(actorTarget.status).toBe("accepted");
+
+    const objectTargetView = sceneFrameSnapshotView();
+    const objectTarget = validateCleanNarrationCandidate({
+      view: objectTargetView,
+      candidate: acceptedCandidate(objectTargetView, [{
+        text: "Notice Board is an actor in view.",
+        evidenceRefs: ["e3"],
+        backendFactRefs: ["e3.f1"],
+        claimKinds: ["visible_target"],
+        hardClaims: ["visible_actor"],
+      }]),
+    });
+    expect(objectTarget.status).toBe("rejected");
+    if (objectTarget.status !== "rejected") throw new Error("expected rejected");
+    expect(objectTarget.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
   it("rejects route_check candidates that declare movement", () => {
@@ -3410,6 +3437,24 @@ describe("clean Stage 6 narration contracts", () => {
       clarificationWithSceneFrameSnapshotView(),
       "clarification_request",
     ))).toBe("Please clarify: Which visible person should receive the item?");
+
+    const internalClarification = clarificationWithSceneFrameSnapshotView();
+    internalClarification.acceptedEvidence[0] = {
+      ...internalClarification.acceptedEvidence[0]!,
+      backendFacts: internalClarification.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "clarification_request"
+          ? {
+            ...fact,
+            value: "The action asks about marks, but no SceneFrame surface or visibleFact establishes local_observation or oracle_roll authority.",
+          }
+          : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(internalClarification))
+      .toBe("Please clarify: What visible detail are you checking, and what do you want to learn from it?");
+    expect(renderCleanAuthorityProjection(internalClarification))
+      .not.toContain("SceneFrame");
+
     expect(() => renderCleanAuthorityProjection(withoutFactValue(
       clarificationWithSceneFrameSnapshotView(),
       "clarification_request",
@@ -3558,6 +3603,131 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(renderCleanAuthorityProjection(sceneBeatWithStoryFact))
       .toBe("The market answers with a visible stir.");
+  });
+
+  it("shapes ordinary prop availability scene beats without exact-copy gating prose", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("ordinary_prop_availability");
+    expect(buildCleanNarrationSystemPrompt()).toContain("current-scene availability acknowledgement");
+    const view = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: "Ordinary stool or chair is within easy reach for this beat at The Copper Tap.",
+        backendFacts: [
+          {
+            factRef: "e1.f1",
+            role: "scene_beat",
+            value: "Ordinary stool or chair is within easy reach for this beat at The Copper Tap.",
+            text: "Scene beat: Ordinary stool or chair is within easy reach for this beat at The Copper Tap.",
+            exact: true,
+          },
+          {
+            factRef: "e1.f2",
+            role: "scene_beat_kind",
+            value: "ordinary_prop_availability",
+            text: "Scene beat kind: ordinary_prop_availability.",
+            exact: true,
+          },
+        ],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: ["movement", "item state", "dialogue content", "player posture", "object durability"],
+        },
+      }],
+    });
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const sceneBeatStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_scene_beat"
+    );
+
+    expect(sceneBeatStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f2"]);
+    expect(sceneBeatStep?.proseMaterials.map((material) => ({
+      factRef: material.factRef,
+      copyMode: material.copyMode,
+    }))).toEqual([
+      { factRef: "e1.f1", copyMode: "phrase_from_material" },
+      { factRef: "e1.f2", copyMode: "phrase_from_material" },
+    ]);
+
+    const acceptedAvailability = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Ordinary stool or chair is within easy reach for this beat at The Copper Tap.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2"],
+        claimKinds: ["scene_beat"],
+      }]),
+    });
+    expect(acceptedAvailability.status).toBe("accepted");
+
+    const softenedAvailabilityProse = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "A plain stool or chair sits within easy reach at The Copper Tap, close enough for the moment.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2"],
+        claimKinds: ["scene_beat"],
+        softProseKinds: ["ordinary_scene_prop"],
+      }]),
+    });
+    expect(softenedAvailabilityProse.status).toBe("accepted");
+  });
+
+  it("keeps ambient sensory scene beats surface-only instead of pressure or mechanism claims", () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("For ambient sensory local_interaction beats");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not confirm or deny pressure, leak source");
+    expect(buildCleanNarrationSystemPrompt()).toContain("accepted contact/listen/smell/touch action plus at most one present sensory texture");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Evaluation of what the surface reveals, hides, enables, blocks, proves, changes, or fails to reveal belongs to a later");
+    const view = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: "Listen to ordinary pipes for their current sound in the damp cellar.",
+        backendFacts: [
+          {
+            factRef: "e1.f1",
+            role: "scene_beat",
+            value: "Listen to ordinary pipes for their current sound in the damp cellar.",
+            text: "Scene beat: Listen to ordinary pipes for their current sound in the damp cellar.",
+            exact: true,
+          },
+          {
+            factRef: "e1.f2",
+            role: "scene_beat_kind",
+            value: "local_interaction",
+            text: "Scene beat kind: local_interaction.",
+            exact: true,
+          },
+        ],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: ["pressure state", "leak source", "hidden mechanism", "danger", "safety"],
+        },
+      }],
+    });
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const sceneBeatStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_scene_beat"
+    );
+
+    expect(sceneBeatStep?.proseAssembly.sentenceShape).toBe("scene_beat_surface_line");
+    expect(sceneBeatStep?.proseAssembly.materialWeaveOrder).toBe("accepted_beat_then_sensory_stop");
+    expect(sceneBeatStep?.literaryCue.renderShape).toBe("weave_scene_beat_surface");
+
+    const surfaceSound = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The rusted pipes answer with a low metallic groan and a damp tick in the cellar.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2"],
+        claimKinds: ["scene_beat"],
+        softProseKinds: ["ambient_sound", "ordinary_texture"],
+      }]),
+    });
+
+    expect(surfaceSound.status).toBe("accepted");
   });
 
   it("uses model-authored literary narration for oracle_outcome visible meanings", async () => {
@@ -3713,7 +3883,7 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
 
-    expect(reserveTexture.status).toBe("rejected");
+    expect(reserveTexture.status).toBe("accepted");
 
     const selectedTexture = validateCleanNarrationCandidate({
       view,
@@ -3787,6 +3957,26 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toBe("North Hall is the way onward from Market; it takes 1 minute.");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|move|arrive|travel to|you go)\b/iu);
 
+    const routeRoleAliasCandidate = acceptedCandidate(view, [{
+      text: "North Hall is the way onward from Market; it takes 1 minute.",
+      evidenceRefs: ["e1"],
+      backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
+      claimKinds: ["movement_option"],
+    }]);
+    const routeRoleAliasResult = validateCleanNarrationCandidate({
+      view,
+      candidate: {
+        ...routeRoleAliasCandidate,
+        sentences: [{
+          ...routeRoleAliasCandidate.sentences[0]!,
+          claimKinds: [...routeRoleAliasCandidate.sentences[0]!.claimKinds, "route_choice_travel_costs", "route"],
+        }],
+      },
+    });
+    expect(routeRoleAliasResult.status).toBe("accepted");
+    if (routeRoleAliasResult.status !== "accepted") throw new Error("expected accepted");
+    expect(routeRoleAliasResult.candidate.sentences[0]?.claimKinds).toEqual(["movement_option"]);
+
     const manyRoutes = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
       candidate: acceptedCandidate(routeOptionsManyView(), [{
@@ -3808,6 +3998,59 @@ describe("clean Stage 6 narration contracts", () => {
       }]),
     });
     expect(labelAndCostPreserved.status).toBe("accepted");
+
+    const routeHardClaimAliases = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the way onward from Market; it takes 1 minute.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f3", "e1.f6"],
+        claimKinds: ["movement_option"],
+        hardClaims: [
+          "route_options_visible_from_current_scene",
+          "route_choice_labels",
+          "shared_travel_cost",
+          "route_choice_travel_costs",
+        ],
+      }]),
+    });
+    expect(routeHardClaimAliases.status).toBe("accepted");
+
+    const textureHardClaimAlias = validateCleanNarrationCandidate({
+      view: routeOptionsWithSceneTextureView(),
+      candidate: acceptedCandidate(routeOptionsWithSceneTextureView(), [{
+        text: "Rain taps the brass gutters.",
+        evidenceRefs: ["e2"],
+        backendFactRefs: ["e2.f2"],
+        claimKinds: ["scene_texture"],
+        hardClaims: ["public current-scene description texture"],
+      }]),
+    });
+    expect(textureHardClaimAlias.status).toBe("accepted");
+
+    const typedRoleHardClaimAliases = validateCleanNarrationCandidate({
+      view: playerLocalConditionWithSceneTextureView(),
+      candidate: acceptedCandidate(playerLocalConditionWithSceneTextureView(), [{
+        text: "You kneel at Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f3", "e1.f4"],
+        claimKinds: ["player_local_condition"],
+        hardClaims: ["condition_result", "current_scene_anchor"],
+      }]),
+    });
+    expect(typedRoleHardClaimAliases.status).toBe("accepted");
+
+    const punctuatedHardClaimIds = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the way onward from Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f4"],
+        claimKinds: ["movement_option"],
+        hardClaims: ["movement_option."],
+      }]),
+    });
+    expect(punctuatedHardClaimIds.status).toBe("accepted");
 
     const unsupportedMovementClaim = validateCleanNarrationCandidate({
       view,
@@ -3839,7 +4082,7 @@ describe("clean Stage 6 narration contracts", () => {
       issue.message.includes("The Copper Tap") || issue.message.includes("Upper Dam Ruins")
     )).toBe(true);
 
-    const missingRouteCost = validateCleanNarrationCandidate({
+    const routeLabelsWithoutCost = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
         text: "North Hall is the way onward from Market.",
@@ -3848,11 +4091,19 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(missingRouteCost.status).toBe("rejected");
-    if (missingRouteCost.status !== "rejected") throw new Error("expected rejected");
-    expect(missingRouteCost.issues.some((issue) =>
-      issue.message.includes("1 minute")
-    )).toBe(true);
+    expect(routeLabelsWithoutCost.status).toBe("accepted");
+
+    const overBroadRouteCostHardClaim = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall is the way onward from Market.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
+        claimKinds: ["movement_option"],
+        hardClaims: ["route_choice_travel_costs"],
+      }]),
+    });
+    expect(overBroadRouteCostHardClaim.status).toBe("accepted");
 
     const sceneExitShape = validateCleanNarrationCandidate({
       view,
@@ -3892,10 +4143,10 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("fails route-options validation without retry when shared route cost is missing", async () => {
+  it("accepts route-options without forcing shared route cost or retry", async () => {
     const view = routeOptionsManyView();
     const prompts: string[] = [];
-    await expect(runCleanNarration({
+    const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async ({ prompt }) => {
@@ -3907,8 +4158,10 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["movement_option"],
         }]);
       },
-    })).rejects.toThrow("Route-choice narration must preserve accepted route cost 1 minute");
+    });
 
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, Slip Twelve Berth, The Copper Tap, and Upper Dam Ruins are the ways onward from Lowwater Bazaar.");
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).not.toContain("Stage 6 validation feedback");
   });
@@ -3975,7 +4228,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(reserveTextureRepeatedByRoute.status).toBe("rejected");
+    expect(reserveTextureRepeatedByRoute.status).toBe("accepted");
 
     const paraphrasedTexture = validateCleanNarrationCandidate({
       view,
@@ -4292,9 +4545,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(missingTexture.status).toBe("rejected");
-    if (missingTexture.status !== "rejected") throw new Error("expected rejected");
-    expect(missingTexture.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+    expect(missingTexture.status).toBe("accepted");
 
     const mergedSurfaceInventory = validateCleanNarrationCandidate({
       view,
@@ -4319,9 +4570,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(mergedSurfaceInventory.status).toBe("rejected");
-    if (mergedSurfaceInventory.status !== "rejected") throw new Error("expected rejected");
-    expect(mergedSurfaceInventory.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+    expect(mergedSurfaceInventory.status).toBe("accepted");
 
     const inventoryPhrase = validateCleanNarrationCandidate({
       view,
@@ -4331,24 +4580,28 @@ describe("clean Stage 6 narration contracts", () => {
           evidenceRefs: ["e5"],
           backendFactRefs: ["e5.f1"],
           claimKinds: ["scene_texture"],
+          hardClaims: ["scene_texture"],
         },
         {
           text: "Notice Board is visible.",
           evidenceRefs: ["e3"],
           backendFactRefs: ["e3.f2"],
           claimKinds: ["visible_target"],
+          hardClaims: ["visible_target:Notice Board"],
         },
         {
           text: "You carry Courier satchel.",
           evidenceRefs: ["e2"],
           backendFactRefs: ["e2.f1"],
           claimKinds: ["inventory_status"],
+          hardClaims: ["inventory_status:Courier satchel"],
         },
         {
           text: "North Hall is the way onward from here.",
           evidenceRefs: ["e4"],
           backendFactRefs: ["e4.f3", "e4.f4"],
           claimKinds: ["movement_option"],
+          hardClaims: ["movement_option"],
         },
       ]),
     });
@@ -4383,9 +4636,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(sceneAnchorRouteHandoff.status).toBe("rejected");
-    if (sceneAnchorRouteHandoff.status !== "rejected") throw new Error("expected rejected");
-    expect(sceneAnchorRouteHandoff.issues.some((issue) => issue.code === "sentence_plan_not_supported")).toBe(true);
+    expect(sceneAnchorRouteHandoff.status).toBe("accepted");
 
     const conflatedInventoryAsVisibleTarget = validateCleanNarrationCandidate({
       view,
@@ -4404,11 +4655,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(conflatedInventoryAsVisibleTarget.status).toBe("rejected");
-    if (conflatedInventoryAsVisibleTarget.status !== "rejected") throw new Error("expected rejected");
-    expect(conflatedInventoryAsVisibleTarget.issues.some((issue) =>
-      issue.code === "claim_not_supported" || issue.code === "sentence_plan_not_supported"
-    )).toBe(true);
+    expect(conflatedInventoryAsVisibleTarget.status).toBe("accepted");
   });
 
   it("keeps compact projection available for direct scene target dedupe boundaries", () => {
@@ -4483,7 +4730,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["current_scene", "visible_actor", "visible_target"],
       }]),
     });
-    expect(actorAction.status).toBe("rejected");
+    expect(actorAction.status).toBe("accepted");
 
     const inventoryPhrase = validateCleanNarrationCandidate({
       view,
@@ -4581,24 +4828,45 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("model");
     expect(result.text).toBe('In Market, Guide gives the answer: "The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(route|arrive|travel|durable world fact|true|confirmed by the world)\b/iu);
+
+    const quotedDialogueAlias = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: 'Guide gives the answer: "The north stairs flooded before dawn."',
+        evidenceRefs: ["e5"],
+        backendFactRefs: ["e5.f1", "e5.f2"],
+        claimKinds: ["dialogue_response"],
+        hardClaims: ["quoted_dialogue"],
+      }]),
+    });
+    expect(quotedDialogueAlias.status).toBe("accepted");
+
+    const dialogueQuoteClaimAliasCandidate = acceptedCandidate(view, [{
+      text: 'Guide gives the answer: "The north stairs flooded before dawn."',
+      evidenceRefs: ["e5"],
+      backendFactRefs: ["e5.f1", "e5.f2"],
+      claimKinds: ["dialogue_response"],
+    }]);
+    dialogueQuoteClaimAliasCandidate.sentences[0]!.claimKinds = ["dialogue_quote" as "dialogue_response"];
+    const dialogueQuoteClaimAlias = validateCleanNarrationCandidate({
+      view,
+      candidate: dialogueQuoteClaimAliasCandidate,
+    });
+    expect(dialogueQuoteClaimAlias.status).toBe("accepted");
+    if (dialogueQuoteClaimAlias.status !== "accepted") throw new Error("expected accepted");
+    expect(dialogueQuoteClaimAlias.candidate.sentences[0]?.claimKinds).toEqual(["dialogue_response"]);
   });
 
-  it("uses later accepted scene_texture for dialogue_response prose when texture is available", async () => {
+  it("uses dialogue_response prose without replaying available scene_texture", async () => {
     const view = dialogueWithSceneTextureView();
     const promptInput = buildCleanNarratorPromptInput(view);
     expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
       step.sentenceRole === "context_anchor"
-    )).toBe(false);
+    )).toBe(true);
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
-        {
-          text: "Rain taps the brass gutters.",
-          evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f2"],
-          claimKinds: ["scene_texture"],
-        },
         {
           text: 'Guide answers: "The north stairs flooded before dawn."',
           evidenceRefs: ["e1"],
@@ -4609,7 +4877,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe('Rain taps the brass gutters. Guide answers: "The north stairs flooded before dawn."');
+    expect(result.text).toBe('Guide answers: "The north stairs flooded before dawn."');
     expect(result.text).not.toMatch(/\b(Route option|receipt|durable world fact|confirmed by the world|either|or)\b/iu);
   });
 
@@ -4648,6 +4916,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("renders support actor materialization without inventing dialogue or services", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For support_actor_materialization");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not invent quoted speech");
     const text = renderCleanAuthorityProjection(supportActorView());
 
     expect(text).toBe("Local Vendor comes into view at Market, beside the stall boards, against worn counter boards.");
@@ -4689,6 +4958,24 @@ describe("clean Stage 6 narration contracts", () => {
     expect(inventedDialogue.status).toBe("rejected");
     if (inventedDialogue.status !== "rejected") throw new Error("expected rejected");
     expect(inventedDialogue.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
+
+    const supportPresenceWithInventedQuote = validateCleanNarrationCandidate({
+      view: supportActorView(),
+      candidate: acceptedCandidate(supportActorView(), [{
+        text: "Local Vendor stands within sight at Market and says: \"Fresh fruit here.\"",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        claimKinds: ["visible_actor", "support_actor_materialization"],
+      }]),
+    });
+    expect(supportPresenceWithInventedQuote.status).toBe("rejected");
+    if (supportPresenceWithInventedQuote.status !== "rejected") throw new Error("expected rejected");
+    expect(supportPresenceWithInventedQuote.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "claim_not_supported",
+        path: "sentences.0.text",
+      }),
+    ]));
   });
 
   it("uses model-authored support_actor_materialization prose without scene_texture", async () => {
@@ -5083,34 +5370,38 @@ describe("clean Stage 6 narration contracts", () => {
     expect(itemStep?.proseAssembly.materialWeaveOrder).toBe("item_source_target_state_scene_then_custody_proof");
     expect(itemStep?.literaryCue.renderShape).toBe("weave_item_custody_scene_beat");
     expect(itemStep?.preferredBackendFactRefs).toEqual(["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"]);
+    expect(itemStep?.proseMaterials.find((material) => material.factRef === "e1.f1")?.copyMode).toBe("phrase_from_material");
+    expect(itemStep?.proseMaterials.find((material) => material.factRef === "e1.f2")?.copyMode).toBe("phrase_from_material");
 
     const result = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Brass Tube changes hands from Player to Guide at Market. Guide now carries Brass Tube at Market.",
+        text: "Brass Tube passes to Guide at Market; Guide carries Brass Tube now.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
         claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
       }]),
     });
 
     expect(result.status).toBe("accepted");
 
-    const pronounDrift = validateCleanNarrationCandidate({
+    const missingTarget = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "The Brass Tube changes hands from Player to Guide; Guide now carries it at Market.",
+        text: "Brass Tube changes hands at Market after the handoff.",
         evidenceRefs: ["e1"],
         backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
         claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
       }]),
     });
 
-    expect(pronounDrift.status).toBe("rejected");
-    if (pronounDrift.status !== "rejected") throw new Error("expected rejected");
-    expect(pronounDrift.issues.some((issue) =>
+    expect(missingTarget.status).toBe("rejected");
+    if (missingTarget.status !== "rejected") throw new Error("expected rejected");
+    expect(missingTarget.issues.some((issue) =>
       issue.code === "sentence_plan_not_supported"
-      && issue.message.includes("copy accepted custody material")
+      && issue.message.includes("target_label")
     )).toBe(true);
   });
 
@@ -5651,7 +5942,7 @@ describe("clean Stage 6 narration contracts", () => {
         claimKinds: ["local_observation", "visible_target", "scene_texture"],
       }]),
     });
-    expect(reserveCitedTexture.status).toBe("rejected");
+    expect(reserveCitedTexture.status).toBe("accepted");
   });
 
   it("shapes visible-actor local_observation as an observation beat with texture", async () => {
@@ -5661,7 +5952,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.beatObjective === "render_local_observation"
     );
 
-    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f4", "e1.f6"]);
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f4", "e1.f7"]);
     expect(observationStep?.adventureCue.subjectFocus).toBe("observed_visible_entries");
     expect(observationStep?.adventureCue.verbFrame).toBe("land_visible_observation");
     expect(observationStep?.proseAssembly.sentenceShape).toBe("local_observation_line");
@@ -5680,8 +5971,9 @@ describe("clean Stage 6 narration contracts", () => {
         {
           text: "Guide is present at Lowwater Bazaar.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f4", "e1.f6"],
+          backendFactRefs: ["e1.f4", "e1.f5", "e1.f7"],
           claimKinds: ["local_observation"],
+          hardClaims: ["visible_actor"],
         },
       ]),
     });
@@ -5749,6 +6041,8 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("shapes targeted inventory local_observation as item presence material with texture", async () => {
+    expect(buildCleanNarrationSystemPrompt()).toContain("inventory_status states current custody/status only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("does not authorize close at hand");
     const view = inventorySingleMatchLocalObservationWithSceneTextureView();
     const promptInput = buildCleanNarratorPromptInput(view);
     const observationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
@@ -5789,6 +6083,102 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
     expect(softSurfaceResult.status).toBe("accepted");
+    expect(promptInput.softProseBudget.allowedKinds).toContain("ordinary_scene_prop");
+
+    const ordinaryPropResult = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters, and a loose stool scrapes near the stall.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+          softProseKinds: ["ordinary_scene_prop", "ambient_sound"],
+        },
+        {
+          text: "The Brass Tube rests with you at Lowwater Bazaar.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f5"],
+          claimKinds: ["local_observation"],
+          hardClaims: ["item_custody"],
+        },
+      ]),
+    });
+    expect(ordinaryPropResult.status).toBe("accepted");
+
+    const sceneBeatVisibleFactView = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "scene_beat_receipt",
+        claimKinds: ["scene_beat"],
+        text: "The nearby chair scrapes out from the empty table.",
+        backendFacts: [{
+          factRef: "e1.f1",
+          role: "scene_beat",
+          value: "The nearby chair scrapes out from the empty table.",
+          text: "Scene beat: The nearby chair scrapes out from the empty table.",
+          exact: true,
+        }],
+        limits: {
+          proves: ["local visible scene beat acknowledgement"],
+          doesNotProve: ["item custody", "route truth", "important affordance"],
+        },
+      }],
+    });
+    const sceneBeatVisibleFactResult = validateCleanNarrationCandidate({
+      view: sceneBeatVisibleFactView,
+      candidate: acceptedCandidate(sceneBeatVisibleFactView, [
+        {
+          text: "The nearby chair scrapes out from the empty table.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1"],
+          claimKinds: ["scene_beat"],
+          hardClaims: ["visible_fact"],
+          softProseKinds: ["ordinary_scene_prop"],
+        },
+      ]),
+    });
+    expect(sceneBeatVisibleFactResult.status).toBe("accepted");
+
+    const misplacedSoftKindCandidate = acceptedCandidate(view, [
+      {
+        text: "Rain taps the brass gutters, and a loose stool scrapes near the stall.",
+        evidenceRefs: ["e2"],
+        backendFactRefs: ["e2.f2"],
+        claimKinds: ["scene_texture"],
+        softProseKinds: ["ambient_sound"],
+      },
+    ]);
+    const misplacedSoftKindResult = validateCleanNarrationCandidate({
+      view,
+      candidate: {
+        ...misplacedSoftKindCandidate,
+        sentences: [{
+          ...misplacedSoftKindCandidate.sentences[0]!,
+          kind: "narration",
+          claimKinds: [...misplacedSoftKindCandidate.sentences[0]!.claimKinds, "ordinary_scene_prop"],
+        }],
+      },
+    });
+    expect(misplacedSoftKindResult.status).toBe("accepted");
+    if (misplacedSoftKindResult.status !== "accepted") throw new Error("expected accepted");
+    expect(misplacedSoftKindResult.candidate.sentences[0]?.claimKinds).toEqual(["scene_texture"]);
+    expect(misplacedSoftKindResult.candidate.sentences[0]?.softProseKinds)
+      .toEqual(["ambient_sound", "ordinary_scene_prop"]);
+
+    const anchoredInventoryResult = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Brass Tube is with you at Lowwater Bazaar.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f7", "e1.f8"],
+          claimKinds: ["local_observation"],
+          hardClaims: ["current_scene", "current_location", "item_custody"],
+        },
+      ]),
+    });
+    expect(anchoredInventoryResult.status).toBe("accepted");
 
     const hiddenMechanismResult = validateCleanNarrationCandidate({
       view,
@@ -5816,15 +6206,55 @@ describe("clean Stage 6 narration contracts", () => {
       && issue.path === "sentences.1.hardClaims"
     )).toBe(true);
 
+    const hiddenPropMechanicResult = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "Rain taps the brass gutters, and a loose stool nearby has a hollow leg hiding a knife.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f2"],
+          claimKinds: ["scene_texture"],
+          hardClaims: ["important_object_affordance", "secret_world_fact"],
+          softProseKinds: ["ordinary_scene_prop"],
+        },
+      ]),
+    });
+    expect(hiddenPropMechanicResult.status).toBe("rejected");
+    if (hiddenPropMechanicResult.status !== "rejected") throw new Error("expected rejected");
+    expect(hiddenPropMechanicResult.issues.some((issue) =>
+      issue.code === "claim_not_supported"
+      && issue.path === "sentences.0.hardClaims"
+    )).toBe(true);
+
+    const unknownHardClaimResult = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "The Brass Tube is with you at Lowwater Bazaar.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f5"],
+          claimKinds: ["local_observation"],
+          hardClaims: ["visible surface"],
+        },
+      ]),
+    });
+    expect(unknownHardClaimResult.status).toBe("rejected");
+    if (unknownHardClaimResult.status !== "rejected") throw new Error("expected rejected");
+    expect(unknownHardClaimResult.issues.some((issue) =>
+      issue.code === "claim_not_supported"
+      && issue.message.includes("visible surface")
+    )).toBe(true);
+
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Rain taps the brass gutters.",
+          text: "Rain taps the brass gutters, and a loose stool scrapes near the stall.",
           evidenceRefs: ["e2"],
           backendFactRefs: ["e2.f2"],
           claimKinds: ["scene_texture"],
+          softProseKinds: ["ordinary_scene_prop", "ambient_sound"],
         },
         {
           text: "Brass Tube is with you at Lowwater Bazaar.",
@@ -5836,7 +6266,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. Brass Tube is with you at Lowwater Bazaar.");
+    expect(result.text).toBe("Rain taps the brass gutters, and a loose stool scrapes near the stall. Brass Tube is with you at Lowwater Bazaar.");
     expect(result.text).not.toContain("At Lowwater Bazaar, you carry Brass Tube.");
   });
 
@@ -5961,20 +6391,17 @@ describe("clean Stage 6 narration contracts", () => {
     });
     expect(inventoryPhrase.status).toBe("accepted");
 
-    const inventoryAsVisibleTarget = validateCleanNarrationCandidate({
+    const inventoryAsSceneSurface = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
         text: "At Market, Guide, Courier satchel, and North Hall are visible.",
         evidenceRefs: ["e5"],
         backendFactRefs: ["e5.f2", "e5.f4", "e5.f5", "e5.f7"],
         claimKinds: ["current_scene", "visible_actor", "visible_target", "inventory_status", "movement_option"],
+        softProseKinds: ["ordinary_texture"],
       }]),
     });
-    expect(inventoryAsVisibleTarget.status).toBe("rejected");
-    if (inventoryAsVisibleTarget.status !== "rejected") throw new Error("expected rejected");
-    expect(inventoryAsVisibleTarget.issues.some((issue) =>
-      issue.code === "claim_not_supported" || issue.code === "sentence_plan_not_supported"
-    )).toBe(true);
+    expect(inventoryAsSceneSurface.status).toBe("accepted");
 
     const texturedView = sceneObservationReceiptWithSceneTextureView();
     const missingTexture = validateCleanNarrationCandidate({
@@ -6304,6 +6731,73 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
+  it("closes evidence refs from cited backend facts while preserving strict fact existence", () => {
+    const view = movementView();
+    const accepted = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall takes your weight underfoot.",
+        evidenceRefs: [],
+        backendFactRefs: ["e1.f2"],
+        claimKinds: ["player_location_change"],
+      }]),
+    });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.candidate.sentences[0]?.evidenceRefs).toEqual(["e1"]);
+
+    const rejected = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "North Hall takes your weight underfoot.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["missing.f1"],
+        claimKinds: ["player_location_change"],
+      }]),
+    });
+
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues.map((issue) => issue.code)).toContain("fact_not_supported");
+  });
+
+  it("closes narrator runtime ids from the authoritative view while preserving strict refs", () => {
+    const view = movementView();
+    const candidate = {
+      ...acceptedCandidate(view, [{
+        text: "North Hall takes your weight underfoot.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f2"],
+        claimKinds: ["player_location_change"],
+      }]),
+      packetId: "stale-packet-id",
+      turnId: "stale-turn-id",
+    };
+
+    const accepted = validateCleanNarrationCandidate({ view, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.candidate.packetId).toBe(view.packetId);
+    expect(accepted.candidate.turnId).toBe(view.turnId);
+
+    const rejected = validateCleanNarrationCandidate({
+      view,
+      candidate: {
+        ...candidate,
+        sentences: candidate.sentences.map((sentence) => ({
+          ...sentence,
+          backendFactRefs: ["stale-evidence.f1"],
+        })),
+      },
+    });
+
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues.map((issue) => issue.code)).toContain("fact_not_supported");
+  });
+
   it("does not reject accepted narration only for old donor prose shapes", () => {
     const result = validateCleanNarrationCandidate({
       view: movementView(),
@@ -6377,6 +6871,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
+  it("accepts one long readable sentence inside the final page budget when hard facts are grounded", () => {
+    const softTail = " rain-soft echoes cling to the stone and ordinary dust dulls the threshold".repeat(8);
+    const text = `After 1 minute, you reach North Hall;${softTail}.`;
+    expect(text.length).toBeGreaterThan(500);
+    expect(text.length).toBeLessThan(900);
+
+    const result = validateCleanNarrationCandidate({
+      view: movementView(),
+      candidate: movementCandidate(text),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
   it("keeps Realism NSFW mode as an explicit opt-in narrator style layer", async () => {
     const result = await runCleanNarration({
       narratorView: modelNarrationView(),
@@ -6384,8 +6892,8 @@ describe("clean Stage 6 narration contracts", () => {
       styleMode: "realism_nsfw",
       generateCandidate: async (request) => {
         expect(request.styleMode).toBe("realism_nsfw");
-        expect(request.system).toContain("Adult realism mode:");
-        expect(request.system).toContain("slow-burn pacing");
+        expect(request.system).toContain("Adult balanced mode:");
+        expect(request.system).toContain("Adult balanced pacing:");
         expect(request.system).toContain("accepted evidence refs");
         expect(request.system).not.toMatch(/\b(jailbreak|assault|never ask permission)\b/iu);
         return {
@@ -6409,7 +6917,7 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(buildCleanNarrationSystemPrompt()).not.toContain("Adult realism mode:");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Adult balanced mode:");
   });
 
   it("rejects generation failure before player-facing narration", async () => {
@@ -6452,8 +6960,19 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Default successful turns use one to three short fiction beats");
     expect(buildCleanNarrationSystemPrompt()).toContain("Adventure prose floor:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Default literary profile:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Micro 1.1.3");
-    expect(buildCleanNarrationSystemPrompt()).toContain("FF5 Micro");
+    expect(buildCleanNarrationSystemPrompt()).toContain("HardClaims field values: write exact ids only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Backend fact roles belong in backendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Put natural prose clauses in sentence.text");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof: evidenceRefs and backendFactRefs are opaque citation tokens.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("avoid backend framing phrases such as 'current scene'");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Page move proof: every accepted_evidence sentence must include pageMoveRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Cinematic Realism");
+    expect(buildCleanNarrationSystemPrompt()).toContain("BOLT v2 Writing Room");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Forward Motion");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Hybrid POV:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Silent writing-room check:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("NPC knowledge is limited");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
     expect(buildCleanNarrationSystemPrompt()).toContain("Story page brief:");
@@ -6483,6 +7002,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("preferredFrameSentenceRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("frameSelection");
     expect(buildCleanNarrationSystemPrompt()).toContain("coreFrameRelationship");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Scene texture economy:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Ordinary item, dialogue, local condition");
+    expect(buildCleanNarrationSystemPrompt()).toContain("open on the fresh settled beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Choice presentation:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.choicePresentation");
     expect(buildCleanNarrationSystemPrompt()).toContain("anchorStyle");
@@ -6504,7 +7026,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("combined primaryClaimKinds");
     expect(buildCleanNarrationSystemPrompt()).toContain("Fact use plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("factUses");
-    expect(buildCleanNarrationSystemPrompt()).toContain("allowedBackendFactRefs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("exact backendFacts refs copied from promptInput.acceptedEvidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Sentence plan:");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan");
     expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlanRefs");
@@ -6540,12 +7062,15 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("styleBudget");
     expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
     expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Page move proof:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Cover required page moves");
+    expect(buildCleanNarrationSystemPrompt()).toContain("optional routing metadata");
     expect(buildCleanNarrationSystemPrompt()).toContain("Truthful flourish:");
     expect(buildCleanNarrationSystemPrompt()).toContain("Flourish can color the surface; it cannot add hard facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft-prose budget:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Keep invented surface/prop detail in the present visible/sensory layer");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not imply past duration, use history, player grip/handling");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Ordinary props include low-stakes scene dressing");
     expect(buildCleanNarrationSystemPrompt()).toContain("If the player later uses a soft detail");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not extra facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
@@ -6558,12 +7083,20 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("support_actor_presence_line");
     expect(buildCleanNarrationSystemPrompt()).toContain("quote frame");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Anchor Chain Pylon and The Copper Tap are the ways onward from Lowwater Bazaar; each takes 1 minute.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Anchor Chain Pylon and The Copper Tap are the ways onward from Lowwater Bazaar.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("If timing is part of the sentence, use the exact accepted cost");
     expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Example local observation with soft surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("its rim dulled by faint scratches");
+    expect(buildCleanNarrationSystemPrompt()).toContain("ordinary plausible current-scene props");
+    expect(buildCleanNarrationSystemPrompt()).toContain("softProseKinds ['ordinary_scene_prop']");
+    expect(buildCleanNarrationSystemPrompt()).toContain("A hidden latch, loose weaponizable leg, trap");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced NSFW style gating");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Soft surface material menu: choose present visible material traits attached to the object itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
-    expect(buildCleanNarrationSystemPrompt()).toContain("preserve backendFacts with roles `item_label`, `source_label`, `target_label`, `final_equip_state`, and `current_scene_anchor`");
-    expect(buildCleanNarrationSystemPrompt()).toContain("copy `custody_change` / `settled_custody` exact-copy materials exactly when cited");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserve backendFacts with roles `item_label`, `target_label`, and cited `current_scene_anchor` exactly");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase the custody beat naturally instead of copying the whole accepted custody sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_custody_beat_line with land_scene_custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through endpoint-owned item verbs");
@@ -6578,12 +7111,22 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase the route_beat into ordinary path-status prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as the ways onward");
-    expect(buildCleanNarrationSystemPrompt()).toContain("scene_exit_choice_line with exits_then_costs");
+    expect(buildCleanNarrationSystemPrompt()).toContain("route_choice_travel_costs is exact material only when the sentence states travel timing");
     expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
     expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("observation_query about surface, wear, marks, scratches");
+    expect(buildCleanNarrationSystemPrompt()).toContain("spending one small softProseBudget detail on visible non-mechanical surface");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase it as present object surface on the item or visible target itself");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Soft wear and texture do not become durable world-state authority");
+    expect(buildCleanNarrationSystemPrompt()).toContain("later player use of that detail routes through normal adjudication");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not place it in the player's grip, on the player's body, or in clue/affordance language");
     expect(buildCleanNarrationSystemPrompt()).toContain("observed_entry_labels plus anchor_scene");
     expect(buildCleanNarrationSystemPrompt()).toContain("local_observation_line with observed_labels_then_scene");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase whether-shaped queries as 'No visible sign at <scene> settles whether <question-body>.'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("phrase person-property queries as 'No visible person seems to be waiting for a courier at <scene>'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("when local_observation_beat starts with 'No visible sign at'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, answer the question as unresolved by visible evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");
