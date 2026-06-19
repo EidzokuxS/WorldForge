@@ -149,6 +149,7 @@ function expectNpcScaffoldContract(prompt: string, anchor: string = "WORLD PREMI
   expect(prompt).toContain('"factionName": null');
   expect(prompt).toContain('"sceneLocationName"');
   expect(prompt).toContain('"goals": { "shortTerm"');
+  expect(prompt).toContain("frictions");
   expect(prompt).toContain('"personalitySampleLines": ["..."]');
   expect(prompt).toContain("locationName remains broad macro/home");
   expect(prompt).toContain("sceneLocationName must exactly match a known location or sublocation");
@@ -173,6 +174,7 @@ interface NpcDetailMock {
     shortTerm: string[];
     longTerm: string[];
   };
+  frictions: string[];
   personalitySummary: string;
   personalityVoice: string;
   personalityDecisionStyle: string;
@@ -203,6 +205,7 @@ function buildNpcDetail(overrides: Partial<NpcDetailMock> = {}): NpcDetailMock {
       shortTerm: ["Prove the newest signal burst came from outside the station"],
       longTerm: ["Decode the source before Station Authority silences the evidence"],
     },
+    frictions: ["Gets brittle and territorial when officials question his readings"],
     personalitySummary: "Cautious scholar who trusts data more than people",
     personalityVoice: "Clipped, precise, frequently referring to timestamps",
     personalityDecisionStyle: "Collects three independent readings before moving",
@@ -459,7 +462,21 @@ describe("generateNpcsStep", () => {
             }),
             behavioralCore: expect.objectContaining({
               selfImage: "The only person listening closely enough to hear the station answer.",
+              pressureResponses: ["Gets brittle and territorial when officials question his readings"],
             }),
+            liveDynamics: expect.objectContaining({
+              currentStrains: ["Gets brittle and territorial when officials question his readings"],
+            }),
+          }),
+          motivations: expect.objectContaining({
+            frictions: ["Gets brittle and territorial when officials question his readings"],
+          }),
+          capabilities: expect.objectContaining({
+            traits: expect.arrayContaining(["Signal Analyst"]),
+            flaws: expect.arrayContaining(["Paranoid"]),
+          }),
+          state: expect.objectContaining({
+            conditions: expect.arrayContaining(["Exhausted"]),
           }),
           socialContext: expect.objectContaining({
             currentLocationName: "Observation Deck",

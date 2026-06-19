@@ -169,6 +169,7 @@ interface RawWorldData {
     sceneHandle?: string | null;
     goals?: string;
     beliefs?: string;
+    draft?: CharacterDraft | null;
   }>;
   factions: Array<{
     id?: string;
@@ -658,6 +659,10 @@ function parseWorldData(raw: RawWorldData, projection: WorldDataProjection = "ga
       const sceneHandle = publicDtoHandle(npc.sceneHandle, ["place"])
         ?? publicDtoHandle(npc.sceneScopeId, ["place"])
         ?? currentPlaceHandle;
+      const reviewDraft = exposeNpcSemantics ? npc.draft : null;
+      if (exposeNpcSemantics && !reviewDraft) {
+        throw new Error(`Review world payload missing NPC draft for ${npc.name}.`);
+      }
       return [{
         id: actorHandle,
         actorHandle,
@@ -674,7 +679,7 @@ function parseWorldData(raw: RawWorldData, projection: WorldDataProjection = "ga
         sceneScopeId: sceneHandle,
         sceneHandle,
         characterRecord: null,
-        draft: null,
+        draft: reviewDraft,
         npc: null,
       }];
     }),

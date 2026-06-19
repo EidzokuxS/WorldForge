@@ -63,26 +63,27 @@ const npcDetailSingleSchema = z.object({
       "Character traits and skills: [Master Swordsman], [Cynical], [Wealthy]"
     ),
   goals: z
-    .union([
-      z.object({
-        shortTerm: z.array(z.string()).min(1).max(3),
-        longTerm: z.array(z.string()).min(1).max(3),
-      }),
-      z.object({
-        short_term: z.array(z.string()).min(1).max(3),
-        long_term: z.array(z.string()).min(1).max(3),
-      }).transform((g) => ({ shortTerm: g.short_term, longTerm: g.long_term })),
-    ])
-    .catch({ shortTerm: ["Survive"], longTerm: ["Find purpose"] }),
+    .object({
+      shortTerm: z.array(z.string()).min(1).max(3),
+      longTerm: z.array(z.string()).min(1).max(3),
+    }),
+  frictions: z
+    .array(z.string())
+    .min(1)
+    .max(3)
+    .describe(
+      "1-3 pressure responses, fault lines, or stress behaviors that visibly matter under threat, duty, temptation, or social pressure."
+    ),
   selfImage: z
     .string()
-    .default("")
+    .min(1)
     .describe(
       "1 sentence: how this character privately frames their own role, worth, or burden. Must not duplicate persona verbatim."
     ),
   socialRoles: z
     .array(z.string())
-    .default([])
+    .min(1)
+    .max(3)
     .describe(
       "1-3 concise in-world roles or statuses, e.g. [Teacher], [Clan Heir], [Border Commander]. Do not include generic system labels like NPC or player."
     ),
@@ -126,6 +127,7 @@ interface DetailedNpc {
   persona: string;
   tags: string[];
   goals: { shortTerm: string[]; longTerm: string[] };
+  frictions: string[];
   selfImage: string;
   socialRoles: string[];
   personalitySummary: string;
@@ -209,13 +211,13 @@ const NPC_SCAFFOLD_PROMPT_CONTRACT = buildScaffoldPromptContract({
   nestedShapes:
     '"npcs": [{ "name": "Dr. Kel", "role": "Operates the signal array.", "locationName": "Signal Base", "sceneLocationName": "Observation Deck", "factionName": null }]; detail uses "goals": { "shortTerm": ["..."], "longTerm": ["..."] } and "personalitySampleLines": ["..."].',
   caps:
-    "Key NPCs 6-10, supporting NPCs 3-5; tags 3-5; socialRoles 1-3; goals shortTerm/longTerm 1-2 each; personalitySampleLines 2-3 distinct lines.",
+    "Key NPCs 6-10, supporting NPCs 3-5; tags 3-5; frictions 1-3; socialRoles 1-3; goals shortTerm/longTerm 1-2 each; personalitySampleLines 2-3 distinct lines.",
   nullableRules:
     '"factionName" may be null when unaffiliated. sceneLocationName may be null/omitted when no scoped scene evidence exists. Arrays stay arrays; use [] only for optional list fields with no source-backed content.',
   validMinimal:
     '{ "npcs": [{ "name": "Dr. Kel", "role": "Operates the signal array.", "locationName": "Signal Base", "sceneLocationName": "Observation Deck", "factionName": null }] }',
   validExample:
-    '{ "persona": "Dr. Kel maps signal bursts and distrusts the Authority.", "tags": ["Signal Analyst"], "goals": { "shortTerm": ["Decode the new burst"], "longTerm": ["Expose the coverup"] }, "personalitySampleLines": ["..."] }',
+    '{ "persona": "Dr. Kel maps signal bursts and distrusts the Authority.", "tags": ["Signal Analyst"], "goals": { "shortTerm": ["Decode the new burst"], "longTerm": ["Expose the coverup"] }, "frictions": ["Stonewalls officials when cornered"], "personalitySampleLines": ["..."] }',
   invalidExamples: [
     '{ "npcs": "Dr. Kel, Mara Voss" }',
     '{ "sceneLocationName": "Unknown Sublevel" }',
@@ -721,6 +723,7 @@ FIELD INSTRUCTIONS:
   - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW.
   - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans.
   - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase).
+- frictions: 1-3 concrete pressure responses or fault lines. Write what changes when they are threatened, rushed, tempted, contradicted, exposed, indebted, or forced to choose. These feed the review Pressure field.
 - personalitySummary: 1-2 sentences distilling the NPC's stable interior personality. Do not duplicate persona verbatim.
 - personalityVoice: 1-2 sentences describing how this NPC sounds when speaking: rhythm, register, emotional masking, and habits.
 - personalityDecisionStyle: 1 sentence describing how they choose under pressure.
@@ -944,6 +947,7 @@ export async function generateNpcsStep(
       persona: finalDetail.persona,
       tags: finalDetail.tags,
       goals: finalDetail.goals,
+      frictions: finalDetail.frictions,
       selfImage: finalDetail.selfImage,
       socialRoles: finalDetail.socialRoles,
       personalitySummary: finalDetail.personalitySummary,
@@ -1031,10 +1035,31 @@ export async function generateNpcsStep(
       },
     };
 
+    const normalizedBehavioralCore = draft.identity.behavioralCore;
+    const normalizedLiveDynamics = draft.identity.liveDynamics;
+    if (!normalizedBehavioralCore || !normalizedLiveDynamics) {
+      throw new Error(`NPC scaffold draft missing normalized identity dynamics for ${legacyNpc.name}.`);
+    }
+
     result.push({
       ...legacyNpc,
       draft: {
         ...draft,
+        motivations: {
+          ...draft.motivations,
+          frictions: detail.frictions,
+        },
+        identity: {
+          ...draft.identity,
+          behavioralCore: {
+            ...normalizedBehavioralCore,
+            pressureResponses: detail.frictions,
+          },
+          liveDynamics: {
+            ...normalizedLiveDynamics,
+            currentStrains: detail.frictions,
+          },
+        },
         provenance: {
           ...draft.provenance,
           worldgenOrigin: planEntry?.role ?? null,

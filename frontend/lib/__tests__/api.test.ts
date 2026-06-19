@@ -24,7 +24,7 @@ import {
   updateLoreCard,
 } from "../api";
 import type { LoreCardItem, LoreCardUpdateInput } from "../api-types";
-import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
+import type { CharacterDraft, WorldgenResearchArtifactV2 } from "@worldforge/shared";
 
 const RESEARCH_ARTIFACT: WorldgenResearchArtifactV2 = {
   version: 2,
@@ -66,6 +66,99 @@ const PUBLIC_HANDLES = {
   routeNext: "pdto_route_11111111111111111111111111111111",
   checkpoint: "pdto_checkpoint_11111111111111111111111111111111",
 } as const;
+
+function makeReviewNpcDraft(): CharacterDraft {
+  return {
+    identity: {
+      role: "npc",
+      tier: "supporting",
+      displayName: "Station Guard",
+      canonicalStatus: "original",
+      baseFacts: {
+        biography: "Keeps people moving through the station.",
+        socialRole: ["Guard"],
+        hardConstraints: [],
+      },
+      behavioralCore: {
+        motives: ["Keep the gates moving"],
+        pressureResponses: ["Gets clipped and procedural when crowds stall"],
+        taboos: [],
+        attachments: [],
+        selfImage: "The last orderly point before the platform.",
+      },
+      liveDynamics: {
+        activeGoals: ["Watch the gates"],
+        beliefDrift: [],
+        currentStrains: ["Gets clipped and procedural when crowds stall"],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "",
+      ageText: "adult",
+      appearance: "Transit uniform and tired eyes.",
+      backgroundSummary: "Works the station gates.",
+      personaSummary: "Keeps people moving.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: PUBLIC_HANDLES.placeBroad,
+      currentLocationName: "Station",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "resident",
+    },
+    motivations: {
+      shortTermGoals: ["Watch the gates"],
+      longTermGoals: ["Keep the station safe"],
+      beliefs: ["Queues should keep moving."],
+      drives: [],
+      frictions: ["Gets clipped and procedural when crowds stall"],
+    },
+    capabilities: {
+      traits: ["Procedural"],
+      skills: [{ name: "Crowd control", tier: "Skilled" }],
+      flaws: [],
+      specialties: ["Gate discipline"],
+      wealthTier: null,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["station baton"],
+      equippedItemRefs: [],
+      currencyNotes: "",
+      signatureItems: ["station baton"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "worldgen",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "Gate guard",
+      legacyTags: [],
+    },
+    powerStats: {
+      attackPotency: { tier: "Human", rank: 3 },
+      speed: { tier: "Human", rank: 5 },
+      durability: { tier: "Human", rank: 4 },
+      intelligence: { tier: "Average", rank: 5 },
+      hax: [],
+      vulnerabilities: [
+        { description: "Loses options when isolated from station procedure", severity: "minor" },
+      ],
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // readErrorMessage
@@ -818,6 +911,7 @@ describe("gameplay API helpers", () => {
             sceneHandle: PUBLIC_HANDLES.placeScene,
             goals: "{\"short_term\":[\"Watch the gates\"],\"long_term\":[]}",
             beliefs: "[\"Queues should keep moving.\"]",
+            draft: makeReviewNpcDraft(),
           },
         ],
         factions: [],
@@ -842,9 +936,59 @@ describe("gameplay API helpers", () => {
       goals: { short_term: ["Watch the gates"], long_term: [] },
       beliefs: ["Queues should keep moving."],
       characterRecord: null,
-      draft: null,
+      draft: expect.objectContaining({
+        identity: expect.objectContaining({
+          displayName: "Station Guard",
+          behavioralCore: expect.objectContaining({
+            pressureResponses: ["Gets clipped and procedural when crowds stall"],
+          }),
+        }),
+        capabilities: expect.objectContaining({
+          traits: ["Procedural"],
+          skills: [{ name: "Crowd control", tier: "Skilled" }],
+          specialties: ["Gate discipline"],
+        }),
+        powerStats: expect.objectContaining({
+          speed: { tier: "Human", rank: 5 },
+        }),
+      }),
       npc: null,
     });
+  });
+
+  it("getWorldData fails review projection when an NPC draft is missing", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: null,
+        locations: [],
+        npcs: [
+          {
+            actorHandle: PUBLIC_HANDLES.actorNpc,
+            name: "Station Guard",
+            persona: "Keeps people moving.",
+            tags: "[]",
+            tier: "supporting",
+            currentPlaceHandle: PUBLIC_HANDLES.placeBroad,
+            sceneHandle: PUBLIC_HANDLES.placeScene,
+            goals: "{\"short_term\":[\"Watch the gates\"],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getWorldData("camp-1", { projection: "review" })).rejects.toThrow(
+      "Review world payload missing NPC draft for Station Guard.",
+    );
   });
 
   it("getWorldData refuses to promote raw backend ids from legacy fields into public handles", async () => {

@@ -123,6 +123,101 @@ function expectJsonNotToContain(value: unknown, forbidden: string[]) {
   }
 }
 
+function makeNpcCharacterRecord(name = "Signal Runner Toma") {
+  return {
+    identity: {
+      id: "npc-1",
+      campaignId: CAMPAIGN_ID,
+      role: "npc",
+      tier: "supporting",
+      displayName: name,
+      canonicalStatus: "original",
+      baseFacts: {
+        biography: "Carries messages through the storm.",
+        socialRole: ["Courier"],
+        hardConstraints: [],
+      },
+      behavioralCore: {
+        motives: ["Keep the valley connected"],
+        pressureResponses: ["Gets sharper when routes are blocked"],
+        taboos: [],
+        attachments: [],
+        selfImage: "The runner who gets through.",
+      },
+      liveDynamics: {
+        activeGoals: ["Deliver the warning"],
+        beliefDrift: [],
+        currentStrains: ["Gets sharper when routes are blocked"],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "",
+      ageText: "adult",
+      appearance: "Rain-dark coat and a sealed message case.",
+      backgroundSummary: "Messenger for isolated settlements.",
+      personaSummary: "Keeps people moving.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: null,
+      currentLocationName: null,
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "resident",
+    },
+    motivations: {
+      shortTermGoals: ["Deliver the warning"],
+      longTermGoals: ["Keep the valley connected"],
+      beliefs: ["Roads matter more than banners."],
+      drives: [],
+      frictions: ["Gets sharper when routes are blocked"],
+    },
+    capabilities: {
+      traits: ["Fast courier"],
+      skills: [{ name: "Route finding", tier: "Skilled" }],
+      flaws: [],
+      specialties: ["Storm travel"],
+      wealthTier: null,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["sealed message case"],
+      equippedItemRefs: [],
+      currencyNotes: "",
+      signatureItems: ["sealed message case"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "worldgen",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "Courier",
+      legacyTags: [],
+    },
+    powerStats: {
+      attackPotency: { tier: "Human", rank: 2 },
+      speed: { tier: "Human", rank: 4 },
+      durability: { tier: "Human", rank: 3 },
+      intelligence: { tier: "Average", rank: 5 },
+      hax: [],
+      vulnerabilities: [
+        { description: "Exposed when pinned away from routes", severity: "minor" },
+      ],
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockedLoadLocationGraph.mockReturnValue({
@@ -1052,6 +1147,7 @@ describe("GET /:id/world", () => {
             long_term: ["Keep the valley connected"],
           }),
           beliefs: JSON.stringify(["Roads matter more than banners."]),
+          characterRecord: JSON.stringify(makeNpcCharacterRecord()),
           unprocessedImportance: 0,
           inactiveTicks: 0,
           createdAt: 0,
@@ -1080,7 +1176,22 @@ describe("GET /:id/world", () => {
       beliefs: JSON.stringify(["Roads matter more than banners."]),
     });
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
-    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0].draft).toMatchObject({
+      identity: {
+        displayName: "Signal Runner Toma",
+        behavioralCore: {
+          pressureResponses: ["Gets sharper when routes are blocked"],
+        },
+      },
+      capabilities: {
+        traits: ["Fast courier"],
+        skills: [{ name: "Route finding", tier: "Skilled" }],
+        specialties: ["Storm travel"],
+      },
+      powerStats: {
+        speed: { tier: "Human", rank: 4 },
+      },
+    });
     expect(body.npcs[0]).not.toHaveProperty("npc");
   });
 

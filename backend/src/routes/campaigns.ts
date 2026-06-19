@@ -17,7 +17,12 @@ import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { parseBody, requireActiveCampaign, requireGeneratedCampaign } from "./helpers.js";
-import { createCampaignSchema, createCheckpointSchema, promoteNpcBodySchema } from "./schemas.js";
+import {
+  characterRecordSchema,
+  createCampaignSchema,
+  createCheckpointSchema,
+  promoteNpcBodySchema,
+} from "./schemas.js";
 import {
   hydrateStoredPlayerRecord,
   toCharacterDraft,
@@ -294,6 +299,20 @@ function buildWorldCurrentScene(args: {
 
 type WorldNpcProjectionMode = "gameplay" | "review";
 
+function parseReviewNpcCharacterRecord(row: Parameters<typeof hydrateStoredNpcRecord>[0]) {
+  if (!row.characterRecord) {
+    throw new Error(`NPC review payload missing current characterRecord for ${row.name}.`);
+  }
+  const parsed = characterRecordSchema.safeParse(JSON.parse(row.characterRecord));
+  if (!parsed.success) {
+    throw new Error(`NPC review payload missing current characterRecord for ${row.name}.`);
+  }
+  if (parsed.data.identity.role !== "npc") {
+    throw new Error(`NPC review payload has non-NPC characterRecord for ${row.name}.`);
+  }
+  return parsed.data;
+}
+
 function buildWorldNpcPayload(
   campaignId: string,
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
@@ -312,11 +331,17 @@ function buildWorldNpcPayload(
     sceneHandle: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
   };
   if (projectionMode === "review") {
+    const characterRecord = parseReviewNpcCharacterRecord(row);
+    const draft = sanitizeCharacterDraftForPublicProjection(
+      campaignId,
+      toCharacterDraft(characterRecord),
+    );
     return {
       ...payload,
       persona: row.persona,
       goals: row.goals,
       beliefs: row.beliefs,
+      draft,
     };
   }
   return payload;

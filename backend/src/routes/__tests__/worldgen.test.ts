@@ -3064,6 +3064,7 @@ describe("/api/worldgen/regenerate-section section=npcs — real step integratio
             shortTerm: ["Hold the gate through the night"],
             longTerm: ["Retire with honor intact"],
           },
+          frictions: ["Gets colder and more procedural when command breaks down"],
           personalitySummary: "Stoic guard with a private grudge against his captain",
           personalityVoice: "Terse, repeats the rulebook to himself under his breath",
           personalityDecisionStyle: "Defers to protocol unless protocol fails him",
@@ -3160,6 +3161,7 @@ describe("/api/worldgen/regenerate-section section=npcs — Phase 65 PowerStats 
         shortTerm: ["Hold the gate through the night"],
         longTerm: ["Retire with honor intact"],
       },
+      frictions: ["Gets colder and more procedural when command breaks down"],
       personalitySummary:
         "A practical defender who treats panic as a luxury nobody can afford.",
       personalityVoice:
