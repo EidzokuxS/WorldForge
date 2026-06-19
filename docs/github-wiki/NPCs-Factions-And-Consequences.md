@@ -1,8 +1,8 @@
-# NPCs, Factions, And Consequences
+# NPCs, factions, and consequences
 
-WorldForge's living-world systems are about making the campaign feel like it has people and pressures beyond the player's current sentence.
+WorldForge tracks people and pressures beyond the player's current sentence.
 
-## NPC Tiers
+## NPC tiers
 
 Not every NPC gets the same treatment.
 
@@ -17,7 +17,7 @@ Key NPCs are important enough to have stronger continuity:
 - Plans or ongoing pressure.
 - Reasons to act when the player is near or when a world thread reaches them.
 
-They are closer to co-players than scenery.
+They stay in campaign state with continuity.
 
 ## Persistent NPCs
 
@@ -56,7 +56,7 @@ Examples:
 - A clan sends scouts after a strange power appears.
 - A criminal network spreads a false rumor to flush out a witness.
 
-## World Threads
+## World threads
 
 A world thread is an ongoing situation that can progress over time.
 
@@ -91,8 +91,8 @@ Delayed:
 
 Good play often comes from delayed consequences returning at the worst possible moment.
 
-## What Happens Offscreen
+## What happens offscreen
 
-WorldForge does not try to secretly rewrite everything while you are away. Instead, it tracks the important offscreen pressures and brings them forward when they become relevant.
+WorldForge tracks the important offscreen pressures and brings them forward when they become relevant.
 
 This keeps the world alive without turning every turn into a slow simulation of the entire setting.

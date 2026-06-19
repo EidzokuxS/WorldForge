@@ -6,11 +6,7 @@ const { resolveQuickActionSelectionMock } = vi.hoisted(() => ({
   resolveQuickActionSelectionMock: vi.fn(),
 }));
 
-const {
-  isCleanGameplayRuntimeEnabledMock,
-  processCleanGameplayTurnMock,
-} = vi.hoisted(() => ({
-  isCleanGameplayRuntimeEnabledMock: vi.fn(() => false),
+const { processCleanGameplayTurnMock } = vi.hoisted(() => ({
   processCleanGameplayTurnMock: vi.fn(),
 }));
 
@@ -114,9 +110,7 @@ const mockHasTurnSagaSnapshotRecovery = vi.fn((_input?: unknown) => false);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
-  resumeGameplayCycleV2PendingNarration: vi.fn(),
   resumePendingTurnNarration: vi.fn(),
-  findLatestGameplayCycleV2PendingNarrationPacket: vi.fn(() => null),
   processOpeningScene: vi.fn(),
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
@@ -136,25 +130,6 @@ vi.mock("../../engine/index.js", () => ({
     constructor(message = "Narration repair exhausted.") {
       super(message);
       this.name = "NarrationRepairExhaustedError";
-    }
-  },
-  GameplayCycleV2PendingNarrationError: class GameplayCycleV2PendingNarrationError extends Error {
-    packetId: string;
-    campaignId: string;
-    turnId: string;
-
-    constructor(input: {
-      packetId: string;
-      campaignId: string;
-      turnId: string;
-      cause?: unknown;
-    }) {
-      super(`gameplay-cycle-v2 narration pending retry for packet ${input.packetId}`);
-      this.name = "GameplayCycleV2PendingNarrationError";
-      this.packetId = input.packetId;
-      this.campaignId = input.campaignId;
-      this.turnId = input.turnId;
-      this.cause = input.cause;
     }
   },
   tickPresentNpcs: vi.fn(),
@@ -182,7 +157,6 @@ vi.mock("../../engine/quick-action-offers.js", () => ({
 }));
 
 vi.mock("../../engine/gameplay-cycle-runtime/runtime.js", () => ({
-  isCleanGameplayRuntimeEnabled: () => isCleanGameplayRuntimeEnabledMock(),
   processCleanGameplayTurn: (...args: unknown[]) => processCleanGameplayTurnMock(...args),
 }));
 
@@ -318,15 +292,12 @@ import { getErrorMessage, getPlayerSafeErrorMessage } from "../../lib/index.js";
 import {
   processOpeningScene,
   processTurn,
-  resumeGameplayCycleV2PendingNarration,
   resumePendingTurnNarration,
   captureSnapshot,
   restoreSnapshot,
   findPendingNarrationSaga,
-  findLatestGameplayCycleV2PendingNarrationPacket,
   PendingNarrationError,
   NarrationRepairExhaustedError,
-  GameplayCycleV2PendingNarrationError,
   checkAndTriggerReflections,
   tickPresentNpcs,
   simulateOffscreenNpcs,
@@ -352,14 +323,11 @@ const mockedGetDb = vi.mocked(getDb);
 const mockedGetErrorMessage = vi.mocked(getErrorMessage);
 const mockedGetPlayerSafeErrorMessage = vi.mocked(getPlayerSafeErrorMessage);
 const mockedProcessTurn = vi.mocked(processTurn);
-const mockedResumeGameplayCycleV2PendingNarration = vi.mocked(resumeGameplayCycleV2PendingNarration);
 const mockedResumePendingTurnNarration = vi.mocked(resumePendingTurnNarration);
 const mockedProcessOpeningScene = vi.mocked(processOpeningScene);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
 const mockedFindPendingNarrationSaga = vi.mocked(findPendingNarrationSaga);
-const mockedFindLatestGameplayCycleV2PendingNarrationPacket =
-  vi.mocked(findLatestGameplayCycleV2PendingNarrationPacket);
 const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
 const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedSimulateOffscreenNpcs = vi.mocked(simulateOffscreenNpcs);
@@ -429,6 +397,75 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
   })();
 }
 
+function lastAssistantText(campaignId: string): string {
+  const history = chatHistoryByCampaign.get(campaignId) ?? [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index] as { role?: string; content?: string };
+    if (message.role === "assistant" && typeof message.content === "string") {
+      return message.content;
+    }
+  }
+  return "";
+}
+
+function cleanDoneBoundaryData(options: any, data: unknown): Record<string, unknown> {
+  const record = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  const campaignId = String(options.campaignId);
+  const playerAction = String(options.normalizedPlayerAction ?? options.playerAction ?? "");
+  const historyLength = chatHistoryByCampaign.get(campaignId)?.length ?? 0;
+  const chatHistoryLengthAfterTurn = typeof record.chatHistoryLengthAfterTurn === "number"
+    ? record.chatHistoryLengthAfterTurn
+    : historyLength;
+  const chatHistoryLengthBeforeTurn = typeof record.chatHistoryLengthBeforeTurn === "number"
+    ? record.chatHistoryLengthBeforeTurn
+    : Math.max(0, chatHistoryLengthAfterTurn - 2);
+
+  return {
+    ...record,
+    runtime: "gameplay-cycle-runtime",
+    recordId: String(record.recordId ?? "cgtr_routefixture0000000000"),
+    turnId: String(record.turnId ?? "cgturn_routefixture000000"),
+    packetId: String(record.packetId ?? "cgpacket_routefixture0000"),
+    tick: typeof record.tick === "number" ? record.tick : 0,
+    worldVersion: typeof record.worldVersion === "number" ? record.worldVersion : 0,
+    worldTimeMinutes: typeof record.worldTimeMinutes === "number" ? record.worldTimeMinutes : 0,
+    mutationApplied: typeof record.mutationApplied === "boolean" ? record.mutationApplied : false,
+    settled: typeof record.settled === "boolean" ? record.settled : true,
+    chatHistoryLengthBeforeTurn,
+    chatHistoryLengthAfterTurn,
+    userMessageSha256: String(record.userMessageSha256 ?? sha256Hex(playerAction)),
+    assistantMessageSha256: String(record.assistantMessageSha256 ?? sha256Hex(lastAssistantText(campaignId))),
+  };
+}
+
+function createCleanRuntimeFixtureStream(options: any) {
+  const legacyOptions = {
+    campaignId: options.campaignId,
+    playerAction: options.normalizedPlayerAction,
+    intent: options.normalizedPlayerAction,
+    method: "",
+    judgeProvider: options.judgeProvider,
+    storytellerProvider: options.storytellerProvider,
+    preTurnSnapshot: options.preTurnSnapshot,
+    onPostTurn: async () => undefined,
+  };
+  const stream = mockedProcessTurn(legacyOptions as any);
+  return (async function* () {
+    for await (const event of stream as AsyncGenerator<any>) {
+      if (event.type === "done") {
+        yield {
+          ...event,
+          data: cleanDoneBoundaryData(options, event.data),
+        } as any;
+        continue;
+      }
+      yield event;
+    }
+  })();
+}
+
 function parseSseEvents(body: string): Array<{ event: string; data: unknown }> {
   const events: Array<{ event: string; data: unknown }> = [];
   const blocks = body.split(/\r?\n\r?\n/).map((block) => block.trim()).filter(Boolean);
@@ -452,9 +489,10 @@ function sha256Hex(value: string): string {
 beforeEach(() => {
   vi.clearAllMocks();
   resolveQuickActionSelectionMock.mockReset();
-  isCleanGameplayRuntimeEnabledMock.mockReset();
-  isCleanGameplayRuntimeEnabledMock.mockReturnValue(false);
   processCleanGameplayTurnMock.mockReset();
+  processCleanGameplayTurnMock.mockImplementation((options) =>
+    createCleanRuntimeFixtureStream(options),
+  );
   mockDrainPendingCommittedEvents.mockReturnValue([]);
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
@@ -492,7 +530,6 @@ beforeEach(() => {
     worldTimeMinutes: 0,
   }));
   mockedFindPendingNarrationSaga.mockReturnValue(null);
-  mockedFindLatestGameplayCycleV2PendingNarrationPacket.mockReturnValue(null);
   mockGetTurnSaga.mockReturnValue(null);
 });
 
@@ -753,7 +790,6 @@ describe("Targeted gameplay route campaignId validation", () => {
   it("routes /chat/action to the clean gameplay runtime when the clean lane is enabled", async () => {
     setupStoryteller();
     setupDbMock();
-    isCleanGameplayRuntimeEnabledMock.mockReturnValue(true);
     mockedCaptureSnapshot.mockImplementation((campaignId) => ({
       campaignId,
       bundleDir: "clean-pre-turn",
@@ -779,6 +815,9 @@ describe("Targeted gameplay route campaignId validation", () => {
           recordId: "cgtr_cleanroute000000000000",
           turnId: "cgturn_cleanroute000000000",
           packetId: "cgpacket_cleanroute0000000",
+          tick: 0,
+          worldVersion: 0,
+          worldTimeMinutes: 0,
           mutationApplied: false,
           settled: true,
           chatHistoryLengthBeforeTurn: 0,
@@ -827,7 +866,13 @@ describe("Targeted gameplay route campaignId validation", () => {
       chatHistoryLengthBeforeTurn: 0,
       chatHistoryLengthAfterTurn: 2,
     });
-    expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
+    expect(mockedQueuePostTurnSimulationProposals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        tick: 0,
+        route: "/chat/action",
+      }),
+    );
   });
 
   it("rejects /chat/retry without campaignId", async () => {
@@ -1675,7 +1720,17 @@ describe("Campaign-loaded gameplay transport", () => {
       },
       {
         event: "done",
-        data: { tick: 2, worldVersion: 0, worldTimeMinutes: 0 },
+        data: expect.objectContaining({
+          tick: 2,
+          worldVersion: 0,
+          worldTimeMinutes: 0,
+          runtime: "gameplay-cycle-runtime",
+          recordId: "cgtr_routefixture0000000000",
+          turnId: "cgturn_routefixture000000",
+          packetId: "cgpacket_routefixture0000",
+          mutationApplied: false,
+          settled: true,
+        }),
       },
     ]);
     for (const forbidden of [
@@ -1689,7 +1744,6 @@ describe("Campaign-loaded gameplay transport", () => {
       "rawEvent",
       "authority",
       "sagaId",
-      "turnId",
     ]) {
       expect(body).not.toContain(forbidden);
     }
@@ -2054,7 +2108,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedProcessTurn).not.toHaveBeenCalled();
   });
 
-  it("restores the pre-turn snapshot when gameplay-cycle-v2 fails before settlement", async () => {
+  it("restores the pre-turn snapshot when clean runtime fails before settlement", async () => {
     setupStoryteller();
     setupDbMock();
     const snapshot = {
@@ -2066,13 +2120,13 @@ describe("Campaign-loaded gameplay transport", () => {
       createdChronicleIds: [],
     } as any;
     mockedCaptureSnapshot.mockReturnValue(snapshot);
-    mockedProcessTurn.mockImplementation(() =>
+    processCleanGameplayTurnMock.mockImplementation(() =>
       (async function* () {
         yield {
           type: "scene-settling",
-          data: { stage: "gm-read", phase: "gameplay-cycle-v2" },
+          data: { stage: "gm-read", phase: "gameplay-cycle-runtime" },
         } as any;
-        throw new Error("gameplay-cycle-v2 pre-settlement contract failed: GM Read generation failed before settlement");
+        throw new Error("clean runtime pre-settlement contract failed: GM Read generation failed before settlement");
       })(),
     );
 
@@ -2437,8 +2491,8 @@ describe("Campaign-loaded gameplay transport", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(orderedCalls).toEqual([
       "finalizing_turn",
-      "queuePostTurnSimulationProposals",
       "done",
+      "queuePostTurnSimulationProposals",
     ]);
     expect(mockedQueuePostTurnSimulationProposals).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2904,57 +2958,6 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
   });
 
-  it("does not restore v2 settled packet state when gameplay-cycle-v2 narration is pending retry", async () => {
-    setupStoryteller();
-    setupDbMock();
-    const snapshot = { bundleId: "pre-v2-pending-narration" } as any;
-
-    mockedGetActive.mockReturnValue(null as any);
-    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
-      id: campaignId,
-      name: `Campaign ${campaignId}`,
-      createdAt: "2026-01-01",
-    }) as any);
-    mockedCaptureSnapshot.mockReturnValue(snapshot);
-    mockedFindPendingNarrationSaga.mockReturnValue(null);
-    mockedProcessTurn.mockImplementation(() =>
-      (async function* () {
-        yield { type: "scene-settling", data: { phase: "gameplay-cycle-v2" } } as any;
-        throw new GameplayCycleV2PendingNarrationError({
-          packetId: "v2packet-test-pending",
-          campaignId: CAMPAIGN_ID,
-          turnId: "v2turn-test-pending",
-          cause: new Error("storyteller transport failed"),
-        });
-      })(),
-    );
-
-    const res = await app.request("/chat/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        campaignId: CAMPAIGN_ID,
-        playerAction: "Walk north",
-        intent: "Walk north",
-        method: "",
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    expect(body).toContain("event: scene-settling");
-    expect(body).toContain("event: error");
-    expect(body).toContain("\"pendingNarration\":true");
-    expect(body).toContain("\"runtime\":\"gameplay-cycle-v2\"");
-    expect(body).toContain("\"packetId\":\"v2packet-test-pending\"");
-    expect(body).toContain("\"turnId\":\"v2turn-test-pending\"");
-    expect(body).toContain("\"resumable\":true");
-    expect(body).toContain("\"recoveryState\":\"resume_ready\"");
-    expect(body).toContain("\"resumeToken\":\"resume_v2_deadbeefcafef00d\"");
-    expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
-    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
-  });
-
   it("does not restore finalized paid state when /chat/action final done write fails", async () => {
     setupStoryteller();
     setupDbMock();
@@ -3003,138 +3006,6 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedProcessTurn).toHaveBeenCalledTimes(1);
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(paidState).toBe("finalized");
-  });
-
-  it("D-04/D-05 restores the same bundle before and after a failed /chat/retry replay", async () => {
-    setupStoryteller();
-    setupDbMock();
-    const previousSnapshot = { bundleId: "turn-boundary-retry" } as any;
-    const freshSnapshot = { bundleId: "turn-boundary-retry-fresh" } as any;
-
-    mockedGetActive.mockReturnValue(null as any);
-    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
-      id: campaignId,
-      name: `Campaign ${campaignId}`,
-      createdAt: "2026-01-01",
-    }) as any);
-    mockedCaptureSnapshot
-      .mockReturnValueOnce(previousSnapshot)
-      .mockReturnValueOnce(freshSnapshot);
-    mockedGetLastPlayerAction.mockReturnValue("Retry the swing");
-    mockedPopLastMessages.mockReturnValue([] as any);
-    mockedProcessTurn
-      .mockImplementationOnce(({ campaignId, playerAction }) => {
-        mockedAppendChatMessages(campaignId, [
-          { role: "user", content: playerAction },
-          { role: "assistant", content: "The swing lands." },
-        ] as any);
-        return createTurnStream([{ type: "done", data: { tick: 1 } }]);
-      })
-      .mockImplementationOnce(
-        () =>
-          (async function* () {
-            yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
-            throw new Error("reflection finalization timed out");
-          })(),
-      );
-
-    const actionRes = await app.request("/chat/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        campaignId: CAMPAIGN_ID,
-        playerAction: "Retry the swing",
-        intent: "Retry the swing",
-        method: "",
-      }),
-    });
-    expect(actionRes.status).toBe(200);
-    await actionRes.text();
-
-    const retryRes = await app.request("/chat/retry", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
-    });
-
-    expect(retryRes.status).toBe(200);
-    const retryBody = await retryRes.text();
-    expect(retryBody).toContain("event: finalizing_turn");
-    expect(retryBody).toContain("event: error");
-    expect(retryBody).not.toContain("event: done");
-    expect(mockedRestoreSnapshot).toHaveBeenNthCalledWith(1, CAMPAIGN_ID, previousSnapshot);
-    expect(mockedRestoreSnapshot).toHaveBeenNthCalledWith(2, CAMPAIGN_ID, previousSnapshot);
-
-    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
-    expect(historyRes.status).toBe(200);
-    const historyBody = await historyRes.json();
-    expect(historyBody.hasLiveTurnSnapshot).toBe(false);
-  });
-
-  it("does not restore finalized paid state again when /chat/retry final done write fails", async () => {
-    setupStoryteller();
-    setupDbMock();
-    const previousSnapshot = { bundleId: "pre-finalized-done-retry" } as any;
-    let restoreCount = 0;
-    let paidState = "previous-turn";
-
-    runtimeSnapshots.set(CAMPAIGN_ID, previousSnapshot);
-    chatHistoryByCampaign.set(CAMPAIGN_ID, [
-      { role: "user", content: "Retry the costly turn" },
-      { role: "assistant", content: "The costly turn resolved once." },
-    ] as any);
-    runtimeSnapshotMetadata.set(CAMPAIGN_ID, {
-      acceptedDurableEventIds: [],
-      producedDurableEventIds: [],
-      playerAction: "Retry the costly turn",
-      chatHistoryLengthBeforeTurn: 0,
-      chatHistoryLengthAfterTurn: 2,
-      runtime: "legacy",
-      cleanRecordId: null,
-      cleanPublicTurnId: null,
-      cleanPublicPacketId: null,
-      userMessageSha256: null,
-      assistantMessageSha256: null,
-    });
-    mockedGetActive.mockReturnValue(null as any);
-    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
-      id: campaignId,
-      name: `Campaign ${campaignId}`,
-      createdAt: "2026-01-01",
-    }) as any);
-    mockedGetLastPlayerAction.mockReturnValue("Retry the costly turn");
-    mockedRestoreSnapshot.mockImplementation(() => {
-      restoreCount += 1;
-      paidState = restoreCount === 1 ? "retry-start-restored" : "rolled-back-after-done";
-      return undefined as any;
-    });
-    mockedBuildDoneBoundaryData.mockImplementation(() => {
-      throw new Error("retry final done write failed");
-    });
-    mockedProcessTurn.mockImplementation(() =>
-      (async function* () {
-        yield { type: "narrative", data: { text: "The retry result is committed." } } as any;
-        paidState = "retry-finalized";
-        yield { type: "done", data: { tick: 3 } } as any;
-      })(),
-    );
-
-    const res = await app.request("/chat/retry", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    expect(body).toContain("event: narrative");
-    expect(body).toContain("event: error");
-    expect(body).toContain("\"settled\":true");
-    expect(body).not.toContain("event: done");
-    expect(mockedProcessTurn).toHaveBeenCalledTimes(1);
-    expect(mockedRestoreSnapshot).toHaveBeenCalledTimes(1);
-    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, previousSnapshot);
-    expect(paidState).toBe("retry-finalized");
   });
 
   it("rejects /chat/retry while pending narration has a separate resume owner", async () => {
@@ -3223,62 +3094,6 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(mockedGetLastPlayerAction).not.toHaveBeenCalled();
     expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
-  });
-
-  it("streams gameplay-cycle-v2 pending narration through /chat/resume without legacy saga resume", async () => {
-    setupStoryteller();
-    setupDbMock();
-    mockedGetActive.mockReturnValue(null as any);
-    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
-      id: campaignId,
-      name: `Campaign ${campaignId}`,
-      createdAt: "2026-01-01",
-    }) as any);
-    mockedFindPendingNarrationSaga.mockReturnValue(null);
-    mockedFindLatestGameplayCycleV2PendingNarrationPacket.mockReturnValue({
-      packetId: "v2packet-resume",
-      campaignId: CAMPAIGN_ID,
-      turnId: "v2turn-resume",
-      status: "resolved_pending_narration",
-      narratorAttemptStatus: "failed_pending_retry",
-    } as any);
-    mockedResumeGameplayCycleV2PendingNarration.mockImplementation(() =>
-      createTurnStream([
-        {
-          type: "narrative",
-          data: { text: "The v2 settled narration resumes." },
-        },
-        {
-          type: "done",
-          data: {
-            tick: 5,
-            runtime: "gameplay-cycle-v2",
-            packetId: "v2packet-resume",
-          },
-        },
-      ]) as any,
-    );
-
-    const res = await app.request("/chat/resume", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: CAMPAIGN_ID, resumeToken: "resume_v2_deadbeefcafef00d" }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    expect(body).toContain("The v2 settled narration resumes.");
-    expect(body).toContain("\"runtime\":\"gameplay-cycle-v2\"");
-    expect(body).toContain("\"packetId\":\"v2packet-resume\"");
-    expect(mockedResumeGameplayCycleV2PendingNarration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        packetId: "v2packet-resume",
-      }),
-    );
-    expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
-    expect(mockedProcessTurn).not.toHaveBeenCalled();
-    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
   });
 
   it("routes pre-turn snapshot recovery through /chat/resume for pre-settled crash states", async () => {

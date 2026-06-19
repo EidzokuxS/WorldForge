@@ -1,8 +1,8 @@
-# Creating Your Character
+# Creating your character
 
-Your character is the person you play inside the world. They do not need to be the chosen one. In many campaigns, being one person inside a larger situation is the point.
+Your character is the person you play inside the world. They can be powerful, ordinary, local, lost, famous, or out of place. In many campaigns, being one person inside a larger situation is the point.
 
-## Character Basics
+## Character basics
 
 A useful character has:
 
@@ -14,7 +14,7 @@ A useful character has:
 
 You can play a cautious investigator, a wandering fighter, a local worker, a runaway noble, a stranded tourist, a suspicious sorcerer, or almost anything the world can support.
 
-## Power Level
+## Power level
 
 Power matters because WorldForge tries to let the world push back.
 
@@ -27,7 +27,7 @@ Try to describe power clearly:
 - What costs, limits, or risks exist?
 - Who would notice or care if they used that power?
 
-## Imported Character Cards
+## Imported character cards
 
 If you import a character card, review the result before play.
 
@@ -39,9 +39,9 @@ Check:
 - Starting items.
 - Whether the character fits the campaign tone.
 
-Imported cards can be rich, but they may need cleanup if the source text is messy or written for a different roleplay style.
+Imported cards can be useful, but they may need cleanup if the source text is messy or written for a different roleplay style.
 
-## Starting Location
+## Starting location
 
 The starting location should give you something to do immediately.
 
@@ -59,7 +59,7 @@ Weak starts:
 - The world has no reason to react to you.
 - Your character has no reason to move.
 
-## First Action Ideas
+## First action ideas
 
 If you are unsure what to type first:
 

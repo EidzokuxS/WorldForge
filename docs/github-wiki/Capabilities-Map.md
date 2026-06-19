@@ -1,8 +1,8 @@
-# Capabilities Map
+# Capabilities map
 
-WorldForge is made of several systems that work together. You can think of it as a campaign table with a world builder, a referee, a narrator, a notebook, and a cast of people who can act when the player is not looking.
+WorldForge is made of several systems that work together: a world builder, a referee, a narrator, a campaign notebook, and actors that can matter when the player is not looking.
 
-## Campaign Creation
+## Campaign creation
 
 WorldForge can turn a short idea into a playable campaign:
 
@@ -15,9 +15,9 @@ WorldForge can turn a short idea into a playable campaign:
 - Choose or suggest a starting situation.
 - Let you review and edit the world before play.
 
-This is not meant to replace your taste. It gives you a strong first draft, then expects you to keep what works and adjust what does not.
+This gives you a first draft, then expects you to keep what works and adjust what does not.
 
-## Character Creation
+## Character creation
 
 WorldForge supports:
 
@@ -27,9 +27,9 @@ WorldForge supports:
 - Starting location/scene setup.
 - NPC records with personality, goals, beliefs, and source material.
 
-The character is not just a name in chat. The game tries to understand what the character can do, what they know, what they carry, and where they are.
+The character has more than a chat name. The game tracks what the character can do, what they know, what they carry, and where they are.
 
-## Live Play
+## Live play
 
 During play, you can:
 
@@ -39,9 +39,9 @@ During play, you can:
 - Use quick actions and scene panels as hints.
 - Continue a campaign over many turns.
 
-The game reads actions as intent, not only as literal commands.
+The game reads actions as intent first and literal wording second. `/chat/action` runs `gameplay-cycle-runtime` by default, with no env flag needed for normal play.
 
-## Living World
+## Living world
 
 The world can track:
 
@@ -54,9 +54,9 @@ The world can track:
 - Hidden information.
 - Consequences that may surface later.
 
-The target feeling is: things can happen because of you, near you, or elsewhere, and later those things can matter.
+The target feeling is simple: things can happen because of you, near you, or elsewhere, and later those things can matter.
 
-## Memory And Lore
+## Memory and lore
 
 WorldForge uses memory for two different jobs:
 
@@ -65,19 +65,28 @@ WorldForge uses memory for two different jobs:
 
 It also tries to keep sources straight. Something can be a fact, a rumor, a player claim, an NPC belief, or hidden truth. Those are different.
 
-## Review And Recovery
+## Runtime and narration
+
+The current active gameplay runtime is the clean runtime. The old V1/V2 runtime code is archived or removed from the active tree.
+
+The runtime separates durable facts from presentation:
+
+- Hard facts come from accepted evidence and receipts.
+- The narrator can add low-stakes visible texture inside a soft prose budget.
+- Soft texture becomes saved world state only when later adjudication accepts it.
+
+## Review and recovery
 
 The app includes tools for:
 
 - Reviewing the generated world.
 - Editing or regenerating weak sections.
 - Checking campaign state through panels.
-- Undoing or retrying recent turns.
-- Using checkpoints after risky moments.
+- Using checkpoints and undo-style recovery after risky moments.
 
 The game is designed for long messy play, so recovery matters.
 
-## Optional Extras
+## Optional extras
 
 Depending on setup, WorldForge can also use:
 

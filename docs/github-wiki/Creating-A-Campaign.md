@@ -1,15 +1,15 @@
-# Creating A Campaign
+# Creating a campaign
 
 A campaign starts with an idea. WorldForge expands that idea into a playable world with places, factions, NPCs, lore, and a starting scene.
 
-## The Campaign Idea
+## The campaign idea
 
 The best premise answers at least one of these questions:
 
 - What kind of world is this?
 - What is already tense or unstable?
 - What makes this setting different from a generic fantasy/sci-fi world?
-- What kind of stories should be possible here?
+- What should players be able to do here?
 
 You do not need to write a full setting bible. A strong paragraph is enough.
 
@@ -26,7 +26,7 @@ Examples:
 
 DNA helps the generator stay focused. It is also useful later when you review whether a location, faction, or NPC belongs in the world.
 
-## Known Worlds And Crossovers
+## Known worlds and crossovers
 
 WorldForge can work with familiar settings, alternate timelines, and crossovers. For these, be clear about:
 
@@ -54,7 +54,7 @@ Use them when:
 
 You can still play without a WorldBook.
 
-## Reviewing The World
+## Reviewing the world
 
 After generation, read the world review before you start:
 
@@ -65,9 +65,9 @@ After generation, read the world review before you start:
 - Is there a good starting location?
 - Is anything obviously wrong, duplicated, or too vague?
 
-Small edits here can make the first play session much better.
+Small edits here help the first session.
 
-## When To Regenerate
+## When to regenerate
 
 Regenerate a section when it misses the point. Edit manually when the idea is good but needs polish.
 

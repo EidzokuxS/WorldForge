@@ -1,8 +1,8 @@
-# Getting Started
+# Getting started
 
 This page is for players and curious readers who just want to get WorldForge running and try a campaign.
 
-## What You Need
+## What you need
 
 - Node.js 20 or newer.
 - npm.
@@ -18,7 +18,7 @@ cd WorldForge
 npm install
 ```
 
-## Start The App
+## Start the app
 
 ```bash
 npm run dev
@@ -28,18 +28,20 @@ Then open:
 
 [http://localhost:3000](http://localhost:3000)
 
-## First-Time Setup
+## First-time setup
 
-1. Open **Settings**.
-2. Add a provider in **Providers**.
-3. Choose models in **Roles**.
+1. Open Settings.
+2. Add a provider in Providers.
+3. Choose models in Roles.
 4. Go back to the launch screen.
 5. Create a new campaign.
 6. Review the generated world.
 7. Create your character.
 8. Start playing.
 
-## A Good First Campaign Prompt
+You do not need env flags to choose a gameplay runtime. `/chat/action` uses `gameplay-cycle-runtime` by default.
+
+## A good first campaign prompt
 
 Use something specific enough to give the game texture, but not so detailed that you are writing the whole setting yourself.
 
@@ -51,8 +53,8 @@ Good examples:
 
 > A generation ship where the captain is dead, the cargo is awake, and mercy has become a law nobody understands.
 
-## What To Expect
+## What to expect
 
 World generation can take a while. The app is building locations, factions, NPCs, lore, and a starting situation. Once the world is ready, you can review and edit it before play.
 
-The first playable version of a generated campaign may still have rough edges. Treat it like a living draft: inspect it, fix obvious weirdness, then play.
+The first playable version of a generated campaign may still have rough edges. Inspect it, fix obvious weirdness, then play.

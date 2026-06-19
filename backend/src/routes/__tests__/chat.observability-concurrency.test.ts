@@ -13,7 +13,7 @@
  *      `turn-{tick}-{turnId8}.jsonl`. Second run does not overwrite
  *      the first.
  *
- * Same test-infrastructure invariants as turn-processor.observability.test.ts:
+ * Route-level logging invariants:
  *   - `resetLoggerForTest` + `GSD_LOG_ROOT` (NOT working-directory swap)
  *   - `GSD_CAMPAIGNS_ROOT` for route-level fixture resolution
  *   - `vi.doMock` + dynamic import via applyMocks
@@ -30,9 +30,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyMocks } from "./fixtures/mock-llm.js";
-import { seedCampaignWithAllSeams } from "./fixtures/seed-campaign.js";
-import { listTurnJsonlFiles } from "./fixtures/expected-seams.js";
+import { applyMocks } from "../../engine/__tests__/fixtures/mock-llm.js";
+import { seedCampaignWithAllSeams } from "../../engine/__tests__/fixtures/seed-campaign.js";
+import { listTurnJsonlFiles } from "../../engine/__tests__/fixtures/expected-seams.js";
 
 async function drainBody(res: Response): Promise<void> {
   const reader = res.body!.getReader();
@@ -83,7 +83,7 @@ describe("Turn observability — concurrent turns + same-tick retry", () => {
     seedCampaignWithAllSeams(campaignsRoot, b, { tick: 2 });
 
     const { Hono } = await import("hono");
-    const { default: chatRoutes } = await import("../../routes/chat.js");
+    const { default: chatRoutes } = await import("../chat.js");
     const app = new Hono();
     app.route("/api/chat", chatRoutes);
 
@@ -159,7 +159,7 @@ describe("Turn observability — concurrent turns + same-tick retry", () => {
     seedCampaignWithAllSeams(campaignsRoot, c, { tick: 5 });
 
     const { Hono } = await import("hono");
-    const { default: chatRoutes } = await import("../../routes/chat.js");
+    const { default: chatRoutes } = await import("../chat.js");
     const app = new Hono();
     app.route("/api/chat", chatRoutes);
 

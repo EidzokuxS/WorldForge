@@ -62,7 +62,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "none",
     observabilityEvent: "turn.begin",
     failureTransition: "request fails before gameplay mutation",
-    tests: ["chat.test.ts", "turn-processor.test.ts", "turn-saga.test.ts"],
+    tests: ["chat.test.ts", "gameplay-cycle-runtime-contracts.test.ts", "turn-saga.test.ts"],
   },
   {
     stage: "lease_acquired",
@@ -83,7 +83,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "none",
     observabilityEvent: "turn.worker.claimed",
     failureTransition: "TurnSagaLockConflictError",
-    tests: ["turn-saga.test.ts", "chat.resilience.test.ts", "turn-processor.test.ts"],
+    tests: ["turn-saga.test.ts", "chat.resilience.test.ts", "gameplay-cycle-runtime-contracts.test.ts"],
   },
   {
     stage: "snapshot_taken",
@@ -104,7 +104,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "none",
     observabilityEvent: "turn.snapshot",
     failureTransition: "rollback_critical failure if snapshot restore evidence is invalid",
-    tests: ["rollback.test.ts", "store-manifest-executor.test.ts", "turn-processor.test.ts"],
+    tests: ["rollback.test.ts", "store-manifest-executor.test.ts", "gameplay-cycle-runtime-contracts.test.ts"],
   },
   {
     stage: "effects_staged",
@@ -154,7 +154,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "rebuild_from_receipts",
     observabilityEvent: "tool.call",
     failureTransition: "state corruption if committed receipt evidence cannot be recovered",
-    tests: ["tool-contracts.test.ts", "tool-executor-authority.test.ts", "turn-processor.test.ts"],
+    tests: ["tool-contracts.test.ts", "tool-executor-authority.test.ts", "gameplay-cycle-runtime-stage4.test.ts"],
   },
   {
     stage: "canonical_state_committed",
@@ -178,7 +178,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "rebuild_from_receipts",
     observabilityEvent: "authority.trace",
     failureTransition: "failed_state_corruption on world-version mismatch",
-    tests: ["living-world-authority.test.ts", "tool-executor-authority.test.ts", "turn-processor.test.ts"],
+    tests: ["living-world-authority.test.ts", "tool-executor-authority.test.ts", "gameplay-cycle-runtime-stage4.test.ts"],
   },
   {
     stage: "settled_packet_persisted",
@@ -203,7 +203,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "rebuild_from_receipts",
     observabilityEvent: "settled_packet_persisted",
     failureTransition: "pending settled narration until packet is recovered or rebuilt",
-    tests: ["turn-saga.test.ts", "turn-processor.test.ts", "chat.resilience.test.ts"],
+    tests: ["turn-saga.test.ts", "gameplay-cycle-runtime-settlement.test.ts", "chat.resilience.test.ts"],
   },
   {
     stage: "narration_accepted",
@@ -227,7 +227,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "rebuild_from_receipts",
     observabilityEvent: "visible-narration.packet-guard",
     failureTransition: "resolved_pending_narration or narrator_repairing until accepted",
-    tests: ["narration-grounding-guard.test.ts", "turn-processor.test.ts", "chat.test.ts"],
+    tests: ["gameplay-cycle-runtime-narration.test.ts", "visible-narration-output-guard.test.ts", "chat.test.ts"],
   },
   {
     stage: "public_projection_committed",
@@ -275,7 +275,7 @@ export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract
     vectorPolicy: "rebuild_from_receipts",
     observabilityEvent: "turn.finalized",
     failureTransition: "failed_state_corruption only for verified restore/corruption faults",
-    tests: ["turn-saga.test.ts", "turn-processor.test.ts", "chat.resilience.test.ts"],
+    tests: ["turn-saga.test.ts", "gameplay-cycle-runtime-contracts.test.ts", "chat.resilience.test.ts"],
   },
 ] as const;
 

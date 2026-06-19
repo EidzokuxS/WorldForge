@@ -1,32 +1,32 @@
 # WorldForge
 
-**A text RPG sandbox where the world keeps playing too.**
+A text RPG sandbox where you create a campaign, play one character, and let the world keep state around you.
 
-WorldForge lets you turn a premise into a playable world: an original setting, a strange crossover, a "what if" version of a story you already know, or something completely yours.
+WorldForge turns a premise into a playable world: an original setting, a crossover, a changed version of a story you know, or something of your own.
 
-You are not reading a novel about that world. You wake up inside it and start making choices.
+You wake up inside that world and make choices.
 
-You can chase the main disaster, pick a fight with someone stronger than you, become a courier, hide in a hotel, ask awkward questions, or waste an afternoon eating ice cream. The point is that the world is not waiting politely for you to become important. People have goals. Factions have pressure. Rumors spread. Consequences pile up offscreen and eventually reach you.
+You can chase the main disaster, pick a fight with someone stronger than you, become a courier, hide in a hotel, ask awkward questions, or waste an afternoon eating ice cream. The world keeps moving while you decide what matters. People have goals. Factions put pressure on places. Rumors spread. Consequences build offscreen and can reach you later.
 
-That is the core fantasy: **a text RPG where the player and the world use the same rules.**
+The basic fantasy is a text RPG where the player and the world use the same rules.
 
 ![WorldForge launchpad](docs/assets/readme/launchpad-2560.png)
 
-## Why This Exists
+## Why this exists
 
-Most AI roleplay tools are great at conversation, but the world often behaves like a stage set. NPCs appear when needed, forget what matters, and stop existing when the player leaves the room.
+Most AI roleplay tools handle conversation well, but the world often behaves like a stage set. NPCs appear when needed, forget what matters, and stop existing when the player leaves the room.
 
 WorldForge is trying to build a different kind of RPG:
 
-- The player is one person inside the world, not the only thing that matters.
+- The player is one person inside the world.
 - Important NPCs can remember, plan, move, fail, and change things.
 - Factions can act through resources, territory, orders, and reports.
 - Hidden information stays hidden until the player has a real way to learn it.
 - The AI can be creative, but durable changes go through game rules and saved state.
 
-Think of it like a tabletop game with a tireless game master, a living campaign notebook, and a referee that does not let the story accidentally rewrite reality.
+The game should improvise like a table GM and keep records like a campaign notebook. A good sentence can make the scene read better while staying inside saved reality.
 
-## What You Can Do
+## What you can do
 
 Start with a sentence:
 
@@ -49,13 +49,13 @@ WorldForge can help turn that into:
 
 ![World generation](docs/assets/readme/worldgen-2560.png)
 
-## How It Feels In Play
+## How it feels in play
 
 You type what your character does.
 
 The game master reads it like a human would: intent first, literal words second. If you bluff, it treats that as a bluff. If you claim something false, the world records that you claimed it, not that it became true. If you try to learn a secret, the game checks whether you actually have a path to know it.
 
-Then the game changes the world through tools:
+Then the game changes the world through runtime actions:
 
 - move a character;
 - add an event;
@@ -68,45 +68,46 @@ Then the game changes the world through tools:
 
 Only after the world has been settled does the narrator write the final prose you see.
 
-That separation matters. The narrator is not allowed to invent permanent facts just because a sentence would sound cooler. It describes the visible result of the turn.
+That separation matters. Hard facts stay owned by receipts: movement, route status, inventory, injuries, dialogue quotes, secrets, relationship changes, and world mutations all need accepted evidence. The narrator can spend a small soft prose budget on harmless visible texture, such as sound, wear, color, or ordinary surface detail. That texture makes the page read better. A later turn still has to prove it before the game treats it as saved world state.
 
 ![Play surface](docs/assets/readme/play-2560.png)
 
-## The Living World Idea
+## The living world
 
-WorldForge does not try to run a full expensive AI brain for every person on every turn. That would be slow, noisy, and wildly expensive.
+WorldForge runs attention in layers instead of running a full expensive AI brain for every person on every turn. Full simulation would be slow, noisy, and expensive.
 
 Instead, it gives the world layers:
 
-- **Key NPCs** are the important people. They can have goals, private knowledge, plans, memories, and moments where they wake up and act.
-- **Persistent NPCs** remain real and remembered, but do not need a full independent decision every turn.
-- **Temporary NPCs** can exist for a scene, support a location, then fade unless they become important.
-- **Factions** act like organized forces: they have resources, reports, doctrine, territories, and operations.
-- **World threads** track bigger ongoing changes: investigations, raids, shortages, rituals, disasters, political moves, training arcs.
+- Key NPCs are the important people. They can have goals, private knowledge, plans, memories, and moments where they wake up and act.
+- Persistent NPCs remain real and remembered, but they do not need a full independent decision every turn.
+- Temporary NPCs can exist for a scene, support a location, then fade unless play makes them important.
+- Factions act like organized forces with resources, reports, doctrine, territories, and operations.
+- World threads track bigger changes: investigations, raids, shortages, rituals, disasters, political moves, and training arcs.
 
 The target is simple to say and hard to build:
 
-**If you leave the room, the world should still be able to matter.**
+If you leave the room, the world should still be able to matter.
 
-## What Makes It Different From A Chatbot
+## What makes it different from a chatbot
 
-The AI is not just writing the next paragraph.
+The AI does more than write the next paragraph.
 
-It is more like this:
+The active play path works like this:
 
 1. Understand what the player is trying to do.
 2. Look at the visible world state.
 3. Decide what should happen and what needs to be checked.
-4. Ask the backend to perform concrete game actions.
-5. Let the backend save the real state.
+4. Ask the backend to perform concrete runtime actions.
+5. Let the backend save the real state through receipts.
 6. Give the narrator only the truth the player is allowed to see.
-7. Continue from that saved world next turn.
+7. Commit a player-facing turn record.
+8. Continue from that saved world next turn.
 
-The backend is the part that remembers where people are, what exists, what changed, what is private, and what has been committed. The AI handles meaning, judgment, and improvisation. They are meant to work together instead of pretending one side can do everything.
+The backend remembers where people are, what exists, what changed, what is private, and what has been committed. The AI handles meaning, judgment, and prose. They work together instead of pretending one side can do everything.
 
 ![World review](docs/assets/readme/review-2560.png)
 
-## Current State
+## Current state
 
 WorldForge is in active development.
 
@@ -120,11 +121,14 @@ The app already has:
 - a screen where you can play turns;
 - provider settings for OpenAI-compatible and Anthropic-compatible endpoints;
 - a dark editorial interface being migrated through the app;
-- logic for key NPCs, factions, world threads, narration that does not see hidden facts, and safer saved turns.
+- logic for key NPCs, factions, world threads, narrator-visible packets, receipt-backed hard facts, and safer saved turns.
+- a clean gameplay runtime on `/chat/action`.
 
-This is still an early project, not a polished packaged game. Expect sharp edges. The goal is not a demo that only survives one happy path; the goal is a long-running RPG sandbox that can take strange player choices seriously.
+Active play uses `gameplay-cycle-runtime`. The old V1/V2 gameplay runtime paths are archived or removed from the active tree. Normal play needs no runtime-selection environment flags.
 
-## Quick Start
+This is still an early project with sharp edges. The goal is a long-running RPG sandbox that can take strange player choices seriously.
+
+## Quick start
 
 ### Requirements
 
@@ -149,47 +153,52 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### First Setup
+### First setup
 
-1. Open **Settings -> Providers** and add an OpenAI-compatible or Anthropic-compatible endpoint.
-2. Open **Settings -> Roles** and assign models for Judge, Storyteller, Generator, and Embedder.
+1. Open Settings -> Providers and add an OpenAI-compatible or Anthropic-compatible endpoint.
+2. Open Settings -> Roles and assign models for Judge, Storyteller, Generator, and Embedder.
 3. Create a new campaign.
 4. Review the generated world.
 5. Create or import a player character.
 6. Start playing.
 
-## Model Roles, In Plain English
+No env flags are needed for gameplay. Once providers and roles are configured, `/chat/action` uses the clean runtime by default.
 
-WorldForge uses a few model roles because one prompt should not do every job.
+## Model roles
+
+WorldForge uses a few model roles because different jobs need different prompts.
 
 | Role | Plain meaning |
 | --- | --- |
-| **Judge** | The main game master brain. It understands the turn and decides what game actions are needed. |
-| **Storyteller** | The prose writer. It turns already-decided events into readable fiction. |
-| **Generator** | The world builder. It makes DNA, locations, factions, lore, and characters. |
-| **Embedder** | The search helper. It helps find relevant memories and lore. |
+| Judge | The main game master brain. It understands the turn and decides what game actions are needed. |
+| Storyteller | The prose writer. It turns already-decided events into readable fiction. |
+| Generator | The world builder. It makes DNA, locations, factions, lore, and characters. |
+| Embedder | The search helper. It helps find relevant memories and lore. |
 
 For long games, the Judge model needs enough output and reasoning budget. WorldForge is built around quality turns, not tiny arbitrary response caps.
 
-## Technical Shape
+## Technical shape
 
 ```text
 Player action
   -> bounded world frame
-  -> AI game master decision
-  -> concrete tool checklist
-  -> backend state changes
-  -> memory / lore / wake signals
-  -> visible narration packet
+  -> clean GM read
+  -> uncertainty / oracle check when needed
+  -> concrete runtime action checklist
+  -> receipt-backed backend state changes
+  -> settled turn packet
+  -> narrator view
   -> final prose
+  -> player-facing turn record
 ```
 
 Useful rules:
 
-- A player lie becomes a claim, not a fact.
-- Private names and secrets are not safe just because they exist in the database.
-- Failed tool actions must not appear in narration as if they happened.
-- Background world work cannot silently rewrite a turn that was already returned to the player.
+- A player lie becomes a claim.
+- Private names and secrets need player-visible authority before narration can reveal them.
+- Failed runtime actions stay out of narration.
+- Soft prose can describe harmless visible texture. Receipts create hard facts.
+- Background world work leaves returned turns intact.
 
 ## Data
 
@@ -210,7 +219,7 @@ campaigns/{campaignId}/
 - JSON files store campaign metadata, role links, generated context, and chat.
 - Campaign data is gitignored.
 
-## Development Commands
+## Development commands
 
 ```bash
 # Root
@@ -242,7 +251,7 @@ npm --prefix frontend run visual:v4
 | Backend | Hono, Drizzle ORM, better-sqlite3, Zod, AI SDK, LanceDB, pino |
 | Storage | local campaign folders, SQLite, LanceDB vectors |
 
-## Repo Map
+## Repo map
 
 ```text
 WorldForge/

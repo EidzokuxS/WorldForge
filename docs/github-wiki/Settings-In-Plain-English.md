@@ -1,4 +1,4 @@
-# Settings In Plain English
+# Settings in plain English
 
 WorldForge needs AI models to generate worlds, judge player actions, and write narration. Settings let you choose which provider and model does each job.
 
@@ -12,9 +12,9 @@ You usually need:
 - An API key if the provider requires one.
 - One or more model names.
 
-## Model Roles
+## Model roles
 
-WorldForge splits work into roles so one model does not have to be good at everything.
+WorldForge splits work into roles so each model can handle a narrower job.
 
 | Role | What It Does |
 | --- | --- |
@@ -23,7 +23,7 @@ WorldForge splits work into roles so one model does not have to be good at every
 | Generator | Builds campaign worlds, locations, factions, lore, and characters. |
 | Embedder | Helps search memories and lore by meaning. |
 
-## Which Role Needs The Best Model?
+## Which role needs the best model?
 
 For gameplay, the Judge is usually the most important. It needs to understand intent, risk, hidden information, power level, and consequences.
 
@@ -33,11 +33,11 @@ The Generator matters most when creating new campaigns.
 
 The Embedder matters for memory/lore search.
 
-## Token Budgets
+## Token budgets
 
 If a model has too little output budget, it may give thin, broken, or incomplete answers.
 
-For long campaigns, avoid tiny limits on the Judge and Storyteller. WorldForge is trying to run structured turns, not one-sentence chat replies.
+For long campaigns, avoid tiny limits on the Judge and Storyteller. WorldForge is trying to run structured turns rather than one-sentence chat replies.
 
 ## Images
 
@@ -47,7 +47,13 @@ Image generation is optional. If it is not configured, gameplay should still wor
 
 Research settings affect how the app gathers or uses extra context for world generation. You can leave this simple at first. Add more only when you are trying to build a setting that needs stronger source grounding.
 
-## Good First Setup
+## Gameplay runtime
+
+You do not need a runtime env flag. Current gameplay uses `gameplay-cycle-runtime` through `/chat/action`.
+
+The old V1/V2 gameplay runtimes are archived or removed from the active tree. If you are just playing, configure providers and roles in the app.
+
+## Good first setup
 
 For a first run:
 

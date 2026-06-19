@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
+const { processCleanGameplayTurnMock } = vi.hoisted(() => ({
+  processCleanGameplayTurnMock: vi.fn(),
+}));
+
 const routeState = vi.hoisted(() => {
   const runtimeSnapshots = new Map<string, unknown>();
   const runtimeSnapshotMetadata = new Map<string, {
@@ -191,6 +195,10 @@ vi.mock("../../engine/index.js", () => ({
   readWorldClock: vi.fn((campaignId: string) => ({ campaignId, worldVersion: 0, worldTimeMinutes: 0, currentTick: 0, updatedAt: 0 })),
 }));
 
+vi.mock("../../engine/gameplay-cycle-runtime/runtime.js", () => ({
+  processCleanGameplayTurn: (...args: unknown[]) => processCleanGameplayTurnMock(...args),
+}));
+
 vi.mock("../../engine/grounded-lookup.js", () => ({
   runGroundedLookup: vi.fn(),
 }));
@@ -251,6 +259,56 @@ void retractPendingCommittedEventsForTick;
 const mockedGetLastPlayerAction = vi.mocked(getLastPlayerAction);
 const mockedAppendChatMessages = vi.mocked(appendChatMessages);
 
+function cleanDoneBoundaryData(options: any, data: unknown): Record<string, unknown> {
+  const record = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  const campaignId = String(options.campaignId);
+  const playerAction = String(options.normalizedPlayerAction ?? options.playerAction ?? "");
+  const historyLength = chatHistoryByCampaign.get(campaignId)?.length ?? 0;
+  const chatHistoryLengthAfterTurn = typeof record.chatHistoryLengthAfterTurn === "number"
+    ? record.chatHistoryLengthAfterTurn
+    : historyLength;
+  return {
+    ...record,
+    runtime: "gameplay-cycle-runtime",
+    recordId: String(record.recordId ?? "cgtr_routefixture0000000000"),
+    turnId: String(record.turnId ?? "cgturn_routefixture000000"),
+    packetId: String(record.packetId ?? "cgpacket_routefixture0000"),
+    tick: typeof record.tick === "number" ? record.tick : 0,
+    worldVersion: typeof record.worldVersion === "number" ? record.worldVersion : 0,
+    worldTimeMinutes: typeof record.worldTimeMinutes === "number" ? record.worldTimeMinutes : 0,
+    mutationApplied: typeof record.mutationApplied === "boolean" ? record.mutationApplied : false,
+    settled: typeof record.settled === "boolean" ? record.settled : true,
+    chatHistoryLengthBeforeTurn: typeof record.chatHistoryLengthBeforeTurn === "number"
+      ? record.chatHistoryLengthBeforeTurn
+      : Math.max(0, chatHistoryLengthAfterTurn - 2),
+    chatHistoryLengthAfterTurn,
+    userMessageSha256: String(record.userMessageSha256 ?? "0".repeat(64)),
+    assistantMessageSha256: String(record.assistantMessageSha256 ?? "1".repeat(64)),
+  };
+}
+
+function createCleanRuntimeFixtureStream(options: any) {
+  const stream = mockedProcessTurn({
+    campaignId: options.campaignId,
+    playerAction: options.normalizedPlayerAction,
+    intent: options.normalizedPlayerAction,
+    method: "",
+    judgeProvider: options.judgeProvider,
+    storytellerProvider: options.storytellerProvider,
+    preTurnSnapshot: options.preTurnSnapshot,
+    onPostTurn: async () => undefined,
+  } as any);
+  return (async function* () {
+    for await (const event of stream as AsyncGenerator<any>) {
+      yield event.type === "done"
+        ? { ...event, data: cleanDoneBoundaryData(options, event.data) } as any
+        : event;
+    }
+  })();
+}
+
 function setupSettings() {
   mockedLoadSettings.mockReturnValue({
     judge: { providerId: "p1", model: "judge-model", temperature: 0.1, maxTokens: 1024 },
@@ -303,6 +361,10 @@ function turnStream(events: Array<{ type: string; data: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  processCleanGameplayTurnMock.mockReset();
+  processCleanGameplayTurnMock.mockImplementation((options) =>
+    createCleanRuntimeFixtureStream(options),
+  );
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();

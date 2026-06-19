@@ -142,33 +142,6 @@ function sqliteStoreTable(step: CampaignStoreManifestOperationStep): string | nu
   return step.store.startsWith("sqlite:") ? step.store.slice("sqlite:".length) : null;
 }
 
-function ensureGameplayCycleV2PacketCloneTable(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS gameplay_cycle_v2_packets (
-      packet_id TEXT PRIMARY KEY,
-      campaign_id TEXT NOT NULL,
-      turn_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      narrator_attempt_status TEXT NOT NULL,
-      packet_json TEXT NOT NULL,
-      persistence_json TEXT NOT NULL,
-      checklist_json TEXT,
-      gm_read_json TEXT,
-      receipt_ledger_json TEXT,
-      narrator_view_json TEXT,
-      api_projection_json TEXT,
-      base_world_version INTEGER NOT NULL,
-      result_world_version INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_gameplay_cycle_v2_packets_campaign_turn
-      ON gameplay_cycle_v2_packets (campaign_id, turn_id);
-    CREATE INDEX IF NOT EXISTS idx_gameplay_cycle_v2_packets_status
-      ON gameplay_cycle_v2_packets (campaign_id, status, narrator_attempt_status);
-  `);
-}
-
 function ensureCleanGameplayTurnRecordsCloneTable(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS clean_gameplay_turn_records (
@@ -304,7 +277,6 @@ function applySqliteClonePlan(input: {
 
   try {
     db.pragma("foreign_keys = OFF");
-    ensureGameplayCycleV2PacketCloneTable(db);
     ensureCleanGameplayTurnRecordsCloneTable(db);
     ensureCleanGameplayStage4ReceiptsCloneTable(db);
     ensureCleanGameplayActorConditionsCloneTable(db);

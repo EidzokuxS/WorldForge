@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { processCleanGameplayTurnMock } = vi.hoisted(() => ({
+  processCleanGameplayTurnMock: vi.fn(),
+}));
+
 const routeState = vi.hoisted(() => ({
   chatHistoryByCampaign: new Map<string, Array<{ role: "user" | "assistant"; content: string }>>(),
 }));
@@ -44,6 +48,7 @@ vi.mock("../../lib/index.js", () => ({
     Math.min(Math.max(value, min), max),
   ),
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getPlayerSafeErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -154,6 +159,10 @@ vi.mock("../../engine/index.js", () => ({
   sanitizeNarrative: vi.fn((text: string) => text),
 }));
 
+vi.mock("../../engine/gameplay-cycle-runtime/runtime.js", () => ({
+  processCleanGameplayTurn: (...args: unknown[]) => processCleanGameplayTurnMock(...args),
+}));
+
 vi.mock("../../vectors/episodic-events.js", () => ({
   drainPendingCommittedEvents: vi.fn(() => []),
   drainPendingCommittedEventsByIds: vi.fn(() => []),
@@ -225,6 +234,52 @@ const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
 const app = new Hono();
 app.route("/chat", chatRoutes);
 
+function cleanDoneBoundaryData(options: any, data: unknown): Record<string, unknown> {
+  const record = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  return {
+    ...record,
+    runtime: "gameplay-cycle-runtime",
+    recordId: String(record.recordId ?? "cgtr_routefixture0000000000"),
+    turnId: String(record.turnId ?? "cgturn_routefixture000000"),
+    packetId: String(record.packetId ?? "cgpacket_routefixture0000"),
+    tick: typeof record.tick === "number" ? record.tick : 0,
+    worldVersion: typeof record.worldVersion === "number" ? record.worldVersion : 0,
+    worldTimeMinutes: typeof record.worldTimeMinutes === "number" ? record.worldTimeMinutes : 0,
+    mutationApplied: typeof record.mutationApplied === "boolean" ? record.mutationApplied : false,
+    settled: typeof record.settled === "boolean" ? record.settled : true,
+    chatHistoryLengthBeforeTurn: typeof record.chatHistoryLengthBeforeTurn === "number"
+      ? record.chatHistoryLengthBeforeTurn
+      : 0,
+    chatHistoryLengthAfterTurn: typeof record.chatHistoryLengthAfterTurn === "number"
+      ? record.chatHistoryLengthAfterTurn
+      : 0,
+    userMessageSha256: String(record.userMessageSha256 ?? "0".repeat(64)),
+    assistantMessageSha256: String(record.assistantMessageSha256 ?? "1".repeat(64)),
+  };
+}
+
+function createCleanRuntimeFixtureStream(options: any) {
+  const stream = mockedProcessTurn({
+    campaignId: options.campaignId,
+    playerAction: options.normalizedPlayerAction,
+    intent: options.normalizedPlayerAction,
+    method: "",
+    judgeProvider: options.judgeProvider,
+    storytellerProvider: options.storytellerProvider,
+    preTurnSnapshot: options.preTurnSnapshot,
+    onPostTurn: async () => undefined,
+  } as any);
+  return (async function* () {
+    for await (const event of stream as AsyncGenerator<any>) {
+      yield event.type === "done"
+        ? { ...event, data: cleanDoneBoundaryData(options, event.data) } as any
+        : event;
+    }
+  })();
+}
+
 function createTurnStream(events: Array<{ type: string; data: unknown }>) {
   return (async function* () {
     for (const event of events) {
@@ -235,6 +290,10 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  processCleanGameplayTurnMock.mockReset();
+  processCleanGameplayTurnMock.mockImplementation((options) =>
+    createCleanRuntimeFixtureStream(options),
+  );
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   routeState.chatHistoryByCampaign.clear();

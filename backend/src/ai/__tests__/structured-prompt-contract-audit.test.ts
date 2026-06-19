@@ -62,13 +62,6 @@ const requiredAuditRows: RequiredAuditRow[] = [
     markers: ["STRUCTURED_OUTPUT_CONTRACT: target-context.v1"],
   },
   {
-    source: "backend/src/engine/turn-processor.ts",
-    priority: "P0",
-    planOwner: "74-03",
-    markers: ["STRUCTURED_OUTPUT_CONTRACT: movement-detection.v1"],
-    requiredText: ["detectMovementIntent"],
-  },
-  {
     source: "backend/src/worldgen/ip-researcher.ts",
     priority: "P0",
     planOwner: "74-04",
@@ -300,7 +293,7 @@ describe("Phase 74 prompt-contract audit", () => {
     expect(audit).toContain("Deterministic authority");
     expect(audit).toContain("Failure class");
     expect(audit).toContain("Explicit Exclusions");
-    expect(audit).toContain("backend/src/engine/turn-processor.ts` final narration");
+    expect(audit).toContain("backend/src/engine/gameplay-cycle-runtime/narration.ts` final narration");
     expect(audit).toContain("backend/src/ai/storyteller.ts");
   });
 });

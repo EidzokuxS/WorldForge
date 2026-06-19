@@ -1,8 +1,8 @@
-# How World Creation Works
+# How world creation works
 
 World creation is the process that turns "I want to play this kind of story" into a campaign you can actually enter.
 
-## The Simple Version
+## The simple version
 
 ```text
 Your idea
@@ -17,7 +17,7 @@ Your idea
   -> play
 ```
 
-## Step 1: The Game Reads The Premise
+## Step 1: the game reads the premise
 
 The premise tells WorldForge what kind of campaign this is. It looks for:
 
@@ -33,7 +33,7 @@ Example:
 
 From that, the game can infer law, politics, dead witnesses, unreliable testimony, and a mystery.
 
-## Step 2: It Finds The World DNA
+## Step 2: it finds the World DNA
 
 World DNA is the small set of rules that keeps the campaign from becoming generic.
 
@@ -46,9 +46,9 @@ For the ghost court example, DNA might be:
 
 These DNA ideas guide later generation.
 
-## Step 3: It Builds Places
+## Step 3: it builds places
 
-Locations are not just scenery. A good location gives the player things to notice, people to meet, and reasons to move.
+Good locations give the player things to notice, people to meet, and reasons to move.
 
 WorldForge tries to create:
 
@@ -60,9 +60,9 @@ WorldForge tries to create:
 
 If the map feels flat, review locations before play and sharpen them.
 
-## Step 4: It Builds Factions
+## Step 4: it builds factions
 
-Factions are engines of pressure. They give the world motives that do not depend on the player.
+Factions are engines of pressure. They give the world motives outside the player's immediate choices.
 
 A faction should usually have:
 
@@ -72,11 +72,11 @@ A faction should usually have:
 - A reason to care about the central conflict.
 - A way to affect the world.
 
-If a faction only has a cool name, it is not doing enough yet.
+If a faction only has a cool name, give it a goal or a way to affect play.
 
-## Step 5: It Builds NPCs
+## Step 5: it builds NPCs
 
-NPCs should not all be quest dispensers. WorldForge tries to give important characters:
+Important NPCs need enough structure to act:
 
 - A role in the world.
 - Short-term and long-term goals.
@@ -86,7 +86,7 @@ NPCs should not all be quest dispensers. WorldForge tries to give important char
 
 Some NPCs are temporary scene support. Others can become important if play keeps touching them.
 
-## Step 6: It Builds Lore
+## Step 6: it builds lore
 
 Lore gives the world memory before the first turn. It can include:
 
@@ -99,15 +99,15 @@ Lore gives the world memory before the first turn. It can include:
 
 Good lore should be playable. If a lore card cannot affect a scene, investigation, faction, or decision, it may be decorative.
 
-## Step 7: It Saves A Playable Draft
+## Step 7: it saves a playable draft
 
 When generation finishes, the campaign becomes a saved local world. That saved state is what the game uses during play.
 
 The review screen is your chance to catch weak spots before they become your first session.
 
-## Step 8: You Review And Correct
+## Step 8: you review and correct
 
-This step matters. WorldForge can create a lot, but it does not know your taste perfectly.
+WorldForge can create a lot, but it still needs your taste.
 
 Look for:
 

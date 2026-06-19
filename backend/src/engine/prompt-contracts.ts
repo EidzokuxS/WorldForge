@@ -627,32 +627,6 @@ export function buildTargetContextPromptContract(): string {
   ].join("\n");
 }
 
-export function buildMovementDetectionPromptContract(): string {
-  return [
-    `${ENGINE_CONTRACT_MARKER_PREFIX} movement-detection.v1`,
-    "Return one movement classifier object only.",
-    'Required shape: { "isMovement": boolean, "destination": string|null }.',
-    "destination must be null when isMovement is false.",
-    "destination must be copied from explicit player wording when movement is true; keep it short and do not resolve it to a different location name.",
-    "If the action is attack, talk, look around, pick up, search, examine, or otherwise non-travel, return false/null.",
-    "",
-    "Compact valid example:",
-    '{ "isMovement": true, "destination": "the market" }',
-    "",
-    "Minimal valid output:",
-    '{ "isMovement": false, "destination": null }',
-    "",
-    "Invalid examples:",
-    '- invented destination: { "isMovement": true, "destination": "Hidden Shrine" } when the action did not name it.',
-    '- missing nullable destination: { "isMovement": false }',
-    '- inconsistent nullability: { "isMovement": false, "destination": "Tavern" }',
-    "",
-    "Backend authority:",
-    "backend owns movement execution and destination validation, graph/path checks, no-op current-location handling, and non-connected pass-through behavior.",
-    "Backend must not invent movement intent or destination, travel path, target tags, or state mutation to make validation pass.",
-  ].join("\n");
-}
-
 export function buildNpcOffscreenPromptContract(): string {
   return [
     `${ENGINE_CONTRACT_MARKER_PREFIX} npc-offscreen.v1`,

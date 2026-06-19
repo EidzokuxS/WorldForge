@@ -42,7 +42,6 @@ import {
   buildGameplayRuntimeTurnInput,
   CleanGameplayRuntimeInvariantError,
   type CleanGameplayRuntimeEvent,
-  isCleanGameplayRuntimeEnabled,
   processCleanGameplayTurnFromInput,
 } from "../gameplay-cycle-runtime/runtime.js";
 import {
@@ -142,25 +141,6 @@ describe("gameplay-cycle-runtime primitive 0/1 contracts", () => {
       for (const token of forbidden) {
         expect(source.text, `${source.path} must not import or cite ${token}`).not.toContain(token);
       }
-    }
-  });
-
-  it("uses a clean-runtime flag independent from the old gameplay-cycle-v2 flag", () => {
-    const previousClean = process.env.WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN;
-    const previousV2 = process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2;
-    try {
-      delete process.env.WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN;
-      process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2 = "true";
-      expect(isCleanGameplayRuntimeEnabled()).toBe(false);
-
-      process.env.WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN = "true";
-      process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2 = "false";
-      expect(isCleanGameplayRuntimeEnabled()).toBe(true);
-    } finally {
-      if (previousClean === undefined) delete process.env.WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN;
-      else process.env.WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN = previousClean;
-      if (previousV2 === undefined) delete process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2;
-      else process.env.WORLDFORGE_GAMEPLAY_CYCLE_V2 = previousV2;
     }
   });
 
@@ -1265,6 +1245,9 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
         recordId: "cgtr_fakecommit000000000000",
         turnId: "cgturn_fakecommit0000000000",
         packetId: input.settlement.settledPacket.packetId,
+        tick: input.turn.base.tick,
+        worldVersion: input.turn.base.worldVersion,
+        worldTimeMinutes: input.turn.base.worldTimeMinutes ?? 0,
         mutationApplied: input.projection.mutationApplied,
         settled: true,
         chatHistoryLengthBeforeTurn: 0,
@@ -1278,6 +1261,9 @@ async function fakeCommitTurn(input: Parameters<typeof commitCleanPlayerFacingTu
       recordId: "cgtr_fakecommit000000000000",
       turnId: "cgturn_fakecommit0000000000",
       packetId: input.settlement.settledPacket.packetId,
+      tick: input.turn.base.tick,
+      worldVersion: input.turn.base.worldVersion,
+      worldTimeMinutes: input.turn.base.worldTimeMinutes ?? 0,
       mutationApplied: input.projection.mutationApplied,
       settled: true as const,
       chatHistoryLengthBeforeTurn: 0,

@@ -1,5 +1,28 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-19 - Clean-Only Runtime Cleanup
+
+Goal:
+- Remove active V1/V2 gameplay runtime code from the working tree after archiving it, and make `/chat/action` use the clean gameplay runtime without env flags or fallback runtime selection.
+
+Plan:
+- [x] Create and push an archive branch for the pre-cleanup legacy V1/V2 runtime state.
+- [x] Remove V1/V2 engine files, stores, clone table setup, route branches, env flags, and V1/V2 tests from active code.
+- [x] Keep hard-fact/soft-prose clean runtime contracts intact and make clean `done` boundaries carry clock/world metadata for route post-turn hooks.
+- [x] Update route tests to exercise the clean route path while reusing old event fixtures only as test data.
+- [x] Run typecheck plus focused clean-runtime and route suites.
+- [x] Run GitNexus detect_changes, final audit commands, then commit/push if scope is expected.
+- [x] Run a docs pass for README/Wiki using the requested deslop/humanizer skills.
+
+Review:
+- Removed `gameplay-cycle-v2`, `gameplay-turn-cycle-v1`, V1 packet store, clone bootstrap, route branches, env runtime selection, V1/V2 tests, and stale turn-processor tests from active code.
+- `/chat/action` and `/chat/retry` now use `processCleanGameplayTurn`; clean done boundaries carry tick/worldVersion/worldTimeMinutes.
+- Cut old player-turn bodies from `turn-processor.ts`, removed the unused LLM movement classifier/prompt contract, and renamed the remaining route-level observability test out of the turn-processor namespace.
+- README and GitHub Wiki were rewritten by the requested deslop/humanizer docs agent to describe clean runtime, no gameplay env flags, hard receipts, and soft prose budget.
+- Verification passed: `npm --prefix backend run typecheck`; focused clean/chat/audit/helper suite (573 passed); renamed observability suite (2 passed); full backend suite (222 files passed, 3361 tests passed, 30 todo); `git diff --check`.
+- Oracle browser consult for the remaining `turn-processor` cleanup was attempted with GPT-5.5 Pro but blocked by missing ChatGPT login/cookies.
+- GitNexus `detect_changes(scope=all)` and `detect_changes(scope=staged)` were executed but failed with `spawnSync git ENOBUFS` because the deletion diff is very large; pre-commit scope was reviewed through staged diff/status plus full type/test execution.
+
 ## Current Session Focus 2026-06-19 - P336 Zetta Adult Prose Polish
 
 Goal:

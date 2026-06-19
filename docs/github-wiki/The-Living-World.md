@@ -1,10 +1,10 @@
-# The Living World
+# The living world
 
-WorldForge is built around the idea that the world should not freeze when the player looks away.
+WorldForge is built around a world that keeps pressure and memory when the player looks away.
 
 ## NPCs
 
-Not every NPC is equally important.
+NPCs use different levels of persistence.
 
 - Key NPCs can have goals, memories, private knowledge, and ongoing plans.
 - Persistent NPCs remain part of the world but may not act independently every turn.
@@ -28,7 +28,7 @@ They might:
 
 You do not need to join a faction for factions to matter.
 
-## Rumors And Reports
+## Rumors and reports
 
 The game can distinguish between:
 
@@ -40,9 +40,9 @@ The game can distinguish between:
 
 This matters because a rumor can be useful without being true.
 
-## Hidden Information
+## Hidden information
 
-WorldForge tries not to reveal secrets just because the narrator knows them.
+WorldForge gives the narrator player-visible material instead of the whole hidden state.
 
 Your character may need a real path to learn hidden information:
 
@@ -57,7 +57,7 @@ If you guess a secret correctly, the game should not automatically confirm it un
 
 ## Consequences
 
-Consequences are not always immediate.
+Consequences can be immediate or delayed.
 
 You might:
 
@@ -70,8 +70,8 @@ You might:
 
 This is why small choices can matter in long play.
 
-## What The Living World Is Not
+## Simulation scope
 
-It is not a perfect full simulation of every person at every second. That would be slow and expensive.
+WorldForge focuses attention where it matters: visible scenes, important NPCs, active factions, unresolved threads, and consequences that can reach the player.
 
-Instead, WorldForge focuses attention where it matters: visible scenes, important NPCs, active factions, unresolved threads, and consequences that can reach the player.
+This keeps turns playable without pretending to simulate every person at every second.

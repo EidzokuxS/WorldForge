@@ -46,7 +46,6 @@ import {
 } from "../lib/sse-hash.js";
 import {
   processOpeningScene,
-  processTurn,
   resumePendingTurnNarration,
   captureSnapshot,
   restoreSnapshot,
@@ -56,11 +55,8 @@ import {
   hasPreparedSettledTurnPacketRecovery,
   hasTurnSagaSnapshotRecovery,
   NarrationRepairExhaustedError,
-  GameplayCycleV2PendingNarrationError,
   PendingNarrationError,
-  findLatestGameplayCycleV2PendingNarrationPacket,
   queuePostTurnSimulationProposals,
-  resumeGameplayCycleV2PendingNarration,
 } from "../engine/index.js";
 import type {
   TurnSagaRecord,
@@ -108,7 +104,6 @@ import {
 } from "../engine/quick-action-offers.js";
 import { withSafeTurnProgressPayload } from "../engine/turn-processor.js";
 import {
-  isCleanGameplayRuntimeEnabled,
   processCleanGameplayTurn,
 } from "../engine/gameplay-cycle-runtime/runtime.js";
 
@@ -122,6 +117,9 @@ type CleanRuntimeDoneBoundaryData = {
   recordId: string;
   turnId: string;
   packetId: string;
+  tick: number;
+  worldVersion: number;
+  worldTimeMinutes: number;
   chatHistoryLengthBeforeTurn: number;
   chatHistoryLengthAfterTurn: number;
   userMessageSha256: string;
@@ -421,12 +419,6 @@ function resumeTokenForSaga(
   return `resume_${sha256Prefix(`${saga.campaignId}:${saga.id}:${saga.turnId}`)}`;
 }
 
-function resumeTokenForGameplayCycleV2Packet(
-  packet: Pick<GameplayCycleV2PendingNarrationError, "campaignId" | "packetId" | "turnId">,
-): string {
-  return `resume_v2_${sha256Prefix(`${packet.campaignId}:${packet.packetId}:${packet.turnId}`)}`;
-}
-
 const pendingNarrationRecoveryStates = [
   "resume_ready",
   "finalizing_turn",
@@ -474,25 +466,7 @@ function pendingNarrationBlockResponse(
   if (pendingSaga) {
     return c.json(pendingNarrationData(pendingSaga, message), 409);
   }
-  const pendingV2Packet = findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
-  return pendingV2Packet
-    ? c.json(gameplayCycleV2PendingNarrationData(pendingV2Packet, message), 409)
-    : null;
-}
-
-async function streamGameplayCycleV2PendingNarrationError(input: {
-  error: GameplayCycleV2PendingNarrationError;
-  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
-  message: string;
-}): Promise<void> {
-  await input.stream.writeSSE({
-    event: "error",
-    data: JSON.stringify({
-      ...gameplayCycleV2PendingNarrationData(input.error, input.message),
-      settled: true,
-      recoverable: true,
-    }),
-  });
+  return null;
 }
 
 function noteTerminalTurnEvent(
@@ -648,6 +622,9 @@ function isCleanRuntimeDoneBoundaryData(value: unknown): value is CleanRuntimeDo
     && typeof value.recordId === "string"
     && typeof value.turnId === "string"
     && typeof value.packetId === "string"
+    && isWholeNonNegativeNumber(value.tick)
+    && isWholeNonNegativeNumber(value.worldVersion)
+    && isWholeNonNegativeNumber(value.worldTimeMinutes)
     && isWholeNonNegativeNumber(value.chatHistoryLengthBeforeTurn)
     && isWholeNonNegativeNumber(value.chatHistoryLengthAfterTurn)
     && typeof value.userMessageSha256 === "string"
@@ -1160,26 +1137,6 @@ function pendingNarrationStatus(
   };
 }
 
-function gameplayCycleV2PendingNarrationData(
-  packet: Pick<GameplayCycleV2PendingNarrationError, "campaignId" | "packetId" | "turnId">,
-  message: string,
-): PendingNarrationPublicData & {
-  runtime: "gameplay-cycle-v2";
-  packetId: string;
-  turnId: string;
-} {
-  return {
-    error: message,
-    pendingNarration: true,
-    resumable: true,
-    recoveryState: "resume_ready",
-    resumeToken: resumeTokenForGameplayCycleV2Packet(packet),
-    runtime: "gameplay-cycle-v2",
-    packetId: packet.packetId,
-    turnId: packet.turnId,
-  };
-}
-
 async function streamPendingTurnNarration(args: {
   campaignId: string;
   saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId">;
@@ -1242,74 +1199,6 @@ async function streamPendingTurnNarration(args: {
     await writeTurnEventSSE(args.stream, {
       type: "error",
       data: pendingNarrationData(args.saga, message),
-    });
-    return "pending";
-  }
-}
-
-async function streamGameplayCycleV2PendingTurnNarration(args: {
-  campaignId: string;
-  packetId: string;
-  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
-  storytellerProvider: ProviderConfig;
-  storytellerTemperature: number;
-  storytellerMaxTokens: number;
-}): Promise<"resumed" | "pending"> {
-  try {
-    const writeRouteEvent = createRouteTurnEventWriter(args.campaignId, args.stream);
-    const generator = resumeGameplayCycleV2PendingNarration({
-      campaignId: args.campaignId,
-      packetId: args.packetId,
-      storytellerProvider: args.storytellerProvider,
-      storytellerTemperature: args.storytellerTemperature,
-      storytellerMaxTokens: args.storytellerMaxTokens,
-    });
-
-    let terminalEventType: "done" | "error" | null = null;
-    for await (const event of generator) {
-      if (event.type === "done" || event.type === "error") {
-        terminalEventType = event.type;
-      }
-      await writeRouteEvent(event);
-    }
-    if (terminalEventType === "done") return "resumed";
-    await writeTurnEventSSE(args.stream, {
-      type: "error",
-      data: {
-        error: "Gameplay-cycle-v2 pending narration resume ended before a terminal done event.",
-        pendingNarration: true,
-        runtime: "gameplay-cycle-v2",
-        packetId: args.packetId,
-        resumable: true,
-        recoveryState: "resume_ready",
-      },
-    });
-    return "pending";
-  } catch (error) {
-    const pendingError = error instanceof GameplayCycleV2PendingNarrationError
-      ? error
-      : null;
-    await writeTurnEventSSE(args.stream, {
-      type: "error",
-      data: pendingError
-        ? gameplayCycleV2PendingNarrationData(
-          pendingError,
-          getPlayerSafeErrorMessage(
-            error,
-            "Gameplay-cycle-v2 pending narration could not be completed yet.",
-          ),
-        )
-        : {
-          error: getPlayerSafeErrorMessage(
-            error,
-            "Gameplay-cycle-v2 pending narration could not be completed yet.",
-          ),
-          pendingNarration: true,
-          runtime: "gameplay-cycle-v2",
-          packetId: args.packetId,
-          resumable: true,
-          recoveryState: "resume_ready",
-        },
     });
     return "pending";
   }
@@ -1439,21 +1328,11 @@ app.get("/history", async (c) => {
     const premise = getCampaignPremise(campaignId);
     const messages = getChatHistory(campaignId).map(toPlayerFacingChatMessage);
     const pendingSaga = findPendingNarrationSaga({ campaignId });
-    const pendingV2Packet = pendingSaga
-      ? null
-      : findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
     return c.json({
       messages,
       premise,
       hasLiveTurnSnapshot: Boolean(getLiveGameplayBoundaryAtTail(campaignId)),
-      pendingNarration: pendingSaga
-        ? pendingNarrationStatus(pendingSaga)
-        : pendingV2Packet
-          ? gameplayCycleV2PendingNarrationData(
-            pendingV2Packet,
-            "A previous gameplay-cycle-v2 turn is still waiting for final narration.",
-          )
-          : null,
+      pendingNarration: pendingSaga ? pendingNarrationStatus(pendingSaga) : null,
     });
   } catch (error) {
     return c.json(
@@ -1708,9 +1587,6 @@ app.post("/action", async (c) => {
         );
       }
     }
-    const compatibilityIntent = playerAction;
-    const compatibilityMethod = "";
-
     return streamSSE(c, async (stream) => {
       const unregisterAbortCleanup = registerTurnAbortCleanup({
         signal: c.req.raw.signal,
@@ -1761,79 +1637,47 @@ app.post("/action", async (c) => {
           chatHistoryLengthBeforeTurn,
         });
         try {
-          const cleanRuntimeEnabled = isCleanGameplayRuntimeEnabled();
-          const turnGenerator = cleanRuntimeEnabled
-            ? processCleanGameplayTurn({
-              campaignId,
-              submittedPlayerAction,
-              normalizedPlayerAction: playerAction,
-              quickActionSelection: quickActionSelection
-                ? {
-                  handle: quickActionSelection.handle,
-                  offerId: quickActionSelection.offerId,
-                  actionId: quickActionSelection.actionId,
-                  baseWorldVersion: quickActionSelection.baseWorldVersion,
-                }
-                : null,
-              judgeProvider: judgeResult.resolved.provider,
-              storytellerProvider: stResult.resolved.provider,
-              preTurnSnapshot: snapshot,
-            })
-            : processTurn({
-              campaignId,
-              playerAction,
-              intent: compatibilityIntent,
-              method: compatibilityMethod,
-              judgeProvider: judgeResult.resolved.provider,
-              storytellerProvider: stResult.resolved.provider,
-              storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-              storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-              embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-              preTurnSnapshot: snapshot,
-              onPostTurn: postTurnHooks.onPostTurn,
-            });
+          const turnGenerator = processCleanGameplayTurn({
+            campaignId,
+            submittedPlayerAction,
+            normalizedPlayerAction: playerAction,
+            quickActionSelection: quickActionSelection
+              ? {
+                handle: quickActionSelection.handle,
+                offerId: quickActionSelection.offerId,
+                actionId: quickActionSelection.actionId,
+                baseWorldVersion: quickActionSelection.baseWorldVersion,
+              }
+              : null,
+            judgeProvider: judgeResult.resolved.provider,
+            storytellerProvider: stResult.resolved.provider,
+            preTurnSnapshot: snapshot,
+          });
 
           let terminalEventType: TerminalTurnEventType | null = null;
           const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);
           for await (const event of turnGenerator) {
-            // Reactive auto-checkpoint when HP drops to danger zone during turn
-            if (event.type === "auto_checkpoint") {
-              const detachedCtx = getTurnContext();
-              const ckptBody = async (): Promise<void> => {
-                try {
-                  await createCheckpoint(campaignId, {
-                    name: "auto-danger",
-                    description: "Auto-save: HP dropped to danger zone",
-                    auto: true,
-                  });
-                  await pruneAutoCheckpoints(campaignId, 3);
-                } catch (err) {
-                  log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
-                }
-              };
-              if (detachedCtx) {
-                void runWithTurnContext({ ...detachedCtx, role: undefined }, ckptBody);
-              } else {
-                void ckptBody();
-              }
-            }
-
             if (event.type === "done") {
-              if (cleanRuntimeEnabled) {
-                if (!isCleanRuntimeDoneBoundaryData(event.data)) {
-                  throw new Error("Clean runtime emitted an invalid committed done boundary.");
-                }
-                settledTurnRollbackShield = true;
-                setCleanLastTurnSnapshot({
-                  campaignId,
-                  snapshot,
-                  playerAction,
-                  done: event.data,
-                });
-              } else {
-              settledTurnRollbackShield = true;
-              postTurnHooks.onDone(event, snapshot);
+              if (!isCleanRuntimeDoneBoundaryData(event.data)) {
+                throw new Error("Clean runtime emitted an invalid committed done boundary.");
               }
+              settledTurnRollbackShield = true;
+              await postTurnHooks.onPostTurn?.(turnSummaryFromDoneEvent(event) ?? {
+                tick: event.data.tick,
+                idempotencyKey: `clean-done-boundary:${event.data.recordId}`,
+                oracleResult: null,
+                toolCalls: [],
+                acceptedDurableEventIds: [],
+                producedDurableEventIds: [],
+                narrativeText: "",
+              });
+              postTurnHooks.onDone(event, snapshot);
+              setCleanLastTurnSnapshot({
+                campaignId,
+                snapshot,
+                playerAction,
+                done: event.data,
+              });
             }
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
@@ -1904,29 +1748,6 @@ app.post("/action", async (c) => {
               message: getPlayerSafeErrorMessage(error, "Narration is pending repair."),
             });
             outcome = result === "resumed" ? "pending_resumed" : "pending";
-            return;
-          }
-          if (error instanceof GameplayCycleV2PendingNarrationError) {
-            outcome = "pending";
-            setLastTurnSnapshot(
-              campaignId,
-              snapshot,
-              {
-                acceptedDurableEventIds: [],
-                producedDurableEventIds: [],
-                playerAction,
-                chatHistoryLengthBeforeTurn,
-                chatHistoryLengthAfterTurn: getChatHistory(campaignId).length,
-              },
-            );
-            await streamGameplayCycleV2PendingNarrationError({
-              error,
-              stream,
-              message: getPlayerSafeErrorMessage(
-                error,
-                "Turn resolved but final narration is pending.",
-              ),
-            });
             return;
           }
           const pendingResult = await streamPendingNarrationBeforeRollback({
@@ -2068,72 +1889,9 @@ app.post("/resume", async (c) => {
 
     const pendingSaga = findPendingNarrationSaga({ campaignId });
     if (!pendingSaga) {
-      const pendingV2Packet = findLatestGameplayCycleV2PendingNarrationPacket(campaignId);
-      if (!pendingV2Packet) {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
-        return c.json({ error: "No pending narration to resume." }, 400);
-      }
-      if (!resumeToken) {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
-        return c.json(
-          gameplayCycleV2PendingNarrationData(
-            pendingV2Packet,
-            "Resume token is required for gameplay-cycle-v2 pending narration recovery.",
-          ),
-          400,
-        );
-      }
-      if (resumeToken !== resumeTokenForGameplayCycleV2Packet(pendingV2Packet)) {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
-        return c.json(
-          gameplayCycleV2PendingNarrationData(
-            pendingV2Packet,
-            "Resume token no longer matches the gameplay-cycle-v2 pending narration packet.",
-          ),
-          409,
-        );
-      }
-
-      const settings = loadSettings();
-      const stResult = resolveStoryteller(settings);
-      if ("error" in stResult) {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
-        return c.json({ error: stResult.error }, stResult.status);
-      }
-
-      c.header("Cache-Control", "no-cache, no-transform");
-      const turnId = randomUUID();
-      const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
-      return streamSSE(c, async (stream) => {
-        const unregisterAbortCleanup = registerTurnAbortCleanup({
-          signal: c.req.raw.signal,
-          campaignId,
-          route: "/resume",
-        });
-        try {
-          await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
-            try {
-              await streamGameplayCycleV2PendingTurnNarration({
-                campaignId,
-                packetId: pendingV2Packet.packetId,
-                stream,
-                storytellerProvider: stResult.resolved.provider,
-                storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-                storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-              });
-            } finally {
-              endTurn(campaignId);
-              turnStartedForCampaign = null;
-            }
-          });
-        } finally {
-          unregisterAbortCleanup();
-        }
-      });
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json({ error: "No pending narration to resume." }, 400);
     }
     const legacyPendingSaga = pendingSaga;
     if (!resumeToken) {
@@ -2442,47 +2200,40 @@ app.post("/retry", async (c) => {
           chatHistoryLengthBeforeTurn: previousBoundary.chatHistoryLengthBeforeTurn ?? undefined,
         });
         try {
-          const turnGenerator = processTurn({
+          const turnGenerator = processCleanGameplayTurn({
             campaignId,
-            playerAction,
-            intent: playerAction, // Re-use player action as intent for retry
-            method: "",
+            submittedPlayerAction: playerAction,
+            normalizedPlayerAction: playerAction,
+            quickActionSelection: null,
             judgeProvider: judgeResult.resolved.provider,
             storytellerProvider: stResult.resolved.provider,
-            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-            embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
             preTurnSnapshot: previousSnapshot,
-            onPostTurn: postTurnHooks.onPostTurn,
           });
 
           let terminalEventType: TerminalTurnEventType | null = null;
           const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);
           for await (const event of turnGenerator) {
-            if (event.type === "auto_checkpoint") {
-              const detachedCtx = getTurnContext();
-              const ckptBody = async (): Promise<void> => {
-                try {
-                  await createCheckpoint(campaignId, {
-                    name: "auto-danger",
-                    description: "Auto-save: HP dropped to danger zone",
-                    auto: true,
-                  });
-                  await pruneAutoCheckpoints(campaignId, 3);
-                } catch (err) {
-                  log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
-                }
-              };
-              if (detachedCtx) {
-                void runWithTurnContext({ ...detachedCtx, role: undefined }, ckptBody);
-              } else {
-                void ckptBody();
-              }
-            }
-
             if (event.type === "done") {
+              if (!isCleanRuntimeDoneBoundaryData(event.data)) {
+                throw new Error("Clean runtime emitted an invalid committed done boundary.");
+              }
               settledTurnRollbackShield = true;
+              await postTurnHooks.onPostTurn?.(turnSummaryFromDoneEvent(event) ?? {
+                tick: event.data.tick,
+                idempotencyKey: `clean-done-boundary:${event.data.recordId}`,
+                oracleResult: null,
+                toolCalls: [],
+                acceptedDurableEventIds: [],
+                producedDurableEventIds: [],
+                narrativeText: "",
+              });
               postTurnHooks.onDone(event, previousSnapshot);
+              setCleanLastTurnSnapshot({
+                campaignId,
+                snapshot: previousSnapshot,
+                playerAction,
+                done: event.data,
+              });
             }
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
@@ -2553,29 +2304,6 @@ app.post("/retry", async (c) => {
               message: getPlayerSafeErrorMessage(error, "Narration is pending repair."),
             });
             outcome = result === "resumed" ? "pending_resumed" : "pending";
-            return;
-          }
-          if (error instanceof GameplayCycleV2PendingNarrationError) {
-            outcome = "pending";
-            setLastTurnSnapshot(
-              campaignId,
-              previousSnapshot,
-              {
-                acceptedDurableEventIds: [],
-                producedDurableEventIds: [],
-                playerAction,
-                chatHistoryLengthBeforeTurn: previousBoundary.chatHistoryLengthBeforeTurn,
-                chatHistoryLengthAfterTurn: getChatHistory(campaignId).length,
-              },
-            );
-            await streamGameplayCycleV2PendingNarrationError({
-              error,
-              stream,
-              message: getPlayerSafeErrorMessage(
-                error,
-                "Retry resolved but final narration is pending.",
-              ),
-            });
             return;
           }
           const pendingResult = await streamPendingNarrationBeforeRollback({

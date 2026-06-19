@@ -130,15 +130,6 @@ export interface CleanGameplayRuntimeCoreOptions {
   }) => Promise<CleanNarrationRunResult>;
 }
 
-function envFlagEnabled(name: string): boolean {
-  const value = process.env[name]?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
-}
-
-export function isCleanGameplayRuntimeEnabled(): boolean {
-  return envFlagEnabled("WORLDFORGE_GAMEPLAY_RUNTIME_CLEAN");
-}
-
 function providerSummary(provider: ProviderConfig): GameplayRuntimeProviderSummary {
   return {
     id: provider.id,

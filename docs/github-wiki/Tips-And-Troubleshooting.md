@@ -1,6 +1,6 @@
-# Tips And Troubleshooting
+# Tips and troubleshooting
 
-## The App Will Not Start
+## The app will not start
 
 Check:
 
@@ -17,9 +17,9 @@ npm run dev
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-## The Game Says A Provider Or Model Is Missing
+## The game says a provider or model is missing
 
-Open **Settings** and check:
+Open Settings and check:
 
 - Provider is saved.
 - API key is present if required.
@@ -28,7 +28,9 @@ Open **Settings** and check:
 
 At minimum, configure Judge, Storyteller, and Generator.
 
-## World Generation Takes A Long Time
+You do not need a gameplay runtime env flag. `/chat/action` uses `gameplay-cycle-runtime` by default.
+
+## World generation takes a long time
 
 That can be normal. The app may be creating locations, factions, NPCs, lore, and source context.
 
@@ -39,7 +41,7 @@ If it seems stuck:
 - Check provider settings.
 - Try a more reliable/faster model for Generator.
 
-## The Story Feels Too Vague
+## The story feels too vague
 
 Give the game clearer actions.
 
@@ -53,17 +55,17 @@ Try:
 
 Also review the generated world. A vague starting location or weak faction goal can make play feel fuzzy.
 
-## The Game Asked A Clarifying Question
+## The game asked a clarifying question
 
-This is not always a failure. It often means the game does not want to guess your target, method, or intent.
+This often means the game needs your target, method, or intent before it changes the world.
 
 Answer directly:
 
 > I mean the old warehouse by the river, and I am trying to enter quietly without being seen.
 
-## The Game Did Something That Feels Wrong
+## The game did something that feels wrong
 
-Use retry or checkpoint tools if available. Then adjust your action with clearer intent.
+Use checkpoint or undo tools if available. Then adjust your action with clearer intent.
 
 Examples:
 
@@ -72,13 +74,13 @@ Examples:
 - "I am trying to scare him away, not kill him."
 - "I want to know what my character can see, not hidden truth."
 
-## The Narration Is In The Wrong Language
+## The narration is in the wrong language
 
 Try writing your action in the language you want the game to use. If the campaign itself is mixed-language, be explicit:
 
 > Answer in Russian, but keep proper names as written.
 
-## The World Ignored My Character's Power
+## The world ignored my character's power
 
 Describe how the power works in the action. Mention limits and method.
 
@@ -88,7 +90,7 @@ This is easier for the game to judge than:
 
 > I use my powers.
 
-## The World Gave Me Too Much Secret Information
+## The world gave me too much secret information
 
 Treat it as a bug or rough edge. A good action to recover is:
 
