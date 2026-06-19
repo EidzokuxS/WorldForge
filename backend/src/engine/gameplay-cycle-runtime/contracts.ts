@@ -3336,7 +3336,7 @@ const cleanNarratorStoryPageBriefSchema = z.object({
 const cleanNarratorPageTaskSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narrator-page-task.v1"),
   source: z.literal("derived_from_story_frame_page_plan"),
-  referenceProfile: z.literal("zetta_micro_1_1_3_primary_ff5_micro_secondary"),
+  referenceProfile: z.literal("zetta_onyx_1_37_primary_balanced_freaky_nsfw_donor"),
   pageGoal: z.literal("turn_changelog_to_grounded_text_rpg_page"),
   truthBoundary: z.literal("hard_facts_strict_soft_prose_free"),
   storyPageBrief: cleanNarratorStoryPageBriefSchema,

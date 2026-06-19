@@ -1592,7 +1592,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.narrativePageTask).toEqual({
       version: "gameplay-runtime.clean-narrator-page-task.v1",
       source: "derived_from_story_frame_page_plan",
-      referenceProfile: "zetta_micro_1_1_3_primary_ff5_micro_secondary",
+      referenceProfile: "zetta_onyx_1_37_primary_balanced_freaky_nsfw_donor",
       pageGoal: "turn_changelog_to_grounded_text_rpg_page",
       truthBoundary: "hard_facts_strict_soft_prose_free",
       storyPageBrief: {
@@ -6885,15 +6885,15 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
-  it("keeps Realism NSFW mode as an explicit opt-in narrator style layer", async () => {
+  it("keeps realism_nsfw as an intensified adult narrator style layer", async () => {
     const result = await runCleanNarration({
       narratorView: modelNarrationView(),
       provider,
       styleMode: "realism_nsfw",
       generateCandidate: async (request) => {
         expect(request.styleMode).toBe("realism_nsfw");
-        expect(request.system).toContain("Adult balanced mode:");
-        expect(request.system).toContain("Adult balanced pacing:");
+        expect(request.system).toContain("Adult explicit mode:");
+        expect(request.system).toContain("Adult explicit pacing:");
         expect(request.system).toContain("accepted evidence refs");
         expect(request.system).not.toMatch(/\b(jailbreak|assault|never ask permission)\b/iu);
         return {
@@ -6917,7 +6917,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("model");
-    expect(buildCleanNarrationSystemPrompt()).not.toContain("Adult balanced mode:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced-Freaky adult register:");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Adult explicit mode:");
   });
 
   it("rejects generation failure before player-facing narration", async () => {
@@ -6971,8 +6972,15 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("BOLT v2 Writing Room");
     expect(buildCleanNarrationSystemPrompt()).toContain("Forward Motion");
     expect(buildCleanNarrationSystemPrompt()).toContain("Hybrid POV:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Silent writing-room check:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("BOLT v2 silent writing room:");
     expect(buildCleanNarrationSystemPrompt()).toContain("NPC knowledge is limited");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced-Freaky NSFW adult register");
+    expect(buildCleanNarrationSystemPrompt()).toContain("WorldForge is adult fiction");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta banned vocabulary is craft guidance and offline benchmark data");
+    expect(buildCleanNarrationSystemPrompt()).toContain("fresh meat");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Seven-family Zetta prose bans are craft guidance and offline benchmark data");
+    expect(buildCleanNarrationSystemPrompt()).toContain("word-as-object name tasting");
+    expect(buildCleanNarrationSystemPrompt()).toContain("clinical euphemism");
     expect(buildCleanNarrationSystemPrompt()).toContain("Micro-page rhythm:");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow storyFrame.pagePlan from accepted context to accepted turn event to accepted next-action context");
     expect(buildCleanNarrationSystemPrompt()).toContain("Story page brief:");
@@ -7061,7 +7069,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("materialWeaveOrder");
     expect(buildCleanNarrationSystemPrompt()).toContain("styleBudget");
     expect(buildCleanNarrationSystemPrompt()).toContain("closingFunction");
-    expect(buildCleanNarrationSystemPrompt()).toContain("subject/verb pairings");
+    expect(buildCleanNarrationSystemPrompt()).toContain("different doors across nearby turns");
     expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof:");
     expect(buildCleanNarrationSystemPrompt()).toContain("pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("optional routing metadata");
@@ -7091,7 +7099,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("ordinary plausible current-scene props");
     expect(buildCleanNarrationSystemPrompt()).toContain("softProseKinds ['ordinary_scene_prop']");
     expect(buildCleanNarrationSystemPrompt()).toContain("A hidden latch, loose weaponizable leg, trap");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced NSFW style gating");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Balanced-Freaky NSFW adult register");
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft surface material menu: choose present visible material traits attached to the object itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");

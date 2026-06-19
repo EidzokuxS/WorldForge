@@ -1,5 +1,28 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-19 - P336 Zetta Adult Prose Polish
+
+Goal:
+- Polish Stage 6 prose toward adult text-RPG narration using Zetta Onyx v1.37 donor blocks, while keeping the P334/P335 hard-fact/soft-prose truth contract intact.
+
+Plan:
+- [x] Read the P334 handoff, current worktree, recent commits, current Stage 6 prompt/validation surface, Zetta v1.37 donor blocks, humanizer, and deslop references.
+- [x] Update the Stage 6 prompt contract so Zetta Cinematic Realism, BOLT v2 writing-room discipline, Forward Motion, Door Rotation, NPC voice/knowledge boundaries, and Balanced-Freaky NSFW adult register are present as prose guidance.
+- [x] Keep the runtime validator focused on schema, refs, hard claims, and private leaks; use style bans only as prompt craft and offline benchmark data.
+- [x] Extend `scripts/audit-clean-runtime-prose.mjs` to report Zetta banned vocabulary per 1k words, seven-family prose hits, echo/repetition/opening-rotation stats, and adult-register blandness/euphemism signals.
+- [x] Update focused narration tests for the new adult prose prompt contract while preserving harmless Brass Tube surface acceptance and hidden/mechanical rejection.
+- [x] Run focused/expanded tests, typecheck, prose audit over available P335 long-run artifacts, GitNexus detect_changes, then commit/push if clean.
+
+Review:
+- Updated Stage 6 `referenceProfile` from the old Zetta Micro/FF5 marker to `zetta_onyx_1_37_primary_balanced_freaky_nsfw_donor` in prompt input and schema.
+- Stage 6 default system prompt now carries Zetta Onyx v1.37 Cinematic Realism, BOLT v2 silent writing-room check, Forward Motion, Door Rotation, NPC voice/anti-omniscience, Balanced-Freaky adult register, donor banned vocabulary, and seven-family prose-ban craft guidance as prompt/audit guidance only.
+- `realism_nsfw` remains an intensified adult style layer under the same accepted-evidence boundary; the default narrator also knows WorldForge is adult fiction and can use adult register when accepted evidence creates the charge.
+- Runtime validation remains on schema/refs/hard claims. Harmless Brass Tube surface prose acceptance and hidden/mechanical affordance rejection remain covered by the focused narration suite.
+- Extended prose audit output now reports structural blocker hits separately from `styleBenchmark`: banned vocabulary occurrences/per 1k words, seven-family style hits/per 1k words, adult clinical-euphemism rate, opening-door counts, repeated starts, and repeated exact sentences.
+- Verification so far: focused narration suite passed 126/126; expanded clean-runtime slice passed 450/450; `npm --prefix backend run typecheck` passed.
+- Reran the new audit over P335 long-run r67/r70: 120 narratives, hard/runtime blocker hits 0, banned vocabulary 0 per 1k words, seven-family style hits 0 per 1k words, adult clinical euphemism 0 per 1k words. Baseline repetition is now explicit: repeatedStartRate 0.625, exactRepeatedSentenceRate 0.633, top repeats dominated by static scene texture and travel landing frames.
+- `git diff --check` passed. GitNexus detect_changes reported LOW risk, 7 changed symbols, 0 affected execution flows.
+
 ## Current Session Focus 2026-06-15 - P335 Long-Run Prose Endurance Acceptance
 
 Goal:
