@@ -215,7 +215,7 @@ const createSceneAssembly = (
     } | null;
     playerAction?: string;
   } = {},
-) => ({
+): SceneAssembly => ({
   openingScene: false,
   openingState: sceneModeHints.openingState
     ? {
@@ -235,6 +235,7 @@ const createSceneAssembly = (
     name: "Scenario Hall",
     description: "A tense platform with no clear boundaries.",
     tags: sceneModeHints.tags ?? [],
+    kind: "persistent_sublocation",
   },
   presentNpcNames: [],
   sceneDirection: sceneModeHints.sceneDirection ?? null,
@@ -1071,6 +1072,7 @@ describe("assemblePrompt", () => {
           description:
             "Canvas stalls sag under smoke while merchants whisper behind shuttered lamps.",
           tags: ["market", "tense"],
+          kind: "persistent_sublocation",
         },
         presentNpcNames: ["Mira"],
         sceneDirection: null,
@@ -1501,6 +1503,7 @@ describe("assemblePrompt", () => {
           name: "Platform 7",
           description: "A concrete platform inside the larger station district.",
           tags: ["encounter-scope"],
+          kind: "persistent_sublocation",
         },
         presentNpcNames: ["Nanami"],
         sceneDirection: null,
@@ -2098,6 +2101,58 @@ describe("assemblePrompt", () => {
     expect(result.prompt).not.toContain("dr...");
   });
 
+  it("asks opening narration to spend multiple distinct backend facts when available", async () => {
+    const narratorPacket = createNarratorPacket({
+      playerAction: "[opening scene]",
+      controlReturnReason: "opening_scene_settled_packet",
+    });
+    narratorPacket.evidenceLedger = [
+      {
+        id: "opening:0:visible-fact:1",
+        category: "perceivable_effect",
+        summary: "You are at Shibuya station concourse, inside Shibuya.",
+        sourceId: "opening:0:visible-fact:1",
+        summaryBackendFact: true,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [],
+      },
+      {
+        id: "opening:0:visible-fact:2",
+        category: "perceivable_effect",
+        summary: "Civilians crowd the shopping streets and station concourses.",
+        sourceId: "opening:0:visible-fact:2",
+        summaryBackendFact: true,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [],
+      },
+      {
+        id: "opening:0:visible-fact:3",
+        category: "perceivable_effect",
+        summary: "Chakra saturation in the tunnels drops temperatures and shorts streetlights.",
+        sourceId: "opening:0:visible-fact:3",
+        summaryBackendFact: true,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [],
+      },
+    ];
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly(),
+      narratorPacket,
+    });
+
+    expect(result.prompt).toContain(
+      "Opening scene pages establish a playable start page",
+    );
+    expect(result.prompt).toContain("select 3-5 different backendFacts");
+    expect(result.prompt).toContain("do not collapse opening into one summary line");
+    expect(result.prompt).toContain("You are at Shibuya station concourse, inside Shibuya.");
+    expect(result.prompt).toContain("Civilians crowd the shopping streets and station concourses.");
+    expect(result.prompt).toContain("Chakra saturation in the tunnels drops temperatures and shorts streetlights.");
+  });
+
   it("isolates NarratorPacket final-visible prompts from sceneAssembly failed or skipped effect prose", async () => {
     const narratorPacket = createNarratorPacket();
     const sceneAssembly = createSceneAssembly({
@@ -2232,6 +2287,7 @@ describe("assemblePrompt", () => {
       name: "Shibuya Kissaten",
       description: "A narrow cafe booth under warm lights.",
       tags: ["urban", "cafe"],
+      kind: "persistent_sublocation",
     };
     sceneAssembly.presentNpcNames = ["Cafe Clerk"];
     sceneAssembly.recentContext = [

@@ -1,5 +1,27 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-20 - Opening Scene Playable Page Contract
+
+Goal:
+- Turn `/chat/opening` from a one-line world-summary into a playable start page grounded in the starting point: concrete opening lens, pressure/texture, visible actors, and first route/action handles, without regex prose gates, fallbacks, repair loops, or legacy runtime paths.
+
+Plan:
+- [x] Run GitNexus impact on the touched opening/prompt/scene symbols.
+- [x] Add `currentScene.kind` to assembled scene context so opening can distinguish macro locations from concrete scene scopes.
+- [x] Build opening narration evidence as multiple sentence-ready backend facts: opening lens, scene texture, starting state, pressure, route handles, and player-perceivable world-brain beats.
+- [x] Tighten the Stage 6 opening prompt contract so opening pages spend 3-5 distinct backend facts instead of collapsing to one summary line.
+- [x] Preserve strict hard-fact validation and leave harmless prose policing out of runtime validation.
+- [x] Fix the opening narration render path to pass the saga lock token into narrator attempt recording.
+- [x] Verify with typecheck, focused/expanded tests, and a live `/api/chat/opening` proof on a clean proof clone.
+
+Review:
+- `AuthoritativeSceneContext` now carries location `kind`, letting opening narration derive a soft opening lens for broad macro rows such as Shibuya instead of treating the whole district as a single room.
+- Opening settled packets now expose up to 8 narratable facts, including a concrete Shibuya station-concourse lens, public scene texture, pressure, world-brain visible beats, and route handles from the current location graph.
+- The Stage 6 draft contract now explicitly says opening pages must establish immediate locus/opening lens, pressure or sensory texture, and first handles; when 3+ backend facts are available it asks for 3-5 distinct factRefs and forbids collapsing opening into one summary line.
+- The first live proof exposed a separate opening runtime bug: `renderSettledNarrationWithSaga` was called without `lockToken`, so `recordNarratorAttempt` failed before the final narrator attempt. Passing `openingLedger.lockToken` fixed the first-turn crash.
+- Live proof on `opening-proof-p334-20260620` via port 3002 returned `done` with a 5-sentence start page: Shibuya station-concourse lens, actor pressure, civilian/curse-user situation, chakra/cursed-spirit hazard, and route handles toward Dogenzaka Safehouse, Sendai, Shibuya Station Concourse, and Tokyo Jujutsu High.
+- Verification passed: `npm --prefix backend run typecheck`; focused route/narration prompt suite 194/194; expanded clean-runtime/chat slice 655/655; `git diff --check` clean except CRLF warnings.
+
 ## Current Session Focus 2026-06-20 - Narration Draft Crash Cleanup
 
 Goal:

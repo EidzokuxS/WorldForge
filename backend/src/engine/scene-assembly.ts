@@ -61,6 +61,7 @@ export interface AuthoritativeSceneContext {
   name: string;
   description: string;
   tags: string[];
+  kind: "macro" | "persistent_sublocation" | "ephemeral_scene";
 }
 
 export interface SceneAssembly {
@@ -329,6 +330,7 @@ function buildCurrentScene(
     name: location.name,
     description: location.description,
     tags: parseStringArray(location.tags),
+    kind: location.kind,
   };
 }
 

@@ -38,6 +38,7 @@ function createSceneAssembly(): SceneAssembly {
       name: "Night Courier Depot",
       description: "A brass counter, route hooks, and a rain-black street outside.",
       tags: ["depot"],
+      kind: "persistent_sublocation",
     },
     presentNpcNames: ["Depot Clerk"],
     sceneDirection: null,

@@ -1812,6 +1812,7 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
   const forbiddenTerms = collectNarratorPacketForbiddenTerms(narratorPacket);
   const evidenceLines = getAllowedNarrationCitationEvidenceRefs(narratorPacket)
     .map((entry) => formatAllowedCitationEvidenceRef(entry, forbiddenTerms));
+  const openingScene = narratorPacket.controlReturnReason === "opening_scene_settled_packet";
 
   return [
     "[GROUNDED SENTENCE DRAFT CONTRACT]",
@@ -1823,6 +1824,11 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "Any other sentence key, including text, kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid.",
     `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "factRefs": [exactly 1 backendFacts ref such as "e1.p1"], "evidenceRefs": [1 to 4 short packet evidence refs such as "e1"] }] }.`,
     "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
+    ...(openingScene
+      ? [
+          "Opening scene pages establish a playable start page: immediate locus/opening lens, live pressure or sensory texture, and first handles for action. When 3 or more distinct backendFacts are listed, select 3-5 different backendFacts across 3-5 sentence objects; do not collapse opening into one summary line.",
+        ]
+      : []),
     "If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects.",
     "Do not output text, kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata and compiles player-visible prose from factRefs and evidenceRefs.",
     "Every sentence must cite 1-4 short refs from [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]; HARD CAP: each evidenceRefs array MUST contain <= 4 refs, never 5 or more.",

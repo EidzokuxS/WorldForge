@@ -131,6 +131,8 @@ import {
   type CanonicalTurnPacketResponse,
   type CanonicalTurnResolution,
   type NarratorPacket,
+  type NarratorPacketEvidence,
+  type NarratorPacketSourceLinkedSummary,
 } from "./narrator-packet.js";
 import {
   runVisibleNarrationWithPacketGuard,
@@ -2559,6 +2561,193 @@ function openingSafeTexts(
   }));
 }
 
+function openingEvidenceKey(value: string): string {
+  let key = "";
+  let previousWasSpace = false;
+  for (const char of value.trim().toLocaleLowerCase()) {
+    const isSpace = char === " " || char === "\t" || char === "\n" || char === "\r";
+    if (isSpace) {
+      if (!previousWasSpace) {
+        key += " ";
+      }
+      previousWasSpace = true;
+      continue;
+    }
+    previousWasSpace = false;
+    key += char;
+  }
+  return key.trim();
+}
+
+function ensureOpeningSentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  const last = trimmed[trimmed.length - 1];
+  return last === "." || last === "!" || last === "?" ? trimmed : `${trimmed}.`;
+}
+
+function stripOpeningContextLabel(value: string): string {
+  const trimmed = value.trim();
+  const prefixes = [
+    "Opening Constraints:",
+    "Opening Opportunities:",
+    "Opening Companions:",
+    "Opening Arrival:",
+    "Opening Visibility:",
+    "Opening Pressure:",
+  ];
+  for (const prefix of prefixes) {
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim();
+    }
+  }
+  return trimmed;
+}
+
+function splitOpeningDescriptionSentences(value: string, maxSentences: number): string[] {
+  const sentences: string[] = [];
+  let current = "";
+  for (const char of value.trim()) {
+    current += char;
+    if (char !== "." && char !== "!" && char !== "?") {
+      continue;
+    }
+    const sentence = current.trim();
+    if (sentence) {
+      sentences.push(sentence);
+    }
+    current = "";
+    if (sentences.length >= maxSentences) {
+      return sentences;
+    }
+  }
+  const tail = current.trim();
+  if (tail && sentences.length < maxSentences) {
+    sentences.push(ensureOpeningSentence(tail));
+  }
+  return sentences;
+}
+
+type OpeningSceneLens = {
+  label: string;
+  sourcePath: string;
+  kind: "macro_lens" | "specific_scene";
+  parentSceneName: string | null;
+};
+
+function openingTextIncludesAny(value: string, terms: readonly string[]): boolean {
+  const normalized = value.toLocaleLowerCase();
+  return terms.some((term) => {
+    const cleanTerm = term.trim().toLocaleLowerCase();
+    return cleanTerm.length > 0 && normalized.includes(cleanTerm);
+  });
+}
+
+function openingSceneSearchText(scene: NonNullable<SceneAssembly["currentScene"]>): string {
+  return [scene.name, scene.description, ...scene.tags].join(" ");
+}
+
+function chooseMacroOpeningLens(
+  scene: NonNullable<SceneAssembly["currentScene"]>,
+): OpeningSceneLens {
+  const text = openingSceneSearchText(scene);
+  const sceneName = scene.name.trim();
+  let label = `the immediate street-level edge of ${sceneName}`;
+
+  if (openingTextIncludesAny(text, ["station", "concourse", "platform", "terminal"])) {
+    label = `${sceneName} station concourse`;
+  } else if (openingTextIncludesAny(text, ["underground", "tunnel", "subway", "basement"])) {
+    label = `an underground passage in ${sceneName}`;
+  } else if (openingTextIncludesAny(text, ["alley", "backstreet", "side street", "lane"])) {
+    label = `a side street in ${sceneName}`;
+  } else if (openingTextIncludesAny(text, ["campus", "school", "courtyard", "training"])) {
+    label = `a campus courtyard at ${sceneName}`;
+  } else if (openingTextIncludesAny(text, ["market", "bazaar", "stalls", "shops"])) {
+    label = `a market-side lane in ${sceneName}`;
+  }
+
+  return {
+    label,
+    sourcePath: "opening.currentScene.macroLens",
+    kind: "macro_lens",
+    parentSceneName: sceneName,
+  };
+}
+
+function resolveOpeningSceneLens(sceneAssembly: SceneAssembly): OpeningSceneLens | null {
+  const scene = sceneAssembly.currentScene;
+  if (!scene) {
+    const locationName = sceneAssembly.openingState?.locationName?.trim();
+    return locationName
+      ? {
+          label: locationName,
+          sourcePath: "opening.locationName",
+          kind: "specific_scene",
+          parentSceneName: null,
+        }
+      : null;
+  }
+
+  if (scene.kind === "macro") {
+    return chooseMacroOpeningLens(scene);
+  }
+
+  return {
+    label: scene.name.trim(),
+    sourcePath: "opening.currentScene.name",
+    kind: "specific_scene",
+    parentSceneName: null,
+  };
+}
+
+function formatOpeningNameList(names: readonly string[]): string {
+  const trimmed = uniqueRefs(names.map((name) => name.trim()).filter(Boolean));
+  if (trimmed.length <= 1) {
+    return trimmed[0] ?? "";
+  }
+  if (trimmed.length === 2) {
+    return `${trimmed[0]} and ${trimmed[1]}`;
+  }
+  return `${trimmed.slice(0, -1).join(", ")}, and ${trimmed[trimmed.length - 1]}`;
+}
+
+function buildOpeningRouteHandleCandidates(input: {
+  campaignId: string;
+  currentTick: number;
+  sceneAssembly: SceneAssembly;
+  lens: OpeningSceneLens | null;
+}): Array<{ summary: string; sourcePath: string }> {
+  const scene = input.sceneAssembly.currentScene;
+  if (!scene) {
+    return [];
+  }
+
+  const graph = loadLocationGraph({ campaignId: input.campaignId });
+  const connectedPaths = listConnectedPaths({
+    campaignId: input.campaignId,
+    fromLocationId: scene.id,
+    edges: graph.edges,
+    locations: graph.locations,
+    currentTick: input.currentTick,
+  });
+  const routeNames = uniqueRefs(connectedPaths.map((path) => path.locationName)).slice(0, 4);
+  if (routeNames.length === 0) {
+    return [];
+  }
+
+  const anchorLabel = input.lens?.label ?? scene.name;
+  const routeList = formatOpeningNameList(routeNames);
+  const summary =
+    routeNames.length === 1
+      ? `From ${anchorLabel}, the clearest way out leads toward ${routeList}.`
+      : `From ${anchorLabel}, the clearest ways out point toward ${routeList}.`;
+
+  return [{
+    sourcePath: "opening.currentScene.connectedPaths",
+    summary,
+  }];
+}
+
 function collectOpeningForbiddenActorNames(sceneAssembly: SceneAssembly): string[] {
   return uniqueRefs(
     Object.entries(sceneAssembly.awareness.byNpcName)
@@ -2601,6 +2790,108 @@ function selectOpeningVisibleSummary(input: {
   }
 
   throw new Error("Opening scene requires a safe player-perceivable summary.");
+}
+
+function buildOpeningNarrationEvidence(input: {
+  campaignId: string;
+  currentTick: number;
+  sceneAssembly: SceneAssembly;
+  visibleDirection: WorldBrainSceneDirection;
+  visibleSummary: string;
+  forbiddenTerms: readonly string[];
+}): {
+  evidenceLedger: NarratorPacketEvidence[];
+  sourceLinkedSummaries: NarratorPacketSourceLinkedSummary[];
+} {
+  const candidates: Array<{ summary: string; sourcePath: string }> = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (sourcePath: string, value: string | null | undefined): void => {
+    const safe = openingSafeText(stripOpeningContextLabel(value ?? ""), input.forbiddenTerms);
+    if (!safe) return;
+    const summary = ensureOpeningSentence(safe);
+    const key = openingEvidenceKey(summary);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ summary, sourcePath });
+  };
+
+  const openingLens = resolveOpeningSceneLens(input.sceneAssembly);
+  if (openingLens) {
+    addCandidate(
+      openingLens.sourcePath,
+      openingLens.kind === "macro_lens" && openingLens.parentSceneName
+        ? `You are at ${openingLens.label}, inside ${openingLens.parentSceneName}.`
+        : `You are at ${openingLens.label}.`,
+    );
+  }
+
+  for (const [index, sentence] of splitOpeningDescriptionSentences(
+    input.sceneAssembly.currentScene?.description ?? "",
+    3,
+  ).entries()) {
+    addCandidate(`opening.currentScene.description[${index}]`, sentence);
+  }
+
+  addCandidate("opening.startingVisibility", input.sceneAssembly.openingState?.startingVisibility
+    ? `Your arrival is ${input.sceneAssembly.openingState.startingVisibility}.`
+    : null);
+  addCandidate("opening.immediateSituation", input.sceneAssembly.openingState?.immediateSituation);
+  for (const [index, pressure] of (input.sceneAssembly.openingState?.entryPressure ?? []).entries()) {
+    addCandidate(`opening.entryPressure[${index}]`, pressure);
+  }
+  for (const [index, line] of (input.sceneAssembly.openingState?.sceneContextLines ?? []).entries()) {
+    addCandidate(`opening.sceneContextLines[${index}]`, line);
+  }
+
+  for (const route of buildOpeningRouteHandleCandidates({
+    campaignId: input.campaignId,
+    currentTick: input.currentTick,
+    sceneAssembly: input.sceneAssembly,
+    lens: openingLens,
+  })) {
+    addCandidate(route.sourcePath, route.summary);
+  }
+
+  addCandidate("opening.playerPerceivableSceneDirection.situationSummary", input.visibleSummary);
+  for (const [index, beat] of input.visibleDirection.causalBeats.entries()) {
+    addCandidate(`opening.playerPerceivableSceneDirection.causalBeats[${index}]`, beat.summary);
+  }
+  for (const [index, reason] of input.visibleDirection.presenceReasons.entries()) {
+    addCandidate(
+      `opening.playerPerceivableSceneDirection.presenceReasons[${index}]`,
+      reason.reason.trim() ? `${reason.actorName} is present: ${reason.reason}` : reason.actorName,
+    );
+  }
+  for (const [index, consequence] of input.sceneAssembly.playerPerceivableConsequences.entries()) {
+    addCandidate(`opening.playerPerceivableConsequences[${index}]`, consequence);
+  }
+
+  if (candidates.length === 0) {
+    throw new Error("Opening scene requires player-perceivable narration evidence.");
+  }
+
+  const selected = candidates.slice(0, 8);
+  const evidenceLedger = selected.map((candidate, index): NarratorPacketEvidence => {
+    const id = `opening:${input.currentTick}:visible-fact:${index + 1}`;
+    return {
+      id,
+      category: "perceivable_effect",
+      summary: candidate.summary,
+      sourceId: id,
+      summaryBackendFact: true,
+      claimSupport: ["playable_beat"],
+      precisionFacts: [],
+    };
+  });
+  const sourceLinkedSummaries = evidenceLedger.map((entry, index): NarratorPacketSourceLinkedSummary => ({
+    id: `opening:${input.currentTick}:summary:${index + 1}`,
+    summary: entry.summary,
+    sourceIds: [entry.id],
+    summarizedItemCount: 1,
+  }));
+
+  return { evidenceLedger, sourceLinkedSummaries };
 }
 
 function uniqueTicks(values: readonly (number | null | undefined)[]): number[] {
@@ -4354,6 +4645,20 @@ function openingNarrationPackets(input: {
   );
   const anchorEventId = `opening:${input.currentTick}:scene`;
   const playerActorId = input.playerId ?? "player";
+  const openingNarrationEvidence = buildOpeningNarrationEvidence({
+    campaignId: input.campaignId,
+    currentTick: input.currentTick,
+    sceneAssembly: input.sceneAssembly,
+    visibleDirection,
+    visibleSummary,
+    forbiddenTerms,
+  });
+  const openingEffects: CanonicalTurnPacketEffect[] = openingNarrationEvidence.evidenceLedger.map((entry) => ({
+    id: entry.id,
+    actorId: playerActorId,
+    summary: entry.summary,
+    perceivableByPlayer: true,
+  }));
   const anchorEvent: CanonicalTurnPacketEvent = {
     id: anchorEventId,
     actorId: playerActorId,
@@ -4361,17 +4666,11 @@ function openingNarrationPackets(input: {
     summary: visibleSummary,
     perceivableByPlayer: true,
   };
-  const openingEffect: CanonicalTurnPacketEffect = {
-    id: `opening:${input.currentTick}:visible-scene`,
-    actorId: playerActorId,
-    summary: visibleSummary,
-    perceivableByPlayer: true,
-  };
   const openingTurnResolution: CanonicalTurnResolution = {
     kind: "status_read",
     resolutionState: "observation_grounded",
     combatIntent: false,
-    evidenceIds: [openingEffect.id],
+    evidenceIds: openingEffects.map((effect) => effect.id),
     consequenceIds: [],
     explicitNoCombatEvidenceIds: [],
     toolNames: [],
@@ -4392,7 +4691,7 @@ function openingNarrationPackets(input: {
     anchorEvent,
     events: [anchorEvent],
     responses: [],
-    effects: [openingEffect],
+    effects: openingEffects,
     actionResults: [],
     guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",
@@ -4419,7 +4718,7 @@ function openingNarrationPackets(input: {
     anchorEvent,
     perceivableEvents: [anchorEvent],
     perceivableResponses: [],
-    perceivableEffects: [openingEffect],
+    perceivableEffects: openingEffects,
     visibleActors,
     hintSignals: openingSafeTexts([
       ...visibleDirection.presenceReasons.map((reason) =>
@@ -4428,19 +4727,7 @@ function openingNarrationPackets(input: {
           : reason.actorName),
       ...input.sceneAssembly.awareness.hintSignals,
     ], forbiddenTerms),
-    evidenceLedger: [{
-      id: openingEffect.id,
-      category: "perceivable_effect",
-      summary: visibleSummary,
-      sourceId: openingEffect.id,
-      summaryBackendFact: true,
-      claimSupport: ["playable_beat"],
-      precisionFacts: [{
-        kind: "summary",
-        value: visibleSummary,
-        sourcePath: "opening.playerPerceivableSceneDirection.situationSummary",
-      }],
-    }],
+    evidenceLedger: openingNarrationEvidence.evidenceLedger,
     guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",
     allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
@@ -4448,12 +4735,7 @@ function openingNarrationPackets(input: {
     forbiddenFactMarkers: [],
     forbiddenPrivateTerms,
     canonicalTurnPacket,
-    sourceLinkedSummaries: [{
-      id: anchorEventId,
-      summary: visibleSummary,
-      sourceIds: [anchorEventId],
-      summarizedItemCount: 1,
-    }],
+    sourceLinkedSummaries: openingNarrationEvidence.sourceLinkedSummaries,
   };
   return { canonicalTurnPacket, narratorPacket };
 }
@@ -4709,6 +4991,7 @@ export async function* processOpeningScene(
       storytellerTemperature,
       storytellerMaxTokens,
       narrationLabel: "opening",
+      lockToken: openingLedger.lockToken,
     });
     const narrativeText = narration.narrativeText;
     const reasoningText = narration.reasoningText;
