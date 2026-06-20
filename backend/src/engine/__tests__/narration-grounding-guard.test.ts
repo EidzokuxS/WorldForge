@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import type { NarratorPacket } from "../narrator-packet.js";
 import {
-  buildGroundedSentenceDraftRepairAddendum,
   compileGroundedSentenceDraftToNarrationDraft,
   formatAllowedCitationEvidenceRef,
   getAllowedNarrationCitationEvidenceRefs,
@@ -654,64 +653,6 @@ describe("grounded sentence draft compiler", () => {
       kind: "future_pressure",
       evidenceRefs: ["perceivable_effect:effect-observed-wardens"],
     });
-  });
-
-  it("builds grounded sentence repair addenda with only citation evidence", () => {
-    const packet = createPacket();
-    packet.anchorEvent = {
-      ...packet.anchorEvent,
-      id: "event-player-waits",
-      summary: "Player action request: I wait.",
-    };
-    packet.evidenceLedger = [
-      {
-        id: "player_action_request:player-action",
-        category: "player_action_request",
-        summary: "I wait.",
-        sourceId: "player-action",
-      },
-      {
-        id: "anchor_event:event-player-waits",
-        category: "anchor_event",
-        summary: "Player action request: I wait.",
-        sourceId: "event-player-waits",
-      },
-      {
-        id: "committed_event:event-player-waits",
-        category: "committed_event",
-        summary: "Player action request: I wait.",
-        sourceId: "event-player-waits",
-      },
-      {
-        id: "perceivable_effect:effect-pressure-clock",
-        category: "perceivable_effect",
-        summary: "The visible pressure clock remains active.",
-        sourceId: "effect-pressure-clock",
-      },
-      {
-        id: "control_return:current",
-        category: "control_return",
-        summary: "Return control.",
-        sourceId: "current",
-      },
-    ];
-
-    const addendum = buildGroundedSentenceDraftRepairAddendum({
-      packet,
-      failureReason:
-        "GroundedSentenceDraft sentence 4 lacks future_pressure support beyond player_action_request.",
-    });
-
-    expect(addendum).toContain("Previous validation failure");
-    expect(addendum).toContain("Return 1-5 sentence objects total; never return 6 or more.");
-    expect(addendum).toContain("HARD CAP: evidenceRefs.length MUST be <= 4");
-    expect(addendum).toContain("cite only the strongest 1-4 short refs");
-    expect(addendum).toContain("- e1 [category=perceivable_effect]");
-    expect(addendum).not.toContain("perceivable_effect:effect-pressure-clock");
-    expect(addendum).not.toContain("player_action_request:player-action");
-    expect(addendum).not.toContain("anchor_event:event-player-waits");
-    expect(addendum).not.toContain("committed_event:event-player-waits");
-    expect(addendum).not.toContain("control_return:current");
   });
 
   it("requires the settled NPC answer evidence for procedural route or access status", () => {
@@ -1588,6 +1529,69 @@ describe("grounded sentence draft compiler", () => {
     expect(draft.prose).toBe("The clerk warns that the inspector is due before dusk.");
   });
 
+  it("accepts backend fact refs accidentally placed in evidenceRefs in the live final narration path", () => {
+    const packet = createPacket();
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1.s1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe("The clerk warns that the inspector is due before dusk.");
+    expect(draft.claims[0]?.evidenceRefs).toEqual([
+      "perceivable_response:response-clerk-warning",
+    ]);
+  });
+
+  it("compiles repeated expanded prose once instead of failing or printing exact duplicates", () => {
+    const packet = createPacket();
+    const sourceResponse = packet.evidenceLedger?.[0];
+    if (!sourceResponse) {
+      throw new Error("Expected createPacket to provide response evidence.");
+    }
+    const repeatedResponse = {
+      ...sourceResponse,
+      id: "perceivable_response:response-clerk-warning-repeat",
+      sourceId: "response-clerk-warning-repeat",
+    };
+    packet.evidenceLedger = [
+      sourceResponse,
+      repeatedResponse,
+    ];
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1"],
+          },
+          {
+            factRefs: ["e2.s1"],
+            evidenceRefs: ["e2"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe("The clerk warns that the inspector is due before dusk.");
+    expect(draft.claims).toHaveLength(1);
+  });
+
   it("expands aggregated inventory status fact refs into playable backend-owned prose", () => {
     const packet = createPacket();
     packet.evidenceLedger = [
@@ -1958,14 +1962,6 @@ describe("grounded sentence draft compiler", () => {
       }),
     ).toThrow(/unknown or disallowed evidence ref/u);
 
-    const repairAddendum = buildGroundedSentenceDraftRepairAddendum({
-      packet,
-      failureReason: "Guardrail was cited as evidence.",
-    });
-    expect(repairAddendum).not.toContain("guardrail:1");
-    expect(repairAddendum).not.toContain("Forest Outpost");
-    expect(repairAddendum).toContain("e1");
-    expect(repairAddendum).toContain("The visible pressure clock remains active.");
   });
 
   it("supports static current inventory facts without treating them as inventory changes", () => {
@@ -2099,10 +2095,9 @@ describe("narration grounding guard", () => {
     expect(result.ok).toBe(true);
     expect(result.violations).toEqual([]);
     expect(result.warnings).toContainEqual({ kind: "thin_prose" });
-    expect(result.repairAddendum).toBeNull();
   });
 
-  it("fails unsupported declared future pressure with structured repair instructions", () => {
+  it("fails unsupported declared future pressure with structured diagnostics", () => {
     const draft = supportedFuturePressureDraft();
     draft.claims[0] = {
       ...draft.claims[0]!,
@@ -2122,20 +2117,6 @@ describe("narration grounding guard", () => {
         claimKind: "future_pressure",
       }),
     );
-    expect(result.repairAddendum).toContain("[ALLOWED NARRATABLE PACKET EVIDENCE REFS]");
-    expect(result.repairAddendum).toContain("sentences[].factRefs/evidenceRefs");
-    expect(result.repairAddendum).toContain("Use factRefs, not text");
-    expect(result.repairAddendum).not.toContain("sentences[].text/evidenceRefs");
-    expect(result.repairAddendum).toContain(
-      "[category=perceivable_response]",
-    );
-    expect(result.repairAddendum).toContain(
-      "summary=The clerk warns that the inspector is due before dusk.",
-    );
-    expect(result.repairAddendum).toContain("[GROUNDING DIAGNOSTICS]");
-    expect(result.repairAddendum).toContain("kind=unsupported_claim");
-    expect(result.repairAddendum).toContain("an evidence-required claim lacks evidenceRefs");
-    expect(result.repairAddendum).not.toContain("claim-inspector-pressure");
   });
 
   it("requires observation evidence for observation-grounded status claims", () => {
@@ -2379,36 +2360,6 @@ describe("narration grounding guard", () => {
     );
   });
 
-  it("redacts forbidden packet terms from grounding repair evidence summaries", () => {
-    const packet = createPacket();
-    packet.forbiddenPrivateTerms = ["Forest Outpost"];
-    packet.evidenceLedger = [
-      {
-        id: "perceivable_effect:private-summary",
-        category: "perceivable_effect",
-        summary: "Forest Outpost pressure is visible at the counter.",
-        sourceId: "private-summary",
-      },
-    ];
-    const draft = supportedFuturePressureDraft();
-    draft.claims[0] = {
-      ...draft.claims[0]!,
-      evidenceRefs: [],
-    };
-
-    const result = validateNarrationDraftGrounding({
-      packet,
-      draft,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.repairAddendum).toContain("No narratable packet evidence refs are in scope");
-    expect(result.repairAddendum).not.toContain("perceivable_effect:private-summary");
-    expect(result.repairAddendum).not.toContain("[private term omitted] pressure is visible");
-    expect(result.repairAddendum).not.toContain("Forest Outpost");
-    expect(result.repairAddendum).not.toContain("claim-inspector-pressure");
-  });
-
   it("fails concrete claimSpan coverage when the span is omitted from evidence-backed claims", () => {
     const draft = supportedFuturePressureDraft();
     draft.claims = [];
@@ -2530,7 +2481,6 @@ describe("narration grounding guard", () => {
         proseWordCount: expect.any(Number),
       }),
     );
-    expect(result.repairAddendum).toContain("kind=insufficient_claim_span_coverage");
   });
 
   it("does not let non-evidence claims cover evidence-required spans", () => {
@@ -2568,31 +2518,6 @@ describe("narration grounding guard", () => {
         spanId: "span-inspector-pressure",
       }),
     );
-  });
-
-  it("does not echo model-controlled claim or span ids in repair addenda", () => {
-    const draft = supportedFuturePressureDraft();
-    draft.claims[0] = {
-      ...draft.claims[0]!,
-      id: "claim-Forest-Outpost-hidden-actor",
-      evidenceRefs: [],
-    };
-    draft.claimSpans[0] = {
-      ...draft.claimSpans[0]!,
-      id: "span-Hidden-Archer-private",
-      claimIds: ["claim-Forest-Outpost-hidden-actor"],
-    };
-
-    const result = validateNarrationDraftGrounding({
-      packet: createPacket(),
-      draft,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.repairAddendum).not.toContain("Forest-Outpost");
-    expect(result.repairAddendum).not.toContain("Hidden-Archer");
-    expect(result.repairAddendum).not.toContain("claim-Forest-Outpost-hidden-actor");
-    expect(result.repairAddendum).not.toContain("span-Hidden-Archer-private");
   });
 
   it("fails non-empty prose with empty claimSpans so claims cannot bypass grounding", () => {

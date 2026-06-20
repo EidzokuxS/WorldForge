@@ -15,18 +15,6 @@ import {
 
 export const VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT = 0;
 
-const GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM =
-  "Revise the final narration to stay within the visible packet. Omit any identity or fact that is not directly visible to the player.";
-
-const EMPTY_VISIBLE_PACKET_RETRY_ADDENDUM =
-  "Revise the final narration because the previous output was empty. Write a concrete, player-visible response from the packet and return control on a playable next moment.";
-
-const THIN_VISIBLE_PACKET_RETRY_ADDENDUM =
-  "Revise the final narration because the previous output was too thin. Write a concrete, player-visible beat from the packet and return control on a playable next moment.";
-
-const INVALID_DRAFT_RETRY_ADDENDUM =
-  "Revise the final narration because the previous output was not a valid grounded structured draft. Stay within the visible packet. Return exactly one GroundedSentenceDraft object with version and sentences. Use sentences[].factRefs with exactly one backend-owned fact ref per sentence, plus 1-4 short packet evidence refs in sentences[].evidenceRefs. Do not output sentences[].text.";
-
 export type VisibleNarrationPacketViolationKind =
   | "forbiddenActorName"
   | "forbiddenFactMarker"
@@ -198,13 +186,11 @@ export function validateVisibleNarrationAgainstPacket(args: {
 export async function runVisibleNarrationWithPacketGuard(
   args: RunVisibleNarrationWithPacketGuardArgs,
 ): Promise<RunVisibleNarrationWithPacketGuardResult> {
-  const maxAttempts = VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT + 1;
+  const maxAttempts = 1;
   let lastValidation: VisibleNarrationPacketValidationResult | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const guardAddendum = attempt === 1
-      ? null
-      : buildVisibleNarrationRetryAddendum(lastValidation);
+    const guardAddendum = null;
     const generated = await args.generateNarration({
       attempt,
       guardAddendum,
@@ -218,15 +204,6 @@ export async function runVisibleNarrationWithPacketGuard(
     const effectiveValidation = !candidate.draft
       ? withInvalidNarrationDraftViolation(validation)
       : validation;
-
-    if (shouldRetryThinNarrationPreference({
-      validation: effectiveValidation,
-      attempt,
-      maxAttempts,
-    })) {
-      lastValidation = effectiveValidation;
-      continue;
-    }
 
     if (effectiveValidation.ok && candidate.draft) {
       return {
@@ -244,38 +221,11 @@ export async function runVisibleNarrationWithPacketGuard(
   }
 
   throw new VisibleNarrationPacketGuardError(
-    "Visible narration failed NarrationDraft or packet validation after retry.",
+    "Visible narration failed NarrationDraft or packet validation.",
     lastValidation?.violations ?? [],
     maxAttempts,
     lastValidation,
   );
-}
-
-function buildVisibleNarrationRetryAddendum(
-  validation: VisibleNarrationPacketValidationResult | null,
-): string {
-  if (validation?.violations.some((violation) => violation.kind === "emptyNarration")) {
-    return EMPTY_VISIBLE_PACKET_RETRY_ADDENDUM;
-  }
-  if (validation?.violations.some((violation) => violation.kind === "invalidNarrationDraft")) {
-    return INVALID_DRAFT_RETRY_ADDENDUM;
-  }
-  if (validation?.grounding && !validation.grounding.ok) {
-    return validation.grounding.repairAddendum ?? GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM;
-  }
-  if (hasThinNarrationWarning(validation)) {
-    return THIN_VISIBLE_PACKET_RETRY_ADDENDUM;
-  }
-
-  if (validation?.diagnostics?.violationKinds.length) {
-    return [
-      GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM,
-      `Safe redaction audit categories: ${validation.diagnostics.violationKinds.join(", ")}.`,
-      formatDiagnosticCountLine(validation.diagnostics.redactionAudit),
-    ].join("\n");
-  }
-
-  return GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM;
 }
 
 function buildVisibleNarrationDiagnostics(
@@ -316,40 +266,6 @@ function summarizeGroundingDiagnostics(
       missingClaim: evidenceRequiredCoverage.filter((entry) => entry.claimIds.length === 0).length,
     },
   };
-}
-
-function formatDiagnosticCountLine(
-  audit: VisibleNarrationPacketDiagnostics["redactionAudit"],
-): string {
-  return [
-    "Safe redaction audit counts:",
-    `hiddenEventCount=${audit.hiddenEventCount}`,
-    `hiddenResponseCount=${audit.hiddenResponseCount}`,
-    `failedEffectCount=${audit.failedEffectCount}`,
-    `unreferencedEffectCount=${audit.unreferencedEffectCount}`,
-    `hiddenEffectCount=${audit.hiddenEffectCount}`,
-    `privateActorNameCount=${audit.privateActorNameCount}`,
-    `forbiddenFactMarkerCount=${audit.forbiddenFactMarkerCount}`,
-    `forbiddenPrivateTermCount=${audit.forbiddenPrivateTermCount}`,
-    `uncommittedProposalCount=${audit.uncommittedProposalCount}`,
-  ].join(" ");
-}
-
-function shouldRetryThinNarrationPreference(args: {
-  validation: VisibleNarrationPacketValidationResult;
-  attempt: number;
-  maxAttempts: number;
-}): boolean {
-  return args.validation.ok
-    && args.attempt < args.maxAttempts
-    && hasThinNarrationWarning(args.validation);
-}
-
-function hasThinNarrationWarning(
-  validation: VisibleNarrationPacketValidationResult | null,
-): boolean {
-  return validation?.warnings?.some((warning) => warning.kind === "thinNarration") === true
-    || validation?.grounding?.warnings?.some((warning) => warning.kind === "thin_prose") === true;
 }
 
 function collectForbiddenTermViolations(args: {

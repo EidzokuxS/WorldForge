@@ -169,7 +169,6 @@ export interface GroundingGuardResult {
   violations: GroundingGuardViolation[];
   warnings?: GroundingGuardWarning[];
   coverage: NarrationClaimCoverageResult[];
-  repairAddendum: string | null;
 }
 
 const MIN_THIN_PROSE_WORDS = 4;
@@ -253,36 +252,6 @@ function claimNeedsObservationEvidence(claim: NarrationClaim): boolean {
     && claim.kind !== "oracle_outcome";
 }
 
-export function buildGroundedSentenceDraftRepairAddendum(args: {
-  packet: NarratorPacket;
-  failureReason: string;
-}): string {
-  const forbiddenTerms = collectNarratorPacketForbiddenTerms(args.packet);
-  const evidenceLines = getAllowedNarrationCitationEvidenceRefs(args.packet)
-    .map((entry) => formatAllowedEvidenceForRepair(entry, forbiddenTerms));
-  const failureReason = sanitizeRepairText(args.failureReason, forbiddenTerms);
-
-  return [
-    "Revise the final grounded sentence draft because the previous structured object failed validation.",
-    `Return exactly one GroundedSentenceDraft object with version="${GROUNDED_SENTENCE_DRAFT_VERSION}" and sentences[].factRefs/evidenceRefs fields.`,
-    "Return 1-5 sentence objects total; never return 6 or more. Merge or prioritize details if needed.",
-    "Every sentence must cite 1-4 short narratable evidence refs such as e1/e2; HARD CAP: evidenceRefs.length MUST be <= 4 for each sentence, never 5 or more.",
-    "If many packet facts support one sentence, cite only the strongest 1-4 short refs or split/prioritize the prose inside the 1-5 sentence limit.",
-    "Do not include kind; the backend derives internal claim metadata from cited packet evidence.",
-    "Use factRefs, not text. Do not output prose, placeholders, claims, claimSpans, id, summary, or requiresEvidence.",
-    "Every sentence must contain exactly one listed backendFacts ref in factRefs, such as e1.s1 or e1.p1; never repeat the same factRef in another sentence.",
-    "Use evidenceRefs for support. Do not repeat a quote factRef just to support later claim facts.",
-    "Do not rewrite facts yourself. The backend expands the selected factRef into player-visible prose.",
-    "Use only short narratable evidence refs listed below; do not copy UUIDs, diagnostic source ids, support-only labels, or raw tool-result ids.",
-    "Rows or details without backendFacts= are support context only and are not legal evidenceRefs or fact placeholders.",
-    "Quoted speech, formal wording, office hours, seals, document phrases, route labels, NPC answers, route/access status, pressure, and visible changes belong inside backend-owned placeholders.",
-    "Do not cite player_action_request, anchor_event, guardrail, control_return, or the anchor player-action committed_event as proof of success, access, route truth, inventory, threat, pressure, or world change.",
-    `Previous validation failure: ${failureReason || "GroundedSentenceDraft validation failed."}`,
-    "[ALLOWED NARRATABLE PACKET EVIDENCE REFS]",
-    ...(evidenceLines.length > 0 ? evidenceLines : ["- No packet evidence refs are in scope."]),
-  ].join("\n");
-}
-
 export function compileGroundedSentenceDraftToNarrationDraft(args: {
   packet: NarratorPacket;
   draft: unknown;
@@ -293,9 +262,14 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
   const allowedEvidenceByRef = buildAllowedCitationEvidenceByRef(args.packet);
   const allowedEvidenceById = buildAllowedCitationEvidenceById(args.packet);
   const allowedBackendFactsByRef = buildAllowedBackendFactsByRef(args.packet);
-  const seenSentences = new Set<string>();
   const seenFactRefs = new Set<string>();
-  const normalizedSentences = draft.sentences.map((sentence, index) => {
+  const seenSentenceTexts = new Set<string>();
+  const normalizedSentences: Array<{
+    text: string;
+    kind: NarrationClaimKind;
+    evidenceRefs: string[];
+  }> = [];
+  draft.sentences.forEach((sentence, index) => {
     if (args.requireFactRefs && !sentence.factRefs) {
       throw new Error(
         `Live GroundedSentenceDraft sentence ${index + 1} must use factRefs; sentences[].text is legacy-only.`,
@@ -304,6 +278,7 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
     const evidenceRefs = resolveGroundedSentenceEvidenceRefs(
       sentence.evidenceRefs,
       allowedEvidenceByRef,
+      allowedBackendFactsByRef,
       index,
     );
     const expanded = sentence.factRefs
@@ -338,10 +313,10 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
     if (!text) {
       throw new Error(`GroundedSentenceDraft sentence ${index + 1} is empty.`);
     }
-    if (seenSentences.has(text)) {
-      throw new Error(`GroundedSentenceDraft sentence ${index + 1} duplicates earlier prose.`);
+    if (seenSentenceTexts.has(text)) {
+      return;
     }
-    seenSentences.add(text);
+    seenSentenceTexts.add(text);
     assertGroundedSentenceTextIsVisibleProse(text, index);
     assertGroundedSentencePrecisionTextSupported({
       text,
@@ -354,11 +329,11 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
       evidenceRefs,
       allowedEvidenceById,
     });
-    return {
+    normalizedSentences.push({
       text,
       kind,
       evidenceRefs,
-    };
+    });
   });
   const prose = normalizedSentences.map((sentence) => sentence.text).join(" ");
   const compiledDraft: NarrationDraft = {
@@ -609,75 +584,6 @@ export function auditNarrationClaimCoverage(args: {
   });
 }
 
-export function buildNarrationGroundingRepairAddendum(
-  violations: readonly GroundingGuardViolation[],
-  options: {
-    evidenceLedger?: readonly NarratorPacketEvidence[];
-    packet?: NarratorPacket;
-    forbiddenTerms?: readonly string[];
-  } = {},
-): string {
-  const forbiddenTerms = options.forbiddenTerms ?? [];
-  const citationRefs = options.packet
-    ? getAllowedNarrationCitationEvidenceRefs(options.packet)
-    : (options.evidenceLedger ?? [])
-        .filter((entry) => isNarrationDraftCitationEvidence(entry, options.packet)
-          && evidenceHasBackendFacts(entry, forbiddenTerms))
-        .map((evidence, index) => ({ refId: `e${index + 1}`, evidence }));
-  const evidenceLines = citationRefs.map((entry) =>
-    formatAllowedEvidenceForRepair(entry, forbiddenTerms),
-  );
-  const issueLines = violations.map((violation, index) => {
-    const label = `Issue ${index + 1}`;
-    const details = formatGroundingViolationDetails(violation);
-    switch (violation.kind) {
-      case "empty_prose":
-        return `${label}: kind=empty_prose${details}; prose is empty; provide visible narration from the packet.`;
-      case "missing_claim_spans":
-        return `${label}: kind=missing_claim_spans${details}; claimSpans are missing; declare concrete prose spans and map them to claims.`;
-      case "insufficient_claim_span_coverage":
-        return `${label}: kind=insufficient_claim_span_coverage${details}; claimSpans cover too little of the prose; copy each concrete visible statement into claimSpans and map those spans to claims.`;
-      case "unsupported_claim":
-        return `${label}: kind=unsupported_claim${details}; an evidence-required claim lacks evidenceRefs; either remove it or cite short packet evidence refs.`;
-      case "unknown_evidence_ref":
-        return `${label}: kind=unknown_evidence_ref${details}; an evidence-required claim cites evidence refs outside the packet ledger; use only listed short packet evidence refs.`;
-      case "disallowed_evidence_ref":
-        return `${label}: kind=disallowed_evidence_ref${details}; an evidence-required claim cites context-only packet refs; use only allowed short citation evidence refs.`;
-      case "missing_observation_ref":
-        return `${label}: kind=missing_observation_ref${details}; this observation-grounded turn must cite the lookup observation result for visible status, people, route, object, risk, or playable-beat claims.`;
-      case "observation_claim_mismatch":
-        return `${label}: kind=observation_claim_mismatch${details}; cited observation evidence does not support this claim kind; cite an observation atom for the specific person, route, object, barrier, absence, or playable beat being narrated.`;
-      case "precision_fact_drift":
-        return `${label}: kind=precision_fact_drift${details}; exact procedural, route, office-hour, seal, document, permission, or quoted text conflicts with cited precision facts; copy the committed value or paraphrase generically.`;
-      case "claim_span_not_in_prose":
-        return `${label}: kind=claim_span_not_in_prose${details}; a claimSpan has empty text or text absent from prose; set spanText to an exact substring copied from prose.`;
-      case "uncovered_claim_span":
-        return `${label}: kind=uncovered_claim_span${details}; an evidence-required span has no declared claim; map it to an evidence-backed claim or remove the span.`;
-      case "unsupported_claim_span":
-        return `${label}: kind=unsupported_claim_span${details}; an evidence-required span maps only to unsupported claims; cite short packet evidence refs or revise prose.`;
-    }
-  });
-
-  return [
-    "Revise the final grounded sentence draft. Do not reveal hidden terms.",
-    `Return exactly one GroundedSentenceDraft object with version="${GROUNDED_SENTENCE_DRAFT_VERSION}" and sentences[].factRefs/evidenceRefs fields.`,
-    "Return 1-5 sentence objects total; never return 6 or more. Merge or prioritize details if needed.",
-    "Every sentence must cite 1-4 short narratable evidence refs such as e1/e2; HARD CAP: evidenceRefs.length MUST be <= 4 for each sentence, never 5 or more.",
-    "If many packet facts support one sentence, cite only the strongest 1-4 short refs or split/prioritize the prose inside the 1-5 sentence limit.",
-    "Do not include kind; the backend derives internal claim metadata from cited packet evidence.",
-    "Use factRefs, not text. Do not output prose, placeholders, claims, claimSpans, id, summary, or requiresEvidence.",
-    "Every sentence must contain exactly one listed backendFacts ref in factRefs, such as e1.s1 or e1.p1; never repeat the same factRef in another sentence.",
-    "Do not rewrite facts yourself. The backend expands the selected factRef into player-visible prose.",
-    "Use only short narratable evidence refs already present in the packet evidence list; do not copy UUIDs, diagnostic source ids, support-only labels, or raw tool-result ids.",
-    "Rows or details without backendFacts= are support context only and are not legal evidenceRefs or fact placeholders.",
-    "Quoted speech, formal wording, office hours, seals, document phrases, and route labels are precision text: copy them from cited packet evidence or paraphrase generically without changing the exact value.",
-    "[ALLOWED NARRATABLE PACKET EVIDENCE REFS]",
-    ...(evidenceLines.length > 0 ? evidenceLines : ["- No narratable packet evidence refs are in scope."]),
-    "[GROUNDING DIAGNOSTICS]",
-    ...issueLines,
-  ].join("\n");
-}
-
 function buildGroundingResult(
   packet: NarratorPacket,
   violations: GroundingGuardViolation[],
@@ -689,17 +595,6 @@ function buildGroundingResult(
     violations,
     warnings,
     coverage,
-    repairAddendum: violations.length > 0
-      ? buildNarrationGroundingRepairAddendum(violations, {
-          evidenceLedger: packet.evidenceLedger ?? [],
-          packet,
-          forbiddenTerms: [
-            ...packet.forbiddenActorNames,
-            ...packet.forbiddenFactMarkers,
-            ...packet.forbiddenPrivateTerms,
-          ],
-        })
-      : null,
   };
 }
 
@@ -736,13 +631,6 @@ export function formatAllowedCitationEvidenceRef(
     ? ` backendFacts=${backendFacts.join(" | ")}`
     : "";
   return `- ${ref.refId} [category=${ref.evidence.category}] summary=${summary || "(empty summary)"}${precisionSuffix}${backendFactSuffix}`;
-}
-
-function formatAllowedEvidenceForRepair(
-  ref: NarrationCitationEvidenceRef,
-  forbiddenTerms: readonly string[],
-): string {
-  return formatAllowedCitationEvidenceRef(ref, forbiddenTerms);
 }
 
 function collectNarratorPacketForbiddenTerms(packet: NarratorPacket): string[] {
@@ -889,30 +777,6 @@ function isPlayerActionEvidenceEntry(
   const trimmed = entry.summary.trimStart().toLocaleLowerCase();
   if (!trimmed.startsWith("player action request")) return false;
   return nextNonWhitespaceChar(trimmed, "player action request".length) === ":";
-}
-
-function formatGroundingViolationDetails(
-  violation: GroundingGuardViolation,
-): string {
-  const details = [
-    violation.claimKind ? `claimKind=${violation.claimKind}` : null,
-    violation.evidenceRefs ? `evidenceRefCount=${violation.evidenceRefs.length}` : null,
-    violation.missingEvidenceRefs
-      ? `missingEvidenceRefCount=${violation.missingEvidenceRefs.length}`
-      : null,
-    violation.precisionFactKind ? `precisionFactKind=${violation.precisionFactKind}` : null,
-    violation.unsupportedPrecisionTokens?.length
-      ? `unsupportedPrecisionTokens=${violation.unsupportedPrecisionTokens.slice(0, 6).join(",")}`
-      : null,
-    violation.requiredEvidenceCategories?.length
-      ? `requiredEvidenceCategories=${violation.requiredEvidenceCategories.join(",")}`
-      : null,
-    typeof violation.coveredWordCount === "number" && typeof violation.proseWordCount === "number"
-      ? `coveredWords=${violation.coveredWordCount}/${violation.proseWordCount}`
-      : null,
-  ].filter((detail): detail is string => Boolean(detail));
-
-  return details.length > 0 ? `; ${details.join("; ")}` : "";
 }
 
 function sanitizeRepairText(
@@ -1985,12 +1849,20 @@ function uniqueEvidenceRefs(refs: readonly string[]): string[] {
 function resolveGroundedSentenceEvidenceRefs(
   refs: readonly string[],
   allowedEvidenceByRef: ReadonlyMap<string, NarratorPacketEvidence>,
+  allowedBackendFactsByRef: ReadonlyMap<string, AllowedBackendFactRef>,
   sentenceIndex: number,
 ): string[] {
   const unique: string[] = [];
   for (const ref of refs) {
     const trimmed = ref.trim();
     if (!trimmed) {
+      continue;
+    }
+    const backendFact = allowedBackendFactsByRef.get(trimmed);
+    if (backendFact) {
+      if (!unique.includes(backendFact.evidenceId)) {
+        unique.push(backendFact.evidenceId);
+      }
       continue;
     }
     const evidence = allowedEvidenceByRef.get(trimmed);

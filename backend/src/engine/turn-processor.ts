@@ -6,14 +6,12 @@
  */
 
 import type { ChatMessage } from "@worldforge/shared";
-import { generateText } from "../ai/raindrop-workshop.js";
-import { extractReasoningText, normalizeReasoningText } from "../ai/extract-reasoning-text.js";
+import { normalizeReasoningText } from "../ai/extract-reasoning-text.js";
 import {
   getSafeGenerateObjectErrorCode,
   safeGenerateObject as generateObject,
 } from "../ai/generate-object-safe.js";
 import { createHash, randomUUID } from "node:crypto";
-import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { callOracle, type OracleResult } from "./oracle.js";
@@ -140,7 +138,6 @@ import {
   type VisibleNarrationPacketValidationResult,
 } from "./visible-narration-output-guard.js";
 import {
-  buildGroundedSentenceDraftRepairAddendum,
   compileGroundedSentenceDraftToNarrationDraft,
   GROUNDED_SENTENCE_DRAFT_VERSION,
   groundedSentenceDraftSchema,
@@ -207,21 +204,12 @@ const OPENING_SAGA_TO_WORLD_CONSEQUENCE_STATUSES: TurnSagaStatus[] = [
   "local_reaction_running",
   "world_consequence_running",
 ];
-const VISIBLE_NARRATION_TIMEOUT_MS = playerBlockingStageLimit(
-  "WORLDFORGE_VISIBLE_NARRATION_TIMEOUT_MS",
-);
-const VISIBLE_NARRATION_OPENING_TIMEOUT_MS = playerBlockingStageLimit(
-  "WORLDFORGE_VISIBLE_NARRATION_OPENING_TIMEOUT_MS",
-);
-const VISIBLE_NARRATION_MAX_OUTPUT_TOKENS = 4_096;
-const VISIBLE_NARRATION_OPENING_MAX_OUTPUT_TOKENS = 2_048;
 const VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT = 3;
 const VISIBLE_NARRATION_DRAFT_TIMEOUT_MS = playerBlockingStageLimit(
   "WORLDFORGE_VISIBLE_NARRATION_DRAFT_TIMEOUT_MS",
 );
 const VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS = 2_048;
 const VISIBLE_NARRATION_DRAFT_MODE = "native_json";
-const VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT = 1;
 const PENDING_NARRATION_RESUME_CHECKPOINT_KEY = "pendingNarrationResume";
 const PENDING_NARRATION_WORKER_STALE_AFTER_MS = 5 * 60_000;
 const PENDING_NARRATION_WORKER_HEARTBEAT_MS = 60_000;
@@ -237,13 +225,13 @@ function normalizePlayerFacingEmittedEvent(
   return event;
 }
 
-type VisibleNarrationUsage = Awaited<ReturnType<typeof generateText>>["usage"];
-type VisibleNarrationResponse = Awaited<ReturnType<typeof generateText>>["response"] | {
+type VisibleNarrationUsage = unknown;
+type VisibleNarrationResponse = {
   id?: string;
   modelId?: string;
   timestamp?: string;
-};
-type VisibleNarrationFinishReason = Awaited<ReturnType<typeof generateText>>["finishReason"] | string;
+} | undefined;
+type VisibleNarrationFinishReason = unknown;
 interface NarrationDraftStructuredTrace {
   strategy: unknown;
   primaryStrategy: unknown;
@@ -736,11 +724,6 @@ type VisibleNarrationFailure =
   | "instruction_echo"
   | "slop_cluster";
 
-const RETRY_PRIORITY_VISIBLE_NARRATION_FAILURES = new Set<VisibleNarrationFailure>([
-  "residual_leak",
-  "instruction_echo",
-]);
-
 const HIGH_SIGNAL_SLOP_PATTERNS: ReadonlyArray<{ code: string; pattern: RegExp }> = [
   {
     code: "announcement_opener",
@@ -757,10 +740,6 @@ const HIGH_SIGNAL_SLOP_PATTERNS: ReadonlyArray<{ code: string; pattern: RegExp }
     pattern: /\b(?:think about it|here'?s what i mean|what if)\b/iu,
   },
 ];
-
-function applyVisibleNarrationFilters(raw: string): string {
-  return sanitizeNarrative(raw);
-}
 
 function normalizeNarrationFingerprint(text: string): string {
   return text
@@ -873,45 +852,6 @@ export function detectVisibleNarrationFailures(
   return failures;
 }
 
-function buildVisibleNarrationRetryAddendum(
-  failures: readonly VisibleNarrationFailure[],
-): string {
-  const guidance: string[] = [
-    "Reissue the final visible narration only once.",
-    "Do not restart the scene from the top.",
-  ];
-
-  if (failures.includes("repeated_lead")) {
-    guidance.push("Do not repeat the opening beat or first sentence in later paragraphs.");
-  }
-  if (failures.includes("residual_leak")) {
-    guidance.push("Do not include headers, bracketed sections, or tool-call syntax in visible prose.");
-  }
-  if (failures.includes("instruction_echo")) {
-    guidance.push("Do not quote or paraphrase narrator instructions inside the visible prose.");
-  }
-  if (failures.includes("slop_cluster")) {
-    guidance.push("Cut announcement openers, rhetorical setups, and binary contrast phrasing.");
-    guidance.push("Replace generic tension with one local action, object, gesture, sound, or interrupted task from the visible scene.");
-    guidance.push("Write the next playable beat directly: concrete change first, interpretation only after visible evidence.");
-  }
-
-  return `\n\n[FINAL VISIBLE PASS CORRECTION]\n${guidance.map((line) => `- ${line}`).join("\n")}`;
-}
-
-function hasRetryPriorityVisibleNarrationFailure(
-  failures: readonly VisibleNarrationFailure[],
-): boolean {
-  return failures.some((failure) => RETRY_PRIORITY_VISIBLE_NARRATION_FAILURES.has(failure));
-}
-
-function scoreVisibleNarrationCandidate(
-  text: string,
-  failures: readonly VisibleNarrationFailure[],
-): number {
-  return text.length - failures.length * 1000;
-}
-
 function shouldExposeReasoningSse(): boolean {
   return false;
 }
@@ -957,170 +897,9 @@ function isVisibleNarrationRetryableChannelError(error: unknown): boolean {
 
 function visibleNarrationMaxOutputTokens(
   requested: number,
-  cap = VISIBLE_NARRATION_MAX_OUTPUT_TOKENS,
+  cap: number,
 ): number {
   return Math.max(1, Math.min(requested, cap));
-}
-
-async function runVisibleNarrationWithGuard(args: {
-  label: "final" | "opening";
-  provider: ProviderConfig;
-  system: string;
-  prompt: string;
-  storytellerTemperature: number;
-  storytellerMaxTokens: number;
-}): Promise<{
-  text: string;
-  reasoningText: string | undefined;
-  retried: boolean;
-  failures: VisibleNarrationFailure[];
-  usage?: VisibleNarrationUsage;
-  response?: VisibleNarrationResponse;
-  finishReason?: VisibleNarrationFinishReason;
-}> {
-  const {
-    label,
-    provider,
-    system,
-    prompt,
-    storytellerTemperature,
-    storytellerMaxTokens,
-  } = args;
-
-  async function runNarrationPass(activeProvider: ProviderConfig, promptText: string) {
-    let lastError: unknown;
-    const transportRetryLimit = label === "opening"
-      ? VISIBLE_NARRATION_OPENING_TRANSPORT_RETRY_LIMIT
-      : VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT;
-    const timeoutMs = label === "opening"
-      ? VISIBLE_NARRATION_OPENING_TIMEOUT_MS
-      : VISIBLE_NARRATION_TIMEOUT_MS;
-    const outputTokenCap = label === "opening"
-      ? VISIBLE_NARRATION_OPENING_MAX_OUTPUT_TOKENS
-      : VISIBLE_NARRATION_MAX_OUTPUT_TOKENS;
-    for (let attempt = 1; attempt <= transportRetryLimit; attempt += 1) {
-      const startedAt = Date.now();
-      const maxOutputTokens = visibleNarrationMaxOutputTokens(storytellerMaxTokens, outputTokenCap);
-      log.event("storyteller.visible.call.start", {
-        label,
-        attempt,
-        timeoutMs,
-        requestedMaxOutputTokens: storytellerMaxTokens,
-        maxOutputTokens,
-      });
-      try {
-        const result = await generateText({
-          model: createModel(activeProvider, {
-            role: "storyteller",
-            ...(label === "opening" ? { reasoningMode: "bypass" as const } : {}),
-          }),
-          system,
-          prompt: promptText,
-          temperature: storytellerTemperature,
-          maxOutputTokens,
-          timeout: { totalMs: timeoutMs },
-        });
-        log.event("storyteller.visible.call.end", {
-          label,
-          attempt,
-          success: true,
-          durationMs: Date.now() - startedAt,
-          finishReason: result.finishReason ?? null,
-          responseModel: result.response?.modelId ?? null,
-          outputChars: result.text.length,
-        });
-        return result;
-      } catch (error) {
-        lastError = error;
-        log.event("storyteller.visible.call.end", {
-          label,
-          attempt,
-          success: false,
-          durationMs: Date.now() - startedAt,
-          error: errorMessage(error).slice(0, 500),
-        });
-        if (!isVisibleNarrationTransportError(error) || attempt >= transportRetryLimit) {
-          throw error;
-        }
-        log.warn(
-          `Visible narration transport error; retrying storyteller pass ${attempt + 1}/${transportRetryLimit}`,
-          error,
-        );
-      }
-    }
-
-    throw lastError;
-  }
-
-  const initialResult = await runNarrationPass(provider, prompt);
-
-  const initialText = applyVisibleNarrationFilters(initialResult.text);
-  const initialReasoningText = normalizeReasoningText(extractReasoningText(initialResult));
-  const initialFailures = detectVisibleNarrationFailures(initialResult.text, { system, prompt });
-  if (initialFailures.length === 0) {
-    return {
-      text: initialText,
-      reasoningText: initialReasoningText,
-      retried: false,
-      failures: [],
-      usage: initialResult.usage,
-      response: initialResult.response,
-      finishReason: initialResult.finishReason,
-    };
-  }
-
-  const retryPrompt = `${prompt}${buildVisibleNarrationRetryAddendum(initialFailures)}`;
-  const initialHasRetryPriorityFailure = hasRetryPriorityVisibleNarrationFailure(initialFailures);
-
-  try {
-    const retryResult = await runNarrationPass(provider, retryPrompt);
-    const retryText = applyVisibleNarrationFilters(retryResult.text);
-    const retryReasoningText = normalizeReasoningText(extractReasoningText(retryResult));
-    const retryFailures = detectVisibleNarrationFailures(retryResult.text, { system, prompt });
-    const retryHasRetryPriorityFailure = hasRetryPriorityVisibleNarrationFailure(retryFailures);
-
-    if (initialHasRetryPriorityFailure) {
-      return {
-        text: retryText,
-        reasoningText: retryReasoningText,
-        retried: true,
-        failures: retryFailures,
-        usage: retryResult.usage,
-        response: retryResult.response,
-        finishReason: retryResult.finishReason,
-      };
-    }
-
-    if (
-      !retryHasRetryPriorityFailure
-      && scoreVisibleNarrationCandidate(retryText, retryFailures) >= scoreVisibleNarrationCandidate(initialText, initialFailures)
-    ) {
-      return {
-        text: retryText,
-        reasoningText: retryReasoningText,
-        retried: true,
-        failures: retryFailures,
-        usage: retryResult.usage,
-        response: retryResult.response,
-        finishReason: retryResult.finishReason,
-      };
-    }
-  } catch (retryError) {
-    if (initialHasRetryPriorityFailure) {
-      throw retryError;
-    }
-    log.warn("Visible narration quality retry failed; keeping first visible pass", retryError);
-  }
-
-  return {
-    text: initialText,
-    reasoningText: initialReasoningText,
-    retried: true,
-    failures: initialFailures,
-    usage: initialResult.usage,
-    response: initialResult.response,
-    finishReason: initialResult.finishReason,
-  };
 }
 
 async function runVisibleNarrationDraftWithGuard(args: {
@@ -1155,125 +934,94 @@ async function runVisibleNarrationDraftWithGuard(args: {
 
   async function runNarrationDraftPass(activeProvider: ProviderConfig, promptText: string) {
     let lastError: unknown;
-    let contractRepairAddendum: string | null = null;
-    for (
-      let contractAttempt = 1;
-      contractAttempt <= VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT + 1;
-      contractAttempt += 1
-    ) {
-      const activePrompt = contractRepairAddendum
-        ? `${promptText}\n\n[GROUNDING DRAFT CORRECTION]\n${contractRepairAddendum}`
-        : promptText;
-      let shouldRetryContract = false;
-      for (let attempt = 1; attempt <= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT; attempt += 1) {
-        const startedAt = Date.now();
-        const maxOutputTokens = visibleNarrationMaxOutputTokens(
-          storytellerMaxTokens,
-          VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS,
-        );
-        log.event("storyteller.visible.call.start", {
+    const contractAttempt = 1;
+    for (let attempt = 1; attempt <= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT; attempt += 1) {
+      const startedAt = Date.now();
+      const maxOutputTokens = visibleNarrationMaxOutputTokens(
+        storytellerMaxTokens,
+        VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS,
+      );
+      log.event("storyteller.visible.call.start", {
+        label,
+        attempt,
+        contractAttempt,
+        structured: true,
+        mode: VISIBLE_NARRATION_DRAFT_MODE,
+        timeoutMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS,
+        requestedMaxOutputTokens: storytellerMaxTokens,
+        maxOutputTokens,
+        contractRepair: false,
+      });
+      try {
+        const result = await generateObject({
+          model: createModel(activeProvider, {
+            role: "storyteller",
+            reasoningMode: "bypass",
+          }),
+          schema: groundedSentenceDraftSchema,
+          system,
+          prompt: promptText,
+          temperature: storytellerTemperature,
+          maxOutputTokens,
+          timeout: { totalMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS },
+          mode: VISIBLE_NARRATION_DRAFT_MODE,
+          retries: 1,
+          allowTextFallback: false,
+          allowRepair: false,
+          strictSchema: true,
+        });
+        assertClosedStructuredNarrationDraftTrace(result.trace);
+        const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
+          packet: narratorPacket,
+          draft: result.object,
+          requireBackendOwnedFactText: true,
+          requireFactRefs: true,
+        });
+        log.event("storyteller.visible.call.end", {
           label,
           attempt,
           contractAttempt,
           structured: true,
-          mode: VISIBLE_NARRATION_DRAFT_MODE,
-          timeoutMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS,
-          requestedMaxOutputTokens: storytellerMaxTokens,
-          maxOutputTokens,
-          contractRepair: contractRepairAddendum !== null,
+          success: true,
+          durationMs: Date.now() - startedAt,
+          finishReason: result.trace.finishReason ?? null,
+          responseModel: result.trace.response?.modelId ?? null,
+          strategy: result.trace.strategy ?? null,
+          primaryStrategy: result.trace.primaryStrategy ?? null,
+          fallbackReason: result.trace.fallbackReason ?? null,
+          outputChars: compiledDraft.prose.length,
+          sentenceCount: result.object.sentences.length,
+          contractRepair: false,
         });
-        try {
-          const result = await generateObject({
-            model: createModel(activeProvider, {
-              role: "storyteller",
-              reasoningMode: "bypass",
-            }),
-            schema: groundedSentenceDraftSchema,
-            system,
-            prompt: activePrompt,
-            temperature: storytellerTemperature,
-            maxOutputTokens,
-            timeout: { totalMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS },
-            mode: VISIBLE_NARRATION_DRAFT_MODE,
-            retries: 1,
-            allowTextFallback: false,
-            allowRepair: false,
-            strictSchema: true,
-          });
-          assertClosedStructuredNarrationDraftTrace(result.trace);
-          const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
-            packet: narratorPacket,
-            draft: result.object,
-            requireBackendOwnedFactText: true,
-            requireFactRefs: true,
-          });
-          log.event("storyteller.visible.call.end", {
-            label,
-            attempt,
-            contractAttempt,
-            structured: true,
-            success: true,
-            durationMs: Date.now() - startedAt,
-            finishReason: result.trace.finishReason ?? null,
-            responseModel: result.trace.response?.modelId ?? null,
-            strategy: result.trace.strategy ?? null,
-            primaryStrategy: result.trace.primaryStrategy ?? null,
-            fallbackReason: result.trace.fallbackReason ?? null,
-            outputChars: compiledDraft.prose.length,
-            sentenceCount: result.object.sentences.length,
-            contractRepair: contractRepairAddendum !== null,
-          });
-          return {
-            draft: compiledDraft,
-            groundedSentenceDraft: result.object,
-            trace: result.trace,
-          };
-        } catch (error) {
-          lastError = error;
-          const message = errorMessage(error);
-          log.event("storyteller.visible.call.end", {
-            label,
-            attempt,
-            contractAttempt,
-            structured: true,
-            success: false,
-            durationMs: Date.now() - startedAt,
-            error: message.slice(0, 500),
-            contractRepair: contractRepairAddendum !== null,
-          });
-          if (
-            isGroundedSentenceDraftContractError(error)
-            && contractAttempt <= VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT
-          ) {
-            contractRepairAddendum = buildGroundedSentenceDraftRepairAddendum({
-              packet: narratorPacket,
-              failureReason: message,
-            });
-            log.event("storyteller.visible.draft-contract-retry", {
-              label,
-              contractAttempt,
-              nextContractAttempt: contractAttempt + 1,
-              reason: message.slice(0, 500),
-            });
-            shouldRetryContract = true;
-            break;
-          }
-          if (
-            !isVisibleNarrationRetryableChannelError(error)
-            || attempt >= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT
-          ) {
-            throw error;
-          }
-          log.warn(
-            `Visible structured narration channel error; retrying same contract pass ${attempt + 1}/${VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT}`,
-            error,
-          );
+        return {
+          draft: compiledDraft,
+          groundedSentenceDraft: result.object,
+          trace: result.trace,
+        };
+      } catch (error) {
+        lastError = error;
+        const message = errorMessage(error);
+        log.event("storyteller.visible.call.end", {
+          label,
+          attempt,
+          contractAttempt,
+          structured: true,
+          success: false,
+          durationMs: Date.now() - startedAt,
+          error: message.slice(0, 500),
+          contractRepair: false,
+        });
+        if (
+          !isVisibleNarrationRetryableChannelError(error)
+          || attempt >= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT
+        ) {
+          throw error;
         }
+        log.warn(
+          `Visible structured narration channel error; retrying same contract pass ${attempt + 1}/${VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT}`,
+          error,
+        );
       }
-      if (shouldRetryContract) {
-        continue;
-      }
-      break;
     }
 
     throw lastError;
@@ -1291,12 +1039,12 @@ async function runVisibleNarrationDraftWithGuard(args: {
       reasoningText: initialReasoningText,
       retried: false,
       failures: [],
-        usage: initialResult.trace.usage as VisibleNarrationUsage | undefined,
-        response: initialResult.trace.response,
-        finishReason: initialResult.trace.finishReason,
-        structuredTrace: summarizeNarrationDraftStructuredTrace(initialResult.trace),
-      };
-    }
+      usage: initialResult.trace.usage as VisibleNarrationUsage | undefined,
+      response: initialResult.trace.response,
+      finishReason: initialResult.trace.finishReason,
+      structuredTrace: summarizeNarrationDraftStructuredTrace(initialResult.trace),
+    };
+  }
 
   log.event("visible-narration.prose-filter", {
     label,
@@ -1331,16 +1079,6 @@ function assertClosedStructuredNarrationDraftTrace(trace: {
   throw new Error(
     `Final NarrationDraft generation left closed structured output path (strategy=${String(trace.strategy ?? "unknown")}); failing closed.`,
   );
-}
-
-function isGroundedSentenceDraftContractError(error: unknown): boolean {
-  if (getSafeGenerateObjectErrorCode(error) === "schema_validation_failed") {
-    return true;
-  }
-  if (error instanceof z.ZodError) {
-    return true;
-  }
-  return errorMessage(error).includes("GroundedSentenceDraft");
 }
 
 function summarizeNarrationDraftStructuredTrace(trace: {
@@ -2847,14 +2585,6 @@ function collectOpeningPrivateTerms(input: {
   ]);
 }
 
-function openingFallbackSummary(sceneAssembly: SceneAssembly): string {
-  const currentSceneName = sceneAssembly.currentScene?.name.trim();
-  if (currentSceneName) {
-    return `The opening scene settles into a visible moment at ${currentSceneName}.`;
-  }
-  return "The opening scene settles into a visible, playable moment.";
-}
-
 function selectOpeningVisibleSummary(input: {
   sceneAssembly: SceneAssembly;
   visibleDirection: WorldBrainSceneDirection;
@@ -2863,7 +2593,6 @@ function selectOpeningVisibleSummary(input: {
   for (const candidate of [
     input.visibleDirection.situationSummary,
     ...input.sceneAssembly.playerPerceivableConsequences,
-    openingFallbackSummary(input.sceneAssembly),
   ]) {
     const safe = openingSafeText(candidate, input.forbiddenTerms);
     if (safe) {
@@ -2871,7 +2600,7 @@ function selectOpeningVisibleSummary(input: {
     }
   }
 
-  return "The opening scene settles into a visible, playable moment.";
+  throw new Error("Opening scene requires a safe player-perceivable summary.");
 }
 
 function uniqueTicks(values: readonly (number | null | undefined)[]): number[] {

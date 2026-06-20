@@ -1,5 +1,29 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-20 - Narration Draft Crash Cleanup
+
+Goal:
+- Stop opening/final narration from crashing on misplaced backend fact refs or duplicate prose, while removing the local regex clone from the world review public DTO sanitizer.
+
+Plan:
+- [x] Read the supplied runtime log, current route/public-boundary code, narration draft compiler, and visible narration draft pass.
+- [x] Run GitNexus impact on the touched public-boundary and narration symbols.
+- [x] Route review DTO semantic-string scrubbing through the central public-boundary predicate.
+- [x] Accept backend fact refs such as `e1.p1` when a model places them in `evidenceRefs`, canonicalizing them to the owning packet evidence.
+- [x] Treat repeated expanded prose as accepted narration quality, not a fatal runtime contract error.
+- [x] Remove visible narration contract-repair retry from the runtime path while keeping channel retry for transport failures.
+- [x] Remove stale repair-addendum surfaces from active narration validation/packet guard code.
+- [x] Run focused tests, typecheck, GitNexus detect_changes, and commit/push if clean.
+
+Review:
+- Local regex constants were removed from `backend/src/routes/campaigns.ts`; review DTO semantic strings now call the central public-boundary predicate.
+- `GroundedSentenceDraft` compilation now canonicalizes backend fact refs accidentally placed in `evidenceRefs` to their owning packet evidence id.
+- Duplicate expanded prose no longer restores/fails the turn; repeated text is prose quality/audit material, while repeated backend fact refs remain rejected.
+- Visible narration contract repair retry and stale repair-addendum helper surfaces were removed from the runtime path.
+- Opening scene packet construction no longer injects a generic fallback summary; a safe player-perceivable opening summary is now required from world-brain/scene consequences.
+- Exact duplicate expanded sentences now compile once instead of crashing or printing the duplicate; the live opening smoke on port 3002 returned `done` with one non-duplicated narrative sentence and no contract-repair retry.
+- Verification so far: focused narration/public-boundary/campaign tests passed 130/130; expanded clean-runtime slice passed 494/494; `npm --prefix backend run typecheck` passed; `git diff --check` passed; GitNexus all-scope risk LOW with no affected execution flows.
+
 ## Current Session Focus 2026-06-19 - Clean-Only Runtime Cleanup
 
 Goal:

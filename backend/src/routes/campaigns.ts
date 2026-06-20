@@ -42,7 +42,10 @@ import {
 } from "../engine/scene-presence.js";
 import { executeToolCall } from "../engine/tool-executor.js";
 import type { ToolExecutionContext } from "../engine/tool-execution-context.js";
-import { assertPublicProjectionPayload } from "../engine/gameplay-control-plane-contract.js";
+import {
+  assertPublicProjectionPayload,
+  isBackendRefLikePublicBoundaryString,
+} from "../engine/gameplay-control-plane-contract.js";
 import {
   requirePublicDtoHandle,
   resolvePublicDtoHandle,
@@ -60,17 +63,11 @@ function publicHandle(
   return toPublicDtoHandle({ campaignId, kind, sourceId });
 }
 
-const BACKEND_STORAGE_ID_TEXT = /^(?:campaign|camp|loc|location|npc|player|item|faction|relationship|route|edge|event)-[A-Za-z0-9_.:-]+$/i;
-const BACKEND_REF_TEXT = /^(?:actor|character|event|faction|item|knowledge|location|memory|npc|player|relationship|route|scene|world):/i;
-
 function publicSemanticStrings(values: string[] | undefined): string[] | undefined {
   if (!values) {
     return values;
   }
-  return values.filter((value) => {
-    const trimmed = value.trim();
-    return !BACKEND_STORAGE_ID_TEXT.test(trimmed) && !BACKEND_REF_TEXT.test(trimmed);
-  });
+  return values.filter((value) => !isBackendRefLikePublicBoundaryString(value));
 }
 
 function requiredPublicHandle(

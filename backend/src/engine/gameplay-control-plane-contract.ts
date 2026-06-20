@@ -1214,7 +1214,7 @@ export function assertIssuedRefOwnerMatrix(
 }
 
 const BACKEND_REF_BOUNDARY_PATTERN =
-  /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:actor|location|route|item|tool-result|action-result|authority|saga|turn-saga|settled-packet):[A-Za-z0-9_.:-]+|(?:tool_result|action_result|turn_saga|settled_packet)_[A-Za-z0-9_.:-]+)\b/i;
+  /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:actor|character|event|faction|item|knowledge|location|memory|npc|player|relationship|route|scene|world|tool-result|action-result|authority|saga|turn-saga|settled-packet):[A-Za-z0-9_.:-]+|(?:tool_result|action_result|turn_saga|settled_packet)_[A-Za-z0-9_.:-]+)\b/i;
 
 const BACKEND_STORAGE_ID_PATTERN =
   /^(?:campaign|camp|loc|location|npc|player|item|faction|relationship|route|edge|event)-[A-Za-z0-9_.:-]+$/i;
@@ -1223,13 +1223,15 @@ const PUBLIC_PROJECTION_SAFE_STRING_VALUES = new Set([
   "player-input",
 ]);
 
+export function isBackendRefLikePublicBoundaryString(value: string): boolean {
+  const trimmed = value.trim();
+  return !PUBLIC_PROJECTION_SAFE_STRING_VALUES.has(trimmed)
+    && (BACKEND_REF_BOUNDARY_PATTERN.test(value) || BACKEND_STORAGE_ID_PATTERN.test(trimmed));
+}
+
 export function assertNoBackendRefsInPublicValue(value: unknown, path = "$"): void {
   if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (
-      !PUBLIC_PROJECTION_SAFE_STRING_VALUES.has(trimmed)
-      && (BACKEND_REF_BOUNDARY_PATTERN.test(value) || BACKEND_STORAGE_ID_PATTERN.test(trimmed))
-    ) {
+    if (isBackendRefLikePublicBoundaryString(value)) {
       throw new Error(`Backend ref crossed public boundary at ${path}.`);
     }
     return;
