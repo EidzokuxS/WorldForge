@@ -60,6 +60,19 @@ function publicHandle(
   return toPublicDtoHandle({ campaignId, kind, sourceId });
 }
 
+const BACKEND_STORAGE_ID_TEXT = /^(?:campaign|camp|loc|location|npc|player|item|faction|relationship|route|edge|event)-[A-Za-z0-9_.:-]+$/i;
+const BACKEND_REF_TEXT = /^(?:actor|character|event|faction|item|knowledge|location|memory|npc|player|relationship|route|scene|world):/i;
+
+function publicSemanticStrings(values: string[] | undefined): string[] | undefined {
+  if (!values) {
+    return values;
+  }
+  return values.filter((value) => {
+    const trimmed = value.trim();
+    return !BACKEND_STORAGE_ID_TEXT.test(trimmed) && !BACKEND_REF_TEXT.test(trimmed);
+  });
+}
+
 function requiredPublicHandle(
   campaignId: string,
   kind: PublicDtoHandleKind,
@@ -149,6 +162,12 @@ function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof t
         ...ref,
         entityId: null,
       })),
+    },
+    capabilities: {
+      ...draft.capabilities,
+      traits: publicSemanticStrings(draft.capabilities.traits),
+      flaws: publicSemanticStrings(draft.capabilities.flaws),
+      specialties: publicSemanticStrings(draft.capabilities.specialties),
     },
     provenance: {
       ...draft.provenance,

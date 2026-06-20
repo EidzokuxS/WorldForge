@@ -180,7 +180,7 @@ function makeNpcCharacterRecord(name = "Signal Runner Toma") {
     capabilities: {
       traits: ["Fast courier"],
       skills: [{ name: "Route finding", tier: "Skilled" }],
-      flaws: [],
+      flaws: [] as string[],
       specialties: ["Storm travel"],
       wealthTier: null,
     },
@@ -1130,6 +1130,15 @@ describe("GET /:id/world", () => {
     const mockWhere = vi.fn(() => ({ all: mockAll }));
     const mockFrom = vi.fn(() => ({ where: mockWhere }));
     const mockSelect = vi.fn(() => ({ from: mockFrom }));
+    const npcRecord = makeNpcCharacterRecord();
+    npcRecord.capabilities.traits = [
+      "Fast courier",
+      "Stormwise",
+      "npc-hidden-storage-ref",
+      "scene:hidden-storage-ref",
+    ];
+    npcRecord.capabilities.flaws = ["Overextends", "item-hidden-storage-ref"];
+    npcRecord.capabilities.specialties = ["Storm travel", "route:hidden-storage-ref"];
 
     mockAll
       .mockReturnValueOnce([])
@@ -1147,7 +1156,7 @@ describe("GET /:id/world", () => {
             long_term: ["Keep the valley connected"],
           }),
           beliefs: JSON.stringify(["Roads matter more than banners."]),
-          characterRecord: JSON.stringify(makeNpcCharacterRecord()),
+          characterRecord: JSON.stringify(npcRecord),
           unprocessedImportance: 0,
           inactiveTicks: 0,
           createdAt: 0,
@@ -1184,14 +1193,21 @@ describe("GET /:id/world", () => {
         },
       },
       capabilities: {
-        traits: ["Fast courier"],
+        traits: ["Fast courier", "Stormwise"],
         skills: [{ name: "Route finding", tier: "Skilled" }],
+        flaws: ["Overextends"],
         specialties: ["Storm travel"],
       },
       powerStats: {
         speed: { tier: "Human", rank: 4 },
       },
     });
+    expectJsonNotToContain(body.npcs[0].draft, [
+      "npc-hidden-storage-ref",
+      "scene:hidden-storage-ref",
+      "item-hidden-storage-ref",
+      "route:hidden-storage-ref",
+    ]);
     expect(body.npcs[0]).not.toHaveProperty("npc");
   });
 
