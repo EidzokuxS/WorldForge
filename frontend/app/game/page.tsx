@@ -165,26 +165,6 @@ function getAuthoritativeSceneNpcs(worldData: WorldData): Array<{ id: string; na
     .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
 }
 
-function getFallbackSceneNpcs(worldData: WorldData): Array<{ id: string; name: string; tier: string }> {
-  const player = worldData.player;
-  if (!player?.currentLocationId) {
-    return [];
-  }
-
-  const playerSceneScopeId = player.sceneScopeId ?? player.currentLocationId;
-  const sceneScopedNpcs = worldData.npcs
-    .filter((npc) => (npc.sceneScopeId ?? npc.currentLocationId) === playerSceneScopeId)
-    .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
-
-  if (sceneScopedNpcs.length > 0) {
-    return sceneScopedNpcs;
-  }
-
-  return worldData.npcs
-    .filter((npc) => npc.currentLocationId === player.currentLocationId)
-    .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
-}
-
 function buildScenePanelData(
   currentScene: WorldCurrentScene | null,
   currentLocation: { id: string; name: string } | null,
@@ -197,7 +177,7 @@ function buildScenePanelData(
     id: currentScene.id,
     name: currentScene.name,
     broadLocationName: currentScene.broadLocationName ?? currentLocation?.name ?? null,
-    hintSignals: currentScene.awareness.hintSignals,
+    hintSignals: [],
   };
 }
 
@@ -807,20 +787,9 @@ export default function GamePage() {
 
   const npcsHere = useMemo(() => {
     if (!worldData) return [];
-    return currentScene
-      ? getAuthoritativeSceneNpcs(worldData)
-      : getFallbackSceneNpcs(worldData);
-  }, [currentScene, worldData]);
-  const scenePresenceHints = currentScene?.awareness.hintSignals ?? [];
-  const offscreenAnchorCount = useMemo(() => {
-    if (!worldData || !currentScene) return 0;
-    const visibleIds = new Set(npcsHere.map((npc) => npc.id));
-    return worldData.npcs.filter((npc) => {
-      if (visibleIds.has(npc.id)) return false;
-      return npc.currentLocationId === currentScene.broadLocationId
-        && (npc.sceneScopeId ?? currentScene.id) !== currentScene.id;
-    }).length;
-  }, [currentScene, npcsHere, worldData]);
+    return getAuthoritativeSceneNpcs(worldData);
+  }, [worldData]);
+  const scenePresenceHints: string[] = [];
 
   const scenePanelData = useMemo(
     () => buildScenePanelData(currentScene, currentLocation),
@@ -1348,9 +1317,7 @@ export default function GamePage() {
     ? `${visibleActorCount} visible`
     : scenePresenceHints.length > 0
       ? "Something nearby"
-      : offscreenAnchorCount > 0
-        ? `${offscreenAnchorCount} not in sight`
-        : "No one visible";
+      : "No one visible";
   const stageLeftSlot = (
     <div className="space-y-3">
       <StageContextCard
@@ -1424,18 +1391,11 @@ export default function GamePage() {
           </div>
         ) : scenePresenceHints.length > 0 ? (
           <p>{scenePresenceHints[0]}</p>
-        ) : offscreenAnchorCount > 0 ? (
-          <p>Same broad area, outside this immediate scene.</p>
         ) : (
           <p>The scene is quiet for now.</p>
         )}
         {visibleActorCount > 0 && scenePresenceHints.length > 0 ? (
           <p className="mt-2 text-zinc-500">{scenePresenceHints[0]}</p>
-        ) : null}
-        {visibleActorCount > 0 && offscreenAnchorCount > 0 ? (
-          <p className="mt-2 text-zinc-500">
-            {offscreenAnchorCount} more in the same broad area, not in sight.
-          </p>
         ) : null}
       </StageContextCard>
       {itemsHere.length > 0 ? (
@@ -1453,13 +1413,15 @@ export default function GamePage() {
 
   return (
     <GameSceneShell
-      debugState={{
-        campaignId: activeCampaign?.id ?? null,
-        worldVersion: worldData?.worldVersion ?? null,
-        currentTick: worldData?.currentTick ?? null,
-        worldTimeMinutes: worldData?.worldTimeMinutes ?? null,
-        sceneId: currentScene?.id ?? currentLocation?.id ?? null,
-      }}
+      debugState={canShowRawReasoning
+        ? {
+            campaignId: activeCampaign?.id ?? null,
+            worldVersion: worldData?.worldVersion ?? null,
+            currentTick: worldData?.currentTick ?? null,
+            worldTimeMinutes: worldData?.worldTimeMinutes ?? null,
+            sceneId: currentScene?.id ?? currentLocation?.id ?? null,
+          }
+        : undefined}
       backdrop={
         <SceneBackdrop
           sceneName={backdropSceneName}
@@ -1489,7 +1451,6 @@ export default function GamePage() {
         <PresenceLayer
           visibleActors={npcsHere}
           hintSignals={scenePresenceHints}
-          offscreenAnchorCount={offscreenAnchorCount}
           selectedActorId={playSurface.selectedActorId}
           onSelectActor={playSurface.selectActor}
         />

@@ -7483,7 +7483,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("avoid receipt/legal phrasing");
     expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <checked thing> shows at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <finding> shows on <target> at <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("At <scene>, nothing visible supports that <question-body>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The visible scene gives no clear sign that <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("<target> stays visually silent on <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not turn any/some/a target in the checked query into every/all targets");
     expect(buildCleanNarrationSystemPrompt()).toContain("use every/all only when accepted observed_entry_labels enumerate the complete visible set");

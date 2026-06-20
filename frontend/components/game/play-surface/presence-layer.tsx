@@ -1,4 +1,4 @@
-import { Eye, Radio, UsersRound } from "lucide-react";
+import { Eye, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface PresenceActor {
@@ -10,7 +10,6 @@ export interface PresenceActor {
 export interface PresenceLayerProps {
   visibleActors: PresenceActor[];
   hintSignals: string[];
-  offscreenAnchorCount?: number;
   selectedActorId: string | null;
   onSelectActor: (actorId: string) => void;
   className?: string;
@@ -19,12 +18,11 @@ export interface PresenceLayerProps {
 export function PresenceLayer({
   visibleActors,
   hintSignals,
-  offscreenAnchorCount = 0,
   selectedActorId,
   onSelectActor,
   className,
 }: PresenceLayerProps) {
-  if (visibleActors.length === 0 && hintSignals.length === 0 && offscreenAnchorCount === 0) {
+  if (visibleActors.length === 0 && hintSignals.length === 0) {
     return null;
   }
 
@@ -75,17 +73,6 @@ export function PresenceLayer({
         </div>
       ) : null}
 
-      {offscreenAnchorCount > 0 ? (
-        <p
-          data-testid="presence-offscreen-anchor-count"
-          className="inline-flex min-h-8 items-center gap-2 rounded-full border border-white/8 bg-black/30 px-3 py-1 text-[12px] font-semibold leading-tight text-zinc-500"
-        >
-          <UsersRound aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-          <span>
-            {offscreenAnchorCount} nearby, not visible
-          </span>
-        </p>
-      ) : null}
     </section>
   );
 }

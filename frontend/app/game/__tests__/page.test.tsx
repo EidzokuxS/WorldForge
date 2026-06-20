@@ -334,13 +334,11 @@ vi.mock("@/components/game/play-surface/stage-overlay", () => ({
 vi.mock("@/components/game/play-surface/presence-layer", () => ({
   PresenceLayer: ({
     hintSignals,
-    offscreenAnchorCount,
     onSelectActor,
     selectedActorId,
     visibleActors,
   }: {
     hintSignals: string[];
-    offscreenAnchorCount?: number;
     onSelectActor: (actorId: string) => void;
     selectedActorId: string | null;
     visibleActors: Array<{ id: string; name: string }>;
@@ -362,9 +360,6 @@ vi.mock("@/components/game/play-surface/presence-layer", () => ({
           {signal}
         </p>
       ))}
-      {offscreenAnchorCount ? (
-        <p data-testid="presence-offscreen-anchor-count">{offscreenAnchorCount} off-screen anchors</p>
-      ) : null}
     </div>
   ),
 }));
@@ -1356,9 +1351,7 @@ describe("GamePage", () => {
     expect(within(presenceLayer).getByRole("button", { name: "Open Nobara Kugisaki character details" })).toBeInTheDocument();
     expect(within(presenceLayer).queryByRole("button", { name: /Satoru Gojo/ })).not.toBeInTheDocument();
     expect(within(presenceLayer).queryByRole("button", { name: /Rooftop Lookout/ })).not.toBeInTheDocument();
-    expect(within(presenceLayer).getByTestId("presence-hint-0")).toHaveTextContent(
-      "A pressure shift moves along the platform edge.",
-    );
+    expect(within(presenceLayer).queryByTestId("presence-hint-0")).not.toBeInTheDocument();
 
     openDrawer("World");
     expect(screen.getByTestId("location-people-count")).toHaveTextContent("1");
@@ -1367,9 +1360,7 @@ describe("GamePage", () => {
     expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Rooftop Lookout");
     expect(screen.getByTestId("location-scene-name")).toHaveTextContent("Platform 7");
     expect(screen.getByTestId("location-scene-broad-name")).toHaveTextContent("Town Square");
-    expect(screen.getByTestId("location-scene-hints")).toHaveTextContent(
-      "A pressure shift moves along the platform edge."
-    );
+    expect(screen.getByTestId("location-scene-hints")).toBeEmptyDOMElement();
   });
 
   it("opens Character scoped to visible actors and falls back to the player from the rail", async () => {
@@ -1466,7 +1457,7 @@ describe("GamePage", () => {
     );
   });
 
-  it("uses legacy broad-location People Here fallback only when currentScene is absent", async () => {
+  it("does not synthesize People Here from broad location when currentScene is absent", async () => {
     const worldData = {
       ...fakeWorldData,
       currentScene: null,
@@ -1503,9 +1494,10 @@ describe("GamePage", () => {
     await renderReadyGameWithWorld(worldData);
 
     openDrawer("World");
-    expect(screen.getByTestId("location-people-count")).toHaveTextContent("2");
-    expect(screen.getByTestId("location-people-names")).toHaveTextContent("Market Guard");
-    expect(screen.getByTestId("location-people-names")).toHaveTextContent("Street Vendor");
+    expect(screen.getByTestId("location-people-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("location-people-names")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Market Guard");
+    expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Street Vendor");
     expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Forest Scout");
     expect(screen.getByTestId("location-scene-name")).toHaveTextContent("none");
   });

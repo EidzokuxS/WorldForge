@@ -43,18 +43,17 @@ describe("PresenceLayer", () => {
     expect(screen.queryByRole("button", { name: /Satoru Gojo/i })).not.toBeInTheDocument();
   });
 
-  it("does not render off-screen anchors as direct scene chips", () => {
+  it("omits empty presence instead of surfacing off-screen counts", () => {
     render(
       <PresenceLayer
         visibleActors={[]}
         hintSignals={[]}
-        offscreenAnchorCount={3}
         selectedActorId={null}
         onSelectActor={vi.fn()}
       />,
     );
 
-    expect(screen.getByTestId("presence-offscreen-anchor-count")).toHaveTextContent("3 nearby, not visible");
+    expect(screen.queryByTestId("presence-layer")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 

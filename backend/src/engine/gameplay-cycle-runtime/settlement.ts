@@ -321,6 +321,22 @@ function localObservationSurfaceGroupLabel(kinds: readonly string[]): string {
 
 function whetherPresenceSubject(questionBody: string): string | null {
   const lowerBody = questionBody.toLocaleLowerCase("en-US");
+  const placedMarkers = [
+    " is visibly present in ",
+    " are visibly present in ",
+    " is visible in ",
+    " are visible in ",
+    " is present in ",
+    " are present in ",
+  ];
+  for (const marker of placedMarkers) {
+    const index = lowerBody.indexOf(marker);
+    if (index > 0) {
+      const subject = questionBody.slice(0, index).trim();
+      return subject.length > 0 ? subject : null;
+    }
+  }
+
   const suffixes = [
     " is visibly present",
     " are visibly present",
@@ -336,6 +352,29 @@ function whetherPresenceSubject(questionBody: string): string | null {
     }
   }
   return null;
+}
+
+function visibleNoMatchSubject(subject: string): string {
+  const trimmed = subject.trim();
+  const lowerSubject = trimmed.toLocaleLowerCase("en-US");
+  const prefixes = [
+    "any visible signs of ",
+    "any visible sign of ",
+    "visible signs of ",
+    "visible sign of ",
+    "any signs of ",
+    "any sign of ",
+    "signs of ",
+    "sign of ",
+    "a sign of ",
+  ];
+  for (const prefix of prefixes) {
+    if (lowerSubject.startsWith(prefix)) {
+      const withoutPrefix = trimmed.slice(prefix.length).trim();
+      if (withoutPrefix.length > 0) return withoutPrefix;
+    }
+  }
+  return trimmed;
 }
 
 function whetherSurfaceFinding(input: string): { surface: string; finding: string } | null {
@@ -389,15 +428,15 @@ function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneL
     if (questionBody.length > 0) {
       const presenceSubject = whetherPresenceSubject(questionBody);
       if (presenceSubject) {
-        return `No visible sign of ${presenceSubject} shows at ${anchorSceneLabel}.`;
+        return `No visible sign of ${visibleNoMatchSubject(presenceSubject)} shows at ${anchorSceneLabel}.`;
       }
       const surfaceFinding = whetherSurfaceFinding(questionBody);
       if (surfaceFinding) {
         return `No visible sign of ${visibleFindingPhrase(surfaceFinding.finding)} shows ${visibleSurfacePhrase(surfaceFinding.surface)} at ${anchorSceneLabel}.`;
       }
-      return `At ${anchorSceneLabel}, nothing visible supports that ${questionBody}.`;
+      return `The visible scene gives no clear sign that ${questionBody} at ${anchorSceneLabel}.`;
     }
-    return `At ${anchorSceneLabel}, nothing visible supports that question.`;
+    return `The visible scene gives no clear answer at ${anchorSceneLabel}.`;
   }
   const surfaceFinding = observationSurfaceFinding(query);
   if (surfaceFinding) {

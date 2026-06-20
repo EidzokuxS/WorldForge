@@ -557,7 +557,7 @@ function buildScenePresence(
     .where(eq(players.campaignId, campaignId))
     .get();
 
-  if (!currentScene || !player) {
+  if (!currentScene || !player || currentScene.kind === "macro") {
     return {
       snapshot: null,
       presentNpcNames: [],

@@ -379,7 +379,7 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
     expect(scene.playerPerceivableConsequences.join("\n")).not.toContain("Forest Outpost");
   });
 
-  it("keeps explicit macro scene scope visible without broad-only actor leakage", () => {
+  it("does not treat explicit macro scene scope as immediate NPC co-presence", () => {
     vi.mocked(getDb).mockReturnValue(
       createMockDb({
         playerRow: {
@@ -457,11 +457,9 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
       playerLabel: "Hero",
     });
 
-    expect(scene.presentNpcNames).toEqual(["Wax-Tablet Clerk"]);
-    expect(scene.awareness.clearNpcNames).toEqual(["Wax-Tablet Clerk"]);
-    expect(scene.awareness.byNpcName).toEqual({
-      "Wax-Tablet Clerk": "clear",
-    });
+    expect(scene.presentNpcNames).toEqual([]);
+    expect(scene.awareness.clearNpcNames).toEqual([]);
+    expect(scene.awareness.byNpcName).toEqual({});
   });
 
   it("filters pending committed events before both scene effects and recent context", () => {

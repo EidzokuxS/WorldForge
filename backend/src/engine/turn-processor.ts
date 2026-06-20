@@ -2756,6 +2756,53 @@ function collectOpeningForbiddenActorNames(sceneAssembly: SceneAssembly): string
   );
 }
 
+function openingNameKey(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function collectOpeningImmediateNpcNames(sceneAssembly: SceneAssembly): string[] {
+  if (sceneAssembly.currentScene?.kind === "macro") {
+    return [];
+  }
+
+  return uniqueRefs(sceneAssembly.presentNpcNames);
+}
+
+function collectOpeningDirectionActorNames(direction: WorldBrainSceneDirection): string[] {
+  return uniqueRefs([
+    ...direction.focalActorNames,
+    ...direction.backgroundActorNames,
+    ...direction.presenceReasons.map((reason) => reason.actorName),
+  ]);
+}
+
+function collectOpeningDisallowedActorNames(input: {
+  sceneAssembly: SceneAssembly;
+  sceneDirection: WorldBrainSceneDirection;
+  visibleDirection: WorldBrainSceneDirection;
+  playerLabel: string;
+  allowedNpcNames: readonly string[];
+}): string[] {
+  const allowedNames = new Set(
+    uniqueRefs(input.allowedNpcNames).map(openingNameKey),
+  );
+
+  return uniqueRefs([
+    ...input.sceneAssembly.presentNpcNames,
+    ...Object.keys(input.sceneAssembly.awareness.byNpcName),
+    ...collectOpeningDirectionActorNames(input.sceneDirection),
+    ...collectOpeningDirectionActorNames(input.visibleDirection),
+  ]).filter((name) => !allowedNames.has(openingNameKey(name)));
+}
+
+function openingActorNameAllowed(
+  actorName: string,
+  allowedNames: readonly string[],
+): boolean {
+  const actorKey = openingNameKey(actorName);
+  return allowedNames.some((name) => openingNameKey(name) === actorKey);
+}
+
 function collectOpeningPrivateTerms(input: {
   sceneDirection: WorldBrainSceneDirection;
   forbiddenActorNames: readonly string[];
@@ -2782,6 +2829,10 @@ function selectOpeningVisibleSummary(input: {
   for (const candidate of [
     input.visibleDirection.situationSummary,
     ...input.sceneAssembly.playerPerceivableConsequences,
+    input.sceneAssembly.openingState?.immediateSituation,
+    ...(input.sceneAssembly.openingState?.entryPressure ?? []),
+    ...(input.sceneAssembly.openingState?.sceneContextLines ?? []),
+    ...splitOpeningDescriptionSentences(input.sceneAssembly.currentScene?.description ?? "", 2),
   ]) {
     const safe = openingSafeText(candidate, input.forbiddenTerms);
     if (safe) {
@@ -2798,27 +2849,39 @@ function buildOpeningNarrationEvidence(input: {
   sceneAssembly: SceneAssembly;
   visibleDirection: WorldBrainSceneDirection;
   visibleSummary: string;
+  allowedPresenceActorNames: readonly string[];
   forbiddenTerms: readonly string[];
 }): {
   evidenceLedger: NarratorPacketEvidence[];
   sourceLinkedSummaries: NarratorPacketSourceLinkedSummary[];
 } {
-  const candidates: Array<{ summary: string; sourcePath: string }> = [];
+  type OpeningEvidenceSlot =
+    | "local_lens"
+    | "immediate_pressure"
+    | "sensed_handle"
+    | "action_handle"
+    | "scene_texture";
+  const candidates: Array<{ summary: string; sourcePath: string; slot: OpeningEvidenceSlot }> = [];
   const seen = new Set<string>();
 
-  const addCandidate = (sourcePath: string, value: string | null | undefined): void => {
+  const addCandidate = (
+    slot: OpeningEvidenceSlot,
+    sourcePath: string,
+    value: string | null | undefined,
+  ): void => {
     const safe = openingSafeText(stripOpeningContextLabel(value ?? ""), input.forbiddenTerms);
     if (!safe) return;
     const summary = ensureOpeningSentence(safe);
     const key = openingEvidenceKey(summary);
     if (!key || seen.has(key)) return;
     seen.add(key);
-    candidates.push({ summary, sourcePath });
+    candidates.push({ summary, sourcePath, slot });
   };
 
   const openingLens = resolveOpeningSceneLens(input.sceneAssembly);
   if (openingLens) {
     addCandidate(
+      "local_lens",
       openingLens.sourcePath,
       openingLens.kind === "macro_lens" && openingLens.parentSceneName
         ? `You are at ${openingLens.label}, inside ${openingLens.parentSceneName}.`
@@ -2826,22 +2889,15 @@ function buildOpeningNarrationEvidence(input: {
     );
   }
 
-  for (const [index, sentence] of splitOpeningDescriptionSentences(
-    input.sceneAssembly.currentScene?.description ?? "",
-    3,
-  ).entries()) {
-    addCandidate(`opening.currentScene.description[${index}]`, sentence);
-  }
-
-  addCandidate("opening.startingVisibility", input.sceneAssembly.openingState?.startingVisibility
+  addCandidate("sensed_handle", "opening.startingVisibility", input.sceneAssembly.openingState?.startingVisibility
     ? `Your arrival is ${input.sceneAssembly.openingState.startingVisibility}.`
     : null);
-  addCandidate("opening.immediateSituation", input.sceneAssembly.openingState?.immediateSituation);
+  addCandidate("immediate_pressure", "opening.immediateSituation", input.sceneAssembly.openingState?.immediateSituation);
   for (const [index, pressure] of (input.sceneAssembly.openingState?.entryPressure ?? []).entries()) {
-    addCandidate(`opening.entryPressure[${index}]`, pressure);
+    addCandidate("immediate_pressure", `opening.entryPressure[${index}]`, pressure);
   }
   for (const [index, line] of (input.sceneAssembly.openingState?.sceneContextLines ?? []).entries()) {
-    addCandidate(`opening.sceneContextLines[${index}]`, line);
+    addCandidate("sensed_handle", `opening.sceneContextLines[${index}]`, line);
   }
 
   for (const route of buildOpeningRouteHandleCandidates({
@@ -2850,28 +2906,50 @@ function buildOpeningNarrationEvidence(input: {
     sceneAssembly: input.sceneAssembly,
     lens: openingLens,
   })) {
-    addCandidate(route.sourcePath, route.summary);
+    addCandidate("action_handle", route.sourcePath, route.summary);
   }
 
-  addCandidate("opening.playerPerceivableSceneDirection.situationSummary", input.visibleSummary);
+  addCandidate("immediate_pressure", "opening.playerPerceivableSceneDirection.situationSummary", input.visibleSummary);
   for (const [index, beat] of input.visibleDirection.causalBeats.entries()) {
-    addCandidate(`opening.playerPerceivableSceneDirection.causalBeats[${index}]`, beat.summary);
+    addCandidate("sensed_handle", `opening.playerPerceivableSceneDirection.causalBeats[${index}]`, beat.summary);
   }
   for (const [index, reason] of input.visibleDirection.presenceReasons.entries()) {
+    if (!openingActorNameAllowed(reason.actorName, input.allowedPresenceActorNames)) {
+      continue;
+    }
     addCandidate(
+      "sensed_handle",
       `opening.playerPerceivableSceneDirection.presenceReasons[${index}]`,
       reason.reason.trim() ? `${reason.actorName} is present: ${reason.reason}` : reason.actorName,
     );
   }
   for (const [index, consequence] of input.sceneAssembly.playerPerceivableConsequences.entries()) {
-    addCandidate(`opening.playerPerceivableConsequences[${index}]`, consequence);
+    addCandidate("sensed_handle", `opening.playerPerceivableConsequences[${index}]`, consequence);
+  }
+
+  for (const [index, sentence] of splitOpeningDescriptionSentences(
+    input.sceneAssembly.currentScene?.description ?? "",
+    2,
+  ).entries()) {
+    addCandidate("scene_texture", `opening.currentScene.description[${index}]`, sentence);
   }
 
   if (candidates.length === 0) {
     throw new Error("Opening scene requires player-perceivable narration evidence.");
   }
 
-  const selected = candidates.slice(0, 8);
+  const selected: typeof candidates = [];
+  for (const slot of ["local_lens", "immediate_pressure", "sensed_handle", "action_handle"] as const) {
+    const candidate = candidates.find((entry) => entry.slot === slot);
+    if (candidate) selected.push(candidate);
+  }
+  for (const candidate of candidates) {
+    if (selected.length >= 8) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  if (selected.length < 3 || !selected.some((entry) => entry.slot === "local_lens")) {
+    throw new Error("Opening scene requires a local playable lens plus player-facing action evidence.");
+  }
   const evidenceLedger = selected.map((candidate, index): NarratorPacketEvidence => {
     const id = `opening:${input.currentTick}:visible-fact:${index + 1}`;
     return {
@@ -4623,9 +4701,22 @@ function openingNarrationPackets(input: {
   sceneAssembly: SceneAssembly;
   sceneDirection: WorldBrainSceneDirection;
 }): { canonicalTurnPacket: CanonicalTurnPacket; narratorPacket: NarratorPacket } {
-  const visibleDirection =
-    input.sceneAssembly.playerPerceivableSceneDirection ?? input.sceneDirection;
-  const forbiddenActorNames = collectOpeningForbiddenActorNames(input.sceneAssembly);
+  const visibleDirection = input.sceneAssembly.playerPerceivableSceneDirection;
+  if (!visibleDirection) {
+    throw new Error("Opening scene requires player-perceivable scene direction.");
+  }
+  const openingImmediateNpcNames = collectOpeningImmediateNpcNames(input.sceneAssembly);
+  const disallowedActorNames = collectOpeningDisallowedActorNames({
+    sceneAssembly: input.sceneAssembly,
+    sceneDirection: input.sceneDirection,
+    visibleDirection,
+    playerLabel: input.playerLabel,
+    allowedNpcNames: openingImmediateNpcNames,
+  });
+  const forbiddenActorNames = uniqueRefs([
+    ...collectOpeningForbiddenActorNames(input.sceneAssembly),
+    ...disallowedActorNames,
+  ]);
   const forbiddenPrivateTerms = collectOpeningPrivateTerms({
     sceneDirection: input.sceneDirection,
     forbiddenActorNames,
@@ -4651,6 +4742,7 @@ function openingNarrationPackets(input: {
     sceneAssembly: input.sceneAssembly,
     visibleDirection,
     visibleSummary,
+    allowedPresenceActorNames: openingImmediateNpcNames,
     forbiddenTerms,
   });
   const openingEffects: CanonicalTurnPacketEffect[] = openingNarrationEvidence.evidenceLedger.map((entry) => ({
@@ -4696,20 +4788,13 @@ function openingNarrationPackets(input: {
     guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",
   };
-  const visibleActors = [
-    {
-      id: playerActorId,
-      label: input.playerLabel,
-      type: "player" as const,
-    },
-    ...openingSafeTexts(visibleDirection.focalActorNames, forbiddenTerms)
-      .filter((name) => name.trim() && name.trim() !== input.playerLabel)
-      .map((name) => ({
-        id: `opening-actor:${name.trim()}`,
-        label: name.trim(),
-        type: "npc" as const,
-      })),
-  ];
+  const visibleActors = openingSafeTexts(openingImmediateNpcNames, forbiddenTerms)
+    .filter((name) => name.trim() && name.trim() !== input.playerLabel)
+    .map((name) => ({
+      id: `opening-actor:${name.trim()}`,
+      label: name.trim(),
+      type: "npc" as const,
+    }));
   const narratorPacket: NarratorPacket = {
     campaignId: input.campaignId,
     tick: input.currentTick,
@@ -4720,13 +4805,7 @@ function openingNarrationPackets(input: {
     perceivableResponses: [],
     perceivableEffects: openingEffects,
     visibleActors,
-    hintSignals: openingSafeTexts([
-      ...visibleDirection.presenceReasons.map((reason) =>
-        reason.reason.trim()
-          ? `${reason.actorName}: ${reason.reason}`
-          : reason.actorName),
-      ...input.sceneAssembly.awareness.hintSignals,
-    ], forbiddenTerms),
+    hintSignals: [],
     evidenceLedger: openingNarrationEvidence.evidenceLedger,
     guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",

@@ -9513,3 +9513,20 @@ Session: `gm-v1-consequenc-slice`.
     - Promoted the ignored local P336 reference/review notes into tracked docs: `docs/narration/p336-narrative-reference-notes.md` and `docs/narration/p336-live-prose-review-r29.md`. The docs capture Zetta/Balanced-Freaky/TarotEngine/AndreiNicu/Yozakura findings and the r29 live prose proof with excerpts.
     - Re-ran current-state verification after the tracked docs change: expanded clean-runtime tests passed (467), `npm --prefix backend run typecheck` passed, and `node scripts/audit-clean-runtime-prose.mjs --out output/p336-pristine-postfix-r29-20260619/prose-audit-current.json --fail-on-hits output/p336-pristine-postfix-r29-20260619` passed with 33 narratives, zero runtime/debug/receipt hits, zero Zetta banned/style-family hits, repeatedStartRate 0.061, exactRepeatedSentenceRate 0.
     - Reviewed GitNexus HIGH traces for the changed critical paths: `RunCleanNarration -> AssertRouteOptionsReceiptStoryEvidence`, `RunCleanNarration -> AssertSceneFrameRouteStoryEvidence`, `RunCleanNarration -> AssertSceneObservationStoryEvidence`, and `Stage4Evidence -> UniqueStrings`. The risk is concentrated in Stage 6 evidence selection/assertion and route-choice evidence flow, matching the P336 slice.
+
+- WorldForge launch-to-longplay playability recovery:
+  - [x] Captured the user-facing product contract in `docs/playtest/launch-to-longplay-gameplay-contract.md`.
+  - [x] Asked Oracle/GPT-5.5 Pro browser path for a full product/architecture diagnosis using a compact 19-file context bundle; first browser attempt failed on ChatGPT selector/cookies, second completed with `--browser-model-strategy ignore`, so model selector verification is unavailable even though Oracle stored a completed `gpt-5.5-pro` browser session.
+  - [x] Saved Oracle prompt and response in `tasks/oracle-launch-to-longplay-diagnosis-prompt.md` and `tasks/oracle-launch-to-longplay-diagnosis-response.md`.
+  - [x] Applied Krypton Planning and saved the recovery goal package: `docs/goals/worldforge-playability-recovery/PLAN.md` and `docs/goals/worldforge-playability-recovery/GOAL.md`.
+  - [x] Implemented the Opening Gameplay Gate P0 slice:
+    - Frontend game UI uses only `currentScene.clearNpcIds` for visible presence; broad/hidden counts and raw hint pills are gone.
+    - Backend `/world` and scene assembly treat `kind: "macro"` as a location lens, not immediate actor co-presence.
+    - Opening narrator packet no longer treats the player label as an NPC-like visible actor or allowed presence evidence.
+    - Bounded negative observe prose no longer uses the legalistic `nothing visible supports...` frame.
+  - [x] Live proof on fresh clean-start clone `opening-proof-p334-live-r2-20260620`:
+    - `/chat/opening` completed successfully, 663 chars, one storyteller attempt, `contractRepair=false`, no fallback/repair loop.
+    - First screen rendered `The Copper Tap`, visible NPCs `Old Route Hand Sessik` and `Tap-Keeper Brost`, no broad/hidden presence counts.
+    - Custom action `I keep listening for any signs of trouble.` completed through `/chat/action` and rendered a sensory scene beat: `Canal water drums...`.
+  - [x] Focused verification passed: frontend game/presence tests 64/64; backend focused suites 298/298; backend and frontend typecheck passed.
+  - [ ] Next implementation should start from the Krypton plan, run GitNexus impact before edits, and capture player-perspective evidence before any playability claim.

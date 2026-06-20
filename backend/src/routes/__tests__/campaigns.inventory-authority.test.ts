@@ -474,7 +474,7 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       .toBe(siblingSceneHandle);
   });
 
-  it("keeps explicitly scoped macro-scene NPCs visible without pulling sibling sublocations", async () => {
+  it("does not synthesize visible actors from a macro currentScene scope", async () => {
     (getDb as Mock).mockReturnValue(
       createMockDb({
         locations: [
@@ -560,7 +560,6 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     const macroPlaceHandle = publicPlaceHandle("loc-macro");
-    const clerkActorHandle = publicActorHandle("npc-clerk");
     const bellHallActorHandle = publicActorHandle("npc-bell-hall");
     const legacyActorHandle = publicActorHandle("npc-legacy");
 
@@ -571,19 +570,16 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       broadLocationId: macroPlaceHandle,
       broadPlaceHandle: macroPlaceHandle,
       broadLocationName: "Brass Citadel",
-      sceneNpcIds: [clerkActorHandle],
-      actorHandles: [clerkActorHandle],
-      clearNpcIds: [clerkActorHandle],
-      clearActorHandles: [clerkActorHandle],
+      sceneNpcIds: [],
+      actorHandles: [],
+      clearNpcIds: [],
+      clearActorHandles: [],
       awareness: {
-        byNpcId: {
-          [clerkActorHandle]: "clear",
-        },
-        byActorHandle: {
-          [clerkActorHandle]: "clear",
-        },
+        byNpcId: {},
+        byActorHandle: {},
       },
     });
+    expect(body.currentScene.sceneNpcIds).not.toContain("npc-clerk");
     expect(body.currentScene.sceneNpcIds).not.toContain("npc-bell-hall");
     expect(body.currentScene.sceneNpcIds).not.toContain("npc-legacy");
     expect(body.currentScene.sceneNpcIds).not.toContain(bellHallActorHandle);

@@ -1738,6 +1738,49 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.text).not.toContain("visible surface gives you no usable sign");
   });
 
+  it("settles whether-shaped trouble checks as playable visible signs instead of legal proof wording", () => {
+    const query = "whether any signs of trouble are present in the tavern";
+    const inputFrame = frame({
+      playerAction: "I look around the tavern and listen for trouble.",
+      scene: {
+        currentLocation: { ref: "The Copper Tap", label: "The Copper Tap", description: null },
+        currentScene: { ref: "The Copper Tap", label: "The Copper Tap", description: null },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+      movementOptions: [],
+      citableRefs: ["Player", "The Copper Tap"],
+    });
+    const inputChecklist = checklist(inputFrame);
+    const baseReceipt = localObservationReceipt(inputFrame, inputChecklist);
+    const expectedBeat = "No visible sign of trouble shows at The Copper Tap.";
+    const receipt = cleanStage4ReceiptSchema.parse({
+      ...baseReceipt,
+      publicResult: {
+        ...baseReceipt.publicResult,
+        summary: `No visible evidence answers "${query}" among local scene entries.`,
+        visibleRefs: ["Player", "The Copper Tap"],
+        localObservation: {
+          ...baseReceipt.publicResult.localObservation!,
+          queryText: query,
+          searchedSurfaceKinds: ["visible_fact"],
+          anchorSceneLabel: "The Copper Tap",
+          anchorLocationLabel: "The Copper Tap",
+          summary: `No visible evidence answers "${query}" among local scene entries.`,
+        },
+      },
+    });
+    const packet = buildPacket({
+      frame: inputFrame,
+      checklist: inputChecklist,
+      execution: stage4([receipt], inputFrame),
+    });
+
+    const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
+    expect(observation?.text).toBe(expectedBeat);
+    expect(observation?.text).not.toContain("nothing visible supports");
+  });
+
   it("settles targeted mechanical surface no-match without falling back to item presence prose", () => {
     const query = "visible threading, contact seating, or relay hardware marks on Brass Tube";
     const inputFrame = frame({

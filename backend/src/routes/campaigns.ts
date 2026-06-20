@@ -255,9 +255,9 @@ function buildWorldCurrentScene(args: {
   const broadLocation = parentBroadLocation ?? storedBroadLocation;
   const broadLocationId = broadLocation?.id ?? player.currentLocationId;
 
-  const presenceSceneScopeId = resolveImmediateScenePresenceScopeId(
-    player.currentSceneLocationId,
-  );
+  const presenceSceneScopeId = sceneLocation?.kind === "macro"
+    ? null
+    : resolveImmediateScenePresenceScopeId(player.currentSceneLocationId);
 
   const presenceSnapshot = resolveScenePresence({
     playerActorId: player.id,
