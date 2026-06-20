@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
+import type { CharacterRecord } from "@worldforge/shared";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -123,7 +124,7 @@ function expectJsonNotToContain(value: unknown, forbidden: string[]) {
   }
 }
 
-function makeNpcCharacterRecord(name = "Signal Runner Toma") {
+function makeNpcCharacterRecord(name = "Signal Runner Toma"): CharacterRecord {
   return {
     identity: {
       id: "npc-1",
@@ -145,6 +146,7 @@ function makeNpcCharacterRecord(name = "Signal Runner Toma") {
         selfImage: "The runner who gets through.",
       },
       liveDynamics: {
+        attachments: [],
         activeGoals: ["Deliver the warning"],
         beliefDrift: [],
         currentStrains: ["Gets sharper when routes are blocked"],
@@ -180,7 +182,7 @@ function makeNpcCharacterRecord(name = "Signal Runner Toma") {
     capabilities: {
       traits: ["Fast courier"],
       skills: [{ name: "Route finding", tier: "Skilled" }],
-      flaws: [] as string[],
+      flaws: [],
       specialties: ["Storm travel"],
       wealthTier: null,
     },
@@ -1139,6 +1141,14 @@ describe("GET /:id/world", () => {
     ];
     npcRecord.capabilities.flaws = ["Overextends", "item-hidden-storage-ref"];
     npcRecord.capabilities.specialties = ["Storm travel", "route:hidden-storage-ref"];
+    npcRecord.state.conditions = ["Rain-soaked", "event-hidden-storage-ref"];
+    npcRecord.state.statusFlags = ["Alert", "relationship:hidden-storage-ref"];
+    npcRecord.loadout.inventorySeed = ["sealed message case", "item-inventory-storage-ref"];
+    npcRecord.loadout.equippedItemRefs = ["message case strap", "item-equipped-storage-ref"];
+    npcRecord.loadout.signatureItems = ["sealed message case", "item-signature-storage-ref"];
+    npcRecord.startConditions.entryPressure = ["storm closing in", "route-entry-storage-ref"];
+    npcRecord.startConditions.companions = ["old mule", "npc-companion-storage-ref"];
+    npcRecord.provenance.legacyTags = ["runner", "npc-legacy-storage-ref"];
 
     mockAll
       .mockReturnValueOnce([])
@@ -1198,6 +1208,22 @@ describe("GET /:id/world", () => {
         flaws: ["Overextends"],
         specialties: ["Storm travel"],
       },
+      state: {
+        conditions: ["Rain-soaked"],
+        statusFlags: ["Alert"],
+      },
+      loadout: {
+        inventorySeed: ["sealed message case"],
+        equippedItemRefs: ["message case strap"],
+        signatureItems: ["sealed message case"],
+      },
+      startConditions: {
+        entryPressure: ["storm closing in"],
+        companions: ["old mule"],
+      },
+      provenance: {
+        legacyTags: ["runner"],
+      },
       powerStats: {
         speed: { tier: "Human", rank: 4 },
       },
@@ -1207,6 +1233,14 @@ describe("GET /:id/world", () => {
       "scene:hidden-storage-ref",
       "item-hidden-storage-ref",
       "route:hidden-storage-ref",
+      "event-hidden-storage-ref",
+      "relationship:hidden-storage-ref",
+      "item-inventory-storage-ref",
+      "item-equipped-storage-ref",
+      "item-signature-storage-ref",
+      "route-entry-storage-ref",
+      "npc-companion-storage-ref",
+      "npc-legacy-storage-ref",
     ]);
     expect(body.npcs[0]).not.toHaveProperty("npc");
   });

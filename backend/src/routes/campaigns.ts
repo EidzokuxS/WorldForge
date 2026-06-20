@@ -149,9 +149,22 @@ function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof t
 ): T {
   return {
     ...draft,
+    state: {
+      ...draft.state,
+      conditions: publicSemanticStrings(draft.state.conditions),
+      statusFlags: publicSemanticStrings(draft.state.statusFlags),
+    },
+    loadout: {
+      ...draft.loadout,
+      inventorySeed: publicSemanticStrings(draft.loadout.inventorySeed),
+      equippedItemRefs: publicSemanticStrings(draft.loadout.equippedItemRefs),
+      signatureItems: publicSemanticStrings(draft.loadout.signatureItems),
+    },
     startConditions: {
       ...draft.startConditions,
       startLocationId: publicHandle(campaignId, "place", draft.startConditions.startLocationId),
+      entryPressure: publicSemanticStrings(draft.startConditions.entryPressure),
+      companions: publicSemanticStrings(draft.startConditions.companions),
     },
     socialContext: {
       ...draft.socialContext,
@@ -172,6 +185,7 @@ function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof t
     provenance: {
       ...draft.provenance,
       templateId: null,
+      legacyTags: publicSemanticStrings(draft.provenance.legacyTags),
     },
   };
 }
