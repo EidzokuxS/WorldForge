@@ -462,6 +462,72 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
     expect(scene.awareness.byNpcName).toEqual({});
   });
 
+  it("uses a sublocation parent broad scope when resolving immediate scene NPCs", () => {
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        playerRow: {
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          race: "Human",
+          gender: "",
+          age: "",
+          appearance: "",
+          currentLocationId: "scene-tap",
+          currentSceneLocationId: "scene-tap",
+          characterRecord: "{}",
+        },
+        locationRows: [
+          {
+            id: "scene-tap",
+            campaignId: CAMPAIGN_ID,
+            name: "The Copper Tap",
+            description: "A tavern in the canal ward.",
+            tags: "[]",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-silt",
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-silt",
+            campaignId: CAMPAIGN_ID,
+            name: "Silt Warrens",
+            description: "A broad canal ward.",
+            tags: "[]",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+        ],
+        npcRows: [
+          {
+            id: "npc-route-hand",
+            campaignId: CAMPAIGN_ID,
+            name: "Old Route Hand Sessik",
+            tags: "[]",
+            currentLocationId: "loc-silt",
+            currentSceneLocationId: "scene-tap",
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const scene = assembleAuthoritativeScene({
+      campaignId: CAMPAIGN_ID,
+      currentLocationId: null,
+      currentSceneScopeId: "scene-tap",
+      pendingEventTicks: [5],
+      toolCalls: [],
+      playerLabel: "Hero",
+    });
+
+    expect(scene.presentNpcNames).toEqual(["Old Route Hand Sessik"]);
+    expect(scene.awareness.clearNpcNames).toEqual(["Old Route Hand Sessik"]);
+  });
+
   it("filters pending committed events before both scene effects and recent context", () => {
     vi.mocked(readPendingCommittedEvents).mockReturnValue([
       {

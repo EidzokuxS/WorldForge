@@ -586,6 +586,120 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
     expect(body.currentScene.sceneNpcIds).not.toContain(legacyActorHandle);
   });
 
+  it("shows explicit current-scene support actors on a macro scene without broad actor synthesis", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-market",
+            campaignId: "abc-123",
+            name: "Lowwater Bazaar",
+            description: "A broad market district.",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Courier",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-market",
+            currentSceneLocationId: "loc-market",
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-local-vendor",
+            campaignId: "abc-123",
+            name: "Local Vendor",
+            persona: "",
+            tags: JSON.stringify([
+              "temporary-support",
+              "clean-runtime-support",
+              "support-role:vendor",
+              "current-scene",
+              "minor-support",
+              "reactive-only",
+            ]),
+            tier: "temporary",
+            currentLocationId: "loc-market",
+            currentSceneLocationId: "loc-market",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-market-crowd",
+            campaignId: "abc-123",
+            name: "Market Crowd",
+            persona: "",
+            tags: "[]",
+            tier: "temporary",
+            currentLocationId: "loc-market",
+            currentSceneLocationId: "loc-market",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-local-clerk",
+            campaignId: "abc-123",
+            name: "Local Clerk",
+            persona: "",
+            tags: JSON.stringify(["clerk"]),
+            tier: "temporary",
+            currentLocationId: "loc-market",
+            currentSceneLocationId: "loc-market",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        items: [],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const marketHandle = publicPlaceHandle("loc-market");
+    const vendorHandle = publicActorHandle("npc-local-vendor");
+    const crowdHandle = publicActorHandle("npc-market-crowd");
+    const clerkHandle = publicActorHandle("npc-local-clerk");
+
+    expect(body.currentScene).toMatchObject({
+      id: marketHandle,
+      sceneHandle: marketHandle,
+      name: "Lowwater Bazaar",
+      broadLocationId: marketHandle,
+      broadPlaceHandle: marketHandle,
+      broadLocationName: "Lowwater Bazaar",
+      sceneNpcIds: [vendorHandle, clerkHandle],
+      actorHandles: [vendorHandle, clerkHandle],
+      clearNpcIds: [vendorHandle, clerkHandle],
+      clearActorHandles: [vendorHandle, clerkHandle],
+      awareness: {
+        byNpcId: {
+          [vendorHandle]: "clear",
+          [clerkHandle]: "clear",
+        },
+        byActorHandle: {
+          [vendorHandle]: "clear",
+          [clerkHandle]: "clear",
+        },
+      },
+    });
+    expect(body.currentScene.sceneNpcIds).not.toContain(crowdHandle);
+    expect(body.currentScene.clearNpcIds).not.toContain(crowdHandle);
+  });
+
   it("derives persistent sublocation broad scope so support NPCs placed at parent remain visible", async () => {
     (getDb as Mock).mockReturnValue(
       createMockDb({

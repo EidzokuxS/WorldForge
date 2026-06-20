@@ -56,7 +56,6 @@ import {
   hasTurnSagaSnapshotRecovery,
   NarrationRepairExhaustedError,
   PendingNarrationError,
-  queuePostTurnSimulationProposals,
 } from "../engine/index.js";
 import type {
   TurnSagaRecord,
@@ -110,7 +109,6 @@ import {
 const log = createLogger("chat");
 
 const app = new Hono();
-type PostTurnRoute = "/chat/action" | "/chat/retry" | "/chat/resume";
 type TerminalTurnEventType = "done" | "error";
 type CleanRuntimeDoneBoundaryData = {
   runtime: "gameplay-cycle-runtime";
@@ -150,58 +148,6 @@ function registerTurnAbortCleanup(args: {
   return () => {
     args.signal.removeEventListener("abort", cleanup);
   };
-}
-
-/**
- * Rollback-critical work must finish before the turn is marked done.
- * Heavy world simulation is recorded as versioned proposals so player control
- * returns after the visible GM/narrator turn without allowing detached NPC or
- * faction LLM agents to mutate the world behind the `done` boundary.
- */
-async function runRollbackCriticalPostTurn(
-  _settings: Settings,
-  campaignId: string,
-  judgeProvider: ProviderConfig,
-  summary: TurnSummary,
-  route: PostTurnRoute,
-): Promise<void> {
-  const db = (await import("../db/index.js")).getDb();
-  const { players } = await import("../db/schema.js");
-  const { eq } = await import("drizzle-orm");
-
-  const player = db
-    .select({
-      currentLocationId: players.currentLocationId,
-      currentSceneLocationId: players.currentSceneLocationId,
-    })
-    .from(players)
-    .where(eq(players.campaignId, campaignId))
-    .get();
-
-  const result = queuePostTurnSimulationProposals({
-    campaignId,
-    tick: summary.tick,
-    judgeProvider,
-    playerLocationId: player?.currentLocationId,
-    playerSceneScopeId: player?.currentSceneLocationId ?? undefined,
-    route,
-    idempotencyKey: summary.idempotencyKey,
-  });
-  const actorSchedules = result.actorSchedules ?? [];
-  log.event("simulation.proposals.queued", {
-    campaignId,
-    tick: summary.tick,
-    baseWorldVersion: result.baseWorldVersion,
-    proposalCount: result.queued.length,
-    proposalTypes: result.queued.map((proposal) => proposal.proposalType),
-    actorScheduleCount: actorSchedules.length,
-    actorScheduleRoutes: actorSchedules.map((schedule) => ({
-      actorId: schedule.actorId,
-      route: schedule.route,
-      reservation: schedule.reservation?.status ?? null,
-      signals: schedule.signals.map((signal) => signal.type),
-    })),
-  });
 }
 
 function queueAuxiliaryPostTurnWork(
@@ -532,14 +478,9 @@ async function retractDurableEventsByIds(
 }
 
 function buildOnPostTurn(
-  settings: Settings,
-  campaignId: string,
-  judgeProvider: ProviderConfig,
-  route: PostTurnRoute,
   onRollbackCriticalSummary?: (summary: TurnSummary) => void,
 ): ((summary: TurnSummary) => Promise<void>) | undefined {
   return async (summary: TurnSummary) => {
-    await runRollbackCriticalPostTurn(settings, campaignId, judgeProvider, summary, route);
     onRollbackCriticalSummary?.(summary);
   };
 }
@@ -562,7 +503,6 @@ function createPostTurnHooks(input: {
   settings: Settings;
   campaignId: string;
   judgeProvider: ProviderConfig;
-  route: PostTurnRoute;
   playerAction?: string;
   chatHistoryLengthBeforeTurn?: number;
 }): {
@@ -572,10 +512,6 @@ function createPostTurnHooks(input: {
   let rollbackCriticalSummary: TurnSummary | null = null;
   return {
     onPostTurn: buildOnPostTurn(
-      input.settings,
-      input.campaignId,
-      input.judgeProvider,
-      input.route,
       (summary) => {
         rollbackCriticalSummary = summary;
       },
@@ -1632,7 +1568,6 @@ app.post("/action", async (c) => {
           settings,
           campaignId,
           judgeProvider: judgeResult.resolved.provider,
-          route: "/chat/action",
           playerAction,
           chatHistoryLengthBeforeTurn,
         });
@@ -1959,7 +1894,6 @@ app.post("/resume", async (c) => {
               settings,
               campaignId,
               judgeProvider: judgeResult.resolved.provider,
-              route: "/chat/resume",
             });
             await streamPendingTurnNarration({
               campaignId,
@@ -2195,7 +2129,6 @@ app.post("/retry", async (c) => {
           settings,
           campaignId,
           judgeProvider: judgeResult.resolved.provider,
-          route: "/chat/retry",
           playerAction,
           chatHistoryLengthBeforeTurn: previousBoundary.chatHistoryLengthBeforeTurn ?? undefined,
         });

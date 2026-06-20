@@ -720,6 +720,29 @@ function sceneFrameSnapshotWithOverlappingTargetsView(): CleanNarratorView {
   });
 }
 
+function mixedLocalObservationView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "local_observation_receipt",
+      claimKinds: ["local_observation", "visible_actor", "inventory_status", "movement_option"],
+      text: "At Charter Gallery, you can see Auditor-Voice Maren Dael, Clerk Aldris, Sealed lacquer message tube, Courier satchel, Brass Tube, Auditor Spire, and Lowwater Bazaar.",
+      backendFacts: [
+        { factRef: "e1.f1", role: "local_observation_beat", value: "At Charter Gallery, you can see Auditor-Voice Maren Dael, Clerk Aldris, Sealed lacquer message tube, Courier satchel, Brass Tube, Auditor Spire, and Lowwater Bazaar.", text: "Local observation beat: At Charter Gallery, you can see Auditor-Voice Maren Dael, Clerk Aldris, Sealed lacquer message tube, Courier satchel, Brass Tube, Auditor Spire, and Lowwater Bazaar.", exact: true },
+        { factRef: "e1.f2", role: "observed_entry_labels", value: "Charter Gallery; Auditor-Voice Maren Dael; Clerk Aldris; Sealed lacquer message tube; Courier satchel; Brass Tube; Auditor Spire; Lowwater Bazaar", text: "Observed entry labels: Charter Gallery; Auditor-Voice Maren Dael; Clerk Aldris; Sealed lacquer message tube; Courier satchel; Brass Tube; Auditor Spire; Lowwater Bazaar.", exact: true },
+        { factRef: "e1.f3", role: "observed_visible_actor_labels", value: "Auditor-Voice Maren Dael; Clerk Aldris", text: "Observed visible actor labels: Auditor-Voice Maren Dael; Clerk Aldris.", exact: true },
+        { factRef: "e1.f4", role: "observed_inventory_item_labels", value: "Courier satchel; Brass Tube", text: "Observed inventory item labels: Courier satchel; Brass Tube.", exact: true },
+        { factRef: "e1.f5", role: "route_choice_labels", value: "Auditor Spire; Lowwater Bazaar", text: "Route choice labels: Auditor Spire; Lowwater Bazaar.", exact: true },
+        { factRef: "e1.f6", role: "anchor_scene", value: "Charter Gallery", text: "Anchor scene: Charter Gallery.", exact: true },
+      ],
+      limits: {
+        proves: ["matching current visible entries"],
+        doesNotProve: ["item state change", "route truth beyond route option/check receipts", "mutation"],
+      },
+    }],
+  });
+}
+
 function dialogueView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -1123,8 +1146,8 @@ function positiveLocalObservationView(): CleanNarratorView {
         { factRef: "e1.f3", role: "observation_query", text: "Observation query: central telegraph desk.", exact: true },
         { factRef: "e1.f4", role: "observed_entry_labels", value: "central telegraph desk", text: "Observed entry labels: central telegraph desk.", exact: true },
         { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: visible target central telegraph desk.", exact: true },
-        { factRef: "e1.f6", role: "anchor_scene", text: "Anchor scene: Market.", exact: true },
-        { factRef: "e1.f7", role: "anchor_location", text: "Anchor location: Market.", exact: true },
+        { factRef: "e1.f6", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
+        { factRef: "e1.f7", role: "anchor_location", value: "Market", text: "Anchor location: Market.", exact: true },
       ],
       limits: {
         proves: ["matching current visible entries"],
@@ -1253,7 +1276,7 @@ function inventorySingleMatchLocalObservationWithSceneTextureView(): CleanNarrat
         backendFacts: [
           { factRef: "e1.f1", role: "local_observation_beat", value: "Brass Tube is with you at Lowwater Bazaar.", text: "Local observation beat: Brass Tube is with you at Lowwater Bazaar.", exact: true },
           { factRef: "e1.f2", role: "searched_visible_surfaces", text: "Searched visible surfaces: inventory items.", exact: true },
-          { factRef: "e1.f3", role: "observation_query", value: "Brass Tube", text: "Observation query: Brass Tube.", exact: true },
+          { factRef: "e1.f3", role: "observation_query", value: "visible surface details, color, scratches, and seal marks on Brass Tube", text: "Observation query: visible surface details, color, scratches, and seal marks on Brass Tube.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "Brass Tube", text: "Observed entry labels: Brass Tube.", exact: true },
           { factRef: "e1.f5", role: "observed_inventory_item_labels", value: "Brass Tube", text: "Observed inventory item labels: Brass Tube.", exact: true },
           { factRef: "e1.f6", role: "observed_entry_surfaces", text: "Observed entry surfaces: inventory item Brass Tube.", exact: true },
@@ -3589,6 +3612,51 @@ describe("clean Stage 6 narration contracts", () => {
     expect(renderCleanAuthorityProjection(internalClarification))
       .not.toContain("SceneFrame");
 
+    const routeClarification = clarificationWithSceneFrameSnapshotView();
+    routeClarification.acceptedEvidence[0] = {
+      ...routeClarification.acceptedEvidence[0]!,
+      backendFacts: routeClarification.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "clarification_request"
+          ? {
+            ...fact,
+            value: "The Verification Desk (second tier) is not an exposed movement option. The available routes from Auditor Spire are Charter Gallery and Lowwater Bazaar. Should the scene-model add the second tier as an internal destination, or does the player need to describe how they reach it?",
+          }
+          : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(routeClarification))
+      .toBe("Please clarify: How do you reach The Verification Desk (second tier): by taking one of the visible routes, or by describing a current-scene path inside this place?");
+    expect(renderCleanAuthorityProjection(routeClarification)).not.toContain("[hidden]");
+    expect(renderCleanAuthorityProjection(routeClarification)).not.toContain("scene-model");
+
+    routeClarification.acceptedEvidence[0] = {
+      ...routeClarification.acceptedEvidence[0]!,
+      backendFacts: routeClarification.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "clarification_request"
+          ? {
+            ...fact,
+            value: "The Verification Desk (second tier) is not listed as an available route from Auditor Spire. The exposed routes are Charter Gallery and Lowwater Bazaar. Should the scene-model add the second tier as an internal destination, or does the player need to describe how they reach it?",
+          }
+          : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(routeClarification))
+      .toBe("Please clarify: How do you reach The Verification Desk (second tier): by taking one of the visible routes, or by describing a current-scene path inside this place?");
+
+    routeClarification.acceptedEvidence[0] = {
+      ...routeClarification.acceptedEvidence[0]!,
+      backendFacts: routeClarification.acceptedEvidence[0]!.backendFacts.map((fact) =>
+        fact.role === "clarification_request"
+          ? {
+            ...fact,
+            value: "The Verification Desk (second tier) is not an exposed route from Auditor Spire. The only movement options are Charter Gallery and Lowwater Bazaar. Should the scene-model add the second tier as an internal destination, or does the player need to describe how they reach it?",
+          }
+          : fact
+      ),
+    };
+    expect(renderCleanAuthorityProjection(routeClarification))
+      .toBe("Please clarify: How do you reach The Verification Desk (second tier): by taking one of the visible routes, or by describing a current-scene path inside this place?");
+
     expect(() => renderCleanAuthorityProjection(withoutFactValue(
       clarificationWithSceneFrameSnapshotView(),
       "clarification_request",
@@ -4895,23 +4963,30 @@ describe("clean Stage 6 narration contracts", () => {
     const visibleTargetEvidence = promptInput.acceptedEvidence.find((evidence) =>
       evidence.ref === "e4"
     );
-    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).toEqual(["e4.f2", "e4.f3", "e4.f4"]);
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).toEqual(["e4.f2", "e4.f4"]);
     expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.role)).toEqual([
       "visible_actor_target_labels",
-      "visible_item_target_labels",
       "visible_place_handle_target_labels",
     ]);
     expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).not.toContain("e4.f1");
+    expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).not.toContain("e4.f3");
     expect(visibleTargetEvidence?.backendFacts.map((fact) => fact.factRef)).not.toContain("e4.f5");
+    const directSceneStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.sentenceRole === "next_action_handle"
+      && step.beatObjective === "render_direct_scene_snapshot"
+    );
+    expect(directSceneStep?.preferredBackendFactRefs).not.toContain("e4.f3");
+    expect(directSceneStep?.proseMaterials.map((material) => material.materialText))
+      .not.toContain("Courier satchel; Brass Tube");
 
     const result = await runCleanNarration({
       narratorView: view,
       provider,
       generateCandidate: async () => acceptedCandidate(view, [
         {
-          text: "Guide is present here; Brass Tube and Notice Board are visible here.",
+          text: "Guide is present here; Notice Board is visible here.",
           evidenceRefs: ["e2", "e4"],
-          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
+          backendFactRefs: ["e2.f1", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
         },
         {
@@ -4933,6 +5008,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toContain("Guide is present");
     expect(result.text).not.toContain("Guide, Courier satchel");
     expect(result.text).not.toContain("Guide, Brass Tube");
+    expect(result.text).not.toContain("Brass Tube and Notice Board");
     expect(result.text).not.toContain("Courier satchel is visible");
     expect(result.text).not.toContain("North Hall is visible");
     expect(result.text.match(/\bGuide\b/gu)).toHaveLength(1);
@@ -4940,7 +5016,7 @@ describe("clean Stage 6 narration contracts", () => {
     const actorAction = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "Guide waits in Market while Brass Tube is visible.",
+        text: "Guide waits in Market while Notice Board is visible.",
         evidenceRefs: ["e1", "e2", "e4"],
         backendFactRefs: ["e1.f1", "e2.f1", "e4.f4"],
         claimKinds: ["current_scene", "visible_actor", "visible_target"],
@@ -4952,9 +5028,9 @@ describe("clean Stage 6 narration contracts", () => {
       view,
       candidate: acceptedCandidate(view, [
         {
-          text: "Guide is present here; Brass Tube and Notice Board are visible here.",
+          text: "Guide is present here; Notice Board is visible here.",
           evidenceRefs: ["e2", "e4"],
-          backendFactRefs: ["e2.f1", "e4.f3", "e4.f4"],
+          backendFactRefs: ["e2.f1", "e4.f4"],
           claimKinds: ["visible_actor", "visible_target"],
         },
         {
@@ -4972,6 +5048,41 @@ describe("clean Stage 6 narration contracts", () => {
       ]),
     });
     expect(inventoryPhrase.status).toBe("accepted");
+  });
+
+  it("keeps mixed local observation room material typed instead of using the generic observed-entry bucket", () => {
+    const promptInput = buildCleanNarratorPromptInput(mixedLocalObservationView());
+    const localObservationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_local_observation"
+    );
+
+    expect(localObservationStep?.preferredBackendFactRefs).toEqual([
+      "e1.f3",
+      "e1.f4",
+      "e1.f5",
+      "e1.f6",
+    ]);
+    expect(localObservationStep?.preferredBackendFactRefs).not.toContain("e1.f2");
+    expect(localObservationStep?.proseMaterials).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        factRef: "e1.f3",
+        materialText: "Auditor-Voice Maren Dael; Clerk Aldris",
+      }),
+      expect.objectContaining({
+        factRef: "e1.f4",
+        materialText: "Courier satchel; Brass Tube",
+      }),
+      expect.objectContaining({
+        factRef: "e1.f5",
+        materialText: "Auditor Spire; Lowwater Bazaar",
+      }),
+      expect.objectContaining({
+        factRef: "e1.f6",
+        materialText: "Charter Gallery",
+      }),
+    ]));
+    expect(localObservationStep?.proseMaterials.map((material) => material.materialText))
+      .not.toContain("Charter Gallery; Auditor-Voice Maren Dael; Clerk Aldris; Sealed lacquer message tube; Courier satchel; Brass Tube; Auditor Spire; Lowwater Bazaar");
   });
 
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
@@ -5576,6 +5687,41 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).not.toMatch(/\b(item state|Operation|Final equip state|Current scene anchor|Item transfer result|says|accepts|reacts|consents|uses|activates|nothing changed|no change)\b/iu);
   });
 
+  it("normalizes model-authored item_custody sentence claimKinds to item_state evidence", () => {
+    const view = itemStateView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Brass Tube passes to Guide at Market; Guide carries Brass Tube now.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
+        claimKinds: ["item_custody" as unknown as NarrationClaimKind],
+        hardClaims: ["item_custody"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.candidate.sentences[0]?.claimKinds).toEqual(["item_state"]);
+    expect(result.candidate.sentences[0]?.hardClaims).toEqual(["item_custody"]);
+  });
+
+  it("accepts item_state custody prose that cites scene context without printing the scene label", () => {
+    const view = itemStateView();
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Brass Tube passes to Guide; Guide carries Brass Tube now.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f2", "e1.f1"],
+        claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
   it("accepts scene-custody item_state prose from the typed custody task card", () => {
     const view = itemStateView();
     const promptInput = buildCleanNarratorPromptInput(view);
@@ -5617,6 +5763,75 @@ describe("clean Stage 6 narration contracts", () => {
     expect(missingTarget.status).toBe("rejected");
     if (missingTarget.status !== "rejected") throw new Error("expected rejected");
     expect(missingTarget.issues.some((issue) =>
+      issue.code === "sentence_plan_not_supported"
+      && issue.message.includes("target_label")
+    )).toBe(true);
+  });
+
+  it("accepts received item_state prose that renders the player target in second person", () => {
+    const view = movementView({
+      acceptedEvidence: [{
+        ref: "e1",
+        authority: "item_transfer_receipt",
+        claimKinds: ["item_state"],
+        text: "The Brass Tube passes from Clerk Aldris to Mira Voss at Charter Gallery; Mira Voss carries it now.",
+        backendFacts: [
+          { factRef: "e1.f1", role: "custody_change", value: "The Brass Tube passes from Clerk Aldris to Mira Voss at Charter Gallery.", text: "Custody change: The Brass Tube passes from Clerk Aldris to Mira Voss at Charter Gallery.", exact: true },
+          { factRef: "e1.f2", role: "settled_custody", value: "Mira Voss carries Brass Tube now.", text: "Settled custody: Mira Voss carries Brass Tube now.", exact: true },
+          { factRef: "e1.f3", role: "item_label", value: "Brass Tube", text: "Item label: Brass Tube.", exact: true },
+          { factRef: "e1.f4", role: "source_label", value: "Clerk Aldris", text: "Source: Clerk Aldris.", exact: true },
+          { factRef: "e1.f5", role: "target_label", value: "Mira Voss", text: "Target: Mira Voss.", exact: true },
+          { factRef: "e1.f6", role: "final_equip_state", value: "carried", text: "Final equip state: carried.", exact: true },
+          { factRef: "e1.f7", role: "current_scene_anchor", value: "Charter Gallery", text: "Current scene anchor: Charter Gallery.", exact: true },
+          { factRef: "e1.f8", role: "item_transfer_result", value: "received_from_actor", text: "Item transfer result: received_from_actor.", exact: true },
+        ],
+        limits: {
+          proves: ["accepted item custody/location/equip-state operation"],
+          doesNotProve: ["dialogue content", "NPC private knowledge"],
+        },
+      }],
+    });
+
+    const accepted = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Clerk Aldris returns Brass Tube to you at Charter Gallery; you carry Brass Tube now.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
+      }]),
+    });
+
+    expect(accepted.status).toBe("accepted");
+
+    const acceptedWithoutResultFactRef = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Clerk Aldris returns Brass Tube to you at Charter Gallery; you carry Brass Tube now.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7"],
+        claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
+      }]),
+    });
+
+    expect(acceptedWithoutResultFactRef.status).toBe("accepted");
+
+    const missingEndpoint = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "Brass Tube changes hands at Charter Gallery after the handoff.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4", "e1.f5", "e1.f6", "e1.f7", "e1.f8"],
+        claimKinds: ["item_state"],
+        hardClaims: ["item_custody"],
+      }]),
+    });
+
+    expect(missingEndpoint.status).toBe("rejected");
+    if (missingEndpoint.status !== "rejected") throw new Error("expected rejected");
+    expect(missingEndpoint.issues.some((issue) =>
       issue.code === "sentence_plan_not_supported"
       && issue.message.includes("target_label")
     )).toBe(true);
@@ -6169,7 +6384,7 @@ describe("clean Stage 6 narration contracts", () => {
       step.beatObjective === "render_local_observation"
     );
 
-    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f4", "e1.f7"]);
+    expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f5", "e1.f7"]);
     expect(observationStep?.adventureCue.subjectFocus).toBe("observed_visible_entries");
     expect(observationStep?.adventureCue.verbFrame).toBe("land_visible_observation");
     expect(observationStep?.proseAssembly.sentenceShape).toBe("local_observation_line");
@@ -6266,6 +6481,8 @@ describe("clean Stage 6 narration contracts", () => {
       step.beatObjective === "render_local_observation"
     );
 
+    expect(promptInput.acceptedEvidence.find((entry) => entry.ref === "e1")?.backendFacts.map((fact) => fact.factRef))
+      .not.toContain("e1.f3");
     expect(observationStep?.preferredBackendFactRefs).toEqual(["e1.f1", "e1.f5"]);
     expect(observationStep?.proseMaterials.map((material) => material.proseUse)).toEqual([
       "primary_beat",
@@ -6497,8 +6714,8 @@ describe("clean Stage 6 narration contracts", () => {
         text: routeBeat,
         backendFacts: [
           { factRef: "e1.f1", role: "local_observation_beat", value: routeBeat, text: `Local observation beat: ${routeBeat}`, exact: true },
-          { factRef: "e1.f2", text: "Searched visible surfaces: route options.", exact: true },
-          { factRef: "e1.f3", text: "Observation query: visible routes and local targets.", exact: true },
+          { factRef: "e1.f2", role: "searched_visible_surfaces", value: "route options", text: "Searched visible surfaces: route options.", exact: true },
+          { factRef: "e1.f3", role: "observation_query", value: "visible routes and local targets", text: "Observation query: visible routes and local targets.", exact: true },
           { factRef: "e1.f4", role: "observed_entry_labels", value: "North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins", text: "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.", exact: true },
           { factRef: "e1.f5", role: "observed_entry_surfaces", text: "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.", exact: true },
           { factRef: "e1.f6", role: "anchor_scene", value: "Market", text: "Anchor scene: Market.", exact: true },
@@ -7436,7 +7653,11 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft surface material menu: choose present visible material traits attached to the object itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the item custody sentence plan as a scene-custody task card");
-    expect(buildCleanNarrationSystemPrompt()).toContain("preserve backendFacts with roles `item_label`, `target_label`, and cited `current_scene_anchor` exactly");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserve backendFacts with role `item_label` exactly");
+    expect(buildCleanNarrationSystemPrompt()).toContain("preserve non-player actor `target_label` endpoints exactly");
+    expect(buildCleanNarrationSystemPrompt()).toContain("received_from_actor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("the player endpoint may be phrased in second person as you/your");
+    expect(buildCleanNarrationSystemPrompt()).toContain("current_scene_anchor` fact is placement proof when the sentence states placement");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase the custody beat naturally instead of copying the whole accepted custody sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Item-state grammar:");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_custody_beat_line with land_scene_custody");
@@ -7468,13 +7689,14 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("For positive look/list_surface observations");
     expect(buildCleanNarrationSystemPrompt()).toContain("open through the surface, place, or object first");
-    expect(buildCleanNarrationSystemPrompt()).toContain("observation_query about surface, wear, marks, scratches");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For positive local_observation, observation_query is adjudication scope, not prose material");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Factual presence, absence, count, readability, authenticity, seal/mark content");
     expect(buildCleanNarrationSystemPrompt()).toContain("spending one small softProseBudget detail on visible non-mechanical surface");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase it as present object surface on the item or visible target itself");
     expect(buildCleanNarrationSystemPrompt()).toContain("Soft wear and texture do not become durable world-state authority");
     expect(buildCleanNarrationSystemPrompt()).toContain("later player use of that detail routes through normal adjudication");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not place it in the player's grip, on the player's body, or in clue/affordance language");
-    expect(buildCleanNarrationSystemPrompt()).toContain("observed_entry_labels plus anchor_scene");
+    expect(buildCleanNarrationSystemPrompt()).toContain("typed observed_visible_actor_labels, observed_inventory_item_labels, route_choice_labels, and anchor_scene before generic observed_entry_labels");
     expect(buildCleanNarrationSystemPrompt()).toContain("local_observation_line with observed_labels_then_scene");
     expect(buildCleanNarrationSystemPrompt()).toContain("Mixed visible-state local observations");
     expect(buildCleanNarrationSystemPrompt()).toContain("Pressure verbs attach to the place or material surroundings");
@@ -7523,7 +7745,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Pressure verbs attach to scene surfaces, air, light");
     expect(buildCleanNarrationSystemPrompt()).toContain("actor labels without accepted visible cue material stay as present/in-view labels");
     expect(buildCleanNarrationSystemPrompt()).toContain("follow directScenePresentation and <worldforge_room_beat>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan should supply one playable_room_beat_line instead of separate actor, inventory, target, and route receipt lines");
+    expect(buildCleanNarrationSystemPrompt()).toContain("sentencePlan should supply one playable_room_beat_line instead of separate actor, inventory, actor/place target, and route receipt lines");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Visible item target labels prove targetability only");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not turn them into floor, counter, hand, ownership, proximity, resting, dropped, carried, or placement prose without item_state");
     expect(buildCleanNarrationSystemPrompt()).toContain("Compose that sentence as one playable room beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Start from the exact scene label, a single soft sensory strike, or scene pressure");
     expect(buildCleanNarrationSystemPrompt()).toContain("not a catalog, but room pressure plus handles");

@@ -190,7 +190,7 @@ function itemTransferCustodyChangeText(itemTransfer: CleanItemTransferResult): s
     return `${itemTransferHolderPhrase(itemTransfer, "already")} at ${itemTransfer.anchorSceneLabel}.`;
   }
   if (
-    itemTransfer.resultKind === "transferred_to_actor"
+    (itemTransfer.resultKind === "transferred_to_actor" || itemTransfer.resultKind === "received_from_actor")
     && itemTransfer.sourceLabel
     && itemTransfer.targetLabel
     && itemTransfer.sourceLabel !== itemTransfer.targetLabel
@@ -1513,12 +1513,16 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const observedActorLabels = uniqueStrings(observation.matchedEntries
         .filter((entry) => entry.surfaceKind === "visible_actor")
         .map((entry) => entry.label));
+      const observedRouteLabels = uniqueStrings(observation.matchedEntries
+        .filter((entry) => entry.surfaceKind === "movement_option")
+        .map((entry) => entry.label));
       const observedSurfaceLabels = localObservationSurfaceEntryLabels(observation.matchedEntries);
       const observedInventoryLabels = uniqueStrings(observation.matchedEntries
         .filter((entry) => entry.surfaceKind === "inventory_item")
         .map((entry) => entry.label));
       const observedLabelList = evidenceSemicolonList(observedLabels);
       const observedActorLabelList = evidenceSemicolonList(observedActorLabels);
+      const observedRouteLabelList = evidenceSemicolonList(observedRouteLabels);
       const observedInventoryLabelList = evidenceSemicolonList(observedInventoryLabels);
       const isInventoryObservation = !boundedNegative
         && observedInventoryLabels.length > 0
@@ -1535,6 +1539,15 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           : observation.resultKind === "positive_list"
           ? ["local_observation"]
           : ["local_observation", "visible_target"];
+      if (!boundedNegative && observedActorLabels.length > 0 && !claimKinds.includes("visible_actor")) {
+        claimKinds.push("visible_actor");
+      }
+      if (!boundedNegative && observedInventoryLabels.length > 0 && !claimKinds.includes("inventory_status")) {
+        claimKinds.push("inventory_status");
+      }
+      if (!boundedNegative && observedRouteLabels.length > 0 && !claimKinds.includes("movement_option")) {
+        claimKinds.push("movement_option");
+      }
       const backendFactTexts: Array<{ role: CleanSettledBackendFactRole; text: string; value?: string }> = [
         { role: "local_observation_beat", text: `Local observation beat: ${localBeat}`, value: localBeat },
         { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.`, value: surfaceGroup },
@@ -1547,6 +1560,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
           : []),
         ...(observedInventoryLabels.length > 0
           ? [{ role: "observed_inventory_item_labels" as const, text: `Observed inventory item labels: ${observedInventoryLabelList}.`, value: observedInventoryLabelList }]
+          : []),
+        ...(observedRouteLabels.length > 0
+          ? [{ role: "route_choice_labels" as const, text: `Route choice labels: ${observedRouteLabelList}.`, value: observedRouteLabelList }]
           : []),
         ...(observedSurfaceLabels.length > 0
           ? [{ role: "observed_entry_surfaces" as const, text: `Observed entry surfaces: ${evidenceSemicolonList(observedSurfaceLabels)}.` }]

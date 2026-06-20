@@ -866,13 +866,7 @@ describe("Targeted gameplay route campaignId validation", () => {
       chatHistoryLengthBeforeTurn: 0,
       chatHistoryLengthAfterTurn: 2,
     });
-    expect(mockedQueuePostTurnSimulationProposals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        tick: 0,
-        route: "/chat/action",
-      }),
-    );
+    expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
   });
 
   it("rejects /chat/retry without campaignId", async () => {
@@ -2419,7 +2413,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body.hasLiveTurnSnapshot).toBe(true);
   });
 
-  it("records post-turn world simulation as proposals before done without direct detached mutations", async () => {
+  it("keeps post-turn clean action hooks off retired simulation proposal stores", async () => {
     setupStoryteller();
     setupDbMock();
     const orderedCalls: string[] = [];
@@ -2438,24 +2432,6 @@ describe("Campaign-loaded gameplay transport", () => {
       createdRelationshipIds: [],
       createdChronicleIds: [],
     }) as any);
-    mockedQueuePostTurnSimulationProposals.mockImplementation(() => {
-      orderedCalls.push("queuePostTurnSimulationProposals");
-      return {
-        campaignId: CAMPAIGN_ID,
-        baseWorldVersion: 7,
-        worldTimeMinutes: 11,
-        queued: [
-          {
-            proposalId: "proposal-1",
-            campaignId: CAMPAIGN_ID,
-            proposalType: "npc_reflection_updates",
-            baseWorldVersion: 7,
-            writeScopes: ["npc:memory"],
-            status: "pending",
-          },
-        ],
-      } as any;
-    });
     mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
       (async function* () {
         yield { type: "oracle_result", data: { outcome: "strong_hit" } } as any;
@@ -2492,16 +2468,8 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(orderedCalls).toEqual([
       "finalizing_turn",
       "done",
-      "queuePostTurnSimulationProposals",
     ]);
-    expect(mockedQueuePostTurnSimulationProposals).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        tick: 2,
-        playerLocationId: "loc-001",
-        playerSceneScopeId: "loc-001",
-      }),
-    );
+    expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
     expect(mockedSimulateOffscreenNpcs).not.toHaveBeenCalled();
     expect(mockedCheckAndTriggerReflections).not.toHaveBeenCalled();
     expect(mockedTickFactions).not.toHaveBeenCalled();
@@ -2592,15 +2560,6 @@ describe("Campaign-loaded gameplay transport", () => {
       createdRelationshipIds: [],
       createdChronicleIds: [],
     }) as any);
-    mockedQueuePostTurnSimulationProposals.mockImplementation(() => {
-      orderedCalls.push("queuePostTurnSimulationProposals");
-      return {
-        campaignId: CAMPAIGN_ID,
-        baseWorldVersion: 0,
-        worldTimeMinutes: 0,
-        queued: [],
-      } as any;
-    });
     mockDrainPendingCommittedEventsByIds.mockReturnValue([
       {
         id: "evt-speak",
@@ -2657,7 +2616,8 @@ describe("Campaign-loaded gameplay transport", () => {
     await res.text();
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(orderedCalls).toEqual(["queuePostTurnSimulationProposals"]);
+    expect(orderedCalls).toEqual([]);
+    expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
     expect(mockedSimulateOffscreenNpcs).not.toHaveBeenCalled();
     expect(mockedCheckAndTriggerReflections).not.toHaveBeenCalled();
     expect(mockedTickFactions).not.toHaveBeenCalled();

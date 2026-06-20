@@ -2760,12 +2760,15 @@ function openingNameKey(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-function collectOpeningImmediateNpcNames(sceneAssembly: SceneAssembly): string[] {
+export function collectOpeningImmediateNpcNames(sceneAssembly: SceneAssembly): string[] {
   if (sceneAssembly.currentScene?.kind === "macro") {
     return [];
   }
 
-  return uniqueRefs(sceneAssembly.presentNpcNames);
+  return uniqueRefs([
+    ...sceneAssembly.presentNpcNames,
+    ...sceneAssembly.awareness.clearNpcNames,
+  ]);
 }
 
 function collectOpeningDirectionActorNames(direction: WorldBrainSceneDirection): string[] {
@@ -2843,6 +2846,65 @@ function selectOpeningVisibleSummary(input: {
   throw new Error("Opening scene requires a safe player-perceivable summary.");
 }
 
+export type OpeningEvidenceSlot =
+  | "local_lens"
+  | "immediate_pressure"
+  | "sensed_handle"
+  | "visible_people"
+  | "action_handle"
+  | "scene_texture";
+
+export type OpeningEvidenceCandidate = {
+  summary: string;
+  sourcePath: string;
+  slot: OpeningEvidenceSlot;
+};
+
+export function selectOpeningEvidenceCandidates(
+  candidates: readonly OpeningEvidenceCandidate[],
+): OpeningEvidenceCandidate[] {
+  const selected: OpeningEvidenceCandidate[] = [];
+
+  const add = (candidate: OpeningEvidenceCandidate | undefined): void => {
+    if (!candidate || selected.includes(candidate) || selected.length >= 5) {
+      return;
+    }
+    selected.push(candidate);
+  };
+
+  const firstForSlot = (
+    slot: OpeningEvidenceSlot,
+    preferredSourcePrefixes: readonly string[] = [],
+  ): OpeningEvidenceCandidate | undefined => {
+    for (const prefix of preferredSourcePrefixes) {
+      const match = candidates.find((candidate) =>
+        candidate.slot === slot && candidate.sourcePath.startsWith(prefix) && !selected.includes(candidate),
+      );
+      if (match) return match;
+    }
+    return candidates.find((candidate) =>
+      candidate.slot === slot && !selected.includes(candidate),
+    );
+  };
+
+  add(firstForSlot("local_lens"));
+  add(firstForSlot("scene_texture"));
+  add(firstForSlot("immediate_pressure", [
+    "opening.entryPressure",
+    "opening.immediateSituation",
+    "opening.playerPerceivableSceneDirection.situationSummary",
+  ]));
+  add(firstForSlot("visible_people"));
+  add(firstForSlot("action_handle"));
+
+  for (const candidate of candidates) {
+    if (selected.length >= 3) break;
+    add(candidate);
+  }
+
+  return selected;
+}
+
 function buildOpeningNarrationEvidence(input: {
   campaignId: string;
   currentTick: number;
@@ -2855,13 +2917,7 @@ function buildOpeningNarrationEvidence(input: {
   evidenceLedger: NarratorPacketEvidence[];
   sourceLinkedSummaries: NarratorPacketSourceLinkedSummary[];
 } {
-  type OpeningEvidenceSlot =
-    | "local_lens"
-    | "immediate_pressure"
-    | "sensed_handle"
-    | "action_handle"
-    | "scene_texture";
-  const candidates: Array<{ summary: string; sourcePath: string; slot: OpeningEvidenceSlot }> = [];
+  const candidates: OpeningEvidenceCandidate[] = [];
   const seen = new Set<string>();
 
   const addCandidate = (
@@ -2909,6 +2965,17 @@ function buildOpeningNarrationEvidence(input: {
     addCandidate("action_handle", route.sourcePath, route.summary);
   }
 
+  if (input.allowedPresenceActorNames.length > 0) {
+    const visiblePeople = formatOpeningNameList(input.allowedPresenceActorNames);
+    addCandidate(
+      "visible_people",
+      "opening.presentNpcNames",
+      input.allowedPresenceActorNames.length === 1
+        ? `${visiblePeople} is in view.`
+        : `${visiblePeople} are in view.`,
+    );
+  }
+
   addCandidate("immediate_pressure", "opening.playerPerceivableSceneDirection.situationSummary", input.visibleSummary);
   for (const [index, beat] of input.visibleDirection.causalBeats.entries()) {
     addCandidate("sensed_handle", `opening.playerPerceivableSceneDirection.causalBeats[${index}]`, beat.summary);
@@ -2938,15 +3005,7 @@ function buildOpeningNarrationEvidence(input: {
     throw new Error("Opening scene requires player-perceivable narration evidence.");
   }
 
-  const selected: typeof candidates = [];
-  for (const slot of ["local_lens", "immediate_pressure", "sensed_handle", "action_handle"] as const) {
-    const candidate = candidates.find((entry) => entry.slot === slot);
-    if (candidate) selected.push(candidate);
-  }
-  for (const candidate of candidates) {
-    if (selected.length >= 8) break;
-    if (!selected.includes(candidate)) selected.push(candidate);
-  }
+  const selected = selectOpeningEvidenceCandidates(candidates);
   if (selected.length < 3 || !selected.some((entry) => entry.slot === "local_lens")) {
     throw new Error("Opening scene requires a local playable lens plus player-facing action evidence.");
   }

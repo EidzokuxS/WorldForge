@@ -62,6 +62,7 @@ export interface AuthoritativeSceneContext {
   description: string;
   tags: string[];
   kind: "macro" | "persistent_sublocation" | "ephemeral_scene";
+  parentLocationId?: string | null;
 }
 
 export interface SceneAssembly {
@@ -331,6 +332,7 @@ function buildCurrentScene(
     description: location.description,
     tags: parseStringArray(location.tags),
     kind: location.kind,
+    parentLocationId: location.parentLocationId,
   };
 }
 
@@ -570,7 +572,7 @@ function buildScenePresence(
     };
   }
 
-  const broadLocationId = currentLocationId ?? player.currentLocationId ?? null;
+  const broadLocationId = currentScene.parentLocationId ?? currentLocationId ?? player.currentLocationId ?? null;
   const playerSceneScopeId = resolveImmediateScenePresenceScopeId(
     player.currentSceneLocationId,
   );

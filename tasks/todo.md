@@ -9529,4 +9529,24 @@ Session: `gm-v1-consequenc-slice`.
     - First screen rendered `The Copper Tap`, visible NPCs `Old Route Hand Sessik` and `Tap-Keeper Brost`, no broad/hidden presence counts.
     - Custom action `I keep listening for any signs of trouble.` completed through `/chat/action` and rendered a sensory scene beat: `Canal water drums...`.
   - [x] Focused verification passed: frontend game/presence tests 64/64; backend focused suites 298/298; backend and frontend typecheck passed.
-  - [ ] Next implementation should start from the Krypton plan, run GitNexus impact before edits, and capture player-perspective evidence before any playability claim.
+  - [ ] Continue from the Opening Gameplay Gate into the full requested launch-to-longplay proof: play the real runtime beyond opening/first action, record player-perspective transcript and state deltas, fix blockers, then verify before claiming playability.
+    - [x] Started fresh r13 lane from launch/opening and reached T8 with zero structural issues.
+    - [x] Proved opening, broad look, harmless Brass Tube surface prose, hidden/mechanical bounded no-match, NPC dialogue, route status, movement, and post-movement overview.
+    - [x] Stopped later diagnostic lanes instead of laundering them into acceptance:
+      - r19/r20 exposed direct handoff defects where `give Clerk Aldris the Brass Tube` and `keep my hands off it` became dialogue/readiness instead of item custody.
+      - r21 T33 exposed pedantic clarification for low-stakes `satchel tight against my side` manner text.
+    - [x] Fixed the launch-to-longplay blockers with typed-owner changes and tests:
+      - GM Read now admits double-object physical handoff (`give actor item`) as `item_transfer`.
+      - Same-item carried-readiness drift on an `item_transfer` is normalized to the transfer owner.
+      - Low-stakes close/tight/tucked/against-side carried-item manner text stays in the single movement/posture/scene beat instead of becoming a second local condition.
+      - Stage 6 item-state target handling accepts player endpoint prose for `receive_from_visible_actor` from accepted evidence.
+      - `/chat/action` no longer writes clean post-turns into retired `simulation_jobs` / `simulation_proposals`.
+    - [x] Verified static gates after the latest fixes:
+      - `npm --prefix backend run test -- --run src/engine/__tests__/gameplay-cycle-runtime-contracts.test.ts` (263 passed).
+      - Expanded clean-runtime subset contracts/narration/stage4/settlement/chat (545 passed).
+      - `npm --prefix backend run typecheck` passed.
+    - [x] Played r21 to T60 at `output/launch-to-longplay-r21-20260620-2130` through the real backend:
+      - Coverage included opening, movement, route inquiry/status/options, visible actor dialogue, explicit give/return item custody, inventory checks, bounded hidden/mechanical no-match, time passage, minor place handle creation/persistence, ordinary prop use, and post-wait return loops.
+      - Audit: 60/60 turns settled with zero hard structural issues; retired gameplay stores stayed zero; final state at Charter Gallery carried only Brass Tube + Courier satchel, with Auditor Spire and Lowwater Bazaar open.
+      - r21 is diagnostic, not pristine acceptance, because T33 contains the pre-fix clarification. The exact same action passed post-fix on T34 as playable scene prose.
+    - [ ] Optional final acceptance remains: run a fresh pristine post-fix lane from opening through distance again if the bar is "no diagnostic turn anywhere in the transcript."

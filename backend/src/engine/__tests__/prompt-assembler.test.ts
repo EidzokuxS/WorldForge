@@ -2146,8 +2146,9 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain(
       "Opening scene pages establish a playable start page",
     );
-    expect(result.prompt).toContain("select 3-5 different backendFacts");
-    expect(result.prompt).toContain("do not collapse opening into one summary line");
+    expect(result.prompt).toContain("When lens, visible-person, or route/action-handle backendFacts are listed, include them");
+    expect(result.prompt).toContain("Select 3-5 different backendFacts");
+    expect(result.prompt).toContain("skip overlapping facts that repeat the same subject/action");
     expect(result.prompt).toContain("You are at Shibuya station concourse, inside Shibuya.");
     expect(result.prompt).toContain("Civilians crowd the shopping streets and station concourses.");
     expect(result.prompt).toContain("Chakra saturation in the tunnels drops temperatures and shorts streetlights.");

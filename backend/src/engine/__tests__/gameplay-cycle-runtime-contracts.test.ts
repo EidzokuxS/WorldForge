@@ -876,6 +876,7 @@ function itemTransferGmRead(frame = itemTransferActionPlanFrame()): GmRead {
         operation: "give_to_visible_actor",
         itemRef: "Brass Tube",
         sourceKind: "player_inventory",
+        sourceRef: null,
         targetKind: "visible_actor",
         targetRef: "Guide",
         equipSlot: null,
@@ -884,6 +885,60 @@ function itemTransferGmRead(frame = itemTransferActionPlanFrame()): GmRead {
       },
     },
     interpretationRationale: "Giving a carried item to a visible actor needs item-state receipt authority.",
+  };
+}
+
+function receiveItemTransferActionPlanFrame(overrides: Partial<AuthoritativeSceneFrame> = {}): AuthoritativeSceneFrame {
+  const base = actionPlanFrame();
+  return actionPlanFrame({
+    playerAction: "I ask Guide to return the Brass Tube to me.",
+    actors: [{
+      ref: "Guide",
+      label: "Guide",
+      role: "support",
+      visibleStatus: { hp: null, conditions: [] },
+    }],
+    targets: [
+      { ref: "Guide", label: "Guide", kind: "actor" },
+      { ref: "Brass Tube", label: "Brass Tube", kind: "item" },
+    ],
+    inventory: [],
+    capabilities: [
+      ...base.capabilities,
+      { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+      { capabilityId: "dialogue_record", evidenceAuthority: "terminal_receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube"],
+    ...overrides,
+  });
+}
+
+function receiveItemTransferGmRead(frame = receiveItemTransferActionPlanFrame()): GmRead {
+  return {
+    ...actionPlanGmRead(frame),
+    focalRefs: ["Player", "Guide", "Brass Tube"],
+    evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+    liveSceneQuestion: "Which visible actor item custody transition must Stage 4 settle?",
+    actionInterpretation: {
+      summary: "The player asks visible Guide to return Brass Tube.",
+      playerIntent: "Ask Guide to return Brass Tube to Player.",
+      method: "ask to return",
+      targetRefs: ["Guide"],
+      interactionKind: "visible_actor_dialogue",
+      itemTransferNeed: {
+        actorRef: "Player",
+        operation: "receive_from_visible_actor",
+        itemRef: "Brass Tube",
+        sourceKind: "visible_actor_item",
+        sourceRef: "Guide",
+        targetKind: "player_inventory",
+        targetRef: "Player",
+        equipSlot: null,
+        requestedItemText: "Brass Tube",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    },
+    interpretationRationale: "Returning a visible actor-held item to Player needs item-state receipt authority before dialogue can claim it.",
   };
 }
 
@@ -1434,6 +1489,17 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(JSON.stringify(parsed)).not.toContain("receipts");
     expect(JSON.stringify(parsed)).not.toContain("receipt_ledger");
     expect(JSON.stringify(parsed)).not.toContain("narrativeText");
+  });
+
+  it("accepts private GM Read rationale up to the model-generation contract size", () => {
+    const rationale = "The player performs a concrete visible handoff to a visible clerk. ".repeat(20);
+    const parsed = gmReadSchema.parse({
+      ...validGmRead(),
+      interpretationRationale: rationale,
+    });
+
+    expect(parsed.interpretationRationale.length).toBeGreaterThan(500);
+    expect(parsed.interpretationRationale.length).toBeLessThanOrEqual(2000);
   });
 
   it("rejects unknown root fields in Primitive 2 GM Read candidates", () => {
@@ -2244,6 +2310,9 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
   it.each([
     ["hand", "I hand the Brass Tube to Guide."],
     ["give", "I give the Brass Tube to Guide."],
+    ["double-object give", "I give Guide the Brass Tube."],
+    ["adverbial hand", "I physically hand the Brass Tube to Guide for a short inspection, making it clear I expect it back after the ledger note."],
+    ["prefaced adverbial hand", "Despite the stated procedure, I physically hand the Brass Tube to Guide for a closer inspection, placing it in his hands and saying I expect it back after the note."],
   ])("accepts %s as bounded item_transfer from Player inventory to a visible actor", (_verb, playerAction) => {
     const frame = itemTransferActionPlanFrame({ playerAction });
     const candidate = itemTransferGmRead(frame);
@@ -2265,6 +2334,210 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         equipSlot: null,
       },
     });
+  });
+
+  it("accepts double-object handoff to a multi-word visible actor label", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I give Clerk Aldris the Brass Tube and keep my hands off it while he completes the verification.",
+      actors: [{
+        ref: "Clerk Aldris",
+        label: "Clerk Aldris",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Clerk Aldris", label: "Clerk Aldris", kind: "actor" }],
+      citableRefs: ["Player", "Market", "Clerk Aldris", "North Hall", "Brass Tube"],
+    });
+    const candidate: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "Clerk Aldris", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Clerk Aldris", "Brass Tube"],
+      liveSceneQuestion: "Which bounded item custody transition must Stage 4 settle?",
+      actionInterpretation: {
+        summary: "The player gives Brass Tube to visible Clerk Aldris.",
+        playerIntent: "Give Brass Tube to Clerk Aldris.",
+        method: "give",
+        targetRefs: ["Brass Tube", "Clerk Aldris"],
+        interactionKind: "item_transfer",
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "give_to_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          sourceRef: null,
+          targetKind: "visible_actor",
+          targetRef: "Clerk Aldris",
+          equipSlot: null,
+          requestedItemText: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Clerk Aldris", "Market"],
+        },
+      },
+      interpretationRationale: "Giving a carried item to a visible actor needs item-state receipt authority.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation).toMatchObject({
+      interactionKind: "item_transfer",
+      itemTransferNeed: {
+        operation: "give_to_visible_actor",
+        itemRef: "Brass Tube",
+        targetRef: "Clerk Aldris",
+      },
+    });
+  });
+
+  it("drops same-item readiness drift from a physical item transfer", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I give Clerk Aldris the Brass Tube and keep my hands off it while he completes the verification.",
+      actors: [{
+        ref: "Clerk Aldris",
+        label: "Clerk Aldris",
+        role: "support",
+        visibleStatus: { hp: null, conditions: [] },
+      }],
+      targets: [{ ref: "Clerk Aldris", label: "Clerk Aldris", kind: "actor" }],
+      citableRefs: ["Player", "Market", "Clerk Aldris", "North Hall", "Brass Tube"],
+    });
+    const candidate: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "Clerk Aldris", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Clerk Aldris", "Brass Tube"],
+      liveSceneQuestion: "Which bounded item custody transition must Stage 4 settle?",
+      actionInterpretation: {
+        summary: "The player gives Brass Tube to visible Clerk Aldris and keeps hands off it.",
+        playerIntent: "Give Brass Tube to Clerk Aldris.",
+        method: "give",
+        targetRefs: ["Brass Tube", "Clerk Aldris"],
+        interactionKind: "item_transfer",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "hands_visible",
+          requestedPostureText: "keep my hands off the Brass Tube while Clerk Aldris verifies it",
+          targetKind: "inventory_item_readiness",
+          targetRef: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Market"],
+        },
+        itemTransferNeed: {
+          actorRef: "Player",
+          operation: "give_to_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "player_inventory",
+          sourceRef: null,
+          targetKind: "visible_actor",
+          targetRef: "Clerk Aldris",
+          equipSlot: null,
+          requestedItemText: "Brass Tube",
+          evidenceRefs: ["Player", "Brass Tube", "Clerk Aldris", "Market"],
+        },
+      },
+      interpretationRationale: "The physical transfer owns the item-state change; hands-off wording is not a separate readiness state on that same item.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.itemTransferNeed).toMatchObject({
+      operation: "give_to_visible_actor",
+      itemRef: "Brass Tube",
+      targetRef: "Clerk Aldris",
+    });
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
+  it("rejects adverbial physical handoff as dialogue-only when the item transfer is omitted", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I physically hand the Brass Tube to Guide for a short inspection, making it clear I expect it back after the ledger note.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Guide", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      liveSceneQuestion: "How does Guide answer?",
+      actionInterpretation: {
+        summary: "The player hands Brass Tube to Guide and expects it back.",
+        playerIntent: "Hand Brass Tube to Guide for short inspection.",
+        method: "physically hand",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+      interpretationRationale: "The model treated a completed handoff as only future spoken permission.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+      }),
+    ]));
+  });
+
+  it("rejects double-object physical handoff as dialogue-only when the item transfer is omitted", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I give Guide the Brass Tube and keep my hands off it while he checks the seal.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Guide", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      liveSceneQuestion: "How does Guide answer?",
+      actionInterpretation: {
+        summary: "The player gives Brass Tube to Guide and waits for a response.",
+        playerIntent: "Give Brass Tube to Guide.",
+        method: "give",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+      interpretationRationale: "The model treated a completed handoff as only future spoken permission.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+      }),
+    ]));
+  });
+
+  it("keeps hypothetical first-person handoff questions as dialogue-only", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "If I hand the Brass Tube to Guide later, would that be safe?",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Guide", "Brass Tube"],
+      evidenceRefs: ["Player", "Market", "Guide", "Brass Tube"],
+      liveSceneQuestion: "How does Guide answer the hypothetical question?",
+      actionInterpretation: {
+        summary: "The player asks a hypothetical question about a future handoff.",
+        playerIntent: "Ask whether handing Brass Tube to Guide later would be safe.",
+        method: "ask",
+        targetRefs: ["Guide"],
+        interactionKind: "visible_actor_dialogue",
+      },
+      interpretationRationale: "The handoff is hypothetical and belongs to dialogue until the player performs it.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.itemTransferNeed).toBeUndefined();
   });
 
   it("accepts item_transfer with a separate maintained Player item-readiness condition", () => {
@@ -2329,13 +2602,13 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         },
       },
     });
-    expect(sameItemCondition.status).toBe("rejected");
-    if (sameItemCondition.status !== "rejected") throw new Error("expected rejected");
-    expect(sameItemCondition.issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path: "actionInterpretation.localConditionNeed.targetRef",
-      }),
-    ]));
+    expect(sameItemCondition.status).toBe("accepted");
+    if (sameItemCondition.status !== "accepted") throw new Error("expected accepted");
+    expect(sameItemCondition.read.actionInterpretation.itemTransferNeed).toMatchObject({
+      operation: "drop_in_current_scene",
+      itemRef: "Courier satchel",
+    });
+    expect(sameItemCondition.read.actionInterpretation.localConditionNeed).toBeUndefined();
   });
 
   it("rejects a supported inventory-to-visible-actor target pair when GM Read labels it unsupported", () => {
@@ -2389,6 +2662,99 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
         code: "interaction_invalid",
         path: "actionInterpretation.interactionKind",
       }),
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+      }),
+    ]));
+  });
+
+  it("requires typed receive_from_visible_actor when a visible actor returns a visible item to Player", () => {
+    const frame = receiveItemTransferActionPlanFrame();
+    const candidate = receiveItemTransferGmRead(frame);
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted");
+    expect(accepted.read.actionInterpretation.itemTransferNeed).toMatchObject({
+      operation: "receive_from_visible_actor",
+      itemRef: "Brass Tube",
+      sourceKind: "visible_actor_item",
+      sourceRef: "Guide",
+      targetKind: "player_inventory",
+      targetRef: "Player",
+    });
+
+    const missingTransfer: GmRead = {
+      ...candidate,
+      actionInterpretation: {
+        ...candidate.actionInterpretation,
+        itemTransferNeed: undefined,
+      },
+    };
+    const rejected = validateGmReadCandidate({ frame, candidate: missingTransfer });
+
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.itemTransferNeed",
+      }),
+    ]));
+    expect(buildGmReadPrompt(frame)).toContain("receive_from_visible_actor");
+  });
+
+  it("admits an offered item handoff while preserving another carried item", () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I offer the Brass Tube to Guide for inspection, but I keep the Courier satchel with me.",
+      inventory: [
+        {
+          ref: "Brass Tube",
+          label: "Brass Tube",
+          equipState: "carried",
+          tags: [],
+        },
+        {
+          ref: "Courier satchel",
+          label: "Courier satchel",
+          equipState: "equipped",
+          tags: [],
+        },
+      ],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Brass Tube", "Courier satchel"],
+    });
+
+    const result = validateGmReadCandidate({ frame, candidate: itemTransferGmRead(frame) });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.itemTransferNeed).toMatchObject({
+      operation: "give_to_visible_actor",
+      itemRef: "Brass Tube",
+      targetRef: "Guide",
+    });
+
+    const wrongKeptItem: GmRead = {
+      ...itemTransferGmRead(frame),
+      actionInterpretation: {
+        ...itemTransferGmRead(frame).actionInterpretation,
+        targetRefs: ["Courier satchel", "Guide"],
+        itemTransferNeed: {
+          ...itemTransferGmRead(frame).actionInterpretation.itemTransferNeed!,
+          itemRef: "Courier satchel",
+          requestedItemText: "Courier satchel",
+          evidenceRefs: ["Player", "Courier satchel", "Guide", "Market"],
+        },
+      },
+    };
+
+    const rejected = validateGmReadCandidate({ frame, candidate: wrongKeptItem });
+
+    expect(rejected.status).toBe("rejected");
+    if (rejected.status !== "rejected") throw new Error("expected rejected");
+    expect(rejected.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({
         code: "interaction_invalid",
         path: "actionInterpretation.itemTransferNeed",
@@ -2724,17 +3090,25 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
   });
 
-  it("keeps overlong GM Read rationale as a model-generation near-miss while final packets stay strict", () => {
+  it("accepts GM Read rationale within model-generation size and rejects beyond it", () => {
     const frame = deviceSurfaceFrame();
-    const nearMiss = {
+    const withinContract = {
       ...deviceSurfaceGmRead(frame),
       interpretationRationale: "Device surface observation requires backend receipt authority. ".repeat(20),
     };
 
-    expect(gmReadModelGenerationSchema.safeParse(nearMiss).success).toBe(true);
-    expect(gmReadSchema.safeParse(nearMiss).success).toBe(false);
-    const result = validateGmReadCandidate({ frame, candidate: nearMiss });
-    expect(result.status).toBe("rejected");
+    expect(gmReadModelGenerationSchema.safeParse(withinContract).success).toBe(true);
+    expect(gmReadSchema.safeParse(withinContract).success).toBe(true);
+    expect(validateGmReadCandidate({ frame, candidate: withinContract }).status).toBe("accepted");
+
+    const beyondContract = {
+      ...deviceSurfaceGmRead(frame),
+      interpretationRationale: "Device surface observation requires backend receipt authority. ".repeat(40),
+    };
+
+    expect(gmReadModelGenerationSchema.safeParse(beyondContract).success).toBe(false);
+    expect(gmReadSchema.safeParse(beyondContract).success).toBe(false);
+    expect(validateGmReadCandidate({ frame, candidate: beyondContract }).status).toBe("rejected");
   });
 
   it("canonicalizes omitted GM Read targetRefs to an empty broad-observation list", () => {
@@ -2762,7 +3136,8 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     });
     const prompt = buildGmReadPrompt(frame);
 
-    expect(buildGmReadSystemPrompt()).toContain("Keeping an already-inventory item close");
+    expect(buildGmReadSystemPrompt()).toContain("Keeping an already-inventory item high");
+    expect(buildGmReadSystemPrompt()).toContain("Low-stakes carried-item manner text");
     expect(prompt).toContain("held-item readiness example shape");
     expect(prompt).toContain("itemTransferNeed");
     expect(prompt).toContain("null");
@@ -3081,6 +3456,53 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.liveSceneQuestion).toContain("keeping Sealed lacquer message tube ready");
     expect(result.read.actionInterpretation.interactionKind).toBe("unsupported_or_unclear");
     expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
+  it("keeps low-stakes carried-item manner inside the single posture action", () => {
+    const frame = minimalFrame({
+      playerAction: "I follow Nisse's footing around the pylon, keeping my weight forward and the satchel tight against my side.",
+      inventory: [{
+        ref: "Courier satchel",
+        label: "Courier satchel",
+        equipState: "equipped",
+        tags: [],
+      }],
+      citableRefs: ["Player", "Market", "Guide", "North Hall", "Courier satchel"],
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      focalRefs: ["Player", "Market", "Courier satchel"],
+      evidenceRefs: ["Player", "Market", "Courier satchel"],
+      actionInterpretation: {
+        summary: "The player follows careful footing around the current-scene pylon while keeping their satchel tight.",
+        playerIntent: "Follow Nisse's footing around the pylon while keeping the satchel tight as manner text.",
+        method: "careful footing with satchel kept tight",
+        targetRefs: ["Player", "Market"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "braced",
+          requestedPostureText: "keep weight forward while following the footing",
+          targetKind: "current_scene",
+          targetRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The satchel wording is low-stakes manner text, not a separate inventory readiness condition.",
+    };
+
+    expect(buildGmReadSystemPrompt()).toContain("satchel close, tight, tucked");
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.path).toBe("procedural");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("braced");
   });
 
   it("exposes steady self-check as a Player local-condition cue without injury truth", () => {
@@ -3772,6 +4194,87 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(meaningCheck.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
     expect(meaningCheck.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
     expect(meaningCheck.read.actionInterpretation.localObservationNeed?.allowBoundedNegative).toBe(true);
+  });
+
+  it("keeps ordinary overheard room chatter as a scene beat instead of a generic visible-entry list", () => {
+    const frame = minimalFrame({
+      playerAction: "I look around the tavern and listen for what the off-duty couriers are arguing about.",
+      actors: [
+        {
+          ref: "Old Route Hand Sessik",
+          label: "Old Route Hand Sessik",
+          role: "support",
+          visibleStatus: { hp: null, conditions: [] },
+        },
+        {
+          ref: "Tap-Keeper Brost",
+          label: "Tap-Keeper Brost",
+          role: "support",
+          visibleStatus: { hp: null, conditions: [] },
+        },
+      ],
+      targets: [
+        { ref: "Old Route Hand Sessik", label: "Old Route Hand Sessik", kind: "actor" },
+        { ref: "Tap-Keeper Brost", label: "Tap-Keeper Brost", kind: "actor" },
+        { ref: "Brass Tube", label: "Brass Tube", kind: "item" },
+        { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", kind: "location" },
+        { ref: "Silt Warrens", label: "Silt Warrens", kind: "location" },
+        { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", kind: "location" },
+      ],
+      movementOptions: [
+        { ref: "Lowwater Bazaar", label: "Lowwater Bazaar", connected: true, travelCost: 1 },
+        { ref: "Silt Warrens", label: "Silt Warrens", connected: true, travelCost: 1 },
+        { ref: "Slip Twelve Berth", label: "Slip Twelve Berth", connected: true, travelCost: 1 },
+      ],
+      citableRefs: [
+        "Player",
+        "The Copper Tap",
+        "Old Route Hand Sessik",
+        "Tap-Keeper Brost",
+        "Brass Tube",
+        "Lowwater Bazaar",
+        "Silt Warrens",
+        "Slip Twelve Berth",
+      ],
+    });
+    const prompt = buildGmReadPrompt(frame);
+
+    expect(buildGmReadSystemPrompt()).toContain("background argument");
+    expect(buildGmReadSystemPrompt()).toContain("exact dialogue quotes");
+    expect(prompt).toContain("valid ordinary overheard chatter example shape");
+
+    const result = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...validGmRead(frame),
+        path: "direct",
+        situationSummary: "The player listens to ordinary tavern argument and courier chatter.",
+        focalRefs: ["Player", "The Copper Tap"],
+        evidenceRefs: ["Player", "The Copper Tap"],
+        liveSceneQuestion: "What background chatter colors the immediate room?",
+        actionInterpretation: {
+          summary: "The player listens to ordinary background argument in the tavern.",
+          playerIntent: "Listen to the ordinary background argument and courier chatter in the current room",
+          method: "ambient social listening",
+          targetRefs: ["The Copper Tap"],
+          interactionKind: "scene_local_beat",
+          sceneBeatNeed: {
+            actorRef: "Player",
+            beatKind: "local_interaction",
+            requestedBeatText: "Listen to the ordinary background argument and courier chatter in the current room",
+            anchorRef: "The Copper Tap",
+            evidenceRefs: ["Player", "The Copper Tap"],
+          },
+        },
+        interpretationRationale: "Overheard room chatter is low-stakes current-scene texture; it does not prove exact quotes, private knowledge, hidden facts, or durable world change.",
+      },
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("scene_local_beat");
+    expect(result.read.actionInterpretation.sceneBeatNeed?.beatKind).toBe("local_interaction");
+    expect(result.read.actionInterpretation.localObservationNeed).toBeUndefined();
   });
 
   it("keeps hidden ordinary-prop affordance checks on bounded observation authority", () => {
@@ -7042,6 +7545,80 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
           speakerSource: "existing_visible_actor",
           speakerRef: "Guide",
           playerIntent: "Hand Brass Tube to Guide, then ask what it is",
+          responseScope: "visible_speaker_response_only",
+        },
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
+  });
+
+  it("deterministically splits visible actor item return plus dialogue with item_transfer_state refresh binding", async () => {
+    const frame = receiveItemTransferActionPlanFrame();
+    const gmRead = receiveItemTransferGmRead(frame);
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Brass Tube", "Guide"],
+      evidenceRefs: ["Player", "Market", "Brass Tube", "Guide"],
+      checkRationale: "The visible actor item return must settle before dependent visible dialogue can be recorded.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Compound visible actor item return and dialogue need backend receipts with refreshed frame binding.",
+        evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-item-return-dialogue",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "item_transfer",
+      "dialogue_record",
+    ]);
+    expect(result.checklist.steps[0]).toMatchObject({
+      stepId: "step-1",
+      intended: {
+        kind: "item_transfer",
+        requiredCapabilityId: "item_transfer",
+        itemTransferPlan: {
+          operation: "receive_from_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "visible_actor_item",
+          sourceRef: "Guide",
+          targetKind: "player_inventory",
+          targetRef: "Player",
+        },
+      },
+    });
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      targetRefs: ["Guide"],
+      dependsOnStepIds: ["step-1"],
+      dependencyBindings: [{
+        bindingId: "item_transfer_state",
+        fromStepId: "step-1",
+        requiredCapabilityId: "item_transfer",
+        requiredReceiptAuthority: "item_transfer_receipt",
+        sourcePath: "publicResult.itemTransfer",
+        resolveIn: "post_dependency_scene_frame",
+        requiredFramePresence: "item_state_reconciled",
+      }],
+      intended: {
+        kind: "dialogue_record",
+        requiredCapabilityId: "dialogue_record",
+        dialoguePlan: {
+          speakerSource: "existing_visible_actor",
+          speakerRef: "Guide",
+          playerIntent: "Ask Guide to return Brass Tube to Player",
           responseScope: "visible_speaker_response_only",
         },
       },

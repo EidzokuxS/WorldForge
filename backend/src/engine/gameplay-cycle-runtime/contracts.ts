@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const shortText = z.string().trim().min(1).max(500);
+const rationaleText = z.string().trim().min(1).max(2000);
 const modelSafeRef = z.string().trim().min(1).max(200);
 
 function normalizedContractRef(value: string): string {
@@ -416,6 +417,7 @@ export const cleanLocalConditionTargetKindSchema = z.enum([
 
 export const cleanItemTransferOperationSchema = z.enum([
   "give_to_visible_actor",
+  "receive_from_visible_actor",
   "drop_in_current_scene",
   "pickup_from_current_scene",
   "equip_inventory_item",
@@ -424,6 +426,7 @@ export const cleanItemTransferOperationSchema = z.enum([
 
 export const cleanItemTransferSourceKindSchema = z.enum([
   "player_inventory",
+  "visible_actor_item",
   "current_scene_item",
 ]);
 
@@ -443,7 +446,7 @@ const itemTransferOperationContracts: Record<CleanItemTransferOperation, {
   targetKind: CleanItemTransferTargetKind;
   targetEquipState: "carried" | "equipped";
   targetEquippedSlot: "equipped" | null;
-  requiredOwner: "Player" | "none";
+  requiredOwner: "Player" | "visible_actor" | "none";
   requiredLocation: "current_scene" | "none";
   requiredEquipState: "equipped" | null;
 }> = {
@@ -453,6 +456,15 @@ const itemTransferOperationContracts: Record<CleanItemTransferOperation, {
     targetEquipState: "carried",
     targetEquippedSlot: null,
     requiredOwner: "Player",
+    requiredLocation: "none",
+    requiredEquipState: null,
+  },
+  receive_from_visible_actor: {
+    sourceKind: "visible_actor_item",
+    targetKind: "player_inventory",
+    targetEquipState: "carried",
+    targetEquippedSlot: null,
+    requiredOwner: "visible_actor",
     requiredLocation: "none",
     requiredEquipState: null,
   },
@@ -513,7 +525,7 @@ function validateItemTransferOperationContract(
     targetKind: CleanItemTransferTargetKind;
     targetEquipState: "carried" | "equipped";
     targetEquippedSlot: "equipped" | null;
-    requiredOwner?: "Player" | "none";
+    requiredOwner?: "Player" | "visible_actor" | "none";
     requiredLocation?: "current_scene" | "none";
     requiredEquipState?: "carried" | "equipped" | null;
   },
@@ -675,6 +687,7 @@ export const gmReadActionInterpretationSchema = z.object({
     operation: cleanItemTransferOperationSchema,
     itemRef: modelSafeRef,
     sourceKind: cleanItemTransferSourceKindSchema,
+    sourceRef: modelSafeRef.nullable().optional(),
     targetKind: cleanItemTransferTargetKindSchema,
     targetRef: modelSafeRef,
     equipSlot: z.literal("equipped").nullable(),
@@ -747,7 +760,7 @@ export const gmReadSchema = z.object({
   evidenceRefs: z.array(modelSafeRef).max(16),
   actionInterpretation: gmReadActionInterpretationSchema,
   uncertainty: gmReadUncertaintySchema,
-  interpretationRationale: shortText,
+  interpretationRationale: rationaleText,
 }).strict();
 
 export const judgePhysicalPossibilitySchema = z.enum([
@@ -1073,6 +1086,7 @@ export const gmActionChecklistStepSchema = z.object({
       operation: cleanItemTransferOperationSchema,
       itemRef: modelSafeRef,
       sourceKind: cleanItemTransferSourceKindSchema,
+      sourceRef: modelSafeRef.nullable().optional(),
       targetKind: cleanItemTransferTargetKindSchema,
       targetRef: modelSafeRef,
       targetEquipState: z.enum(["carried", "equipped"]),
@@ -1171,6 +1185,21 @@ export const gmActionChecklistStepSchema = z.object({
       targetEquipState: plan.targetEquipState,
       targetEquippedSlot: plan.targetEquippedSlot,
     }, ctx, ["intended", "itemTransferPlan"]);
+    if (plan.sourceKind === "visible_actor_item") {
+      if (!plan.sourceRef) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["intended", "itemTransferPlan", "sourceRef"],
+          message: "visible_actor_item itemTransferPlan requires sourceRef.",
+        });
+      }
+    } else if (plan.sourceRef != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["intended", "itemTransferPlan", "sourceRef"],
+        message: "itemTransferPlan.sourceRef is allowed only for visible_actor_item.",
+      });
+    }
   }
   if (step.intended.dialoguePlan?.speakerSource === "existing_visible_actor") {
     if (!step.intended.dialoguePlan.speakerRef) {
@@ -1466,7 +1495,8 @@ export const cleanStage4ItemTransferEffectSchema = z.object({
   itemRef: modelSafeRef,
   source: z.object({
     sourceKind: cleanItemTransferSourceKindSchema,
-    requiredOwner: z.enum(["Player", "none"]),
+    sourceRef: modelSafeRef.nullable().optional(),
+    requiredOwner: z.enum(["Player", "visible_actor", "none"]),
     requiredLocation: z.enum(["current_scene", "none"]),
     requiredEquipState: z.enum(["carried", "equipped"]).nullable(),
   }).strict(),
@@ -1507,12 +1537,28 @@ export const cleanStage4ItemTransferEffectSchema = z.object({
     requiredLocation: effect.source.requiredLocation,
     requiredEquipState: effect.source.requiredEquipState,
   }, ctx, []);
+  if (effect.source.sourceKind === "visible_actor_item") {
+    if (!effect.source.sourceRef) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source", "sourceRef"],
+        message: "visible_actor_item item_transfer requests require sourceRef.",
+      });
+    }
+  } else if (effect.source.sourceRef != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["source", "sourceRef"],
+      message: "item_transfer sourceRef is allowed only for visible_actor_item.",
+    });
+  }
 });
 
 export const cleanStage4ItemTransferResultSchema = z.object({
   type: z.literal("item_transfer"),
   resultKind: z.enum([
     "transferred_to_actor",
+    "received_from_actor",
     "dropped_in_scene",
     "picked_up",
     "equipped",

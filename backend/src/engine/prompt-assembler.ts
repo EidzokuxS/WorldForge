@@ -1826,7 +1826,7 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
     ...(openingScene
       ? [
-          "Opening scene pages establish a playable start page: immediate locus/opening lens, live pressure or sensory texture, and first handles for action. When 3 or more distinct backendFacts are listed, select 3-5 different backendFacts across 3-5 sentence objects; do not collapse opening into one summary line.",
+          "Opening scene pages establish a playable start page: immediate locus/opening lens, one live pressure or sensory texture beat, and first handles for action. When lens, visible-person, or route/action-handle backendFacts are listed, include them. Select 3-5 different backendFacts across 3-5 sentence objects, skip overlapping facts that repeat the same subject/action, and keep broad lore digest behind local playable handles.",
         ]
       : []),
     "If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects.",

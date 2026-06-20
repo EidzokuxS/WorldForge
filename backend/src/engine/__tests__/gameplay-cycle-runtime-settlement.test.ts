@@ -1927,6 +1927,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "Searched visible surfaces: route options.",
       "Observation query: visible routes and local targets.",
       "Observed entry labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.",
+      "Route choice labels: North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins.",
       "Observed entry surfaces: route option North Hall; route option East Gate; route option South Dock; route option West Yard; route option Bell Tower; route option Lantern Row; route option The Copper Tap; route option Upper Dam Ruins.",
       "Anchor scene: Market.",
       "Anchor location: Market.",
@@ -1935,8 +1936,9 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.backendFacts[0]?.text).toContain("Upper Dam Ruins");
     expect(observation?.backendFacts[0]?.value).toBe(routeBeat);
     expect(observation?.backendFacts[3]?.value).toBe("North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins");
+    expect(observation?.backendFacts[4]?.value).toBe("North Hall; East Gate; South Dock; West Yard; Bell Tower; Lantern Row; The Copper Tap; Upper Dam Ruins");
+    expect(observation?.claimKinds).toEqual(["local_observation", "movement_option"]);
     expect(JSON.stringify(observation)).not.toContain("[hidden]");
-    expect(JSON.stringify(observation)).not.toContain("movement_option");
     expect(JSON.stringify(observation)).not.toContain("visible_target");
     expect(JSON.stringify(observation)).not.toContain("SceneFrame");
   });

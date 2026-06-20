@@ -296,6 +296,7 @@ function refIssues(input: {
     ...(step.intended.itemTransferPlan
       ? [
           step.intended.itemTransferPlan.itemRef,
+          ...(step.intended.itemTransferPlan.sourceRef ? [step.intended.itemTransferPlan.sourceRef] : []),
           step.intended.itemTransferPlan.targetRef,
           step.intended.itemTransferPlan.anchorRef,
         ]
@@ -448,7 +449,9 @@ function stepShapeIssues(checklist: GmActionChecklist, frame: AuthoritativeScene
       }
       const plan = step.intended.itemTransferPlan;
       if (plan) {
-        const plannedRefs = [plan.itemRef, plan.targetRef, plan.anchorRef].map((ref) => ref.toLowerCase());
+        const plannedRefs = [plan.itemRef, plan.sourceRef, plan.targetRef, plan.anchorRef]
+          .filter((ref): ref is string => Boolean(ref))
+          .map((ref) => ref.toLowerCase());
         const stepRefs = [...step.targetRefs, ...step.evidenceRefs].map((ref) => ref.toLowerCase());
         for (const ref of plannedRefs) {
           if (!stepRefs.includes(ref)) {
@@ -1104,12 +1107,15 @@ export function buildDeterministicGmActionChecklist(input: {
   if (allowed.has("item_transfer") && sceneRef && itemTransferNeed) {
     const targetRefs = uniqueStrings([
       itemTransferNeed.itemRef,
+      itemTransferNeed.sourceRef ?? null,
       itemTransferNeed.targetRef,
       sceneRef,
-    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    ].filter((ref): ref is string => Boolean(ref)))
+      .filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
     const itemEvidenceRefs = uniqueStrings([
       actorRef,
       itemTransferNeed.itemRef,
+      ...(itemTransferNeed.sourceRef ? [itemTransferNeed.sourceRef] : []),
       itemTransferNeed.targetRef,
       sceneRef,
       input.frame.scene.currentLocation.ref,
@@ -1130,6 +1136,7 @@ export function buildDeterministicGmActionChecklist(input: {
         operation: itemTransferNeed.operation,
         itemRef: itemTransferNeed.itemRef,
         sourceKind: itemTransferNeed.sourceKind,
+        sourceRef: itemTransferNeed.sourceRef ?? null,
         targetKind: itemTransferNeed.targetKind,
         targetRef: itemTransferNeed.targetRef,
         targetEquipState,

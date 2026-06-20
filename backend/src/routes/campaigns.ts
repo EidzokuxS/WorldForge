@@ -215,6 +215,52 @@ function toWorldSceneScopeId(row: {
   return row.currentSceneLocationId ?? row.currentLocationId ?? null;
 }
 
+function parseNpcTagSet(rawTags: string): Set<string> {
+  if (rawTags.trim().length === 0) {
+    return new Set();
+  }
+
+  try {
+    const parsed = JSON.parse(rawTags) as unknown;
+    if (Array.isArray(parsed)) {
+      return new Set(
+        parsed
+          .filter((tag): tag is string => typeof tag === "string")
+          .map((tag) => tag.toLowerCase()),
+      );
+    }
+  } catch {
+    return new Set();
+  }
+
+  return new Set();
+}
+
+function isExplicitCurrentSceneSupportNpc(input: {
+  npc: { currentSceneLocationId: string | null; tags: string };
+  sceneScopeId: string;
+}): boolean {
+  const tags = parseNpcTagSet(input.npc.tags);
+  return (
+    input.npc.currentSceneLocationId === input.sceneScopeId
+    && tags.has("temporary-support")
+    && tags.has("clean-runtime-support")
+    && tags.has("current-scene")
+  );
+}
+
+function isExactCurrentSceneNpc(input: {
+  npc: { currentLocationId: string | null; currentSceneLocationId: string | null; tags: string };
+  sceneScopeId: string;
+}): boolean {
+  const tags = parseNpcTagSet(input.npc.tags);
+  return (
+    input.npc.currentLocationId === input.sceneScopeId
+    && input.npc.currentSceneLocationId === input.sceneScopeId
+    && tags.size > 0
+  );
+}
+
 function buildWorldCurrentScene(args: {
   campaignId: string;
   player: {
@@ -255,9 +301,23 @@ function buildWorldCurrentScene(args: {
   const broadLocation = parentBroadLocation ?? storedBroadLocation;
   const broadLocationId = broadLocation?.id ?? player.currentLocationId;
 
-  const presenceSceneScopeId = sceneLocation?.kind === "macro"
+  const explicitCurrentSceneNpcIds = new Set(
+    sceneLocation?.kind === "macro"
+      ? args.npcs
+        .filter((npc) =>
+          isExplicitCurrentSceneSupportNpc({ npc, sceneScopeId })
+          || isExactCurrentSceneNpc({ npc, sceneScopeId })
+        )
+        .map((npc) => npc.id)
+      : [],
+  );
+  const macroSceneHasExactCurrentSceneNpcs = explicitCurrentSceneNpcIds.size > 0;
+  const presenceSceneScopeId = sceneLocation?.kind === "macro" && !macroSceneHasExactCurrentSceneNpcs
     ? null
     : resolveImmediateScenePresenceScopeId(player.currentSceneLocationId);
+  const presenceNpcs = sceneLocation?.kind === "macro"
+    ? args.npcs.filter((npc) => explicitCurrentSceneNpcIds.has(npc.id))
+    : args.npcs;
 
   const presenceSnapshot = resolveScenePresence({
     playerActorId: player.id,
@@ -271,7 +331,7 @@ function buildWorldCurrentScene(args: {
         sceneScopeId: presenceSceneScopeId,
         visibility: "clear",
       },
-      ...args.npcs.map((npc) => {
+      ...presenceNpcs.map((npc) => {
         const visibility = inferPresenceVisibility(npc.tags);
         return {
           actorId: npc.id,

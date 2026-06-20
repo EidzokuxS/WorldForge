@@ -612,7 +612,12 @@ function requestEffectForStep(input: {
       itemRef: plan.itemRef,
       source: {
         sourceKind,
-        requiredOwner: sourceKind === "player_inventory" ? "Player" : "none",
+        sourceRef: plan.sourceRef ?? null,
+        requiredOwner: sourceKind === "player_inventory"
+          ? "Player"
+          : sourceKind === "visible_actor_item"
+            ? "visible_actor"
+            : "none",
         requiredLocation: sourceKind === "current_scene_item" ? "current_scene" : "none",
         requiredEquipState: operation === "unequip_inventory_item" ? "equipped" : null,
       },
@@ -1165,12 +1170,14 @@ function itemByVisibleLabel(input: {
   label: string;
   sourceKind: ItemTransferEffect["source"]["sourceKind"];
   playerId: string;
+  visibleActorId?: string | null;
   currentSceneLocationId: string;
 }): { ok: true; row: ItemRow } | { ok: false; kind: NonNullable<CleanStage4Receipt["failure"]>["kind"]; message: string } {
   const normalized = normalizedRef(input.label);
   const labelMatches = input.rows.filter((row) => normalizedRef(row.name) === normalized);
   const matches = labelMatches.filter((row) => {
     if (input.sourceKind === "player_inventory") return row.owner_id === input.playerId;
+    if (input.sourceKind === "visible_actor_item") return Boolean(input.visibleActorId && row.owner_id === input.visibleActorId);
     return row.owner_id === null && row.location_id === input.currentSceneLocationId;
   });
   if (matches.length === 1) return { ok: true, row: matches[0] };
@@ -1234,6 +1241,7 @@ function visibleActorTarget(input: {
 
 function itemTransferResultKind(operation: ItemTransferEffect["operation"]): Exclude<ItemTransferResult["resultKind"], "already_satisfied"> {
   if (operation === "give_to_visible_actor") return "transferred_to_actor";
+  if (operation === "receive_from_visible_actor") return "received_from_actor";
   if (operation === "drop_in_current_scene") return "dropped_in_scene";
   if (operation === "pickup_from_current_scene") return "picked_up";
   if (operation === "equip_inventory_item") return "equipped";
@@ -1385,6 +1393,12 @@ function itemTransferTargetForEffect(input: {
     return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer give requires a player inventory source and visible actor target." };
   }
   if (
+    operation === "receive_from_visible_actor"
+    && (input.effect.source.sourceKind !== "visible_actor_item" || target.targetKind !== "player_inventory")
+  ) {
+    return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer receive requires a visible actor item source and player inventory target." };
+  }
+  if (
     operation === "drop_in_current_scene"
     && (input.effect.source.sourceKind !== "player_inventory" || target.targetKind !== "current_scene")
   ) {
@@ -1447,7 +1461,11 @@ function itemTransferTargetForEffect(input: {
     };
   }
 
-  if (operation === "pickup_from_current_scene" || operation === "unequip_inventory_item") {
+  if (
+    operation === "receive_from_visible_actor"
+    || operation === "pickup_from_current_scene"
+    || operation === "unequip_inventory_item"
+  ) {
     if (normalizedRef(target.targetRef) !== normalizedRef(input.frame.player.ref)) {
       return { ok: false, kind: "target_state_invalid", message: "Stage 4 item_transfer player inventory target must be Player." };
     }
@@ -4719,10 +4737,11 @@ async function executeItemTransfer(input: {
     refs: uniqueStrings([
       effect.actorRef,
       effect.itemRef,
+      effect.source.sourceRef ?? null,
       effect.target.targetRef,
       effect.anchorRef,
       ...effect.evidenceRefs,
-    ]),
+    ].filter((ref): ref is string => Boolean(ref))),
   })) {
     const receipt = failReceipt({
       ...input,
@@ -4769,6 +4788,30 @@ async function executeItemTransfer(input: {
         return receipt;
       }
 
+      const sourceActor = effect.source.sourceKind === "visible_actor_item"
+        ? visibleActorTarget({
+            frame: input.frame,
+            targetRef: effect.source.sourceRef ?? "",
+            currentLocationId: currentLocation.id,
+            currentSceneLocationId: currentScene.id,
+          })
+        : null;
+      if (sourceActor && !sourceActor.ok) {
+        const receipt = failReceipt({
+          ...input,
+          capabilityId: "item_transfer",
+          kind: "target_not_visible",
+          message: sourceActor.message,
+        });
+        input.store.insert(receipt);
+        return receipt;
+      }
+      const sourceLabel = effect.source.sourceKind === "player_inventory"
+        ? input.frame.player.label
+        : sourceActor?.ok
+          ? sourceActor.actorLabel
+          : input.frame.scene.currentScene.label;
+
       const visibleSource = effect.source.sourceKind === "player_inventory"
         ? input.frame.inventory.find((item) => normalizedRef(item.ref) === normalizedRef(effect.itemRef))
         : input.frame.targets.find((target) =>
@@ -4810,6 +4853,7 @@ async function executeItemTransfer(input: {
         label: itemLabel,
         sourceKind: effect.source.sourceKind,
         playerId: player.id,
+        visibleActorId: sourceActor?.ok ? sourceActor.npcId : null,
         currentSceneLocationId: currentScene.id,
       });
       if (!item.ok) {
@@ -4827,7 +4871,7 @@ async function executeItemTransfer(input: {
             effect,
             resultKind: "already_satisfied",
             itemLabel,
-            sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+            sourceLabel,
             targetLabel: target.targetLabel,
             finalOwnerKind: target.finalOwnerKind,
             finalLocationKind: target.finalLocationKind,
@@ -4920,7 +4964,7 @@ async function executeItemTransfer(input: {
           effect,
           resultKind: "already_satisfied",
           itemLabel,
-          sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+          sourceLabel,
           targetLabel: target.targetLabel,
           finalOwnerKind: target.finalOwnerKind,
           finalLocationKind: target.finalLocationKind,
@@ -5052,7 +5096,7 @@ async function executeItemTransfer(input: {
         effect,
         resultKind,
         itemLabel,
-        sourceLabel: effect.source.sourceKind === "player_inventory" ? input.frame.player.label : input.frame.scene.currentScene.label,
+        sourceLabel,
         targetLabel: target.targetLabel,
         finalOwnerKind: target.finalOwnerKind,
         finalLocationKind: target.finalLocationKind,

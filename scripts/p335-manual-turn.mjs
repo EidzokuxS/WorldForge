@@ -17,14 +17,17 @@ function loadSqlite() {
 
 const Database = loadSqlite();
 
-const LEGACY_TABLES = [
+const RETIRED_GAMEPLAY_TABLES = [
   "gameplay_cycle_v2_packets",
-  "turn_sagas",
-  "settled_turn_packets",
-  "narrator_attempts",
   "oracle_decisions",
   "simulation_jobs",
   "simulation_proposals",
+];
+
+const CURRENT_CONTROL_PLANE_TABLES = [
+  "turn_sagas",
+  "settled_turn_packets",
+  "narrator_attempts",
 ];
 
 function parseArgs(argv) {
@@ -210,7 +213,12 @@ function queryDbSnapshot(campaignId, done) {
             [campaignId],
           )?.count ?? 0)
           : 0,
-        oldStoreCounts: Object.fromEntries(LEGACY_TABLES.map((table) => [table, tableCount(db, table, campaignId)])),
+        retiredGameplayStoreCounts: Object.fromEntries(
+          RETIRED_GAMEPLAY_TABLES.map((table) => [table, tableCount(db, table, campaignId)]),
+        ),
+        controlPlaneStoreCounts: Object.fromEntries(
+          CURRENT_CONTROL_PLANE_TABLES.map((table) => [table, tableCount(db, table, campaignId)]),
+        ),
       },
       player: safeGet(
         db,
@@ -307,9 +315,14 @@ function structuralIssues(turn, dbSnapshot) {
   if (turn.done?.runtime !== "gameplay-cycle-runtime") issues.push({ severity: "hard", code: "runtime-mismatch", message: "done.runtime is not gameplay-cycle-runtime" });
   if (turn.done?.settled !== true) issues.push({ severity: "hard", code: "turn-not-settled", message: "done.settled is not true" });
   if (String(turn.narrativeText ?? "").trim().length === 0) issues.push({ severity: "hard", code: "empty-narration", message: "Narration is empty" });
-  const oldEntries = Object.entries(dbSnapshot.counts.oldStoreCounts).filter(([, count]) => count !== 0);
-  if (oldEntries.length > 0) {
-    issues.push({ severity: "hard", code: "old-store-write", message: "Legacy/v2 store count is nonzero", detail: Object.fromEntries(oldEntries) });
+  const retiredEntries = Object.entries(dbSnapshot.counts.retiredGameplayStoreCounts).filter(([, count]) => count !== 0);
+  if (retiredEntries.length > 0) {
+    issues.push({
+      severity: "hard",
+      code: "retired-gameplay-store-write",
+      message: "Retired gameplay/v2 store count is nonzero",
+      detail: Object.fromEntries(retiredEntries),
+    });
   }
   if (dbSnapshot.counts.restoreLedgerCount !== 0) {
     issues.push({ severity: "hard", code: "restore-ledger-write", message: "Replay/restore ledger count is nonzero", detail: dbSnapshot.counts.restoreLedgerCount });
@@ -485,8 +498,9 @@ async function commandTurn(args) {
     ].join("\n"),
   );
 
+  const ok = turn.status === "done";
   console.log(JSON.stringify({
-    ok: turn.status === "done",
+    ok,
     root,
     turn: turnIndex,
     campaignId,
@@ -494,6 +508,7 @@ async function commandTurn(args) {
     narrativeText,
     observedAfter: turn.observedAfter,
   }, null, 2));
+  if (!ok) process.exitCode = 1;
 }
 
 async function main() {

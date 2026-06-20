@@ -649,6 +649,71 @@ function itemTransferChecklist(inputFrame = itemTransferFrame()): GmActionCheckl
   };
 }
 
+function receiveItemTransferFrame(worldVersion = 0): AuthoritativeSceneFrame {
+  return {
+    ...frame(),
+    frameId: `frame-stage4-item-receive-${worldVersion}`,
+    turnId: `clean-turn-stage4-item-receive-${worldVersion}`,
+    base: { tick: 0, worldVersion, worldTimeMinutes: 0 },
+    playerAction: "I ask Guide to return the Brass Tube to me.",
+    actors: [{
+      ref: "Guide",
+      label: "Guide",
+      role: "support",
+      visibleStatus: { hp: null, conditions: [] },
+    }],
+    targets: [
+      { ref: "Guide", label: "Guide", kind: "actor" },
+      { ref: "Brass Tube", label: "Brass Tube", kind: "item" },
+    ],
+    inventory: [],
+    capabilities: [
+      ...frame().capabilities,
+      { capabilityId: "item_transfer", evidenceAuthority: "receipt_required", allowed: true },
+    ],
+    citableRefs: ["Player", "Market", "North Hall", "Guide", "Brass Tube"],
+  };
+}
+
+function receiveItemTransferChecklist(inputFrame = receiveItemTransferFrame()): GmActionChecklist {
+  const base = checklistForKind("item_transfer", inputFrame);
+  const step = base.steps[0]!;
+  return {
+    ...base,
+    turnIntent: {
+      playerIntent: "Ask Guide to return Brass Tube to Player.",
+      admittedConsequenceNeed: "Item custody/equip state requires backend receipt authority.",
+    },
+    steps: [{
+      ...step,
+      targetRefs: ["Brass Tube", "Guide", "Player", "Market"],
+      evidenceRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      intended: {
+        kind: "item_transfer",
+        stateOrEvidence: "state",
+        requiredCapabilityId: "item_transfer",
+        summary: "Stage 4 must transfer Brass Tube from visible Guide to Player inventory through backend item authority.",
+        itemTransferPlan: {
+          actorRef: "Player",
+          operation: "receive_from_visible_actor",
+          itemRef: "Brass Tube",
+          sourceKind: "visible_actor_item",
+          sourceRef: "Guide",
+          targetKind: "player_inventory",
+          targetRef: "Player",
+          targetEquipState: "carried",
+          targetEquippedSlot: null,
+          anchorRef: "Market",
+        },
+      },
+      expectedVisibleEffect: {
+        summary: "Accepted item transfer receipt only; no NPC reaction or dialogue is authorized.",
+        visibleRefs: ["Player", "Brass Tube", "Guide", "Market"],
+      },
+    }],
+  };
+}
+
 function minorPoiFrame(worldVersion = 0): AuthoritativeSceneFrame {
   return {
     ...frame(),
@@ -1724,6 +1789,77 @@ describe("clean Stage 4 executor DB contracts", () => {
       ownerId: "npc-guide",
       locationId: null,
       equipState: "carried",
+    });
+  });
+
+  it("receives a visible actor-held item back into Player inventory through clean item_transfer authority", async () => {
+    insertNpc({
+      id: "npc-guide",
+      name: "Guide",
+      tier: "temporary",
+      tags: ["visible-guide"],
+    });
+    insertItem({
+      id: "item-brass-tube",
+      name: "Brass Tube",
+      ownerId: "npc-guide",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
+    });
+    const inputFrame = receiveItemTransferFrame();
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: receiveItemTransferChecklist(inputFrame),
+    });
+
+    expect(result.status).toBe("executed");
+    expect(result.execution?.mutationApplied).toBe(true);
+    expect(result.execution?.visibleResults[0]).toMatchObject({
+      authority: "item_transfer_receipt",
+      itemTransfer: {
+        type: "item_transfer",
+        resultKind: "received_from_actor",
+        itemLabel: "Brass Tube",
+        operation: "receive_from_visible_actor",
+        sourceLabel: "Guide",
+        targetLabel: "Mira Voss",
+        finalOwnerKind: "player",
+        finalLocationKind: "none",
+        finalEquipState: "carried",
+        claimStatus: "visible_item_state_change_only",
+      },
+    });
+    expect(result.execution?.receipts[0]).toMatchObject({
+      capabilityId: "item_transfer",
+      status: "accepted",
+      result: { tick: 0, worldVersion: 1, worldTimeMinutes: 0, mutationApplied: true },
+      publicResult: {
+        itemTransfer: {
+          resultKind: "received_from_actor",
+          itemLabel: "Brass Tube",
+          sourceLabel: "Guide",
+          targetLabel: "Mira Voss",
+        },
+      },
+      privateResult: {
+        itemId: "item-brass-tube",
+        itemOperation: "receive_from_visible_actor",
+        previousOwnerId: "npc-guide",
+        nextOwnerId: "player-1",
+        previousLocationId: null,
+        nextLocationId: null,
+      },
+    });
+    const item = getSqliteConnection()
+      .prepare("SELECT owner_id AS ownerId, location_id AS locationId, equip_state AS equipState, equipped_slot AS equippedSlot FROM items WHERE id = ?")
+      .get("item-brass-tube") as { ownerId: string | null; locationId: string | null; equipState: string; equippedSlot: string | null };
+    expect(item).toEqual({
+      ownerId: "player-1",
+      locationId: null,
+      equipState: "carried",
+      equippedSlot: null,
     });
   });
 
