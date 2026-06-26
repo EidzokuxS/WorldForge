@@ -53,10 +53,11 @@
 - Removed ignored `.codex/` local state.
 - Moved ignored `.agents/` project skill cache to `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
 - Deleted stale tracked `.continuation-state.md`.
-- Archived tracked legacy `CLAUDE.md` to `docs/archive/agent-instructions/CLAUDE.md`.
+- Removed tracked legacy `CLAUDE.md` from the active branch.
 - Reduced `tasks/` to active `todo.md` and `lessons.md`; removed stale tracked task notes and ignored historical handoff/oracle scratch.
-- Archived tracked root evidence/tooling islands to `docs/archive/revamp-cleanup/`: `.planning/`, `output/`, and `scripts/`.
+- Removed tracked root evidence/tooling islands from the active branch after explicit approval: `.planning/`, `output/`, and `scripts/`.
 - Removed ignored old non-revamp RPI folders and generated `frontend/next-env.d.ts`.
+- Removed stale docs bulk after explicit approval: `docs/archive/`, `docs/WorldForge-v4/`, `docs/github-wiki/`, old Phase 95 reports, old screenshots, exported reports, plans, goals, narration reviews, and handoff docs.
 
 ## After
 
@@ -64,7 +65,7 @@
   - `.git/`: 223.20 MB
   - `.gitnexus/`: 92.60 MB
   - `.claude/`: 79.43 MB
-  - `docs/`: active docs plus archived cleanup evidence
+  - `docs/`: active docs and README assets only
   - `backend/`: 10.00 MB
   - `frontend/`: 1.61 MB
   - `rpi/`: active `revamp` scope only
@@ -72,14 +73,14 @@
 - `campaigns/` was removed after user confirmed campaigns can be deleted.
 - `node_modules/`, `frontend/.next/`, and `shared/dist/` were removed.
 - Second pass removed visible ignored root scratch and ignored planning bulk.
-- Final root pass removed `scripts/`, `output/`, and `.planning/` from the top level by archiving their tracked contents under docs.
+- Final root/docs pass removed `scripts/`, `output/`, `.planning/`, and stale docs bulk from the active branch.
 
 ## Kept
 
 - `.gitnexus/`, because project rules require GitNexus impact and change detection.
 - `.claude/worktrees/`, because registered worktrees are active workspace state.
 - `.agents/` content was preserved outside the repo root in `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
-- Tracked historical proof/evidence remains in `docs/archive/revamp-cleanup/` for reference, outside the root workspace.
+- Historical proof/evidence remains recoverable through git history, outside the active workspace.
 
 ## Follow-Ups
 
@@ -94,3 +95,5 @@
 - GitNexus `detect_changes(scope=all)`: attempted, failed with `spawnSync git ENOBUFS`.
 - GitNexus `detect_changes(scope=staged)`: attempted, failed with `spawnSync git ENOBUFS`.
 - Manual scope review: cleanup/docs/task files only; no source, test, schema, package, or runtime files changed.
+- Final docs cleanup `detect_changes(scope=staged)`: attempted, failed with `spawnSync git ENOBUFS` on the large tracked docs deletion diff.
+- Final docs cleanup manual scope review: docs deletions plus README/task/RPI cleanup notes only; no source, test, schema, package, or runtime files changed.

@@ -6,10 +6,10 @@ Clean the repository state on `feat/revamp` so the upcoming mechanics revamp is 
 
 ## Operating Contract
 
-- Remove or archive distraction only when it is unused, generated, stale, duplicated, or outside the active product/runtime contract.
+- Remove distraction when it is unused, generated, stale, duplicated, or outside the active product/runtime contract.
 - Preserve source code, tests, docs, and artifacts that explain current mechanics or prove current behavior.
 - Treat ignored local output as cleanup candidates before tracked source.
-- Prefer `.gitignore` / archive organization over deleting evidence that may still explain current risk.
+- Prefer `.gitignore` for local/generated files; keep only evidence that still explains current risk.
 - Run GitNexus impact before editing code symbols.
 - Run GitNexus `detect_changes` before commit.
 - Keep cleanup commits separate from future gameplay changes.
@@ -24,7 +24,7 @@ Output:
 
 - [inspected] Cleanup target is review/navigation noise on `feat/revamp`.
 - [rejected] Broad deletion of source, tests, current docs, or behavior evidence.
-- [proposed] Prefer ignored local purge first, tracked archive/compaction second.
+- [proposed] Prefer ignored local purge first, tracked cleanup second after reference review.
 - [proposed] Keep cleanup separate from mechanics commits.
 
 ### A2 Current-State Map
@@ -47,7 +47,7 @@ Output:
 - [inspected] `rpi/revamp/*`, `docs/playtest/launch-to-longplay-gameplay-contract.md`, and compact `tasks/lessons.md` should be the active navigation set.
 - [inspected] `tasks/todo.md` was about 1.38 MB and mostly historical session log.
 - [proposed] Compact active task/lesson files; rely on git history for old session bulk.
-- [proposed] Later archive older Phase 95 docs only after reference review.
+- [executed] Removed older Phase 95 docs after reference review and explicit user approval.
 
 ### A4 Source/Test Hygiene
 Status: complete

@@ -259,7 +259,7 @@ WorldForge/
   frontend/                Next.js app and game UI
   backend/                 API, campaign state, worldgen, GM runtime, tools
   campaigns/               local user data, gitignored
-  docs/                    architecture, design, handoff, research notes
+  docs/                    active mechanics, memory, research, playtest, and README assets
 ```
 
 ## Лицензия

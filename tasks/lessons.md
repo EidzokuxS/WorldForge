@@ -2,14 +2,14 @@
 
 ## Operating Rules
 
-- Keep active task files short. Long forensic history belongs in git history, docs, or explicit archives.
+- Keep active task files short. Long forensic history belongs in git history or current docs that still serve the revamp.
 - Treat fallback and backward-compatibility paths as defects unless the user explicitly authorizes a migration window.
 - Fix root causes. Do not add guard piles, compatibility shims, or regex prose gates to hide broken ownership.
 - Before editing code symbols, run GitNexus impact. Before committing, run GitNexus `detect_changes`.
 - Separate cleanup commits from gameplay/mechanics commits.
 - If cleanup hits locked files, stop, identify the owning process, stop only that process, then retry the narrow cleanup.
 - When cleaning visible root noise, inspect inside visible workflow folders too; `tasks/` should stay as `todo.md` plus `lessons.md` unless a current task requires more.
-- For repo presentation cleanup, sweep every top-level directory in one pass; archive broad tracked evidence/tooling islands before deleting them outright.
+- For repo presentation cleanup, sweep every top-level directory in one pass; do not hide obsolete tracked evidence inside another visible folder when the goal is a clean workspace.
 
 ## Revamp Acceptance
 
