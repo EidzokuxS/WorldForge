@@ -1411,8 +1411,8 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
       const travelUnit = travelCost === 1 ? "minute" : "minutes";
       const travelDuration = `${travelCost} ${travelUnit}`;
       const travelBeat = travelCost > 0
-        ? `After ${travelDuration}, you reach ${location}.`
-        : `You reach ${location}.`;
+        ? `${location} comes into view after ${travelDuration}.`
+        : `${location} comes into view.`;
       evidence.push({
         evidenceId,
         sourceKind: "stage4_receipt",

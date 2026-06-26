@@ -843,10 +843,10 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(movement).toMatchObject({
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
-      text: "After 1 minute, you reach North Hall.",
+      text: "North Hall comes into view after 1 minute.",
     });
     expect(movement?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Travel beat: After 1 minute, you reach North Hall.",
+      "Travel beat: North Hall comes into view after 1 minute.",
       "Destination label: North Hall.",
       "Elapsed travel time: 1 minute.",
       "Current place after movement: North Hall.",
@@ -858,7 +858,7 @@ describe("clean Stage 5 settlement contracts", () => {
       "current_place_after_movement",
     ]);
     expect(movement?.backendFacts.map((entry) => entry.value)).toEqual([
-      "After 1 minute, you reach North Hall.",
+      "North Hall comes into view after 1 minute.",
       "North Hall",
       "1 minute",
       "North Hall",
@@ -966,7 +966,7 @@ describe("clean Stage 5 settlement contracts", () => {
 
     expect(cleanSettledTurnPacketSchema.safeParse(packet).success).toBe(true);
     expect(cleanNarratorViewSchema.safeParse(view).success).toBe(true);
-    expect(movement?.text).toBe("After 1 minute, you reach Ground-Floor Barricade.");
+    expect(movement?.text).toBe("Ground-Floor Barricade comes into view after 1 minute.");
     expect(texture?.backendFacts.map((entry) => entry.value)).toEqual([
       "Overturned relay cabinets and iron signal drums form a ten-foot barricade across the Resonance Tower's ground-floor archway.",
       "A rusted iron spire rises twelve stories above the mid-city rooftops.",

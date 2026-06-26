@@ -1948,11 +1948,17 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       });
     }
     if (read.actionInterpretation.localObservationNeed != null) {
-      issues.push({
-        code: "interaction_invalid",
-        path: "actionInterpretation.localObservationNeed",
-        message: "time_passage must not include localObservationNeed.",
-      });
+      const localObservationSurfaceKinds = read.actionInterpretation.localObservationNeed.surfaceKinds;
+      if (
+        read.actionInterpretation.localObservationNeed.targetRef === frame.player.ref
+        || localObservationSurfaceKinds.includes("player_status")
+      ) {
+        issues.push({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localObservationNeed",
+          message: "time_passage may include only external current-scene localObservationNeed; Player status checks use current_scene_observation with player_status observation authority.",
+        });
+      }
     }
     if (read.actionInterpretation.deviceObservationNeed != null) {
       issues.push({
@@ -2400,7 +2406,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     issues.push({
       code: "interaction_invalid",
       path: "actionInterpretation.localObservationNeed",
-      message: "localObservationNeed is allowed only for current_scene_observation or player_local_condition compound external observations.",
+      message: "localObservationNeed is allowed only for current_scene_observation, player_local_condition compound external observations, or time_passage compound external observations.",
     });
   }
   if (read.actionInterpretation.deviceObservationNeed != null) {
@@ -2546,9 +2552,10 @@ export function buildGmReadSystemPrompt(): string {
     "Use movement_intent only when the player asks to physically go, move, travel, enter, leave, follow, take a route, step through, head to, walk back to, return to, or otherwise change current scene/location.",
     "movement_intent requires exactly one targetRef copied from SceneFrame.movementOptions. If the destination is not an exposed movement option, use clarification or unsupported_or_unclear.",
     "When a player gives social color to a visible actor and also explicitly takes an exposed route or moves to an exposed destination, the route movement owns the turn. Put the destination movement option in targetRefs and do not choose visible_actor_dialogue unless the player requests a spoken answer or reaction before movement.",
-    "Use time_passage when the player waits, rests, pauses, watches, stands by, or otherwise lets time pass in the current scene without movement, item custody/equip change, dialogue, support actor creation, observation result, or other primary action. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
+    "Use time_passage when the player waits, rests, pauses, watches, stands by, or otherwise lets elapsed current-scene time be the turn's primary action. Fill timePassageNeed with actorRef=Player, elapsedMinutes, reasonKind, requestedDurationText, and citable evidenceRefs.",
     "For time_passage, copy an explicit requested duration exactly into timePassageNeed.elapsedMinutes when the action gives minutes. For vague brief waits such as a few minutes, set elapsedMinutes=5 and requestedDurationText to the vague duration phrase.",
     "If the player waits while explicitly maintaining a current-scene Player posture/readiness commitment, keep interactionKind=time_passage and fill localConditionNeed for that bounded maintained posture/readiness. This compound does not authorize item custody/equip changes, NPC actions, observations, route truth, or world facts.",
+    "If the player waits while explicitly watching or listening for sirens, crowd surges, flickering lights, approaching sound, visible changes, or other external current-scene surface signs, keep interactionKind=time_passage and fill localObservationNeed for that bounded external observation. Player status checks stay current_scene_observation with player_status observation authority.",
     "Use visible_actor_dialogue only when the player addresses exactly one already-visible non-player actor from SceneFrame.actors as the speaker. Put that speaker ref in actionInterpretation.targetRefs.",
     "Naming a visible actor as an item-transfer recipient is not visible_actor_dialogue by itself. Use visible_actor_dialogue only when the action includes communicative speech content such as asking, telling, saying, answering, greeting, threatening, bargaining, or requesting a spoken response.",
     "If the player also makes a current-scene Player posture/readiness commitment while addressing a visible actor, keep interactionKind=visible_actor_dialogue and fill localConditionNeed for that bounded posture/readiness part.",

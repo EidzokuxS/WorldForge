@@ -2245,6 +2245,70 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(accepted.status).toBe("accepted");
   });
 
+  it("accepts time_passage with bounded external current-scene observation", () => {
+    const frame = minimalFrame({
+      playerAction: "I wait on the rooftop for two minutes, watching the streets below for sirens, crowd surges, flickering lights, or any obvious change near the underpass.",
+      citableRefs: ["Player", "Market"],
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player lets two current-scene minutes pass while watching external surface signs.",
+      liveSceneQuestion: "How much time passes, and which bounded current-scene surface signs are checked?",
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player waits two minutes while watching for visible or audible changes below.",
+        playerIntent: "Wait two minutes and watch the streets below for sirens, crowd surges, flickering lights, or obvious underpass changes.",
+        method: "wait and watch",
+        targetRefs: ["Market"],
+        interactionKind: "time_passage",
+        timePassageNeed: {
+          actorRef: "Player",
+          elapsedMinutes: 2,
+          reasonKind: "wait",
+          requestedDurationText: "two minutes",
+          evidenceRefs: ["Player", "Market"],
+        },
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether sirens, crowd surges, flickering lights, or obvious underpass changes are visible or audible",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+
+    const accepted = validateGmReadCandidate({ frame, candidate });
+    expect(accepted.status).toBe("accepted");
+
+    const rejectedStatusCheck = validateGmReadCandidate({
+      frame,
+      candidate: {
+        ...candidate,
+        actionInterpretation: {
+          ...candidate.actionInterpretation,
+          localObservationNeed: {
+            ...candidate.actionInterpretation.localObservationNeed!,
+            queryText: "whether I look tired or hurt after waiting",
+            targetRef: "Player",
+            surfaceKinds: ["player_status"],
+          },
+        },
+      },
+    });
+    expect(rejectedStatusCheck.status).toBe("rejected");
+    if (rejectedStatusCheck.status !== "rejected") throw new Error("expected rejected");
+    expect(rejectedStatusCheck.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "interaction_invalid",
+        path: "actionInterpretation.localObservationNeed",
+      }),
+    ]));
+  });
+
   it("accepts time_passage with bounded maintained Player item-readiness condition", () => {
     const frame = minimalFrame({
       playerAction: "I wait a few minutes while keeping the sealed tube above the water.",
@@ -7021,6 +7085,86 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
       maySupportNarrationClaim: false,
       settledTruth: false,
     });
+  });
+
+  it("deterministically plans time passage before the dependent external observation", async () => {
+    const frame = actionPlanFrame({
+      playerAction: "I wait on the rooftop for two minutes, watching the streets below for sirens, crowd surges, flickering lights, or any obvious change near the underpass.",
+      movementOptions: [],
+      citableRefs: ["Player", "Market"],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      path: "procedural",
+      evidenceRefs: ["Player", "Market"],
+      liveSceneQuestion: "How should elapsed time settle before the current-scene observation?",
+      actionInterpretation: {
+        summary: "The player waits two minutes while watching for visible or audible changes below.",
+        playerIntent: "Wait two minutes and watch the streets below for sirens, crowd surges, flickering lights, or obvious underpass changes.",
+        method: "wait and watch",
+        targetRefs: ["Market"],
+        interactionKind: "time_passage",
+        timePassageNeed: {
+          actorRef: "Player",
+          elapsedMinutes: 2,
+          reasonKind: "wait",
+          requestedDurationText: "two minutes",
+          evidenceRefs: ["Player", "Market"],
+        },
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether sirens, crowd surges, flickering lights, or obvious underpass changes are visible or audible",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Elapsed time and bounded current-scene observation both need backend receipt authority before narration may claim them.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-wait-and-watch",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "time_advance",
+      "local_observation",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      dependsOnStepIds: ["step-1"],
+      intended: {
+        kind: "local_observation",
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
   });
 
   it("deterministically keeps a maintained item-readiness condition before time passage", async () => {

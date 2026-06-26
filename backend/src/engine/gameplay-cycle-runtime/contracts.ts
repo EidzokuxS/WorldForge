@@ -2965,6 +2965,8 @@ const cleanNarratorSentencePlanStepSchema = z.object({
       "accepted_state",
       "accepted_texture",
       "accepted_time",
+      "route_origin",
+      "structured_route_handles",
     ])).min(1).max(8),
   }).strict(),
   proseAssembly: z.object({
@@ -3264,10 +3266,10 @@ const cleanNarratorPageVariationSchema = z.object({
     "accepted_texture_atmosphere",
     "audit_notice_clarity",
     "concrete_result_verbs",
-    "playable_route_labels",
     "question_clarity",
     "quote_frame",
     "scene_anchor_tokens",
+    "structured_route_handles",
     "time_pressure",
   ])).min(1).max(7),
   variationBoundary: z.literal("vary_syntax_only_inside_cited_material"),
@@ -3351,7 +3353,10 @@ const cleanNarratorChoicePresentationSchema = z.object({
     "choice_labels_only",
     "route_origin_place_label",
   ]),
-  labelHandling: z.literal("preserve_route_labels_verbatim"),
+  labelHandling: z.enum([
+    "preserve_route_labels_verbatim",
+    "structured_route_handles_not_prose",
+  ]),
   costHandling: z.enum([
     "omit_costs",
     "preserve_per_route_costs",

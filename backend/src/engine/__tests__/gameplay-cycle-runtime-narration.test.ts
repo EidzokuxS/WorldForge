@@ -109,9 +109,9 @@ function movementView(overrides: Partial<CleanNarratorView> = {}): CleanNarrator
       ref: "e1",
       authority: "terminal_mutation_receipt",
       claimKinds: ["player_location_change", "elapsed_time"],
-      text: "After 1 minute, you reach North Hall.",
+      text: "North Hall comes into view after 1 minute.",
       backendFacts: [
-        { factRef: "e1.f1", role: "travel_beat", value: "After 1 minute, you reach North Hall.", text: "Travel beat: After 1 minute, you reach North Hall.", exact: true },
+        { factRef: "e1.f1", role: "travel_beat", value: "North Hall comes into view after 1 minute.", text: "Travel beat: North Hall comes into view after 1 minute.", exact: true },
         { factRef: "e1.f2", role: "destination_label", value: "North Hall", text: "Destination label: North Hall.", exact: true },
         { factRef: "e1.f3", role: "elapsed_travel_time", value: "1 minute", text: "Elapsed travel time: 1 minute.", exact: true },
         { factRef: "e1.f4", role: "current_place_after_movement", value: "North Hall", text: "Current place after movement: North Hall.", exact: true },
@@ -1633,7 +1633,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.languageSource).toBe("derived_from_player_action_without_prompting_raw_action");
     expect(promptInput.acceptedEvidence[0]?.backendFacts[0]?.factRef).toBe("e1.f1");
     expect(promptInput.acceptedEvidence[0]?.backendFacts.map((fact) => fact.text)).toEqual([
-      "After 1 minute, you reach North Hall.",
+      "North Hall comes into view after 1 minute.",
       "North Hall",
       "1 minute",
       "North Hall",
@@ -1745,7 +1745,7 @@ describe("clean Stage 6 narration contracts", () => {
         sharedCostFactRef: null,
         anchorFactRefs: [],
         anchorStyle: "choice_labels_only",
-        labelHandling: "preserve_route_labels_verbatim",
+        labelHandling: "structured_route_handles_not_prose",
         costHandling: "omit_costs",
         closingStyle: "none",
         readerHandoff: "none",
@@ -1784,7 +1784,7 @@ describe("clean Stage 6 narration contracts", () => {
           {
             factRef: "e1.f1",
             proseUse: "primary_beat",
-            materialText: "After 1 minute, you reach North Hall.",
+            materialText: "North Hall comes into view after 1 minute.",
             materialTextSource: "accepted_value",
             copyMode: "phrase_from_material",
           },
@@ -1851,7 +1851,7 @@ describe("clean Stage 6 narration contracts", () => {
       }],
     });
     expect(promptInput.narrativePageTask.moves[0]?.usableFacts.map((fact) => fact.value))
-      .toEqual(["After 1 minute, you reach North Hall.", "North Hall", "1 minute", "North Hall"]);
+      .toEqual(["North Hall comes into view after 1 minute.", "North Hall", "1 minute", "North Hall"]);
   });
 
   it("builds a structured story frame from prompt accepted evidence", () => {
@@ -2043,7 +2043,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.turnEvents[0]?.claimKinds).toEqual(["player_location_change", "elapsed_time"]);
     expect(promptInput.storyFrame.turnEvents[0]?.proseCue).toBe("movement_result");
     expect(promptInput.storyFrame.turnEvents[0]?.compositionSlot).toBe("event_beat");
-    expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("After 1 minute, you reach North Hall.");
+    expect(promptInput.storyFrame.turnEvents[0]?.summary).toBe("North Hall comes into view after 1 minute.");
     expect(promptInput.storyFrame.turnEvents[0]?.backendFactRefs).toEqual(["e1.f1", "e1.f2", "e1.f3", "e1.f4"]);
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "narrate_turn_event", entryRefs: ["e1"] },
@@ -2225,7 +2225,7 @@ describe("clean Stage 6 narration contracts", () => {
       dictionPalette: [
         "accepted_texture_atmosphere",
         "scene_anchor_tokens",
-        "playable_route_labels",
+        "structured_route_handles",
       ],
       variationBoundary: "vary_syntax_only_inside_cited_material",
       openingDoor: "accepted_texture_first",
@@ -2257,7 +2257,7 @@ describe("clean Stage 6 narration contracts", () => {
       sharedCostFactRef: "e1.f6",
       anchorFactRefs: ["e1.f2"],
       anchorStyle: "route_origin_place_label",
-      labelHandling: "preserve_route_labels_verbatim",
+      labelHandling: "structured_route_handles_not_prose",
       costHandling: "preserve_shared_cost",
       closingStyle: "name_single_exit",
       readerHandoff: "choose_one_visible_route",
@@ -2387,7 +2387,7 @@ describe("clean Stage 6 narration contracts", () => {
         sentenceRole: "next_action_handle",
         coverage: "required",
         entryRefs: ["e1"],
-        preferredBackendFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+        preferredBackendFactRefs: ["e1.f2"],
         claimFocus: {
           primaryClaimKinds: ["movement_option"],
           supportingClaimKinds: [],
@@ -2402,26 +2402,12 @@ describe("clean Stage 6 narration contracts", () => {
             materialTextSource: "accepted_value",
             copyMode: "preserve_token",
           },
-          {
-            factRef: "e1.f3",
-            proseUse: "route_choice",
-            materialText: "North Hall",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
-          {
-            factRef: "e1.f4",
-            proseUse: "route_choice",
-            materialText: "North Hall",
-            materialTextSource: "accepted_value",
-            copyMode: "preserve_token",
-          },
         ],
         materialObligations: {
-          allowedMaterialFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
-          coreMaterialFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          allowedMaterialFactRefs: ["e1.f2"],
+          coreMaterialFactRefs: ["e1.f2"],
           exactCopyFactRefs: [],
-          preserveTokenFactRefs: ["e1.f2", "e1.f3", "e1.f4"],
+          preserveTokenFactRefs: ["e1.f2"],
           phraseFromMaterialFactRefs: [],
           citationMode: "cite_only_material_fact_refs_from_cited_sentence_plan_refs",
         },
@@ -2433,7 +2419,7 @@ describe("clean Stage 6 narration contracts", () => {
         adventureCue: {
           subjectFocus: "playable_route_choices",
           verbFrame: "offer_scene_exits",
-          detailPalette: ["accepted_labels", "accepted_route_choices"],
+          detailPalette: ["route_origin", "structured_route_handles"],
         },
         proseAssembly: {
           perspective: "playable_choice_present",
@@ -2492,7 +2478,7 @@ describe("clean Stage 6 narration contracts", () => {
       sharedCostFactRef: "e1.f6",
       anchorFactRefs: ["e1.f2"],
       anchorStyle: "route_origin_place_label",
-      labelHandling: "preserve_route_labels_verbatim",
+      labelHandling: "structured_route_handles_not_prose",
       costHandling: "preserve_shared_cost",
       closingStyle: "show_scene_exit_group",
       readerHandoff: "choose_one_visible_route",
@@ -3547,7 +3533,7 @@ describe("clean Stage 6 narration contracts", () => {
         fact.role === "travel_beat" ? { ...fact, text: "Opaque accepted travel fact." } : fact
       ),
     };
-    expect(renderCleanAuthorityProjection(movement)).toBe("After 1 minute, you reach North Hall.");
+    expect(renderCleanAuthorityProjection(movement)).toBe("North Hall comes into view after 1 minute.");
 
     const movementMissingValue = movementView();
     movementMissingValue.acceptedEvidence[0] = {
@@ -4412,20 +4398,16 @@ describe("clean Stage 6 narration contracts", () => {
       issue.code === "claim_not_supported"
     )).toBe(true);
 
-    const missingRouteLabels = validateCleanNarrationCandidate({
+    const summarizedRouteHandles = validateCleanNarrationCandidate({
       view: routeOptionsManyView(),
       candidate: acceptedCandidate(routeOptionsManyView(), [{
-        text: "Passages from here lead toward Anchor Chain Pylon, Auditor Spire, Charter Gallery, Resonance Tower, Silt Warrens, and Slip Twelve Berth, each about a minute's walk.",
+        text: "Lowwater Bazaar opens into several usable ways onward.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f2", "e1.f4", "e1.f6"],
+        backendFactRefs: ["e1.f2"],
         claimKinds: ["movement_option"],
       }]),
     });
-    expect(missingRouteLabels.status).toBe("rejected");
-    if (missingRouteLabels.status !== "rejected") throw new Error("expected rejected");
-    expect(missingRouteLabels.issues.some((issue) =>
-      issue.message.includes("The Copper Tap") || issue.message.includes("Upper Dam Ruins")
-    )).toBe(true);
+    expect(summarizedRouteHandles.status).toBe("accepted");
 
     const routeLabelsWithoutCost = validateCleanNarrationCandidate({
       view,
@@ -4537,7 +4519,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.text).toContain("North Hall");
     expect(result.text).not.toMatch(/\b(Route option|connected|minute\(s\)|you go|you walk|arrive)\b/iu);
 
-    const routeSentenceMissingLabel = validateCleanNarrationCandidate({
+    const routeSentenceUsesStructuredHandle = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [
         {
@@ -4554,7 +4536,7 @@ describe("clean Stage 6 narration contracts", () => {
         },
       ]),
     });
-    expect(routeSentenceMissingLabel.status).toBe("rejected");
+    expect(routeSentenceUsesStructuredHandle.status).toBe("accepted");
 
     const reserveTextureRepeatedByRoute = validateCleanNarrationCandidate({
       view,
@@ -5690,6 +5672,81 @@ describe("clean Stage 6 narration contracts", () => {
         throw new Error("model route reached for composed player_local_condition");
       },
     })).rejects.toThrow("model route reached for composed player_local_condition");
+  });
+
+  it("requires composed player_local_condition plus local_observation coverage", () => {
+    const condition = playerLocalConditionView().acceptedEvidence[0]!;
+    const observation = positiveLocalObservationView().acceptedEvidence[0]!;
+    const view = movementView({
+      acceptedEvidence: [
+        condition,
+        {
+          ...observation,
+          ref: "e2",
+          backendFacts: observation.backendFacts.map((fact) => ({
+            ...fact,
+            factRef: fact.factRef.replace("e1.", "e2."),
+          })),
+        },
+      ],
+    });
+    const promptInput = buildCleanNarratorPromptInput(view);
+
+    expect(promptInput.narrativePageTask.sentencePlan.map((step) => ({
+      sentenceRole: step.sentenceRole,
+      coverage: step.coverage,
+      beatObjective: step.beatObjective,
+      preferredBackendFactRefs: step.preferredBackendFactRefs,
+    }))).toEqual([
+      {
+        sentenceRole: "turn_event_beat",
+        coverage: "required",
+        beatObjective: "render_player_condition",
+        preferredBackendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+      },
+      {
+        sentenceRole: "turn_event_beat",
+        coverage: "required",
+        beatObjective: "render_local_observation",
+        preferredBackendFactRefs: ["e2.f4", "e2.f6"],
+      },
+    ]);
+    expect(promptInput.narrativePageTask.storyPageBrief.requiredSentenceRefs).toEqual(["s1", "s2"]);
+
+    const observationOnly = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The central telegraph desk is visible at Market.",
+        evidenceRefs: ["e2"],
+        backendFactRefs: ["e2.f4", "e2.f6"],
+        claimKinds: ["local_observation", "visible_target"],
+      }]),
+    });
+    expect(observationOnly.status).toBe("rejected");
+    if (observationOnly.status !== "rejected") throw new Error("expected rejected");
+    expect(observationOnly.issues.some((issue) =>
+      issue.code === "sentence_plan_not_supported"
+      && issue.message.includes("required accepted evidence e1")
+    )).toBe(true);
+
+    const covered = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [
+        {
+          text: "You kneel at Market.",
+          evidenceRefs: ["e1"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+          claimKinds: ["player_local_condition"],
+        },
+        {
+          text: "The central telegraph desk is visible at Market.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f4", "e2.f6"],
+          claimKinds: ["local_observation", "visible_target"],
+        },
+      ]),
+    });
+    expect(covered.status).toBe("accepted");
   });
 
   it("accepts player_local_condition prose with structurally cited texture choices", () => {
@@ -7328,12 +7385,12 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("normalizes sentence and final text whitespace without regex masking", () => {
-    const candidate = movementCandidate("After 1 minute,\n\tyou reach North Hall.");
+    const candidate = movementCandidate("North Hall comes into view\n\tafter 1 minute.");
     const result = validateCleanNarrationCandidate({
       view: movementView(),
       candidate: {
         ...candidate,
-        finalText: "After 1 minute, you reach North Hall.",
+        finalText: "North Hall comes into view after 1 minute.",
       },
     });
 
@@ -7511,7 +7568,7 @@ describe("clean Stage 6 narration contracts", () => {
 
   it("accepts one long readable sentence inside the final page budget when hard facts are grounded", () => {
     const softTail = " rain-soft echoes cling to the stone and ordinary dust dulls the threshold".repeat(8);
-    const text = `After 1 minute, you reach North Hall;${softTail}.`;
+    const text = `North Hall comes into view after 1 minute;${softTail}.`;
     expect(text.length).toBeGreaterThan(500);
     expect(text.length).toBeLessThan(900);
 
@@ -7578,7 +7635,7 @@ describe("clean Stage 6 narration contracts", () => {
   });
 
   it("projects movement only from accepted Travel beat evidence", () => {
-    expect(renderCleanAuthorityProjection(movementView())).toBe("After 1 minute, you reach North Hall.");
+    expect(renderCleanAuthorityProjection(movementView())).toBe("North Hall comes into view after 1 minute.");
 
     const view = movementView({
       acceptedEvidence: [{
@@ -7609,6 +7666,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Put natural prose clauses in sentence.text");
     expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof: evidenceRefs and backendFactRefs are opaque citation tokens.");
     expect(buildCleanNarrationSystemPrompt()).toContain("avoid backend framing phrases such as 'current scene'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("do not close with 'in the current scene'");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("Page move proof: every accepted_evidence sentence must include pageMoveRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.54");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cinematic Realism");
@@ -7666,7 +7724,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Choice presentation:");
     expect(buildCleanNarrationSystemPrompt()).toContain("promptInput.narrativePageTask.choicePresentation");
     expect(buildCleanNarrationSystemPrompt()).toContain("anchorStyle");
-    expect(buildCleanNarrationSystemPrompt()).toContain("preserve route labels verbatim");
+    expect(buildCleanNarrationSystemPrompt()).toContain("structured route choices for action handles");
     expect(buildCleanNarrationSystemPrompt()).toContain("reserve posture verbs for cited player_local_condition evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("adventure handoff");
     expect(buildCleanNarrationSystemPrompt()).toContain("Direct-scene presentation:");
@@ -7758,7 +7816,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not stock prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example movement:");
     expect(buildCleanNarrationSystemPrompt()).toContain("roles `travel_beat`, `destination_label`, and `elapsed_travel_time` expose values");
-    expect(buildCleanNarrationSystemPrompt()).toContain("'After 1 minute, you reach North Hall.', 'North Hall', and '1 minute'");
+    expect(buildCleanNarrationSystemPrompt()).toContain("'North Hall comes into view after 1 minute.', 'North Hall', and '1 minute'");
     expect(buildCleanNarrationSystemPrompt()).toContain("Reference transformation examples are patterns, not stock prose");
     expect(buildCleanNarrationSystemPrompt()).toContain("North Hall comes into view after a minute");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("takes your weight underfoot");
@@ -7778,9 +7836,9 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Physical actions such as checking, weighing, writing, handing over, pointing");
     expect(buildCleanNarrationSystemPrompt()).toContain("require accepted visible cue material, item_state/custody evidence, or separate accepted evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example route options:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("From Lowwater Bazaar, you can take Anchor Chain Pylon or The Copper Tap.");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Lowwater Bazaar opens into a couple of usable ways onward.");
     expect(buildCleanNarrationSystemPrompt()).toContain("If timing is part of the sentence, use the exact accepted cost");
-    expect(buildCleanNarrationSystemPrompt()).toContain("without movement, safety, discovery, or hidden-route claims");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not add travel mode, player motion, hidden routes, route safety, or current-scene change.");
     expect(buildCleanNarrationSystemPrompt()).toContain("Example local observation with soft surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("its rim dulled by faint scratches");
     expect(buildCleanNarrationSystemPrompt()).toContain("ordinary plausible current-scene props");
@@ -7800,13 +7858,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_custody_beat_line with land_scene_custody");
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through endpoint-owned item verbs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted `travel_beat` value as the turn event");
+    expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted destination and elapsed travel time as a compact arrival beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not open normal movement pages with a copied static location-card sentence");
     expect(buildCleanNarrationSystemPrompt()).toContain("scene_placement/current_scene facts such as 'You are at <destination>' are context anchors");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement result sentences cite the player_location_change evidence and its travel_beat/destination/time facts");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Do not default to the stock opener 'One minute later, you...'");
     expect(buildCleanNarrationSystemPrompt()).toContain("do not reuse a distinctive arrival metaphor across nearby turns");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Arrival phrasing should use reach, arrive, come into view, or put you at");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Arrival phrasing should use reach, arrive, come into view, spill into, or put you at");
     expect(buildCleanNarrationSystemPrompt()).toContain("Posture framing such as 'you stand at/in <destination>' belongs only to accepted player_local_condition evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("accepted elapsed_time duration value and any cited scene_anchor material as the clock beat");
@@ -7820,11 +7877,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("<Route label> remains reachable from <scene>.");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("such as '<Route label> lies open from here.'");
     expect(buildCleanNarrationSystemPrompt()).toContain("Route-options surface:");
-    expect(buildCleanNarrationSystemPrompt()).toContain("render accepted route labels as playable exits/options");
+    expect(buildCleanNarrationSystemPrompt()).toContain("treat accepted route labels as structured action handles");
+    expect(buildCleanNarrationSystemPrompt()).toContain("summarize the visible opportunity to choose a way onward");
     expect(buildCleanNarrationSystemPrompt()).toContain("recentSurfaceAvoid shows that same opening shape");
-    expect(buildCleanNarrationSystemPrompt()).toContain("route_choice_travel_costs is exact material only when the sentence states travel timing");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Route choice travel costs remain exact hard facts when stated");
     expect(buildCleanNarrationSystemPrompt()).toContain("express the cited route_label and route_status materials");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Include every accepted route label");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("Include every accepted route label");
     expect(buildCleanNarrationSystemPrompt()).toContain("Local-observation surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("For positive look/list_surface observations");
     expect(buildCleanNarrationSystemPrompt()).toContain("open through the surface, place, or object first");

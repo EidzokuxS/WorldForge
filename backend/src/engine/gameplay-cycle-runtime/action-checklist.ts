@@ -1057,6 +1057,7 @@ export function buildDeterministicGmActionChecklist(input: {
   const timePassageNeed = input.gmRead.actionInterpretation.timePassageNeed ?? null;
   const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
     || input.gmRead.actionInterpretation.interactionKind === "player_local_condition"
+    || input.gmRead.actionInterpretation.interactionKind === "time_passage"
     ? input.gmRead.actionInterpretation.localObservationNeed ?? null
     : null;
   const deviceObservationNeed = input.gmRead.actionInterpretation.interactionKind === "device_status_observation"
@@ -1067,6 +1068,46 @@ export function buildDeterministicGmActionChecklist(input: {
   let localConditionStepId: GmActionChecklistStepId | null = null;
   let itemTransferStepId: GmActionChecklistStepId | null = null;
   let minorPoiStepId: GmActionChecklistStepId | null = null;
+
+  const pushLocalObservationStep = (
+    dependsOnStepIds: readonly GmActionChecklistStepId[] = [],
+  ): GmActionChecklistStepId | null => {
+    if (!allowed.has("local_observation") || !sceneRef || !localObservationNeed) return null;
+    const localTargetRefs = uniqueStrings([
+      localObservationNeed.targetRef ?? sceneRef,
+      sceneRef,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    const localEvidenceRefs = uniqueStrings([
+      actorRef,
+      sceneRef,
+      input.frame.scene.currentLocation.ref,
+      ...(localObservationNeed.targetRef ? [localObservationNeed.targetRef] : []),
+      ...localObservationNeed.evidenceRefs,
+      ...evidenceRefs,
+    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
+    steps.push(stepFor({
+      index: steps.length + 1,
+      kind: "local_observation",
+      actorRef,
+      targetRefs: localTargetRefs.length > 0 ? localTargetRefs : [sceneRef],
+      evidenceRefs: localEvidenceRefs,
+      localObservationPlan: {
+        actorRef: "Player",
+        mode: localObservationNeed.mode,
+        queryText: localObservationNeed.queryText,
+        targetRef: localObservationNeed.targetRef,
+        surfaceKinds: localObservationNeed.surfaceKinds,
+        allowBoundedNegative: localObservationNeed.allowBoundedNegative,
+        anchorRef: sceneRef,
+      },
+      purpose: `Plan bounded current-scene local observation for ${localObservationNeed.queryText}.`,
+      intendedSummary: `Stage 4 must settle a read-only local observation over enumerated current SceneFrame surfaces before narration may claim the result. This does not authorize hidden discovery, broad absence, item use, device status, route truth, world facts, mutation, or dialogue.`,
+      expectedVisibleSummary: `If accepted, local observation may describe only matching exposed current-scene surface entries for ${localObservationNeed.queryText}.`,
+      dependsOnStepIds,
+    }));
+    return steps[steps.length - 1]?.stepId ?? null;
+  };
+
   if (allowed.has("condition_set") && sceneRef && localConditionNeed) {
     const targetRefs = uniqueStrings([
       localConditionNeed.targetRef ?? sceneRef,
@@ -1179,39 +1220,8 @@ export function buildDeterministicGmActionChecklist(input: {
     minorPoiStepId = steps[steps.length - 1]?.stepId ?? null;
   }
 
-  if (allowed.has("local_observation") && sceneRef && localObservationNeed) {
-    const localTargetRefs = uniqueStrings([
-      localObservationNeed.targetRef ?? sceneRef,
-      sceneRef,
-    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
-    const localEvidenceRefs = uniqueStrings([
-      actorRef,
-      sceneRef,
-      input.frame.scene.currentLocation.ref,
-      ...(localObservationNeed.targetRef ? [localObservationNeed.targetRef] : []),
-      ...localObservationNeed.evidenceRefs,
-      ...evidenceRefs,
-    ]).filter((ref) => citable.has(ref.toLowerCase()) && admitted.has(ref.toLowerCase()));
-    steps.push(stepFor({
-      index: steps.length + 1,
-      kind: "local_observation",
-      actorRef,
-      targetRefs: localTargetRefs.length > 0 ? localTargetRefs : [sceneRef],
-      evidenceRefs: localEvidenceRefs,
-      localObservationPlan: {
-        actorRef: "Player",
-        mode: localObservationNeed.mode,
-        queryText: localObservationNeed.queryText,
-        targetRef: localObservationNeed.targetRef,
-        surfaceKinds: localObservationNeed.surfaceKinds,
-        allowBoundedNegative: localObservationNeed.allowBoundedNegative,
-        anchorRef: sceneRef,
-      },
-      purpose: `Plan bounded current-scene local observation for ${localObservationNeed.queryText}.`,
-      intendedSummary: `Stage 4 must settle a read-only local observation over enumerated current SceneFrame surfaces before narration may claim the result. This does not authorize hidden discovery, broad absence, item use, device status, route truth, world facts, mutation, or dialogue.`,
-      expectedVisibleSummary: `If accepted, local observation may describe only matching exposed current-scene surface entries for ${localObservationNeed.queryText}.`,
-      dependsOnStepIds: localConditionStepId ? [localConditionStepId] : [],
-    }));
+  if (input.gmRead.actionInterpretation.interactionKind !== "time_passage") {
+    pushLocalObservationStep(localConditionStepId ? [localConditionStepId] : []);
   }
 
   if (allowed.has("device_surface_observation") && sceneRef && deviceObservationNeed) {
@@ -1332,6 +1342,8 @@ export function buildDeterministicGmActionChecklist(input: {
       expectedVisibleSummary: `If accepted, only ${timePassageNeed.elapsedMinutes} minute(s) of elapsed time may be visible.`,
       dependsOnStepIds: localConditionStepId ? [localConditionStepId] : [],
     }));
+    const timeAdvanceStepId = steps[steps.length - 1]?.stepId ?? null;
+    pushLocalObservationStep(timeAdvanceStepId ? [timeAdvanceStepId] : []);
   } else if (allowed.has("dialogue_record") && dialogueSpeaker) {
     const dialogueStepInput: Parameters<typeof stepFor>[0] = {
       index: steps.length + 1,

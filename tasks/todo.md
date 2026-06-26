@@ -1,5 +1,22 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-26 - Revamp Branch Gate
+
+Goal:
+- Ship the current `develop` state through `main`, resync `develop`, then create `feat/revamp` for a full launch-to-longplay mechanics inquisition from campaign creation through 600 turns.
+
+Plan:
+- [x] Inventory the current dirty `develop` slice and keep existing work intact.
+- [x] Verify the current slice with focused runtime tests, typecheck, and GitNexus `detect_changes`.
+- [ ] Commit and push the verified slice to `develop`.
+- [ ] Merge `develop` into `main`, push `main`, then merge `main` back into `develop` and push `develop`.
+- [ ] Create `feat/revamp` from the synchronized baseline.
+- [ ] Start `rpi/revamp/` with the mechanics-audit request and first-pass coverage map.
+
+Review:
+- GitNexus `detect_changes(scope=all)` reported MEDIUM risk: 17 touched symbols, 1 affected process (`Stage4Evidence -> UniqueStrings`), no HIGH/CRITICAL warning.
+- Verification passed: focused gameplay-cycle runtime contracts/narration/settlement suite from `backend/` (450/450), backend typecheck, and `git diff --check` with CRLF warnings only.
+
 ## Current Session Focus 2026-06-25 - Playable Narrative Contract Reset
 
 Goal:
@@ -9612,4 +9629,22 @@ Session: `gm-v1-consequenc-slice`.
     - `npm --prefix backend run typecheck` passed.
     - Fresh live lane `output/p337-stage-in-live-20260626-1345` ran opening plus T1-T10 with zero structural issues.
     - T7 now produces two accepted Stage 4 receipts (`condition_set`, `local_observation`) and player-facing prose: `no visible badge, no visible weapon, no visible sign that he has noticed Hayashi Ren`.
+  - [x] Fixed the follow-up wait/watch defect exposed after T10:
+    - GM Read accepts `time_passage` plus bounded external `localObservationNeed` for waiting while watching/listening for scene signals.
+    - Action checklist now plans `time_advance` before the dependent `local_observation`.
+    - Verified targeted/full runtime contracts and backend typecheck before continuing prose work.
+  - [x] Marked fresh lane `output/p337-stage-in-pristine-r2-20260626-1424` diagnostic at T10:
+    - Opening/T1-T9 ran structurally clean, but route-options prose still dumped backend route labels and a hidden/outsider destination into the player-facing paragraph.
+    - Movement prose also still carried receipt voice such as `After 1 minute, you reach...`.
+  - [x] Reworked Stage 6 route/movement presentation ownership:
+    - `choicePresentation.labelHandling` now uses `structured_route_handles_not_prose` for route-options pages.
+    - Route labels remain in structured `choices`; route-options prose summarizes visible ways onward from the route origin instead of enumerating the menu.
+    - Movement settlement receipts now use compact arrival beats like `<destination> comes into view after <time>`.
+    - Updated prompt examples away from `From X, you can take...` and added regression coverage for summarized route prose.
+  - [x] Verified static gates for the route/movement fix:
+    - Focused route/movement/settlement slice passed: 37/37 targeted tests.
+    - Full narration contract passed: 144/144.
+    - Expanded runtime subset passed: contracts/narration/settlement 449/449.
+    - `npm --prefix backend run typecheck` passed.
   - [ ] Remaining prose polish debt from the fresh lane: movement/device hard-result lines can still be too terse (`Shibuya District opens up around you.`, `A minute's walk puts you at...`, `Burner phone's visible surface...`). This is readability polish, not the T7 runtime blocker.
+  - [ ] Run a fresh post-route-handle live lane from opening through at least the route-options point, then continue distance if the route dump is gone.
