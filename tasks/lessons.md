@@ -9,6 +9,7 @@
 - Separate cleanup commits from gameplay/mechanics commits.
 - If cleanup hits locked files, stop, identify the owning process, stop only that process, then retry the narrow cleanup.
 - When cleaning visible root noise, inspect inside visible workflow folders too; `tasks/` should stay as `todo.md` plus `lessons.md` unless a current task requires more.
+- For repo presentation cleanup, sweep every top-level directory in one pass; archive broad tracked evidence/tooling islands before deleting them outright.
 
 ## Revamp Acceptance
 

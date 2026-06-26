@@ -55,6 +55,8 @@
 - Deleted stale tracked `.continuation-state.md`.
 - Archived tracked legacy `CLAUDE.md` to `docs/archive/agent-instructions/CLAUDE.md`.
 - Reduced `tasks/` to active `todo.md` and `lessons.md`; removed stale tracked task notes and ignored historical handoff/oracle scratch.
+- Archived tracked root evidence/tooling islands to `docs/archive/revamp-cleanup/`: `.planning/`, `output/`, and `scripts/`.
+- Removed ignored old non-revamp RPI folders and generated `frontend/next-env.d.ts`.
 
 ## After
 
@@ -62,28 +64,26 @@
   - `.git/`: 223.20 MB
   - `.gitnexus/`: 92.60 MB
   - `.claude/`: 79.43 MB
-  - `docs/`: 21.02 MB
+  - `docs/`: active docs plus archived cleanup evidence
   - `backend/`: 10.00 MB
   - `frontend/`: 1.61 MB
-  - `output/`: 1.23 MB, tracked proof island only plus no bulk ignored run debris
-  - `.planning/`: 0.35 MB after second root-noise pass
+  - `rpi/`: active `revamp` scope only
   - `tasks/`: active `todo.md` and `lessons.md` only
 - `campaigns/` was removed after user confirmed campaigns can be deleted.
 - `node_modules/`, `frontend/.next/`, and `shared/dist/` were removed.
 - Second pass removed visible ignored root scratch and ignored planning bulk.
+- Final root pass removed `scripts/`, `output/`, and `.planning/` from the top level by archiving their tracked contents under docs.
 
 ## Kept
 
 - `.gitnexus/`, because project rules require GitNexus impact and change detection.
 - `.claude/worktrees/`, because registered worktrees are active workspace state.
 - `.agents/` content was preserved outside the repo root in `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
-- Tracked proof/evidence files under `.planning/`, `output/`, `docs/`, `e2e/`, `tasks/`, and `rpi/`.
+- Tracked historical proof/evidence remains in `docs/archive/revamp-cleanup/` for reference, outside the root workspace.
 
 ## Follow-Ups
 
-- Decide whether tracked historical `output/` proof files should move into `docs/archive/`.
-- Decide whether tracked `.planning` history should be archived or kept as hidden project memory.
-- Treat source/test hygiene items as later code work: build output excluding tests, todo-only worldgen tests, and phase-bound script grouping.
+- Treat source/test hygiene items as later code work: build output excluding tests and todo-only worldgen tests.
 
 ## Verification
 
