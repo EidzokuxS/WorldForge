@@ -12,6 +12,7 @@
 - For repo presentation cleanup, sweep every top-level directory in one pass; do not hide obsolete tracked evidence inside another visible folder when the goal is a clean workspace.
 - Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
 - When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
+- After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
 
 ## Revamp Acceptance
 
