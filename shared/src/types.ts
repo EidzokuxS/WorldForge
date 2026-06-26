@@ -398,6 +398,7 @@ export interface RevampChatTurn {
 
 export interface RevampChatSession {
   turns: RevampChatTurn[];
+  pendingSoftStateHints: RevampSoftStateHint[];
 }
 
 export interface RevampOpeningResult {
@@ -421,6 +422,51 @@ export interface RevampGmResponse {
   text: string;
   suggestedActions: string[];
   softStateHints: RevampSoftStateHint[];
+}
+
+export interface RevampDebugSceneSummary {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface RevampDebugCastSummary {
+  id: string;
+  name: string;
+  source: RevampCastSource;
+  campaignRole: RevampCampaignRole;
+  isPlayer: boolean;
+}
+
+export interface RevampDebugRouteSummary {
+  edgeId: string;
+  toSceneId: string;
+  name: string;
+}
+
+export interface RevampDebugTurnSummary {
+  index: number;
+  role: ChatRole;
+  contentPreview: string;
+  createdAt: number;
+}
+
+export interface RevampDebugSnapshot {
+  campaignId: string;
+  phase: CampaignKernelPhase;
+  turnIndex: number;
+  counts: {
+    nodes: number;
+    edges: number;
+    castMembers: number;
+    turns: number;
+    pendingSoftStateHints: number;
+  };
+  currentScene: RevampDebugSceneSummary | null;
+  presentCast: RevampDebugCastSummary[];
+  routes: RevampDebugRouteSummary[];
+  pendingSoftStateHints: RevampSoftStateHint[];
+  recentTurns: RevampDebugTurnSummary[];
 }
 
 export interface CampaignKernel {
@@ -455,6 +501,7 @@ export function createDraftCampaignKernel(
     startingSetup: null,
     chatSession: {
       turns: [],
+      pendingSoftStateHints: [],
     },
     turnIndex: 0,
   };

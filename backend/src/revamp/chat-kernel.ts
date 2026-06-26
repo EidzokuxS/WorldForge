@@ -67,6 +67,7 @@ export function createRevampChatMessage(input: {
         userTurn,
         assistantTurn,
       ],
+      pendingSoftStateHints: response.softStateHints,
     },
     turnIndex: currentKernel.turnIndex + 2,
   };

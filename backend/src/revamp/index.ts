@@ -50,6 +50,10 @@ export type {
 } from "./chat-kernel.js";
 
 export {
+  buildRevampDebugSnapshot,
+} from "./debug-snapshot.js";
+
+export {
   buildRevampCastRegistry,
 } from "./cast-registry-adapter.js";
 export type {

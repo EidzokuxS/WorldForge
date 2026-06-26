@@ -23,6 +23,7 @@ import {
 } from "../revamp/cast-kernel.js";
 import { composeRevampKernelWorldGraph } from "../revamp/graph-kernel.js";
 import { createRevampChatMessage } from "../revamp/chat-kernel.js";
+import { buildRevampDebugSnapshot } from "../revamp/debug-snapshot.js";
 import { createRevampOpening } from "../revamp/opening-kernel.js";
 import { createRevampStartingSetup } from "../revamp/setup-kernel.js";
 
@@ -138,6 +139,24 @@ app.get("/campaigns/:id/kernel", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to load revamp kernel.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.get("/campaigns/:id/debug", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    return c.json({
+      snapshot: buildRevampDebugSnapshot(readOrCreateRevampKernel(campaignId)),
+    });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to load revamp debug snapshot.") },
       getErrorStatus(error),
     );
   }

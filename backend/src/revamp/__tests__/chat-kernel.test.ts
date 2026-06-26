@@ -166,6 +166,7 @@ function writeActiveKernel(overrides: Partial<ReturnType<typeof createDraftCampa
     },
     chatSession: {
       turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
+      pendingSoftStateHints: [],
     },
     turnIndex: 1,
     ...overrides,
@@ -215,6 +216,7 @@ describe("revamp chat kernel", () => {
       result.userTurn,
       result.assistantTurn,
     ]);
+    expect(result.kernel.chatSession.pendingSoftStateHints).toEqual(result.response.softStateHints);
     expect(readCampaignKernel(CAMPAIGN_ID)).toEqual(result.kernel);
   });
 
@@ -230,6 +232,7 @@ describe("revamp chat kernel", () => {
     writeActiveKernel({
       chatSession: {
         turns: [],
+        pendingSoftStateHints: [],
       },
     });
 

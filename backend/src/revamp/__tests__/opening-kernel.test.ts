@@ -216,8 +216,9 @@ describe("revamp opening kernel", () => {
 
   it("fails when chat already contains turns", () => {
     writeSetupReadyKernel({
-      chatSession: {
+    chatSession: {
         turns: [{ role: "assistant", content: "Already open.", createdAt: 1 }],
+        pendingSoftStateHints: [],
       },
     });
 

@@ -47,6 +47,7 @@ export function createRevampOpening(input: {
           createdAt: input.createdAt ?? Date.now(),
         },
       ],
+      pendingSoftStateHints: [],
     },
     turnIndex: 1,
   };

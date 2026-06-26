@@ -14,6 +14,7 @@ Process the first real player message after the A8 opening and persist a simple 
 - Produce `RevampGmResponse` with text, suggested actions, and soft state hints.
 - Append the trimmed user turn.
 - Append the assistant turn.
+- Persist response soft hints to `chatSession.pendingSoftStateHints`.
 - Increase `turnIndex` by `2`.
 - Return `{ kernel, response, userTurn, assistantTurn }`.
 - Expose `POST /api/revamp/campaigns/:id/chat/message`.
@@ -59,7 +60,7 @@ Scope: define deterministic response behavior.
 Output:
 
 - [proposed] Classify input as scene look, present-cast talk, visible-route intent, or freeform action.
-- [proposed] Return soft hints for later StateWriter work.
+- [proposed] Return and persist soft hints for later StateWriter work.
 - [proposed] Keep suggested actions aligned with A8 labels.
 
 ### A5 proof harness

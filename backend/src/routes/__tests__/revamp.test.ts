@@ -368,6 +368,7 @@ function writeActiveKernelWithChatGraph(): void {
     },
     chatSession: {
       turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
+      pendingSoftStateHints: [],
     },
     turnIndex: 1,
   });
@@ -407,6 +408,47 @@ describe("revamp routes", () => {
         importedCast: [],
         generatedCast: [],
       },
+    });
+  });
+
+  it("returns a revamp debug snapshot through the revamp API boundary", async () => {
+    writeActiveKernelWithChatGraph();
+
+    const res = await app.request(`/api/revamp/campaigns/${CAMPAIGN_ID}/debug`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.snapshot).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      phase: "active",
+      turnIndex: 1,
+      counts: {
+        nodes: 2,
+        edges: 0,
+        castMembers: 1,
+        turns: 1,
+        pendingSoftStateHints: 0,
+      },
+      currentScene: {
+        id: "scene:platform-office",
+        name: "Platform Office",
+        description: "A cramped office lit by timetable lamps.",
+      },
+      presentCast: [{
+        id: "cast:player_created:mira",
+        name: "Mira Vale",
+        source: "player_created",
+        campaignRole: "player",
+        isPlayer: true,
+      }],
+      routes: [],
+      pendingSoftStateHints: [],
+      recentTurns: [{
+        index: 0,
+        role: "assistant",
+        contentPreview: "Opening.",
+        createdAt: 100,
+      }],
     });
   });
 
@@ -616,5 +658,6 @@ describe("revamp routes", () => {
     expect(storedKernel?.chatSession.turns).toHaveLength(3);
     expect(storedKernel?.chatSession.turns[1]?.role).toBe("user");
     expect(storedKernel?.chatSession.turns[2]?.content).toBe(body.response.text);
+    expect(storedKernel?.chatSession.pendingSoftStateHints).toEqual(body.response.softStateHints);
   });
 });
