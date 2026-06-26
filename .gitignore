@@ -8,6 +8,7 @@ settings.json
 # Environment
 .env
 .env.*
+!.env.example
 
 # OS
 .DS_Store
@@ -32,12 +33,20 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # Tasks (local workflow)
-tasks/
-rpi/
+tasks/*
+!tasks/
+!tasks/todo.md
+!tasks/lessons.md
+rpi/*
+!rpi/
+!rpi/revamp/
+!rpi/revamp/**
 .planning/
 
 # E2E test artifacts
-e2e/
+e2e/*
+!e2e/
+!e2e/**/*.ts
 qa-results/
 qa-screenshots/
 backend/e2e/
@@ -54,7 +63,6 @@ pinchtab/
 .playwright-mcp/
 scorecard.png
 .gitnexus
-AGENTS.md
 start.bat
 
 # Local scratch artifacts
