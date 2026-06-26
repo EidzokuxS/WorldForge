@@ -17,6 +17,7 @@
 ## Revamp Acceptance
 
 - A green test suite or one-turn smoke does not prove playability.
+- Every mechanics slice that changes player flow needs a manual playtest note: exact path, player action tried, observed result, and whether it is pristine acceptance or diagnostic.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.
