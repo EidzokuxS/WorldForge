@@ -20,6 +20,14 @@ export {
 } from "./graph-kernel.js";
 
 export {
+  buildRevampStartingSetup,
+} from "./starting-setup.js";
+
+export {
+  createRevampStartingSetup,
+} from "./setup-kernel.js";
+
+export {
   buildRevampCastRegistry,
 } from "./cast-registry-adapter.js";
 export type {

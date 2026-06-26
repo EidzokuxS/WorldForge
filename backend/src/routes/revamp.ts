@@ -22,6 +22,7 @@ import {
   saveRevampPlayerCharacter,
 } from "../revamp/cast-kernel.js";
 import { composeRevampKernelWorldGraph } from "../revamp/graph-kernel.js";
+import { createRevampStartingSetup } from "../revamp/setup-kernel.js";
 
 const app = new Hono();
 
@@ -46,6 +47,11 @@ const revampImportV2CardSchema = z.object({
 const revampSavePlayerSchema = z.object({
   draft: characterDraftSchema,
   source: revampPlayerSourceSchema.default("player_created"),
+}).strip();
+
+const revampStartSetupSchema = z.object({
+  mode: z.enum(["gm_invented", "user_guided"]).default("gm_invented"),
+  userStart: z.string().trim().max(2000).optional(),
 }).strip();
 
 function locationNamesFromKernel(nodes: RevampWorldNode[]): string[] {
@@ -253,6 +259,34 @@ app.post("/campaigns/:id/graph/compose", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to compose revamp world graph.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/setup/start", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const result = await parseBody(c, revampStartSetupSchema);
+    if ("response" in result) return result.response;
+
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    const kernel = createRevampStartingSetup({
+      campaignId,
+      mode: result.data.mode,
+      userStart: result.data.userStart,
+    });
+
+    return c.json({
+      kernel,
+      startingSetup: kernel.startingSetup,
+    });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to create revamp starting setup.") },
       getErrorStatus(error),
     );
   }

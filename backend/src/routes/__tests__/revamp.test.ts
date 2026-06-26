@@ -195,6 +195,70 @@ function writeCastReadyKernelWithLocation(): void {
   });
 }
 
+function writeCastReadyKernelWithSetupGraph(): void {
+  writeCampaignKernel(CAMPAIGN_ID, {
+    ...createDraftCampaignKernel({
+      id: CAMPAIGN_ID,
+      premise: "A railway city under curfew.",
+    }),
+    phase: "cast_ready",
+    worldGraph: {
+      nodes: [
+        {
+          id: "location:station-gate",
+          type: "Location",
+          name: "Station Gate",
+          data: { description: "A curfew checkpoint." },
+        },
+        {
+          id: "scene:platform-office",
+          type: "SceneLocation",
+          name: "Platform Office",
+          data: { description: "A cramped office lit by timetable lamps." },
+        },
+        {
+          id: "cast:player_created:mira",
+          type: "Character",
+          name: "Mira Vale",
+          data: {},
+        },
+      ],
+      edges: [
+        {
+          id: "edge:located_at:scene:platform-office:location:station-gate",
+          fromId: "scene:platform-office",
+          toId: "location:station-gate",
+          type: "located_at",
+          data: {},
+        },
+        {
+          id: "edge:located_at:cast:player_created:mira:scene:platform-office",
+          fromId: "cast:player_created:mira",
+          toId: "scene:platform-office",
+          type: "located_at",
+          data: {},
+        },
+      ],
+    },
+    castRegistry: {
+      playerCharacter: {
+        id: "cast:player_created:mira",
+        source: "player_created",
+        characterDraft: makeDraft("Mira Vale"),
+        campaignRole: "player",
+        placement: {
+          locationId: "location:station-gate",
+          sceneLocationId: "scene:platform-office",
+          notes: [],
+        },
+        importance: "primary",
+      },
+      importedCast: [],
+      generatedCast: [],
+    },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   ingestMock.mockReset();
@@ -368,5 +432,28 @@ describe("revamp routes", () => {
       ]),
     );
     expect(readCampaignKernel(CAMPAIGN_ID)?.worldGraph).toEqual(body.worldGraph);
+  });
+
+  it("creates starting setup through the revamp API boundary", async () => {
+    writeCastReadyKernelWithSetupGraph();
+
+    const res = await app.request(`/api/revamp/campaigns/${CAMPAIGN_ID}/setup/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "gm_invented" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel.phase).toBe("setup_ready");
+    expect(body.startingSetup).toMatchObject({
+      mode: "gm_invented",
+      anchorSceneId: "scene:platform-office",
+      playerCharacterId: "cast:player_created:mira",
+      presentCastIds: ["cast:player_created:mira"],
+      openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
+      openingQuestion: "What do you do?",
+    });
+    expect(readCampaignKernel(CAMPAIGN_ID)?.startingSetup).toEqual(body.startingSetup);
   });
 });
