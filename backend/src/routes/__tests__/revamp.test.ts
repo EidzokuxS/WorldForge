@@ -311,6 +311,9 @@ function writeSetupReadyKernelWithOpeningGraph(): void {
       openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
       openingQuestion: "What do you do?",
     },
+    runtimeState: {
+      currentSceneId: "scene:platform-office",
+    },
   });
 }
 
@@ -369,6 +372,97 @@ function writeActiveKernelWithChatGraph(): void {
     chatSession: {
       turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
       pendingSoftStateHints: [],
+    },
+    runtimeState: {
+      currentSceneId: "scene:platform-office",
+    },
+    turnIndex: 1,
+  });
+}
+
+function writeActiveKernelWithRouteHint(): void {
+  writeCampaignKernel(CAMPAIGN_ID, {
+    ...createDraftCampaignKernel({
+      id: CAMPAIGN_ID,
+      premise: "A railway city under curfew.",
+    }),
+    phase: "active",
+    worldGraph: {
+      nodes: [
+        {
+          id: "scene:platform-office",
+          type: "SceneLocation",
+          name: "Platform Office",
+          data: { description: "A cramped office lit by timetable lamps." },
+        },
+        {
+          id: "scene:ticket-hall",
+          type: "SceneLocation",
+          name: "Ticket Hall",
+          data: { description: "A public hall under guard." },
+        },
+        {
+          id: "cast:player_created:mira",
+          type: "Character",
+          name: "Mira Vale",
+          data: {},
+        },
+      ],
+      edges: [
+        {
+          id: "edge:route_to:scene:platform-office:scene:ticket-hall",
+          fromId: "scene:platform-office",
+          toId: "scene:ticket-hall",
+          type: "route_to",
+          data: {},
+        },
+        {
+          id: "edge:located_at:cast:player_created:mira:scene:platform-office",
+          fromId: "cast:player_created:mira",
+          toId: "scene:platform-office",
+          type: "located_at",
+          data: {},
+        },
+      ],
+    },
+    castRegistry: {
+      playerCharacter: {
+        id: "cast:player_created:mira",
+        source: "player_created",
+        characterDraft: makeDraft("Mira Vale"),
+        campaignRole: "player",
+        placement: {
+          locationId: null,
+          sceneLocationId: "scene:platform-office",
+          notes: [],
+        },
+        importance: "primary",
+      },
+      importedCast: [],
+      generatedCast: [],
+    },
+    startingSetup: {
+      mode: "gm_invented",
+      anchorSceneId: "scene:platform-office",
+      playerCharacterId: "cast:player_created:mira",
+      presentCastIds: ["cast:player_created:mira"],
+      nearbyCastIds: [],
+      activePressureIds: [],
+      visibleHooks: [],
+      hiddenTruthIds: [],
+      openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
+      openingQuestion: "What do you do?",
+    },
+    chatSession: {
+      turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
+      pendingSoftStateHints: [{
+        type: "route_intent",
+        targetId: "scene:ticket-hall",
+        summary: "Move from Platform Office toward Ticket Hall.",
+      }],
+    },
+    runtimeState: {
+      currentSceneId: "scene:platform-office",
     },
     turnIndex: 1,
   });
@@ -659,5 +753,31 @@ describe("revamp routes", () => {
     expect(storedKernel?.chatSession.turns[1]?.role).toBe("user");
     expect(storedKernel?.chatSession.turns[2]?.content).toBe(body.response.text);
     expect(storedKernel?.chatSession.pendingSoftStateHints).toEqual(body.response.softStateHints);
+  });
+
+  it("applies state writer changes through the revamp API boundary", async () => {
+    writeActiveKernelWithRouteHint();
+
+    const res = await app.request(`/api/revamp/campaigns/${CAMPAIGN_ID}/state/apply`, {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result).toMatchObject({
+      appliedCount: 1,
+      rejectedCount: 0,
+      changes: [{
+        type: "MoveCharacter",
+        status: "applied",
+        actorId: "cast:player_created:mira",
+        fromSceneId: "scene:platform-office",
+        toSceneId: "scene:ticket-hall",
+      }],
+    });
+    expect(body.kernel.runtimeState.currentSceneId).toBe("scene:ticket-hall");
+    const storedKernel = readCampaignKernel(CAMPAIGN_ID);
+    expect(storedKernel?.runtimeState.currentSceneId).toBe("scene:ticket-hall");
+    expect(storedKernel?.chatSession.pendingSoftStateHints).toEqual([]);
   });
 });

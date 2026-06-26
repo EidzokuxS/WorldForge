@@ -26,6 +26,7 @@ import { createRevampChatMessage } from "../revamp/chat-kernel.js";
 import { buildRevampDebugSnapshot } from "../revamp/debug-snapshot.js";
 import { createRevampOpening } from "../revamp/opening-kernel.js";
 import { createRevampStartingSetup } from "../revamp/setup-kernel.js";
+import { applyRevampStateWriter } from "../revamp/state-writer.js";
 
 const app = new Hono();
 
@@ -352,6 +353,22 @@ app.post("/campaigns/:id/chat/message", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to process revamp chat message.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/state/apply", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    return c.json(applyRevampStateWriter({ campaignId }));
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to apply revamp state writer.") },
       getErrorStatus(error),
     );
   }

@@ -54,6 +54,14 @@ export {
 } from "./debug-snapshot.js";
 
 export {
+  applyRevampStateHints,
+  applyRevampStateWriter,
+} from "./state-writer.js";
+export type {
+  ApplyRevampStateWriterResult,
+} from "./state-writer.js";
+
+export {
   buildRevampCastRegistry,
 } from "./cast-registry-adapter.js";
 export type {

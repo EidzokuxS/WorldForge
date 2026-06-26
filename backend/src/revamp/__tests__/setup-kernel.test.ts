@@ -214,6 +214,7 @@ describe("revamp setup kernel", () => {
       openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
       openingQuestion: "What do you do?",
     });
+    expect(kernel.runtimeState.currentSceneId).toBe("scene:platform");
     expect(kernel.chatSession.turns).toEqual([]);
     expect(readCampaignKernel(CAMPAIGN_ID)).toEqual(kernel);
   });

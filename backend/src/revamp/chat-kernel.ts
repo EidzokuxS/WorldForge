@@ -30,6 +30,9 @@ export function createRevampChatMessage(input: {
   if (!currentKernel.startingSetup) {
     throw new AppError("A9 chat requires starting setup.", 409);
   }
+  if (!currentKernel.runtimeState.currentSceneId) {
+    throw new AppError("A9 chat requires current scene.", 409);
+  }
   const firstTurn = currentKernel.chatSession.turns[0];
   if (!firstTurn || firstTurn.role !== "assistant" || !firstTurn.content.trim()) {
     throw new AppError("A9 chat requires an opening assistant turn.", 409);
@@ -44,6 +47,7 @@ export function createRevampChatMessage(input: {
     worldGraph: currentKernel.worldGraph,
     castRegistry: currentKernel.castRegistry,
     startingSetup: currentKernel.startingSetup,
+    currentSceneId: currentKernel.runtimeState.currentSceneId,
     recentTurns: currentKernel.chatSession.turns.slice(-8),
     worldDna: currentKernel.worldDna,
     userMessage: message,

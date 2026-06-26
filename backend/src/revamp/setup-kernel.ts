@@ -28,6 +28,9 @@ export function createRevampStartingSetup(input: {
     ...currentKernel,
     phase: "setup_ready",
     startingSetup,
+    runtimeState: {
+      currentSceneId: startingSetup.anchorSceneId,
+    },
   };
 
   writeCampaignKernel(input.campaignId, nextKernel);

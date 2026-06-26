@@ -16,6 +16,7 @@ export interface BuildRevampGmResponseInput {
   worldGraph: RevampWorldGraph;
   castRegistry: RevampCastRegistry;
   startingSetup: RevampStartingSetup;
+  currentSceneId: string;
   recentTurns: RevampChatTurn[];
   worldDna: RevampWorldDNA | null;
   userMessage: string;
@@ -244,7 +245,7 @@ export function buildRevampGmResponse(input: BuildRevampGmResponseInput): Revamp
   }
 
   const nodes = nodeById(input.worldGraph);
-  const scene = requireScene(nodes, input.startingSetup.anchorSceneId);
+  const scene = requireScene(nodes, input.currentSceneId);
   requirePlayer(input.castRegistry, input.startingSetup.playerCharacterId);
   const present = presentCast({
     setup: input.startingSetup,

@@ -41,10 +41,13 @@ function currentScene(input: {
   if (!setup) {
     return null;
   }
+  if (!input.kernel.runtimeState.currentSceneId) {
+    throw new AppError("A10 debug requires current scene.", 409);
+  }
 
-  const scene = input.nodes.get(setup.anchorSceneId);
+  const scene = input.nodes.get(input.kernel.runtimeState.currentSceneId);
   if (!scene || scene.type !== "SceneLocation") {
-    throw new AppError(`A10 debug requires scene ${setup.anchorSceneId}.`, 409);
+    throw new AppError(`A10 debug requires scene ${input.kernel.runtimeState.currentSceneId}.`, 409);
   }
 
   return {

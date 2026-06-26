@@ -1,9 +1,9 @@
 # WorldForge Active Tasks
 
-## Current Focus: Mechanics Revamp A10
+## Current Focus: Mechanics Revamp A11
 
 Goal:
-- Build the early Campaign Kernel substrate through backend debug inspection. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, A7 persists starting setup, A8 persists the opening assistant turn, A9 persists the first user plus assistant turn pair, and A10 exposes a debug snapshot for playtest inspection.
+- Build the early Campaign Kernel substrate through the first StateWriter mutation. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, A7 persists starting setup, A8 persists the opening assistant turn, A9 persists the first user plus assistant turn pair, A10 exposes a debug snapshot for playtest inspection, and A11 applies route movement from pending soft hints.
 
 Source:
 - `rpi/revamp/REQUEST.md`
@@ -18,6 +18,7 @@ Source:
 - `rpi/revamp/implement/a8-opening.md`
 - `rpi/revamp/implement/a9-chat.md`
 - `rpi/revamp/implement/a10-debug.md`
+- `rpi/revamp/implement/a11-state.md`
 
 Plan:
 - [x] Lock A0 revamp architecture contract.
@@ -52,14 +53,18 @@ Plan:
 - [x] A10 persist pending soft state hints for the last GM response.
 - [x] A10 expose backend debug snapshot through `/api/revamp/campaigns/:id/debug`.
 - [x] A10 prove draft/active snapshots, pending hints, recent turns, route boundary, typechecks, and old chat/worldgen/provider exclusion.
+- [x] A11 add `runtimeState.currentSceneId` to the Campaign Kernel.
+- [x] A11 apply `route_intent` as a `MoveCharacter` state change.
+- [x] A11 expose `/api/revamp/campaigns/:id/state/apply`.
+- [x] A11 prove player `located_at` movement, runtime current scene update, pending hint clearing, route boundary, typechecks, and old chat/worldgen/provider exclusion.
 
 6+1 Lanes:
 - L1 Source Lock: keep attachment architecture, `REQUEST.md`, and coverage map as source hierarchy.
-- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, setup anchor contract, opening turn contract, first chat turn contract, and debug snapshot contract.
+- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, setup anchor contract, opening turn contract, first chat turn contract, debug snapshot contract, and route movement contract.
 - L3 Reference Extraction: use old DNA seed and location shapes only as reference.
 - L4 Kernel Protocol: write A3 and A5b kernel state to campaign `kernel.json`; keep A4/A5a/A6 as pure graph/cast outputs.
-- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, setup persistence, opening persistence, chat turn persistence, and debug snapshot output.
-- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7/A8/A9/A10.
+- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, setup persistence, opening persistence, chat turn persistence, debug snapshot output, and first StateWriter movement.
+- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7/A8/A9/A10/A11.
 - +1 Integrator: choose the smallest vertical slice and reject scope creep.
 
 Review:
@@ -111,3 +116,5 @@ Review:
 - A9 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/revamp/__tests__/chat-gm.test.ts src/revamp/__tests__/chat-kernel.test.ts src/routes/__tests__/revamp.test.ts` -> `69 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed; `npm --prefix frontend run typecheck` passed.
 - A10 added `chatSession.pendingSoftStateHints`, `backend/src/revamp/debug-snapshot.ts`, `RevampDebugSnapshot`, and `GET /api/revamp/campaigns/:id/debug`.
 - A10 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/revamp/__tests__/chat-gm.test.ts src/revamp/__tests__/chat-kernel.test.ts src/revamp/__tests__/debug-snapshot.test.ts src/routes/__tests__/revamp.test.ts` -> `73 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed; `npm --prefix frontend run typecheck` passed.
+- A11 added `runtimeState.currentSceneId`, `backend/src/revamp/state-writer.ts`, `RevampStateWriterResult`, and `POST /api/revamp/campaigns/:id/state/apply`.
+- A11 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/revamp/__tests__/chat-gm.test.ts src/revamp/__tests__/chat-kernel.test.ts src/revamp/__tests__/debug-snapshot.test.ts src/revamp/__tests__/state-writer.test.ts src/routes/__tests__/revamp.test.ts` -> `78 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed; `npm --prefix frontend run typecheck` passed.

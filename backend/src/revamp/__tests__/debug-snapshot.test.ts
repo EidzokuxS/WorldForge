@@ -167,6 +167,9 @@ function makeActiveKernel(): CampaignKernel {
         summary: "Inspect Platform Office.",
       }],
     },
+    runtimeState: {
+      currentSceneId: "scene:platform",
+    },
     turnIndex: 3,
   };
 }

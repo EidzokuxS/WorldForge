@@ -401,6 +401,10 @@ export interface RevampChatSession {
   pendingSoftStateHints: RevampSoftStateHint[];
 }
 
+export interface RevampRuntimeState {
+  currentSceneId: string | null;
+}
+
 export interface RevampOpeningResult {
   text: string;
   suggestedActions: string[];
@@ -469,6 +473,33 @@ export interface RevampDebugSnapshot {
   recentTurns: RevampDebugTurnSummary[];
 }
 
+export type RevampStateWriterChangeType =
+  | "MoveCharacter"
+  | "RevealSecret"
+  | "ChangeRelationship"
+  | "AdvancePressure"
+  | "AddItem"
+  | "RemoveItem"
+  | "CreateHook"
+  | "ResolveHook";
+
+export type RevampStateWriterChangeStatus = "applied" | "rejected";
+
+export interface RevampStateWriterChange {
+  type: RevampStateWriterChangeType;
+  status: RevampStateWriterChangeStatus;
+  actorId?: string;
+  fromSceneId?: string;
+  toSceneId?: string;
+  reason: string;
+}
+
+export interface RevampStateWriterResult {
+  changes: RevampStateWriterChange[];
+  appliedCount: number;
+  rejectedCount: number;
+}
+
 export interface CampaignKernel {
   campaignId: string;
   phase: CampaignKernelPhase;
@@ -478,6 +509,7 @@ export interface CampaignKernel {
   castRegistry: RevampCastRegistry;
   startingSetup: RevampStartingSetup | null;
   chatSession: RevampChatSession;
+  runtimeState: RevampRuntimeState;
   turnIndex: number;
 }
 
@@ -502,6 +534,9 @@ export function createDraftCampaignKernel(
     chatSession: {
       turns: [],
       pendingSoftStateHints: [],
+    },
+    runtimeState: {
+      currentSceneId: null,
     },
     turnIndex: 0,
   };

@@ -168,6 +168,9 @@ function writeActiveKernel(overrides: Partial<ReturnType<typeof createDraftCampa
       turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
       pendingSoftStateHints: [],
     },
+    runtimeState: {
+      currentSceneId: "scene:platform",
+    },
     turnIndex: 1,
     ...overrides,
   });
