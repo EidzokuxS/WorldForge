@@ -1056,6 +1056,7 @@ export function buildDeterministicGmActionChecklist(input: {
   const minorPoiNeed = input.gmRead.actionInterpretation.minorPoiNeed ?? null;
   const timePassageNeed = input.gmRead.actionInterpretation.timePassageNeed ?? null;
   const localObservationNeed = input.gmRead.actionInterpretation.interactionKind === "current_scene_observation"
+    || input.gmRead.actionInterpretation.interactionKind === "player_local_condition"
     ? input.gmRead.actionInterpretation.localObservationNeed ?? null
     : null;
   const deviceObservationNeed = input.gmRead.actionInterpretation.interactionKind === "device_status_observation"
@@ -1209,6 +1210,7 @@ export function buildDeterministicGmActionChecklist(input: {
       purpose: `Plan bounded current-scene local observation for ${localObservationNeed.queryText}.`,
       intendedSummary: `Stage 4 must settle a read-only local observation over enumerated current SceneFrame surfaces before narration may claim the result. This does not authorize hidden discovery, broad absence, item use, device status, route truth, world facts, mutation, or dialogue.`,
       expectedVisibleSummary: `If accepted, local observation may describe only matching exposed current-scene surface entries for ${localObservationNeed.queryText}.`,
+      dependsOnStepIds: localConditionStepId ? [localConditionStepId] : [],
     }));
   }
 

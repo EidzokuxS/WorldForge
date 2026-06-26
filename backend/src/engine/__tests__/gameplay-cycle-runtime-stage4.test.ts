@@ -3389,13 +3389,57 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No match for \"obvious visible reaction from Guide to Player's open hands\" stands out among visible actors.",
+        summary: "No match for \"obvious visible reaction from Guide to Mira Voss's open hands\" stands out on Guide.",
         localObservation: {
           resultKind: "bounded_no_match",
-          queryText: "obvious visible reaction from Guide to Player's open hands",
-          targetLabel: null,
+          queryText: "obvious visible reaction from Guide to Mira Voss's open hands",
+          targetLabel: "Guide",
           matchedEntries: [],
           searchedSurfaceKinds: ["visible_actor"],
+          boundedNegative: true,
+        },
+      },
+    });
+
+    const actorAwarenessFrame: AuthoritativeSceneFrame = {
+      ...inputFrame,
+      frameId: "frame-stage4-local-observation-actor-awareness",
+      turnId: "clean-turn-stage4-local-observation-actor-awareness",
+      playerAction: "I watch Guide for any sign he noticed me.",
+    };
+    const actorAwarenessChecklist = checklistForKind("local_observation", actorAwarenessFrame);
+    actorAwarenessChecklist.steps[0] = {
+      ...actorAwarenessChecklist.steps[0]!,
+      targetRefs: ["Guide", "Market"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      intended: {
+        ...actorAwarenessChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether Guide shows any sign that he noticed the Player",
+          targetRef: "Guide",
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const actorAwareness = await runCleanStage4Execution({
+      frame: actorAwarenessFrame,
+      checklist: actorAwarenessChecklist,
+    });
+    expect(actorAwareness.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No visible sign gives a clear answer about \"whether Guide shows any sign that he noticed Mira Voss\" on Guide.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "whether Guide shows any sign that he noticed Mira Voss",
+          targetLabel: "Guide",
+          matchedEntries: [],
+          searchedSurfaceKinds: ["visible_actor", "visible_target"],
           boundedNegative: true,
         },
       },
@@ -3480,11 +3524,11 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No match for \"visible labels, damage, or authorization marks on Brass Tube\" stands out among inventory items and visible facts.",
+        summary: "No match for \"visible labels, damage, or authorization marks on Brass Tube\" stands out on Brass Tube.",
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "visible labels, damage, or authorization marks on Brass Tube",
-          targetLabel: null,
+          targetLabel: "Brass Tube",
           matchedEntries: [],
           searchedSurfaceKinds: ["inventory_item", "visible_fact"],
           boundedNegative: true,
@@ -3524,11 +3568,11 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No match for \"visible threading, contact seating, or relay hardware marks on Brass Tube\" stands out among inventory items and visible facts.",
+        summary: "No match for \"visible threading, contact seating, or relay hardware marks on Brass Tube\" stands out on Brass Tube.",
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "visible threading, contact seating, or relay hardware marks on Brass Tube",
-          targetLabel: null,
+          targetLabel: "Brass Tube",
           matchedEntries: [],
           searchedSurfaceKinds: ["inventory_item", "visible_fact"],
           boundedNegative: true,
@@ -3570,7 +3614,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No visible evidence answers \"whether the Delivery manifest top page shows a public destination name or visible instruction\" among inventory items and visible facts.",
+        summary: "No visible sign gives a clear answer about \"whether the Delivery manifest top page shows a public destination name or visible instruction\" among inventory items and visible facts.",
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "whether the Delivery manifest top page shows a public destination name or visible instruction",
@@ -3627,7 +3671,7 @@ describe("clean Stage 4 executor DB contracts", () => {
         summary: "No obvious injury or strain is visible on Mira Voss.",
         localObservation: {
           resultKind: "positive_match",
-          queryText: "obvious injury or strain on Player",
+          queryText: "obvious injury or strain on Mira Voss",
           targetLabel: "Mira Voss",
           matchedEntries: [expect.objectContaining({
             surfaceKind: "player_status",
@@ -3915,7 +3959,7 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No visible evidence answers \"whether loose rubble shifts under light pressure\" in the current scene.",
+        summary: "No visible sign gives a clear answer about \"whether loose rubble shifts under light pressure\" in the current scene.",
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "whether loose rubble shifts under light pressure",
@@ -3961,11 +4005,11 @@ describe("clean Stage 4 executor DB contracts", () => {
       capabilityId: "local_observation",
       status: "accepted",
       publicResult: {
-        summary: "No visible evidence answers \"whether visible wear on Brass Tube reveals a hidden mechanism or useful clue\" among inventory items and visible facts.",
+        summary: "No visible sign gives a clear answer about \"whether visible wear on Brass Tube reveals a hidden mechanism or useful clue\" on Brass Tube.",
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "whether visible wear on Brass Tube reveals a hidden mechanism or useful clue",
-          targetLabel: null,
+          targetLabel: "Brass Tube",
           matchedEntries: [],
           searchedSurfaceKinds: ["inventory_item", "visible_fact"],
           boundedNegative: true,

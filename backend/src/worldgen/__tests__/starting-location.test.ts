@@ -62,8 +62,10 @@ describe("resolveStartingLocation", () => {
     const result = await resolveStartingLocation({
       premise: "Dark fantasy.",
       locations: [
-        { id: "loc-1", name: "Ironhaven" },
-        { id: "loc-2", name: "Mistharbor" },
+        { id: "region-1", name: "Ironhaven Region", kind: "macro" },
+        { id: "loc-1", name: "Ironhaven", kind: "persistent_sublocation", parentLocationId: "region-1" },
+        { id: "region-2", name: "Mistharbor Region", kind: "macro" },
+        { id: "loc-2", name: "Mistharbor", kind: "persistent_sublocation", parentLocationId: "region-2" },
       ],
       userPrompt: "I want to start in a city.",
       role: fakeRole,
@@ -121,6 +123,74 @@ describe("resolveStartingLocation", () => {
     expect(result.startConditions.startLocationId).toBe("loc-concourse");
   });
 
+  it("uses the concrete starting child when no prompt is provided for a macro start", async () => {
+    const result = await resolveStartingLocation({
+      premise: "Dense transit ward.",
+      locations: [
+        {
+          id: "loc-macro",
+          name: "Dense Transit Ward",
+          kind: "macro",
+          parentLocationId: null,
+          isStarting: false,
+        },
+        {
+          id: "loc-concourse",
+          name: "Station Concourse",
+          kind: "persistent_sublocation",
+          parentLocationId: "loc-macro",
+          isStarting: true,
+        },
+      ],
+      role: fakeRole,
+    });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(result.locationId).toBe("loc-concourse");
+    expect(result.locationName).toBe("Station Concourse");
+    expect(result.startConditions.startLocationId).toBe("loc-concourse");
+    expect(result.startConditions.immediateSituation).toContain("Station Concourse");
+  });
+
+  it("normalizes a model-selected macro row to its concrete starting child", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        locationName: "Dense Transit Ward",
+        arrivalMode: "by train",
+        immediateSituation: "The character arrives under the transit canopy.",
+        entryPressure: ["crowds"],
+        companions: [],
+        startingVisibility: "noticed",
+        resolvedNarrative: "The character arrives under the transit canopy.",
+      },
+    });
+
+    const result = await resolveStartingLocation({
+      premise: "Dense transit ward.",
+      locations: [
+        {
+          id: "loc-macro",
+          name: "Dense Transit Ward",
+          kind: "macro",
+          parentLocationId: null,
+        },
+        {
+          id: "loc-concourse",
+          name: "Station Concourse",
+          kind: "persistent_sublocation",
+          parentLocationId: "loc-macro",
+          isStarting: true,
+        },
+      ],
+      userPrompt: "Put me in the transit ward.",
+      role: fakeRole,
+    });
+
+    expect(result.locationId).toBe("loc-concourse");
+    expect(result.locationName).toBe("Station Concourse");
+    expect(result.startConditions.startLocationId).toBe("loc-concourse");
+  });
+
   it("asks for the full structured start-state contract instead of location-plus-flavor wording", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
@@ -137,8 +207,10 @@ describe("resolveStartingLocation", () => {
     await resolveStartingLocation({
       premise: "Fantasy.",
       locations: [
-        { id: "loc-1", name: "Ironhaven" },
-        { id: "loc-2", name: "Mistharbor" },
+        { id: "region-1", name: "Ironhaven Region", kind: "macro" },
+        { id: "loc-1", name: "Ironhaven", kind: "persistent_sublocation", parentLocationId: "region-1" },
+        { id: "region-2", name: "Mistharbor Region", kind: "macro" },
+        { id: "loc-2", name: "Mistharbor", kind: "persistent_sublocation", parentLocationId: "region-2" },
       ],
       userPrompt: "Near the coast",
       role: fakeRole,

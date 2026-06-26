@@ -8,14 +8,12 @@ import type {
 } from "@worldforge/shared";
 import { START_CONDITIONS_CONTRACT } from "../character/prompt-contract.js";
 import { buildStartingLocationPromptContract } from "./prompt-contracts.js";
+import {
+  resolveConcreteStartPlacement,
+  type StartPlacementLocationCandidate,
+} from "./start-placement.js";
 
-type StartingLocationCandidate = {
-  id: string;
-  name: string;
-  isStarting?: boolean | null;
-  kind?: string | null;
-  parentLocationId?: string | null;
-};
+type StartingLocationCandidate = StartPlacementLocationCandidate;
 
 const resolvedStartSchema = z.object({
   locationName: z.string().describe("One of the known locations"),
@@ -38,12 +36,17 @@ export async function resolveStartingLocation(opts: {
   if (!starting) {
     throw new Error("No locations available for start resolution.");
   }
+  const startingPlacement = resolveConcreteStartPlacement(starting, opts.locations);
+  if (!startingPlacement.ok) {
+    throw new Error(startingPlacement.error);
+  }
+  const concreteStarting = startingPlacement.matchedLocation;
 
   if (!opts.userPrompt?.trim()) {
     const startConditions: CharacterStartConditions = {
-      startLocationId: starting.id,
+      startLocationId: concreteStarting.id,
       arrivalMode: "settled",
-      immediateSituation: `You begin in ${starting.name}.`,
+      immediateSituation: `You begin in ${concreteStarting.name}.`,
       entryPressure: [],
       companions: [],
       startingVisibility: "expected",
@@ -52,8 +55,8 @@ export async function resolveStartingLocation(opts: {
     };
 
     return {
-      locationId: starting.id,
-      locationName: starting.name,
+      locationId: concreteStarting.id,
+      locationName: concreteStarting.name,
       startConditions,
       narrative: null,
     };
@@ -82,8 +85,9 @@ PLAYER REQUEST: "${opts.userPrompt}"
 STRUCTURED START CONTRACT:
 ${START_CONDITIONS_CONTRACT}
 
-Choose the best starting location from the known list, then resolve one authoritative startConditions object.
-- startConditions.startLocationId resolves through locationName from KNOWN LOCATIONS.
+Choose the best concrete playable starting scene from the known list, then resolve one authoritative startConditions object.
+- Macro rows are broad areas for reasoning; prefer a contained persistent_sublocation for locationName whenever one exists.
+- startConditions.startLocationId resolves through the final concrete locationName from KNOWN LOCATIONS.
 - startConditions.arrivalMode describes how the character enters the scene.
 - startConditions.immediateSituation states what is happening right now.
 - startConditions.entryPressure lists immediate pressures shaping the opening moment.
@@ -95,10 +99,15 @@ Return locationName and resolvedNarrative as compatibility aliases, but reason a
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  const matched =
+  const rawMatched =
     opts.locations.find(
       (location) => location.name.toLowerCase() === object.locationName.toLowerCase(),
-    ) ?? starting;
+    ) ?? concreteStarting;
+  const matchedPlacement = resolveConcreteStartPlacement(rawMatched, opts.locations);
+  if (!matchedPlacement.ok) {
+    throw new Error(matchedPlacement.error);
+  }
+  const matched = matchedPlacement.matchedLocation;
 
   const startConditions: CharacterStartConditions = {
     startLocationId: matched.id,

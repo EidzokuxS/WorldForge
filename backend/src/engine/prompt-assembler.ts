@@ -1826,7 +1826,13 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
     ...(openingScene
       ? [
-          "Opening scene pages establish a playable start page: immediate concrete locus, one live pressure or sensory texture beat, visible people only when clearly present, and a handoff to player agency. Do not look for route-list backendFacts; exact route labels belong to UI/map surfaces. Select 3-5 different backendFacts across 3-5 sentence objects, skip overlapping facts that repeat the same subject/action, and keep broad lore digest behind local playable handles.",
+          "Opening scene pages establish a playable start page: immediate concrete locus, one live pressure or sensory texture beat, visible people only when clearly present, and a handoff to player agency.",
+          "Use opening evidenceRefs as hard boundaries for who, where, visible pressure, and the immediate hook; do not copy backendFacts as default sentence wording.",
+          "Soft prose budget is allowed for harmless visible/sensory texture such as light, sound, weather, crowd motion, smell, surface wear, posture, or ordinary clutter when it creates no durable prop, route, hazard, document, authority, promise, injury, changed position, named actor, secret, resource, relationship, mechanical affordance, or reusable world fact.",
+          "Hard facts remain strict: movement, item custody, route/access status, time passage, injury or condition, exact dialogue quote, secret/world fact, resource, relationship, important object, and actionable affordance must be supported by matching evidenceRefs.",
+          "A fork, branch, exit, doorway, stair, path, passage continuation, route choice, hazard direction, or source of a threat is an actionable affordance; cite evidence that states it or keep it as non-addressable ambience.",
+          "Route labels, remote institutions, map discovery, inventory, HP, and exact scene/location labels belong to UI/map/status surfaces unless the player can perceive or know them through opening evidence.",
+          "Keep broad lore digest behind local playable handles; write the first page as a lived moment that returns control to the player.",
         ]
       : []),
     "If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects.",

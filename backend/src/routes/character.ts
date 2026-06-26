@@ -40,6 +40,10 @@ import {
   cacheImage,
 } from "../images/index.js";
 import { toAuthoritativeItemSeed } from "../inventory/index.js";
+import {
+  resolveConcreteStartPlacement,
+  type StartPlacementLocationCandidate,
+} from "../worldgen/start-placement.js";
 
 const log = createLogger("character-route");
 import {
@@ -56,25 +60,7 @@ import type { Context } from "hono";
 
 const app = new Hono();
 
-type CampaignLocationCandidate = {
-  id: string;
-  name: string;
-  isStarting?: boolean | null;
-  kind?: string | null;
-  parentLocationId?: string | null;
-};
-
-type PlayerStartPlacement =
-  | {
-      ok: true;
-      broadLocationId: string;
-      sceneLocationId: string;
-      matchedLocation: CampaignLocationCandidate;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
+type CampaignLocationCandidate = StartPlacementLocationCandidate;
 
 function resolveDraftLocation(
   draft: CharacterDraft,
@@ -103,46 +89,8 @@ function resolveDraftLocation(
 function resolvePlayerStartPlacement(
   matchedLocation: CampaignLocationCandidate,
   allLocations: CampaignLocationCandidate[],
-): PlayerStartPlacement {
-  if (matchedLocation.kind !== "persistent_sublocation") {
-    const childScenes = allLocations.filter((location) =>
-      location.kind === "persistent_sublocation"
-      && location.parentLocationId === matchedLocation.id,
-    );
-    const selectedScene =
-      childScenes.find((location) => location.isStarting)
-      ?? (childScenes.length === 1 ? childScenes[0] : null);
-    if (!selectedScene) {
-      return {
-        ok: false,
-        error: `Starting location "${matchedLocation.name}" must resolve to one concrete sublocation before play.`,
-      };
-    }
-    return {
-      ok: true,
-      broadLocationId: matchedLocation.id,
-      sceneLocationId: selectedScene.id,
-      matchedLocation: selectedScene,
-    };
-  }
-
-  const parentLocationId = matchedLocation.parentLocationId ?? null;
-  const parentLocation = parentLocationId
-    ? allLocations.find((location) => location.id === parentLocationId)
-    : null;
-  if (!parentLocation || parentLocation.kind === "persistent_sublocation") {
-    return {
-      ok: false,
-      error: `Starting location "${matchedLocation.name}" has an unresolved parent location.`,
-    };
-  }
-
-  return {
-    ok: true,
-    broadLocationId: parentLocation.id,
-    sceneLocationId: matchedLocation.id,
-    matchedLocation,
-  };
+) {
+  return resolveConcreteStartPlacement(matchedLocation, allLocations);
 }
 
 function createDraftResponse(campaignId: string, draft: CharacterDraft) {

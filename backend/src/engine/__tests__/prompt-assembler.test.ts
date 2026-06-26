@@ -2102,7 +2102,7 @@ describe("assemblePrompt", () => {
     expect(result.prompt).not.toContain("dr...");
   });
 
-  it("asks opening narration to spend multiple distinct backend facts when available", async () => {
+  it("asks opening narration to use packet refs as boundaries while allowing soft prose", async () => {
     const narratorPacket = createNarratorPacket({
       playerAction: "[opening scene]",
       controlReturnReason: "opening_scene_settled_packet",
@@ -2111,7 +2111,7 @@ describe("assemblePrompt", () => {
       {
         id: "opening:0:visible-fact:1",
         category: "perceivable_effect",
-        summary: "You are in Shibuya Station Side Street.",
+        summary: "Tiamat starts at Shibuya Station Side Street.",
         sourceId: "opening:0:visible-fact:1",
         summaryBackendFact: true,
         claimSupport: ["playable_beat"],
@@ -2147,11 +2147,13 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain(
       "Opening scene pages establish a playable start page",
     );
-    expect(result.prompt).toContain("Do not look for route-list backendFacts");
-    expect(result.prompt).toContain("exact route labels belong to UI/map surfaces");
-    expect(result.prompt).toContain("Select 3-5 different backendFacts");
-    expect(result.prompt).toContain("skip overlapping facts that repeat the same subject/action");
-    expect(result.prompt).toContain("You are in Shibuya Station Side Street.");
+    expect(result.prompt).toContain("Use opening evidenceRefs as hard boundaries");
+    expect(result.prompt).toContain("do not copy backendFacts as default sentence wording");
+    expect(result.prompt).toContain("Soft prose budget is allowed");
+    expect(result.prompt).toContain("Hard facts remain strict");
+    expect(result.prompt).toContain("Route labels, remote institutions, map discovery");
+    expect(result.prompt).not.toContain("Select 3-5 different backendFacts");
+    expect(result.prompt).toContain("Tiamat starts at Shibuya Station Side Street.");
     expect(result.prompt).toContain("Civilians crowd the shopping streets and station concourses.");
     expect(result.prompt).toContain(
       "What do you do before chakra saturation in the tunnels shorts another row of streetlights?",

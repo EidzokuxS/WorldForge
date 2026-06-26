@@ -24,7 +24,9 @@ Review:
 - Initial staging is part of the opening contract: before first prose, the campaign must place player and key NPCs into concrete scenes/sublocations, create missing child scenes when needed, mark which actors are visible/nearby/offscreen, and preserve player knowledge/discovery boundaries.
 - UI/prose split: UI owns scene name, parent location, route chips, inventory/status, and clear actor chips; narrator owns lived moment, pressure, sensory surface, visible behavior, and action handoff.
 - Acceptance gate: Shibuya/Tiamat failure world must produce a playable 3-5 beat opening with NPCs distributed into concrete start scenes, no broad-location cast pile, no route dump, no broad/hidden actor leakage, no "inside Shibuya" receipt sentence, no Jujutsu High/safe-retreat knowledge leak for an outsider, then resolve a first custom action through the normal runtime and continue into a sustained 10/30/60-turn readability lane.
-- Current implementation progress: `buildOpeningNarrationEvidence` no longer loads graph route labels or emits `You are at X, inside Y`; `/save-character` resolves macro starts to one concrete starting child scene; `saveScaffoldToDb` now rejects macro-only starting placement; focused tests are green for opening/character/scaffold and Stage 6 narration.
+- Current implementation progress: `buildOpeningNarrationEvidence` no longer loads graph route labels, no longer emits synthetic `You are in ...` / `What do you do from here?` receipt prose, and prioritizes concrete scene texture before broad sensed context; `/save-character` resolves macro starts to one concrete starting child scene; `saveScaffoldToDb` now rejects macro-only starting placement; focused tests are green for opening/character/scaffold and Stage 6 narration.
+- 2026-06-26 continuation: final narration opening contract now says opening evidenceRefs are hard boundaries while harmless soft prose is allowed; hard facts remain strict for movement, custody, route/access, time, injury/condition, exact dialogue, secret/world fact, resource, relationship, important object, and actionable affordance.
+- 2026-06-26 continuation: Brass Tube guard coverage now accepts harmless surface prose (`cool and scuffed`) and rejects unsupported mechanical affordance prose (`relay/socket/hardware`) through precision fact drift, not a runtime prose banlist.
 - A later short Oracle prompt without the goal attachment was invalidated and will not be used as evidence.
 
 ## Current Session Focus 2026-06-20 - Opening Scene Playable Page Contract
@@ -9600,3 +9602,14 @@ Session: `gm-v1-consequenc-slice`.
   - [x] Re-ran Oracle/GPT-5.5 Pro with the full attached P337 case bundle after the user correction. Session `worldforge-p337-current-review` verified model selection as `Pro Extended` and returned a real answer: keep typed hard-result approach, avoid bounded paraphrase, tighten branch purity, watch first-screen/direct-scene page shape.
   - [x] Applied the immediate branch-purity follow-up from Oracle: `typed_hard_result` proof now carries `promptInput=null`, so standalone exact hard micro-results do not depend on the model-oriented prompt planner; model/deterministic proofs still preserve promptInput.
   - [x] Added source-distribution regression: invalid normal-turn model prose rejects with `CleanNarrationValidationError` instead of being rescued by deterministic/typed projection.
+  - [x] Fixed the Shibuya T7 compound-action defect:
+    - GM Read now preserves external visible `localObservationNeed` inside `player_local_condition` for posture plus visible-actor property checks, while still dropping self/player-status injury drift from posture turns.
+    - Action checklist now emits both `condition_set` and dependent `local_observation` steps for that compound shape.
+    - Regression coverage added for self-check drift, external compound preservation, and deterministic condition-plus-observation checklist splitting.
+  - [x] Verified after the compound-action fix:
+    - Focused regression slice passed: 3/3 targeted tests.
+    - Expanded focused backend subset passed: 525/525 tests.
+    - `npm --prefix backend run typecheck` passed.
+    - Fresh live lane `output/p337-stage-in-live-20260626-1345` ran opening plus T1-T10 with zero structural issues.
+    - T7 now produces two accepted Stage 4 receipts (`condition_set`, `local_observation`) and player-facing prose: `no visible badge, no visible weapon, no visible sign that he has noticed Hayashi Ren`.
+  - [ ] Remaining prose polish debt from the fresh lane: movement/device hard-result lines can still be too terse (`Shibuya District opens up around you.`, `A minute's walk puts you at...`, `Burner phone's visible surface...`). This is readability polish, not the T7 runtime blocker.

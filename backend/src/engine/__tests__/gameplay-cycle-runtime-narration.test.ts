@@ -1134,6 +1134,51 @@ function localObservationView(): CleanNarratorView {
   });
 }
 
+function targetedBoundedLocalObservationView(): CleanNarratorView {
+  return movementView({
+    acceptedEvidence: [{
+      ref: "e1",
+      authority: "local_observation_receipt",
+      claimKinds: ["local_observation", "bounded_visibility_negative"],
+      text: "Delivery manifest gives no clear visible answer about whether the top page shows a public destination name or visible instruction at Shibuya Pedestrian Underpass.",
+      backendFacts: [
+        {
+          factRef: "e1.f1",
+          role: "local_observation_beat",
+          value: "Delivery manifest gives no clear visible answer about whether the top page shows a public destination name or visible instruction at Shibuya Pedestrian Underpass.",
+          text: "Local observation beat: Delivery manifest gives no clear visible answer about whether the top page shows a public destination name or visible instruction at Shibuya Pedestrian Underpass.",
+          exact: true,
+        },
+        { factRef: "e1.f2", role: "searched_visible_surfaces", value: "inventory items and visible facts", text: "Searched visible surfaces: inventory items and visible facts.", exact: true },
+        { factRef: "e1.f3", role: "observation_query", value: "whether the top page shows a public destination name or visible instruction", text: "Observation query: whether the top page shows a public destination name or visible instruction.", exact: true },
+        { factRef: "e1.f4", role: "target_label", value: "Delivery manifest", text: "Target label: Delivery manifest.", exact: true },
+        { factRef: "e1.f5", role: "anchor_scene", value: "Shibuya Pedestrian Underpass", text: "Anchor scene: Shibuya Pedestrian Underpass.", exact: true },
+        { factRef: "e1.f6", role: "anchor_location", value: "Shibuya District", text: "Anchor location: Shibuya District.", exact: true },
+      ],
+      limits: {
+        proves: ["bounded no-match against enumerated current visible entries"],
+        doesNotProve: [
+          "hidden discovery",
+          "concealed or thorough search result",
+          "private facts",
+          "broad absence",
+          "offscreen facts",
+          "future non-discoverability",
+          "item use or effects",
+          "item state change",
+          "phone or device status",
+          "route truth beyond route option/check receipts",
+          "location reveal",
+          "world fact",
+          "dialogue content",
+          "mutation",
+          "no-change",
+        ],
+      },
+    }],
+  });
+}
+
 function positiveLocalObservationView(): CleanNarratorView {
   return movementView({
     acceptedEvidence: [{
@@ -2003,6 +2048,23 @@ describe("clean Stage 6 narration contracts", () => {
     expect(promptInput.storyFrame.pagePlan.steps).toEqual([
       { step: "narrate_turn_event", entryRefs: ["e1"] },
     ]);
+  });
+
+  it("keeps normal movement arrival centered on the travel beat instead of copied static texture", () => {
+    const promptInput = buildCleanNarratorPromptInput(movementWithSceneTextureView());
+
+    expect(promptInput.narrativePageTask.sentencePlan.map((step) => step.sentenceRole))
+      .toEqual(["turn_event_beat"]);
+    expect(promptInput.narrativePageTask.sentencePlan[0]?.preferredBackendFactRefs)
+      .toEqual(["e1.f1", "e1.f2", "e1.f3", "e1.f4"]);
+    expect(promptInput.narrativePageTask.pagePerformance.openingBeat).toBe("settled_result_opening");
+    expect(promptInput.narrativePageTask.pageVariation.openingDoor).toBe("core_result_first");
+    expect(promptInput.narrativePageTask.sentencePlan.some((step) =>
+      step.sentenceRole === "exact_context_texture"
+    )).toBe(false);
+    expect(promptInput.acceptedEvidence.some((evidence) =>
+      evidence.claimKinds.includes("scene_texture")
+    )).toBe(false);
   });
 
   it("keeps oracle outcomes as turn events without inventing context", () => {
@@ -5105,6 +5167,45 @@ describe("clean Stage 6 narration contracts", () => {
       .not.toContain("Charter Gallery; Auditor-Voice Maren Dael; Clerk Aldris; Sealed lacquer message tube; Courier satchel; Brass Tube; Auditor Spire; Lowwater Bazaar");
   });
 
+  it("carries target labels into bounded local observation prose material", () => {
+    const view = targetedBoundedLocalObservationView();
+    const promptInput = buildCleanNarratorPromptInput(view);
+    const localObservationStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
+      step.beatObjective === "render_local_observation"
+    );
+
+    expect(localObservationStep?.preferredBackendFactRefs).toEqual([
+      "e1.f4",
+      "e1.f3",
+      "e1.f5",
+      "e1.f1",
+    ]);
+    expect(localObservationStep?.proseMaterials).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        factRef: "e1.f4",
+        proseUse: "label_anchor",
+        materialText: "Delivery manifest",
+      }),
+      expect.objectContaining({
+        factRef: "e1.f3",
+        proseUse: "label_anchor",
+        materialText: "whether the top page shows a public destination name or visible instruction",
+      }),
+    ]));
+
+    const result = validateCleanNarrationCandidate({
+      view,
+      candidate: acceptedCandidate(view, [{
+        text: "The Delivery manifest's top page gives no visible sign of a public destination name or visible instruction at Shibuya Pedestrian Underpass.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f4", "e1.f3", "e1.f5", "e1.f1"],
+        claimKinds: ["local_observation", "bounded_visibility_negative"],
+      }]),
+    });
+
+    expect(result.status).toBe("accepted");
+  });
+
   it("renders dialogue response evidence without promoting the quote to world truth", () => {
     const text = renderCleanAuthorityProjection(dialogueView());
 
@@ -7018,7 +7119,7 @@ describe("clean Stage 6 narration contracts", () => {
     )).toBe(true);
   });
 
-  it("renders device_surface_unavailable with accepted scene_texture as a typed hard-result", async () => {
+  it("renders device_surface_unavailable with accepted scene_texture without replaying the scene card", async () => {
     const view = deviceSurfaceObservationWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
@@ -7029,7 +7130,8 @@ describe("clean Stage 6 narration contracts", () => {
     });
 
     expect(result.source).toBe("typed_hard_result");
-    expect(result.text).toBe("Canvas awnings hang over the market lanes. Burner phone's visible surface shows no readable public result for the requested message indicator check.");
+    expect(result.text).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
+    expect(result.text).not.toContain("Canvas awnings hang over the market lanes.");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network|sender|caller/iu);
     expect(result.proof?.promptInput).toBeNull();
     expect(result.proof?.candidate).toBeNull();
@@ -7699,11 +7801,13 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("lands ownership and equip state through endpoint-owned item verbs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Movement surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("render the accepted `travel_beat` value as the turn event");
-    expect(buildCleanNarrationSystemPrompt()).toContain("put one exact scene_texture sentence first or second");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Do not open normal movement pages with a copied static location-card sentence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("scene_placement/current_scene facts such as 'You are at <destination>' are context anchors");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Movement result sentences cite the player_location_change evidence and its travel_beat/destination/time facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not default to the stock opener 'One minute later, you...'");
     expect(buildCleanNarrationSystemPrompt()).toContain("do not reuse a distinctive arrival metaphor across nearby turns");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Arrival phrasing should use reach, arrive, come into view, or are at");
-    expect(buildCleanNarrationSystemPrompt()).toContain("posture framing such as 'you stand at/in <destination>' belongs only to accepted player_local_condition evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Arrival phrasing should use reach, arrive, come into view, or put you at");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Posture framing such as 'you stand at/in <destination>' belongs only to accepted player_local_condition evidence");
     expect(buildCleanNarrationSystemPrompt()).toContain("Elapsed-time surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("accepted elapsed_time duration value and any cited scene_anchor material as the clock beat");
     expect(buildCleanNarrationSystemPrompt()).toContain("clock_beat_line with pressure_time");
@@ -7738,10 +7842,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("bare actor labels do not become posture, vigilance, resistance");
     expect(buildCleanNarrationSystemPrompt()).toContain("treat local_observation_beat wording as proof material, not prose to copy");
     expect(buildCleanNarrationSystemPrompt()).toContain("avoid receipt/legal phrasing");
-    expect(buildCleanNarrationSystemPrompt()).toContain("<target> gives no visible cue about <question-body> at <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("The sound stays unresolved in <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("The scene gives texture but no clear answer about <question-body> at <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("<target> stays visually silent on <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain(
+      "Fluorescent hum trembles through <scene>; it gives no clear answer about <question-body>",
+    );
+    expect(buildCleanNarrationSystemPrompt()).toContain("The sound catches in the concrete, then thins without showing <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Light crawls over <target>; no visible sign answers <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<target> gives no clear answer about <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not turn any/some/a target in the checked query into every/all targets");
     expect(buildCleanNarrationSystemPrompt()).toContain("use every/all only when accepted observed_entry_labels enumerate the complete visible set");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep the visible-sign qualifier attached");
@@ -7756,8 +7862,12 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).not.toContain("answers whether");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("settles whether");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("The visible scene gives no clear sign that <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("stays unresolved in <scene>");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("gives no visible cue about <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("gives texture");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("visible and audible details");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase person-property queries as a visible no-match");
-    expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, phrase the scene as giving texture without resolving the asked direction");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, start from a concrete present surface or sound before the narrow non-answer");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");

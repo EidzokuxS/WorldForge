@@ -197,7 +197,7 @@ function createMockDb(options: {
       {
         id: "edge-market-canal",
         campaignId,
-        fromLocationId: broadLocationId,
+        fromLocationId: sceneScopeId,
         toLocationId: connectedLocationId,
         travelCost: 2,
         discovered: true,
@@ -568,6 +568,104 @@ describe("SceneFrame builder", () => {
         }),
       ]),
     );
+  });
+
+  it("derives movement candidates from the concrete scene scope before the broad macro", async () => {
+    const sceneExitId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const broadExitId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locationRows: [
+          {
+            id: broadLocationId,
+            campaignId,
+            name: "Market District",
+            description: "A broad district.",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: '["district"]',
+            isStarting: false,
+            connectedTo: "[]",
+          },
+          {
+            id: sceneScopeId,
+            campaignId,
+            name: "Bridge Checkpoint",
+            description: "A narrow checkpoint inside the market district.",
+            kind: "persistent_sublocation",
+            parentLocationId: broadLocationId,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: '["checkpoint"]',
+            isStarting: false,
+            connectedTo: "[]",
+          },
+          {
+            id: sceneExitId,
+            campaignId,
+            name: "Checkpoint Stairs",
+            description: "The stairs out of the checkpoint.",
+            kind: "persistent_sublocation",
+            parentLocationId: broadLocationId,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: "[]",
+            isStarting: false,
+            connectedTo: "[]",
+          },
+          {
+            id: broadExitId,
+            campaignId,
+            name: "District Rooftops",
+            description: "A broad macro route.",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: "[]",
+            isStarting: false,
+            connectedTo: "[]",
+          },
+        ],
+        edgeRows: [
+          {
+            id: "edge-scene-stairs",
+            campaignId,
+            fromLocationId: sceneScopeId,
+            toLocationId: sceneExitId,
+            travelCost: 1,
+            discovered: true,
+          },
+          {
+            id: "edge-broad-rooftops",
+            campaignId,
+            fromLocationId: broadLocationId,
+            toLocationId: broadExitId,
+            travelCost: 1,
+            discovered: true,
+          },
+        ],
+      }),
+    );
+
+    const frame = await buildDbBackedFrame();
+
+    expect(frame.currentLocationId).toBe(broadLocationId);
+    expect(frame.currentSceneScopeId).toBe(sceneScopeId);
+    expect(frame.movementCandidates.map((candidate) => candidate.label)).toEqual([
+      "Checkpoint Stairs",
+    ]);
+    expect(frame.movementCandidates[0]?.path).toEqual([sceneScopeId, sceneExitId]);
   });
 
   it("derives parent broad presence when the player is stored inside a persistent sublocation", async () => {
@@ -1054,7 +1152,7 @@ describe("SceneFrame builder", () => {
         edgeRows: Array.from({ length: SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT + 2 }, (_, index) => ({
           id: `edge-${index}`,
           campaignId,
-          fromLocationId: broadLocationId,
+          fromLocationId: sceneScopeId,
           toLocationId: `move-${index}`,
           travelCost: index + 1,
           discovered: true,

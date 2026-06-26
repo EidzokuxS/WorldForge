@@ -753,7 +753,17 @@ function normalizeGmReadPlayerConditionObservationDriftCandidate(candidate: unkn
   if (!isRecord(actionInterpretation)) return candidate;
   if (actionInterpretation.interactionKind !== "player_local_condition") return candidate;
   if (!isRecord(actionInterpretation.localConditionNeed)) return candidate;
-  if (actionInterpretation.localObservationNeed == null) return candidate;
+  const localObservationNeed = actionInterpretation.localObservationNeed;
+  if (!isRecord(localObservationNeed)) return candidate;
+  const surfaceKinds = Array.isArray(localObservationNeed.surfaceKinds)
+    ? localObservationNeed.surfaceKinds
+    : [];
+  const targetRef = typeof localObservationNeed.targetRef === "string"
+    ? localObservationNeed.targetRef
+    : null;
+  const isPlayerStatusDrift = targetRef === "Player"
+    || surfaceKinds.some((surfaceKind) => surfaceKind === "player_status");
+  if (!isPlayerStatusDrift) return candidate;
   return {
     ...candidate,
     actionInterpretation: {
@@ -854,6 +864,23 @@ function normalizeGmReadIrrelevantSceneBeatNeedCandidate(candidate: unknown): un
     actionInterpretation: {
       ...actionInterpretation,
       sceneBeatNeed: undefined,
+    },
+  };
+}
+
+function normalizeGmReadIrrelevantLocalConditionNeedCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (!isRecord(actionInterpretation.localConditionNeed)) return candidate;
+  if (actionInterpretation.interactionKind !== "current_scene_observation") return candidate;
+  if (!isRecord(actionInterpretation.localObservationNeed)) return candidate;
+
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      localConditionNeed: undefined,
     },
   };
 }
@@ -997,8 +1024,10 @@ function normalizeGmReadCandidateForValidation(input: {
   });
   const normalizedIrrelevantSceneBeat =
     normalizeGmReadIrrelevantSceneBeatNeedCandidate(normalizedStraySceneBeat);
+  const normalizedIrrelevantLocalCondition =
+    normalizeGmReadIrrelevantLocalConditionNeedCandidate(normalizedIrrelevantSceneBeat);
   const normalizedUnsupportedGiveToActor = normalizeGmReadUnsupportedGiveToVisibleActorNeedCandidate({
-    candidate: normalizedIrrelevantSceneBeat,
+    candidate: normalizedIrrelevantLocalCondition,
     frame: input.frame,
   });
   const normalizedSameItemTransferCondition =
@@ -2156,11 +2185,17 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
       });
     }
     if (read.actionInterpretation.localObservationNeed != null) {
-      issues.push({
-        code: "interaction_invalid",
-        path: "actionInterpretation.localObservationNeed",
-        message: "player_local_condition must not include localObservationNeed.",
-      });
+      const localObservationSurfaceKinds = read.actionInterpretation.localObservationNeed.surfaceKinds;
+      if (
+        read.actionInterpretation.localObservationNeed.targetRef === frame.player.ref
+        || localObservationSurfaceKinds.includes("player_status")
+      ) {
+        issues.push({
+          code: "interaction_invalid",
+          path: "actionInterpretation.localObservationNeed",
+          message: "player_local_condition may include only external current-scene localObservationNeed; Player status checks use current_scene_observation without a posture change.",
+        });
+      }
     }
     if (read.actionInterpretation.deviceObservationNeed != null) {
       issues.push({
@@ -2365,7 +2400,7 @@ function interactionIssues(read: GmRead, frame: AuthoritativeSceneFrame): GmRead
     issues.push({
       code: "interaction_invalid",
       path: "actionInterpretation.localObservationNeed",
-      message: "localObservationNeed is allowed only for current_scene_observation.",
+      message: "localObservationNeed is allowed only for current_scene_observation or player_local_condition compound external observations.",
     });
   }
   if (read.actionInterpretation.deviceObservationNeed != null) {
@@ -2593,6 +2628,7 @@ export function buildGmReadPrompt(
 ): string {
   const firstInventoryItem = frame.inventory[0]?.ref ?? null;
   const firstVisibleActor = frame.actors[0]?.ref ?? null;
+  const firstNonPlayerActor = frame.actors.find((actor) => actor.role !== "player")?.ref ?? null;
   const firstVisibleItem = frame.targets.find((target) => target.kind === "item")?.ref ?? null;
   const itemTransferCue = firstVisibleActor && (firstInventoryItem || firstVisibleItem)
     ? [
@@ -2715,6 +2751,7 @@ export function buildGmReadPrompt(
     "When the player steadies, braces, kneels, crouches, raises hands, keeps hands visible, steps back, keeps distance, or checks themself while making an uncontested current-scene posture/readiness commitment, choose interactionKind=player_local_condition.",
     "When the player only keeps an already-inventory item high, in hand, dry, protected, or ready without giving, dropping, picking up, equipping, or unequipping it, choose player_local_condition with localConditionNeed.conditionKey=gripping_held_item and leave itemTransferNeed null.",
     "When the player combines two standalone body/readiness commitments such as crouch, kneel, step back, or keep hands visible with consequential carried-item readiness such as keeping the message tube dry, satchel high, or a tube ready in hand, ask which posture/readiness condition to apply first. When the body wording is an ordinary prop/fixture beat such as lean on a crate, duck behind a counter, or brace a door while keeping an already-inventory item close, choose scene_local_beat.",
+    "When posture/readiness is paired with an external read-only visible question, such as keeping distance while watching a visible actor for badge, weapon, attention, or notice, keep interactionKind=player_local_condition and also fill localObservationNeed for that external visible-surface question.",
     "If the same wording asks whether the Player is hurt while also declaring posture/readiness, do not assert injury, no injury, HP, damage, or healing from GM Read; model only the supported posture/readiness receipt, such as conditionKey=braced for steady myself, and do not include localObservationNeed in that player_local_condition object.",
     "For this frame, a valid steady/self-check example shape is:",
     JSON.stringify({
@@ -2764,6 +2801,36 @@ export function buildGmReadPrompt(
         }, null, 2),
       ]
       : ["For this frame, no body-posture plus carried-item readiness clarification example is available because SceneFrame.inventory is empty."]),
+    ...(firstNonPlayerActor
+      ? [
+        "For this frame, a valid keep-distance plus visible-actor observation example shape is:",
+        JSON.stringify({
+          path: "procedural",
+          actionInterpretation: {
+            interactionKind: "player_local_condition",
+            targetRefs: ["Player", firstNonPlayerActor, frame.scene.currentScene.ref],
+            localConditionNeed: {
+              actorRef: "Player",
+              operation: "apply",
+              conditionKey: "keeping_distance",
+              requestedPostureText: `keep distance from ${firstNonPlayerActor}`,
+              targetKind: "visible_actor_distance",
+              targetRef: firstNonPlayerActor,
+              evidenceRefs: ["Player", firstNonPlayerActor, frame.scene.currentScene.ref],
+            },
+            localObservationNeed: {
+              actorRef: "Player",
+              mode: "target_match",
+              queryText: `whether ${firstNonPlayerActor} shows any obvious badge, weapon, or sign of noticing Player`,
+              targetRef: null,
+              surfaceKinds: ["visible_actor", "visible_target"],
+              allowBoundedNegative: true,
+              evidenceRefs: ["Player", firstNonPlayerActor, frame.scene.currentScene.ref],
+            },
+          },
+        }, null, 2),
+      ]
+      : ["For this frame, no keep-distance plus visible-actor observation example is available because no non-player SceneFrame actor is visible."]),
     ...(firstInventoryItem
       ? [
         "For this frame, a valid held-item readiness example shape is:",

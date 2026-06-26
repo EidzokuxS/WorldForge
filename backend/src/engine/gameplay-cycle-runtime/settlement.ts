@@ -421,11 +421,18 @@ function observationSurfaceFinding(input: string): { surface: string; finding: s
   return { finding, surface };
 }
 
-function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneLabel: string): string {
+function localObservationBoundedNoMatchStoryBeat(
+  queryText: string,
+  anchorSceneLabel: string,
+  targetLabel: string | null = null,
+): string {
   const query = queryText.trim();
   if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
     const questionBody = query.slice("whether ".length).trim();
     if (questionBody.length > 0) {
+      if (targetLabel) {
+        return `${targetLabel} gives no clear visible answer about whether ${questionBody} at ${anchorSceneLabel}.`;
+      }
       const presenceSubject = whetherPresenceSubject(questionBody);
       if (presenceSubject) {
         return `No visible sign of ${visibleNoMatchSubject(presenceSubject)} shows at ${anchorSceneLabel}.`;
@@ -434,9 +441,9 @@ function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneL
       if (surfaceFinding) {
         return `No visible sign of ${visibleFindingPhrase(surfaceFinding.finding)} shows ${visibleSurfacePhrase(surfaceFinding.surface)} at ${anchorSceneLabel}.`;
       }
-      return `The visible scene gives no clear sign that ${questionBody} at ${anchorSceneLabel}.`;
+      return `At ${anchorSceneLabel}, surfaces and sound give no clear answer about whether ${questionBody}.`;
     }
-    return `The visible scene gives no clear answer at ${anchorSceneLabel}.`;
+    return `At ${anchorSceneLabel}, surfaces and sound give no clear answer.`;
   }
   const surfaceFinding = observationSurfaceFinding(query);
   if (surfaceFinding) {
@@ -466,18 +473,23 @@ function localObservationBoundedNoMatchStoryBeat(queryText: string, anchorSceneL
   ) {
     return `No visible person matching "${query}" stands out at ${anchorSceneLabel}.`;
   }
-  return `${query} does not stand out in the visible scene at ${anchorSceneLabel}.`;
+  return `${query} does not stand out at ${anchorSceneLabel}.`;
 }
 
 function localObservationStoryBeat(observation: {
   resultKind: string;
   queryText: string;
+  targetLabel?: string | null;
   matchedEntries: readonly { surfaceKind: string; label: string; detail?: string | null }[];
   searchedSurfaceKinds: readonly string[];
   anchorSceneLabel: string;
 }): string {
   if (observation.resultKind === "bounded_no_match") {
-    return localObservationBoundedNoMatchStoryBeat(observation.queryText, observation.anchorSceneLabel);
+    return localObservationBoundedNoMatchStoryBeat(
+      observation.queryText,
+      observation.anchorSceneLabel,
+      observation.targetLabel ?? null,
+    );
   }
   if (observation.matchedEntries.length === 0) {
     throw new Error("Local observation story evidence requires matched entries for non-negative results.");
@@ -1553,6 +1565,9 @@ function stage4Evidence(stage4Execution: CleanStage4ExecutionResult, evidence: C
         { role: "local_observation_beat", text: `Local observation beat: ${localBeat}`, value: localBeat },
         { role: "searched_visible_surfaces", text: `Searched visible surfaces: ${surfaceGroup}.`, value: surfaceGroup },
         { role: "observation_query", text: `Observation query: ${observation.queryText}.`, value: observation.queryText },
+        ...(boundedNegative && observation.targetLabel
+          ? [{ role: "target_label" as const, text: `Target label: ${observation.targetLabel}.`, value: observation.targetLabel }]
+          : []),
         ...(observedLabels.length > 0
           ? [{ role: "observed_entry_labels" as const, text: `Observed entry labels: ${observedLabelList}.`, value: observedLabelList }]
           : []),

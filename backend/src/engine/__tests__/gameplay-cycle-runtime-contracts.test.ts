@@ -3317,6 +3317,58 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.sceneBeatNeed).toBeUndefined();
   });
 
+  it("ignores irrelevant localConditionNeed when current_scene_observation carries localObservationNeed", async () => {
+    const frame = localObservationFrame({
+      playerAction: "I keep my distance and watch Guide for any obvious badge, weapon, or sign that he has noticed me.",
+    });
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player watches a visible actor from a distance for public visible cues.",
+      liveSceneQuestion: "Which visible actor surface can be checked without reading private intent?",
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      actionInterpretation: {
+        summary: "The player observes Guide for visible equipment or attention cues while keeping distance.",
+        playerIntent: "Watch Guide for any obvious badge, weapon, or sign he has noticed Player.",
+        method: "keep distance and watch",
+        targetRefs: ["Guide"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "obvious badge, weapon, or visible sign that Guide has noticed Player",
+          targetRef: "Guide",
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market", "Guide"],
+        },
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "braced",
+          requestedPostureText: "keep distance from Guide",
+          targetKind: "visible_actor_distance",
+          targetRef: "Guide",
+          evidenceRefs: ["Player", "Guide", "Market"],
+        },
+      },
+      interpretationRationale: "The observation need owns the visible actor check; the local condition is stray generation noise.",
+    };
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => candidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText)
+      .toBe("obvious badge, weapon, or visible sign that Guide has noticed Player");
+    expect(result.read.actionInterpretation.localConditionNeed).toBeUndefined();
+  });
+
   it("canonicalizes nullable GM Read liveSceneQuestion before player_local_condition validation", async () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I keep both hands visible while staying in place.",
@@ -3726,6 +3778,55 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
     expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("braced");
     expect(result.read.actionInterpretation.localObservationNeed).toBeNull();
+  });
+
+  it("preserves player_local_condition external visible observation compound", () => {
+    const frame = localObservationFrame({
+      playerAction: "I keep my distance and watch Guide for any obvious badge, weapon, or sign that he has noticed me.",
+    });
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      actionInterpretation: {
+        summary: "The player keeps distance from Guide while checking visible signs on Guide.",
+        playerIntent: "Keep distance from Guide and watch for badge, weapon, or notice.",
+        method: "keep distance and watch",
+        targetRefs: ["Player", "Guide"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "keeping_distance",
+          requestedPostureText: "keep distance from Guide",
+          targetKind: "visible_actor_distance",
+          targetRef: "Guide",
+          evidenceRefs: ["Player", "Market", "Guide"],
+        },
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether Guide shows any obvious badge, weapon, or sign that he has noticed Player",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market", "Guide"],
+        },
+      },
+      interpretationRationale: "The posture is a local Player condition; the badge, weapon, and notice question is a separate read-only visible-surface observation.",
+    };
+
+    const result = validateGmReadCandidate({ frame, candidate });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("player_local_condition");
+    expect(result.read.actionInterpretation.localConditionNeed?.conditionKey).toBe("keeping_distance");
+    expect(result.read.actionInterpretation.localObservationNeed).toMatchObject({
+      mode: "target_match",
+      queryText: "whether Guide shows any obvious badge, weapon, or sign that he has noticed Player",
+      targetRef: null,
+      surfaceKinds: ["visible_actor", "visible_target"],
+    });
   });
 
   it("exposes pure obvious-injury self-check as player-status observation instead of clarification", () => {
@@ -7140,6 +7241,97 @@ describe("gameplay-cycle-runtime primitive 6 GM Action Checklist contracts", () 
         kind: "stage4_backend_resolution_required",
       },
     });
+  });
+
+  it("deterministically splits keep-distance visible-actor observation into condition and local_observation", async () => {
+    const base = actionPlanFrame();
+    const frame = localObservationFrame({
+      playerAction: "I keep my distance and watch Guide for any obvious badge, weapon, or sign that he has noticed me.",
+      capabilities: [
+        ...base.capabilities,
+        { capabilityId: "condition_set", evidenceAuthority: "receipt_required", allowed: true },
+      ],
+    });
+    const gmRead: GmRead = {
+      ...actionPlanGmRead(frame),
+      focalRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      liveSceneQuestion: "Which posture and visible-surface observation need receipts?",
+      actionInterpretation: {
+        summary: "The player keeps distance from Guide while watching for visible signs.",
+        playerIntent: "Keep distance from Guide and watch for badge, weapon, or notice.",
+        method: "keep distance and watch",
+        targetRefs: ["Player", "Guide"],
+        interactionKind: "player_local_condition",
+        localConditionNeed: {
+          actorRef: "Player",
+          operation: "apply",
+          conditionKey: "keeping_distance",
+          requestedPostureText: "keep distance from Guide",
+          targetKind: "visible_actor_distance",
+          targetRef: "Guide",
+          evidenceRefs: ["Player", "Market", "Guide"],
+        },
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether Guide shows any obvious badge, weapon, or sign that he has noticed Player",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market", "Guide"],
+        },
+      },
+      interpretationRationale: "A local posture condition and a read-only visible observation must both settle before narration.",
+    };
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, gmRead),
+      actorRefs: ["Player"],
+      targetRefs: ["Player", "Guide"],
+      evidenceRefs: ["Player", "Market", "Guide"],
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "The posture and visible observation both need backend receipts before narration.",
+        evidenceRefs: ["Player", "Market", "Guide"],
+      },
+    };
+
+    expect(validateGmReadCandidate({ frame, candidate: gmRead }).status).toBe("accepted");
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead, candidate: judgment }).status).toBe("accepted");
+    const result = await runCleanGmActionChecklist({
+      frame,
+      gmRead,
+      judgment,
+      checklistId: "gm-action-checklist-distance-and-observation",
+    });
+
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") throw new Error("expected accepted");
+    expect(result.checklist.steps.map((step) => step.intended.kind)).toEqual([
+      "condition_set",
+      "local_observation",
+    ]);
+    expect(result.checklist.steps[1]).toMatchObject({
+      stepId: "step-2",
+      dependsOnStepIds: ["step-1"],
+      actorRef: "Player",
+      targetRefs: ["Market"],
+      intended: {
+        kind: "local_observation",
+        requiredCapabilityId: "local_observation",
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether Guide shows any obvious badge, weapon, or sign that he has noticed Player",
+          targetRef: null,
+          surfaceKinds: ["visible_actor", "visible_target"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    });
+    expect(validateGmActionChecklistCandidate({ frame, gmRead, judgment, candidate: result.checklist }).status)
+      .toBe("accepted");
   });
 
   it("deterministically produces device_surface_observation checklist for modeled device surface checks", async () => {

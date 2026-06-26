@@ -229,7 +229,13 @@ describe("save-character authoritative item seeding", () => {
       .fn()
       .mockReturnValueOnce(null)
       .mockReturnValueOnce(null);
-    const mockAll = vi.fn(() => [{ id: "loc-1", name: "Wayfarer Gate", isStarting: true }]);
+    const mockAll = vi.fn(() => [{
+      id: "loc-1",
+      name: "Wayfarer Gate",
+      isStarting: true,
+      kind: "ephemeral_scene",
+      parentLocationId: null,
+    }]);
     const mockWhere = vi.fn(() => ({ all: mockAll, get: mockGet, run: mockRun }));
     const mockFrom = vi.fn(() => ({ where: mockWhere, get: mockGet }));
     const mockSelect = vi.fn(() => ({ from: mockFrom }));
@@ -327,7 +333,8 @@ describe("save-character authoritative item seeding", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    const responseText = await response.clone().text();
+    expect(response.status, responseText).toBe(200);
 
     const seededItems = dbCalls[1] as Array<Record<string, unknown>> | undefined;
 

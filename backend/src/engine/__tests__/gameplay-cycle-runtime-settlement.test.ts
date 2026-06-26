@@ -1661,16 +1661,16 @@ describe("clean Stage 5 settlement contracts", () => {
 
     const observation = packet.acceptedEvidence.find((entry) => entry.authority === "local_observation_receipt");
     expect(observation?.claimKinds).toEqual(["local_observation", "bounded_visibility_negative"]);
-    expect(observation?.text).toBe("Violet Astrolabe does not stand out in the visible scene at Market.");
+    expect(observation?.text).toBe("Violet Astrolabe does not stand out at Market.");
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
-      "Local observation beat: Violet Astrolabe does not stand out in the visible scene at Market.",
+      "Local observation beat: Violet Astrolabe does not stand out at Market.",
       "Searched visible surfaces: visible actors and visible targets.",
       "Observation query: Violet Astrolabe.",
       "Anchor scene: Market.",
       "Anchor location: Market.",
     ]);
     expect(observation?.backendFacts.map((entry) => entry.value)).toEqual([
-      "Violet Astrolabe does not stand out in the visible scene at Market.",
+      "Violet Astrolabe does not stand out at Market.",
       "visible actors and visible targets",
       "Violet Astrolabe",
       "Market",
@@ -1711,7 +1711,7 @@ describe("clean Stage 5 settlement contracts", () => {
       ...baseReceipt,
       publicResult: {
         ...baseReceipt.publicResult,
-        summary: `No visible evidence answers "${query}" among inventory items and visible facts.`,
+        summary: `No visible sign gives a clear answer about "${query}" among inventory items and visible facts.`,
         visibleRefs: ["Player", "Lowwater Bazaar", "Brass Tube"],
         localObservation: {
           ...baseReceipt.publicResult.localObservation!,
@@ -1719,7 +1719,7 @@ describe("clean Stage 5 settlement contracts", () => {
           searchedSurfaceKinds: ["inventory_item", "visible_fact"],
           anchorSceneLabel: "Lowwater Bazaar",
           anchorLocationLabel: "Lowwater Bazaar",
-          summary: `No visible evidence answers "${query}" among inventory items and visible facts.`,
+          summary: `No visible sign gives a clear answer about "${query}" among inventory items and visible facts.`,
         },
       },
     });
@@ -1758,7 +1758,7 @@ describe("clean Stage 5 settlement contracts", () => {
       ...baseReceipt,
       publicResult: {
         ...baseReceipt.publicResult,
-        summary: `No visible evidence answers "${query}" among local scene entries.`,
+        summary: `No visible sign gives a clear answer about "${query}" among local scene entries.`,
         visibleRefs: ["Player", "The Copper Tap"],
         localObservation: {
           ...baseReceipt.publicResult.localObservation!,
@@ -1766,7 +1766,7 @@ describe("clean Stage 5 settlement contracts", () => {
           searchedSurfaceKinds: ["visible_fact"],
           anchorSceneLabel: "The Copper Tap",
           anchorLocationLabel: "The Copper Tap",
-          summary: `No visible evidence answers "${query}" among local scene entries.`,
+          summary: `No visible sign gives a clear answer about "${query}" among local scene entries.`,
         },
       },
     });
@@ -2051,7 +2051,7 @@ describe("clean Stage 5 settlement contracts", () => {
           surfaceVersion: "scene_frame_current_observation_surface.v1",
           resultKind: "positive_match",
           mode: "target_match",
-          queryText: "obvious injury or strain on Player",
+          queryText: "obvious injury or strain on Mira Voss",
           targetLabel: "Mira Voss",
           matchedEntries: [{
             surfaceKind: "player_status",
@@ -2079,7 +2079,7 @@ describe("clean Stage 5 settlement contracts", () => {
     expect(observation?.backendFacts.map((entry) => entry.text)).toEqual([
       "Local observation beat: No obvious injury or strain is visible on Mira Voss at Market.",
       "Searched visible surfaces: player visible status.",
-      "Observation query: obvious injury or strain on Player.",
+      "Observation query: obvious injury or strain on Mira Voss.",
       "Observed entry labels: Mira Voss.",
       "Observed entry surfaces: player status Mira Voss.",
       "Anchor scene: Market.",

@@ -2946,13 +2946,40 @@ function localObservationEntryList(entries: readonly LocalObservationSurfaceEntr
   return entries.map(localObservationSurfaceEntryLabel).join(", ");
 }
 
-function localObservationNoMatchSummary(surfaceGroup: string, queryText: string): string {
+function localObservationNoMatchSummary(
+  surfaceGroup: string,
+  queryText: string,
+  targetLabel: string | null = null,
+): string {
   const preposition = surfaceGroup.startsWith("the ") ? "in" : "among";
   const query = queryText.trim();
+  if (targetLabel) {
+    if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
+      return `No visible sign gives a clear answer about "${query}" on ${targetLabel}.`;
+    }
+    return `No match for "${query}" stands out on ${targetLabel}.`;
+  }
   if (query.toLocaleLowerCase("en-US").startsWith("whether ")) {
-    return `No visible evidence answers "${query}" ${preposition} ${surfaceGroup}.`;
+    return `No visible sign gives a clear answer about "${query}" ${preposition} ${surfaceGroup}.`;
   }
   return `No match for "${query}" stands out ${preposition} ${surfaceGroup}.`;
+}
+
+function possessiveActorLabel(label: string): string {
+  const trimmed = label.trim();
+  return `${trimmed}'s`;
+}
+
+function playerFacingLocalObservationQueryText(queryText: string, playerLabel: string): string {
+  const label = playerLabel.trim();
+  const possessive = possessiveActorLabel(label);
+  return queryText.trim()
+    .replaceAll("the Player's", possessive)
+    .replaceAll("The Player's", possessive)
+    .replaceAll("Player's", possessive)
+    .replaceAll("the Player", label)
+    .replaceAll("The Player", label)
+    .replaceAll("Player", label);
 }
 
 function isOnlyVisibleActorSurface(kinds: readonly LocalObservationSurfaceKind[]): boolean {
@@ -3017,6 +3044,15 @@ function localObservationRequiresSurfaceContentProof(effect: LocalObservationEff
     "route opening",
     "coded mark",
     "coded marking",
+    "badge",
+    "weapon",
+    "noticed",
+    "notice",
+    "aware",
+    "awareness",
+    "attention",
+    "watching",
+    "looking at",
     "latch",
     "hidden seam",
     "damage",
@@ -3056,13 +3092,15 @@ function localObservationSummary(input: {
   resultKind: LocalObservationResult["resultKind"];
   matchedEntries: readonly LocalObservationSurfaceEntry[];
   availableEntryCount: number;
+  targetLabel: string | null;
+  queryText: string;
 }): string {
   const surfaceGroup = localObservationSurfaceGroupLabel(input.effect.surfaceKinds);
   if (input.resultKind === "bounded_no_match") {
     return isOnlyVisibleActorSurface(input.effect.surfaceKinds)
       && (input.effect.mode === "list_surface" || input.availableEntryCount === 0)
       ? "No visible non-player actors are present in the current scene."
-      : localObservationNoMatchSummary(surfaceGroup, input.effect.queryText);
+      : localObservationNoMatchSummary(surfaceGroup, input.queryText, input.targetLabel);
   }
   const labels = localObservationLabelList(input.matchedEntries);
   if (labels.length > 0 && isOnlyPlayerStatusSurface(input.effect.surfaceKinds)) {
@@ -3108,16 +3146,20 @@ function localObservationResult(input: {
   resultKind: LocalObservationResult["resultKind"];
   matchedEntries: readonly LocalObservationSurfaceEntry[];
   availableEntryCount: number;
+  targetLabel: string | null;
 }): LocalObservationResult {
-  const summary = localObservationSummary(input);
+  const queryText = playerFacingLocalObservationQueryText(input.effect.queryText, input.frame.player.label);
+  const summary = localObservationSummary({ ...input, queryText });
   const firstMatch = input.matchedEntries[0] ?? null;
   return {
     type: "local_observation",
     surfaceVersion: "scene_frame_current_observation_surface.v1",
     resultKind: input.resultKind,
     mode: input.effect.mode,
-    queryText: input.effect.queryText,
-    targetLabel: input.resultKind === "positive_match" && firstMatch ? firstMatch.label : null,
+    queryText,
+    targetLabel: input.resultKind === "positive_match" && firstMatch
+      ? firstMatch.label
+      : input.targetLabel,
     matchedEntries: input.matchedEntries.slice(0, 12).map((entry) => ({
       surfaceKind: entry.surfaceKind,
       label: entry.label,
@@ -3181,6 +3223,10 @@ function executeLocalObservation(input: {
     frame: input.frame,
     surfaceKinds: effect.surfaceKinds,
   });
+  const targetEntry = effect.targetRef
+    ? entries.find((entry) => normalizedRef(entry.ref) === normalizedRef(effect.targetRef ?? ""))
+    : null;
+  const targetLabel = targetEntry?.label ?? null;
   let matchedEntries: LocalObservationSurfaceEntry[] = [];
   let resultKind: LocalObservationResult["resultKind"];
   if (effect.mode === "list_surface") {
@@ -3235,6 +3281,7 @@ function executeLocalObservation(input: {
     resultKind,
     matchedEntries,
     availableEntryCount: entries.length,
+    targetLabel,
   });
   const receipt = baseReceipt({
     frame: input.frame,
@@ -3247,6 +3294,7 @@ function executeLocalObservation(input: {
     visibleRefs: uniqueStrings([
       "Player",
       effect.anchorRef,
+      ...(effect.targetRef ? [effect.targetRef] : []),
       ...matchedEntries.map((entry) => entry.ref),
     ]).slice(0, 12),
     localObservation: result,

@@ -878,17 +878,19 @@ function collectRecentEvents(input: {
 
 function collectMovementCandidates(input: {
   currentLocationId: string | null;
+  currentSceneScopeId: string | null;
   currentTick: number;
   locationRows: LocationRow[];
   edgeRows: LocationEdgeRow[];
 }): SceneFrameMovementCandidate[] {
-  if (!input.currentLocationId) {
+  const movementOriginId = input.currentSceneScopeId ?? input.currentLocationId;
+  if (!movementOriginId) {
     return [];
   }
 
   const locationById = new Map(input.locationRows.map((location) => [location.id, location]));
   return input.edgeRows
-    .filter((edge) => edge.fromLocationId === input.currentLocationId)
+    .filter((edge) => edge.fromLocationId === movementOriginId)
     .filter((edge) => edge.discovered)
     .map((edge): SceneFrameMovementCandidate | null => {
       const location = locationById.get(edge.toLocationId);
@@ -901,7 +903,7 @@ function collectMovementCandidates(input: {
         label: location.name,
         connected: true,
         travelCost: edge.travelCost,
-        path: [input.currentLocationId!, location.id],
+        path: [movementOriginId, location.id],
       };
     })
     .filter((candidate): candidate is SceneFrameMovementCandidate => candidate !== null)
@@ -1191,6 +1193,7 @@ export async function buildSceneFrame(
   });
   const movementCandidates = collectMovementCandidates({
     currentLocationId,
+    currentSceneScopeId,
     currentTick: frameTick,
     locationRows,
     edgeRows,

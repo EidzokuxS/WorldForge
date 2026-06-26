@@ -1705,6 +1705,127 @@ describe("grounded sentence draft compiler", () => {
     }));
   });
 
+  it("accepts harmless Brass Tube surface prose without making it a hard affordance", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:brass-tube-surface",
+        category: "perceivable_effect",
+        summary: "Brass Tube is with you.",
+        sourceId: "brass-tube-surface",
+        summaryBackendFact: false,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [
+          {
+            kind: "summary",
+            value: "Brass Tube is with you.",
+            sourcePath: "inventory.current",
+            claimKind: "playable_beat",
+          },
+        ],
+      },
+    ];
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: false,
+      requireFactRefs: false,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            text: "The Brass Tube rests cool and scuffed in your grip.",
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe("The Brass Tube rests cool and scuffed in your grip.");
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "playable_beat",
+      evidenceRefs: ["perceivable_effect:brass-tube-surface"],
+    }));
+  });
+
+  it("rejects unsupported Brass Tube mechanical affordance prose", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:brass-tube-surface",
+        category: "perceivable_effect",
+        summary: "Brass Tube is with you.",
+        sourceId: "brass-tube-surface",
+        summaryBackendFact: false,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [
+          {
+            kind: "summary",
+            value: "Brass Tube is with you.",
+            sourcePath: "inventory.current",
+            claimKind: "playable_beat",
+          },
+        ],
+      },
+    ];
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: false,
+        requireFactRefs: false,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "The Brass Tube has visible relay socket hardware under the lacquer.",
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/precision_fact_drift: relay, socket, hardware/);
+  });
+
+  it("rejects unsupported route-like branch affordance prose", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:passage-texture",
+        category: "perceivable_effect",
+        summary: "The underground passage hums with recycled air.",
+        sourceId: "passage-texture",
+        summaryBackendFact: false,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [
+          {
+            kind: "summary",
+            value: "The underground passage hums with recycled air.",
+            sourcePath: "opening.scene_texture",
+            claimKind: "playable_beat",
+          },
+        ],
+      },
+    ];
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: false,
+        requireFactRefs: false,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "The underground passage forks ahead into a surface branch.",
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/precision_fact_drift: forks, branch/);
+  });
+
   it("expands combined movement-time fact refs without exposing receipt summaries as backend facts", () => {
     const packet = createPacket();
     packet.evidenceLedger = [

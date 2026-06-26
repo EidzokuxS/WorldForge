@@ -34,6 +34,7 @@ import {
   hydrateStoredPlayerRecord,
   projectPlayerRecord,
 } from "../character/record-adapters.js";
+import { resolveOpeningStageInPlacement } from "../worldgen/start-placement.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import {
   buildCombatEnvelope,
@@ -546,6 +547,106 @@ function ensurePlayerSceneScopeAlignment(
   }
 
   return resolvedSceneScopeId;
+}
+
+function syncPlayerRecordOpeningScene(
+  record: ReturnType<typeof hydrateStoredPlayerRecord>,
+  sceneLocationId: string,
+  sceneLocationName: string,
+) {
+  return {
+    ...record,
+    socialContext: {
+      ...record.socialContext,
+      currentLocationId: sceneLocationId,
+      currentLocationName: sceneLocationName,
+    },
+    startConditions: {
+      ...record.startConditions,
+      startLocationId: sceneLocationId,
+    },
+  };
+}
+
+function updatePlayerOpeningSceneScope(input: {
+  db: ReturnType<typeof getDb>;
+  player: typeof players.$inferSelect;
+  broadLocationId: string;
+  sceneLocationId: string;
+  sceneLocationName: string;
+}) {
+  const updatedRecord = syncPlayerRecordOpeningScene(
+    hydrateStoredPlayerRecord(input.player, {
+      currentLocationName: input.sceneLocationName,
+    }),
+    input.sceneLocationId,
+    input.sceneLocationName,
+  );
+  const projection = projectPlayerRecord(updatedRecord);
+
+  input.db.update(players)
+    .set({
+      ...projection,
+      currentLocationId: input.broadLocationId,
+      currentSceneLocationId: input.sceneLocationId,
+    })
+    .where(eq(players.id, input.player.id))
+    .run();
+  log.event("db.write", {
+    table: "players",
+    op: "update",
+    rowId: input.player.id,
+    rowName: input.player.name ?? null,
+  });
+
+  input.player.currentLocationId = input.broadLocationId;
+  input.player.currentSceneLocationId = input.sceneLocationId;
+  input.player.characterRecord = projection.characterRecord;
+}
+
+function ensureOpeningConcreteSceneScope(
+  db: ReturnType<typeof getDb>,
+  campaignId: string,
+  player: typeof players.$inferSelect | undefined,
+): string | null {
+  if (!player) return null;
+
+  const locationRows = db
+    .select({
+      id: locations.id,
+      name: locations.name,
+      description: locations.description,
+      tags: locations.tags,
+      isStarting: locations.isStarting,
+      kind: locations.kind,
+      parentLocationId: locations.parentLocationId,
+    })
+    .from(locations)
+    .where(eq(locations.campaignId, campaignId))
+    .all();
+  const placement = resolveOpeningStageInPlacement({
+    playerCurrentLocationId: player.currentLocationId,
+    playerCurrentSceneLocationId: player.currentSceneLocationId,
+    locations: locationRows,
+  });
+  if (!placement.ok) {
+    throw new Error(placement.error);
+  }
+
+  if (
+    player.currentLocationId !== placement.broadLocationId
+    || player.currentSceneLocationId !== placement.sceneLocationId
+  ) {
+    updatePlayerOpeningSceneScope({
+      db,
+      player,
+      broadLocationId: placement.broadLocationId,
+      sceneLocationId: placement.sceneLocationId,
+      sceneLocationName: placement.matchedLocation.name,
+    });
+  }
+
+  return placement.sceneLocationId;
 }
 
 function persistPlayerLocation(
@@ -2629,65 +2730,20 @@ function splitOpeningDescriptionSentences(value: string, maxSentences: number): 
 type OpeningSceneLens = {
   label: string;
   sourcePath: string;
-  kind: "macro_lens" | "specific_scene";
+  kind: "specific_scene";
   parentSceneName: string | null;
 };
 
-function openingTextIncludesAny(value: string, terms: readonly string[]): boolean {
-  const normalized = value.toLocaleLowerCase();
-  return terms.some((term) => {
-    const cleanTerm = term.trim().toLocaleLowerCase();
-    return cleanTerm.length > 0 && normalized.includes(cleanTerm);
-  });
-}
-
-function openingSceneSearchText(scene: NonNullable<SceneAssembly["currentScene"]>): string {
-  return [scene.name, scene.description, ...scene.tags].join(" ");
-}
-
-function chooseMacroOpeningLens(
-  scene: NonNullable<SceneAssembly["currentScene"]>,
-): OpeningSceneLens {
-  const text = openingSceneSearchText(scene);
-  const sceneName = scene.name.trim();
-  let label = `the immediate street-level edge of ${sceneName}`;
-
-  if (openingTextIncludesAny(text, ["station", "concourse", "platform", "terminal"])) {
-    label = `${sceneName} station concourse`;
-  } else if (openingTextIncludesAny(text, ["underground", "tunnel", "subway", "basement"])) {
-    label = `an underground passage in ${sceneName}`;
-  } else if (openingTextIncludesAny(text, ["alley", "backstreet", "side street", "lane"])) {
-    label = `a side street in ${sceneName}`;
-  } else if (openingTextIncludesAny(text, ["campus", "school", "courtyard", "training"])) {
-    label = `a campus courtyard at ${sceneName}`;
-  } else if (openingTextIncludesAny(text, ["market", "bazaar", "stalls", "shops"])) {
-    label = `a market-side lane in ${sceneName}`;
-  }
-
-  return {
-    label,
-    sourcePath: "opening.currentScene.macroLens",
-    kind: "macro_lens",
-    parentSceneName: sceneName,
-  };
-}
-
-function resolveOpeningSceneLens(sceneAssembly: SceneAssembly): OpeningSceneLens | null {
+function resolveOpeningSceneLens(sceneAssembly: SceneAssembly): OpeningSceneLens {
   const scene = sceneAssembly.currentScene;
   if (!scene) {
-    const locationName = sceneAssembly.openingState?.locationName?.trim();
-    return locationName
-      ? {
-          label: locationName,
-          sourcePath: "opening.locationName",
-          kind: "specific_scene",
-          parentSceneName: null,
-        }
-      : null;
+    throw new Error("Opening scene requires a concrete current scene before narration.");
   }
 
   if (scene.kind === "macro") {
-    return chooseMacroOpeningLens(scene);
+    throw new Error(
+      `Opening scene cannot narrate from macro location "${scene.name}"; stage-in must resolve a concrete scene first.`,
+    );
   }
 
   return {
@@ -2740,7 +2796,7 @@ function collectOpeningDirectionActorNames(direction: WorldBrainSceneDirection):
   ]);
 }
 
-function collectOpeningDisallowedActorNames(input: {
+export function collectOpeningDisallowedActorNames(input: {
   sceneAssembly: SceneAssembly;
   sceneDirection: WorldBrainSceneDirection;
   visibleDirection: WorldBrainSceneDirection;
@@ -2748,7 +2804,7 @@ function collectOpeningDisallowedActorNames(input: {
   allowedNpcNames: readonly string[];
 }): string[] {
   const allowedNames = new Set(
-    uniqueRefs(input.allowedNpcNames).map(openingNameKey),
+    uniqueRefs([input.playerLabel, ...input.allowedNpcNames]).map(openingNameKey),
   );
 
   return uniqueRefs([
@@ -2854,10 +2910,12 @@ export function selectOpeningEvidenceCandidates(
     "opening.immediateSituation",
     "opening.playerPerceivableSceneDirection.situationSummary",
   ]));
+  add(firstForSlot("scene_texture", [
+    "opening.currentScene.description",
+  ]));
   add(firstForSlot("visible_people"));
   add(firstForSlot("action_handle", [
     "opening.playerPerceivableSceneDirection.sceneQuestion",
-    "opening.playerHandoff",
   ]));
   add(firstForSlot("sensed_handle"));
 
@@ -2872,6 +2930,7 @@ export function selectOpeningEvidenceCandidates(
 export function buildOpeningNarrationEvidence(input: {
   campaignId: string;
   currentTick: number;
+  playerLabel: string;
   sceneAssembly: SceneAssembly;
   visibleDirection: WorldBrainSceneDirection;
   visibleSummary: string;
@@ -2903,7 +2962,7 @@ export function buildOpeningNarrationEvidence(input: {
     addCandidate(
       "local_lens",
       openingLens.sourcePath,
-      `You are in ${openingLens.label}.`,
+      `${input.playerLabel} starts at ${openingLens.label}.`,
     );
   }
 
@@ -2920,7 +2979,6 @@ export function buildOpeningNarrationEvidence(input: {
     "opening.playerPerceivableSceneDirection.sceneQuestion",
     input.visibleDirection.sceneQuestion,
   );
-  addCandidate("action_handle", "opening.playerHandoff", "What do you do from here?");
 
   if (input.allowedPresenceActorNames.length > 0) {
     const visiblePeople = formatOpeningNameList(input.allowedPresenceActorNames);
@@ -2928,8 +2986,8 @@ export function buildOpeningNarrationEvidence(input: {
       "visible_people",
       "opening.presentNpcNames",
       input.allowedPresenceActorNames.length === 1
-        ? `${visiblePeople} is in view.`
-        : `${visiblePeople} are in view.`,
+        ? `${visiblePeople} is immediately visible to ${input.playerLabel}.`
+        : `${visiblePeople} are immediately visible to ${input.playerLabel}.`,
     );
   }
 
@@ -4755,6 +4813,7 @@ function openingNarrationPackets(input: {
   const openingNarrationEvidence = buildOpeningNarrationEvidence({
     campaignId: input.campaignId,
     currentTick: input.currentTick,
+    playerLabel: input.playerLabel,
     sceneAssembly: input.sceneAssembly,
     visibleDirection,
     visibleSummary,
@@ -5010,7 +5069,9 @@ export async function* processOpeningScene(
     .from(players)
     .where(eq(players.campaignId, campaignId))
     .get();
-  const syncedSceneScopeId = ensurePlayerSceneScopeAlignment(db, player ?? undefined);
+  const openingSceneScopeId =
+    ensureOpeningConcreteSceneScope(db, campaignId, player ?? undefined)
+    ?? ensurePlayerSceneScopeAlignment(db, player ?? undefined);
   const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
   const playerLabel = player?.name ?? "Player";
 
@@ -5024,7 +5085,7 @@ export async function* processOpeningScene(
 
   const sceneDirectionSeedAssembly = assembleAuthoritativeScene({
     campaignId,
-    currentSceneScopeId: syncedSceneScopeId,
+    currentSceneScopeId: openingSceneScopeId,
     pendingEventTicks: [currentTick],
     toolCalls: [],
     openingScene: true,
@@ -5044,7 +5105,7 @@ export async function* processOpeningScene(
 
   const sceneAssembly = assembleAuthoritativeScene({
     campaignId,
-    currentSceneScopeId: player?.currentSceneLocationId ?? null,
+    currentSceneScopeId: openingSceneScopeId,
     pendingEventTicks: [currentTick],
     toolCalls: [],
     openingScene: true,
