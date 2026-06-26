@@ -8,6 +8,7 @@
 - Before editing code symbols, run GitNexus impact. Before committing, run GitNexus `detect_changes`.
 - Separate cleanup commits from gameplay/mechanics commits.
 - If cleanup hits locked files, stop, identify the owning process, stop only that process, then retry the narrow cleanup.
+- When cleaning visible root noise, inspect inside visible workflow folders too; `tasks/` should stay as `todo.md` plus `lessons.md` unless a current task requires more.
 
 ## Revamp Acceptance
 

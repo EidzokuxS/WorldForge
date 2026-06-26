@@ -54,6 +54,7 @@
 - Moved ignored `.agents/` project skill cache to `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
 - Deleted stale tracked `.continuation-state.md`.
 - Archived tracked legacy `CLAUDE.md` to `docs/archive/agent-instructions/CLAUDE.md`.
+- Reduced `tasks/` to active `todo.md` and `lessons.md`; removed stale tracked task notes and ignored historical handoff/oracle scratch.
 
 ## After
 
@@ -66,7 +67,7 @@
   - `frontend/`: 1.61 MB
   - `output/`: 1.23 MB, tracked proof island only plus no bulk ignored run debris
   - `.planning/`: 0.35 MB after second root-noise pass
-  - `tasks/`: 0.22 MB after active file compaction
+  - `tasks/`: active `todo.md` and `lessons.md` only
 - `campaigns/` was removed after user confirmed campaigns can be deleted.
 - `node_modules/`, `frontend/.next/`, and `shared/dist/` were removed.
 - Second pass removed visible ignored root scratch and ignored planning bulk.

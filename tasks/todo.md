@@ -15,6 +15,7 @@ Plan:
 - [x] Commit and push the first cleanup separately from mechanics changes.
 - [x] Run second root-noise pass for visible local/tracked clutter.
 - [x] Verify second root-noise pass.
+- [x] Reduce `tasks/` to active `todo.md` and `lessons.md` only.
 
 Review:
 - Local purge removed ignored generated artifacts from `output/`, `campaigns/`, `backend/campaigns`, logs, QA screenshots/results, temp dirs, Playwright/tool state, `node_modules`, `.next`, and `shared/dist`.
@@ -23,6 +24,7 @@ Review:
 - `AGENTS.md` and `.env.example` were unhidden from ignore rules and will be tracked as repo contracts.
 - Verification passed for diff scope, whitespace, deleted tracked files, ignored leftovers, and post-cleanup directory size. GitNexus `detect_changes` was attempted on `all` and `staged`; both failed with `spawnSync git ENOBUFS` on the large docs/task compaction diff.
 - Second pass removed ignored root scratch files, moved `.agents` to `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`, removed ignored `.codex`, archived `CLAUDE.md`, and deleted stale `.continuation-state.md`.
+- `tasks/` now contains only the active cockpit files: `todo.md` and `lessons.md`.
 
 ## Next Focus: Mechanics Revamp
 
