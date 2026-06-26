@@ -22,6 +22,7 @@ import {
   saveRevampPlayerCharacter,
 } from "../revamp/cast-kernel.js";
 import { composeRevampKernelWorldGraph } from "../revamp/graph-kernel.js";
+import { createRevampOpening } from "../revamp/opening-kernel.js";
 import { createRevampStartingSetup } from "../revamp/setup-kernel.js";
 
 const app = new Hono();
@@ -287,6 +288,24 @@ app.post("/campaigns/:id/setup/start", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to create revamp starting setup.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/opening", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    const result = createRevampOpening({ campaignId });
+
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to create revamp opening.") },
       getErrorStatus(error),
     );
   }

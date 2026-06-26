@@ -28,6 +28,17 @@ export {
 } from "./setup-kernel.js";
 
 export {
+  buildRevampOpening,
+} from "./opening-gm.js";
+
+export {
+  createRevampOpening,
+} from "./opening-kernel.js";
+export type {
+  CreateRevampOpeningResult,
+} from "./opening-kernel.js";
+
+export {
   buildRevampCastRegistry,
 } from "./cast-registry-adapter.js";
 export type {

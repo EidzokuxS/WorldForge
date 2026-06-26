@@ -45,6 +45,7 @@ export type {
   RevampStartingSetup,
   RevampChatTurn,
   RevampChatSession,
+  RevampOpeningResult,
   CampaignKernel,
   LocationKind,
   LocationPersistence,

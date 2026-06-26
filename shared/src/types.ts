@@ -400,6 +400,11 @@ export interface RevampChatSession {
   turns: RevampChatTurn[];
 }
 
+export interface RevampOpeningResult {
+  text: string;
+  suggestedActions: string[];
+}
+
 export interface CampaignKernel {
   campaignId: string;
   phase: CampaignKernelPhase;

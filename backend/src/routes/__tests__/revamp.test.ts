@@ -259,6 +259,61 @@ function writeCastReadyKernelWithSetupGraph(): void {
   });
 }
 
+function writeSetupReadyKernelWithOpeningGraph(): void {
+  writeCampaignKernel(CAMPAIGN_ID, {
+    ...createDraftCampaignKernel({
+      id: CAMPAIGN_ID,
+      premise: "A railway city under curfew.",
+    }),
+    phase: "setup_ready",
+    worldGraph: {
+      nodes: [
+        {
+          id: "scene:platform-office",
+          type: "SceneLocation",
+          name: "Platform Office",
+          data: { description: "A cramped office lit by timetable lamps." },
+        },
+        {
+          id: "cast:player_created:mira",
+          type: "Character",
+          name: "Mira Vale",
+          data: {},
+        },
+      ],
+      edges: [],
+    },
+    castRegistry: {
+      playerCharacter: {
+        id: "cast:player_created:mira",
+        source: "player_created",
+        characterDraft: makeDraft("Mira Vale"),
+        campaignRole: "player",
+        placement: {
+          locationId: null,
+          sceneLocationId: "scene:platform-office",
+          notes: [],
+        },
+        importance: "primary",
+      },
+      importedCast: [],
+      generatedCast: [],
+    },
+    startingSetup: {
+      mode: "gm_invented",
+      anchorSceneId: "scene:platform-office",
+      playerCharacterId: "cast:player_created:mira",
+      presentCastIds: ["cast:player_created:mira"],
+      nearbyCastIds: [],
+      activePressureIds: [],
+      visibleHooks: [],
+      hiddenTruthIds: [],
+      openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
+      openingQuestion: "What do you do?",
+    },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   ingestMock.mockReset();
@@ -455,5 +510,23 @@ describe("revamp routes", () => {
       openingQuestion: "What do you do?",
     });
     expect(readCampaignKernel(CAMPAIGN_ID)?.startingSetup).toEqual(body.startingSetup);
+  });
+
+  it("creates the opening through the revamp API boundary", async () => {
+    writeSetupReadyKernelWithOpeningGraph();
+
+    const res = await app.request(`/api/revamp/campaigns/${CAMPAIGN_ID}/opening`, {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel.phase).toBe("active");
+    expect(body.opening.text).toContain("Start at Platform Office.");
+    expect(body.opening.suggestedActions).toEqual(["Look around"]);
+    const storedKernel = readCampaignKernel(CAMPAIGN_ID);
+    expect(storedKernel?.phase).toBe("active");
+    expect(storedKernel?.chatSession.turns[0]?.role).toBe("assistant");
+    expect(storedKernel?.chatSession.turns[0]?.content).toBe(body.opening.text);
   });
 });

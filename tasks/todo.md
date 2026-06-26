@@ -1,9 +1,9 @@
 # WorldForge Active Tasks
 
-## Current Focus: Mechanics Revamp A7
+## Current Focus: Mechanics Revamp A8
 
 Goal:
-- Build the early Campaign Kernel substrate through the first playable setup. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, and A7 persists starting setup.
+- Build the early Campaign Kernel substrate through the first GM answer. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, A7 persists starting setup, and A8 persists the opening assistant turn.
 
 Source:
 - `rpi/revamp/REQUEST.md`
@@ -15,6 +15,7 @@ Source:
 - `rpi/revamp/implement/a5b-character.md`
 - `rpi/revamp/implement/a6-graph.md`
 - `rpi/revamp/implement/a7-setup.md`
+- `rpi/revamp/implement/a8-opening.md`
 
 Plan:
 - [x] Lock A0 revamp architecture contract.
@@ -40,14 +41,17 @@ Plan:
 - [x] A7 implement deterministic starting setup from composed graph and cast registry.
 - [x] A7 persist `startingSetup`, advance to `setup_ready`, and expose `/api/revamp/campaigns/:id/setup/start`.
 - [x] A7 prove anchor scene selection, present/nearby cast, user-guided setup, and fail-closed ambiguous/missing setup cases.
+- [x] A8 implement deterministic opening result from setup, active scene, present cast, and routes.
+- [x] A8 persist the opening as the first assistant turn, advance to `active`, and expose `/api/revamp/campaigns/:id/opening`.
+- [x] A8 prove suggested actions, first assistant turn persistence, active phase, and fail-closed invalid opening cases.
 
 6+1 Lanes:
 - L1 Source Lock: keep attachment architecture, `REQUEST.md`, and coverage map as source hierarchy.
-- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, and setup anchor contract.
+- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, setup anchor contract, and opening turn contract.
 - L3 Reference Extraction: use old DNA seed and location shapes only as reference.
 - L4 Kernel Protocol: write A3 and A5b kernel state to campaign `kernel.json`; keep A4/A5a/A6 as pure graph/cast outputs.
-- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, and setup persistence.
-- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7.
+- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, setup persistence, and opening persistence.
+- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7/A8.
 - +1 Integrator: choose the smallest vertical slice and reject scope creep.
 
 Review:
@@ -91,3 +95,6 @@ Review:
 - A7 added `backend/src/revamp/starting-setup.ts`, `backend/src/revamp/setup-kernel.ts`, and `POST /api/revamp/campaigns/:id/setup/start`.
 - GLM-5.2 reviewed the A7 setup plan and returned `Revise`. Required fixes applied: stable `presentCastIds`/`nearbyCastIds` graph-node ordering and a fail-closed non-location placement target case.
 - A7 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/routes/__tests__/revamp.test.ts` -> `50 passed`; `npm --prefix backend run typecheck` passed.
+- GLM-5.2 reviewed the A8 opening plan and returned `Plan is up-to-date.`
+- A8 added `backend/src/revamp/opening-gm.ts`, `backend/src/revamp/opening-kernel.ts`, `RevampOpeningResult`, and `POST /api/revamp/campaigns/:id/opening`.
+- A8 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/routes/__tests__/revamp.test.ts` -> `58 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed.
