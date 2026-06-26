@@ -509,6 +509,7 @@ app.post("/", async (c) => {
       seeds,
       ipContext,
       premiseDivergence,
+      researchArtifact,
       worldbookSelection,
       worldgenSourceHint,
       worldgenResearchEnabled,
@@ -516,6 +517,7 @@ app.post("/", async (c) => {
     const campaign = await createCampaign(name, premise, seeds, {
       ipContext,
       premiseDivergence,
+      ...(researchArtifact !== undefined ? { researchArtifact } : {}),
       ...(worldgenSourceHint ? { worldgenSourceHint } : {}),
       ...(typeof worldgenResearchEnabled === "boolean" ? { worldgenResearchEnabled } : {}),
       ...(Array.isArray(worldbookSelection) ? { worldbookSelection } : {}),

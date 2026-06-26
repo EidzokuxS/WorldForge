@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Sanitized Phase 73/74 structured-output failure corpus. Payloads preserve wrong shapes only; raw prompts, raw provider responses, credentials, and campaign data are omitted.",
+  "notes": "Sanitized structured-output failure corpus. Payloads preserve wrong shapes only; raw prompts, raw provider responses, credentials, and campaign data are omitted.",
   "fixtures": [
     {
       "fixtureId": "kimi-citations-string",
@@ -8,7 +8,7 @@
       "providerModel": "Kimi/Moonshot generated-context class",
       "targetSchemaFamily": "generatedContext.v1",
       "failureClass": "citations returned as a single joined string where citation object array is required",
-      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:556; backend/src/ai/__tests__/generate-object-safe.test.ts:546",
+      "source": "backend/src/worldgen/prompt-contracts.ts; backend/src/ai/__tests__/generate-object-safe.test.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -22,7 +22,7 @@
       "providerModel": "Mimo-like generated-context class",
       "targetSchemaFamily": "generatedContext.v1",
       "failureClass": "canonicalNames returned as a flat string where grouped object arrays are required",
-      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:556; backend/src/ai/__tests__/generate-object-safe.test.ts:547",
+      "source": "backend/src/worldgen/prompt-contracts.ts; backend/src/ai/__tests__/generate-object-safe.test.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -36,7 +36,7 @@
       "providerModel": "OpenCode DeepSeek scene-plan class",
       "targetSchemaFamily": "semanticScenePlan.v1",
       "failureClass": "offer_quick_actions input has labels but omits nested actions[].action",
-      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:106; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51",
+      "source": "backend/src/engine/scene-planner.ts; backend/src/engine/hidden-adjudication.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -50,7 +50,7 @@
       "providerModel": "OpenCode DeepSeek scene-plan class",
       "targetSchemaFamily": "semanticScenePlan.v1",
       "failureClass": "planned action uses payload instead of the primary input field",
-      "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-PRD.md:8; .planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:557",
+      "source": "backend/src/engine/scene-planner.ts; backend/src/engine/prompt-contracts.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -64,7 +64,7 @@
       "providerModel": "GLM/Z.AI oracle-style class",
       "targetSchemaFamily": "oracle.v1",
       "failureClass": "reasoning/rationale exceeds prompt and schema caps",
-      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:31; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-03-PLAN.md:105",
+      "source": "backend/src/engine/oracle.ts; backend/src/engine/prompt-contracts.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -78,7 +78,7 @@
       "providerModel": "multi-provider tool-call class",
       "targetSchemaFamily": "semanticScenePlan.v1",
       "failureClass": "model invents unsupported toolName outside runtime tool schema registry",
-      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-STRUCTURED-PROMPT-AUDIT.md:69",
+      "source": "backend/src/engine/scene-planner.ts; backend/src/engine/tool-schemas.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",
@@ -92,7 +92,7 @@
       "providerModel": "named-IP power-stat class",
       "targetSchemaFamily": "powerStats.v1",
       "failureClass": "lazy or underspecified power stats use vague labels instead of evidence-bound axes",
-      "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:297; backend/src/character/prompt-contract.ts:88",
+      "source": "backend/src/character/prompt-contract.ts; backend/src/character/known-ip-worldgen-research.ts",
       "sanitizedFields": [
         "provider response envelope",
         "prompt body",

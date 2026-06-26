@@ -6,43 +6,26 @@ import { ArrowLeft, Check, Loader2, Play, Wand2 } from "lucide-react";
 import { WORLD_DNA_CARDS, seedValueToTextarea } from "@/components/title/utils";
 import { useCampaignNewFlow } from "@/components/campaign-new/flow-provider";
 import { collectEnabledSeeds } from "@/components/title/utils";
-import { GenerationWorkspace } from "@/components/campaign-new/generation-workspace";
 import { DnaSuggestionWorkspace } from "@/components/campaign-new/dna-suggestion-workspace";
 
 const DNA_READY_STAGES = [
   { title: "Concept", detail: "name + sources" },
   { title: "World DNA", detail: "six seed cards" },
-  { title: "World generation", detail: "backend pipeline" },
-  { title: "World Review", detail: "save world" },
-  { title: "Player character", detail: "player draft" },
+  { title: "Campaign Kernel", detail: "draft shell" },
+  { title: "WorldGraph", detail: "causality map" },
+  { title: "Starting setup", detail: "first scene" },
 ] as const;
 
 export function DnaWorkspace() {
   const w = useCampaignNewFlow();
-  if (w.isGenerating) {
-    return <GenerationWorkspace returnHref="/campaign/new/dna" />;
-  }
   if (w.isSuggesting && !w.dnaState) {
     return <DnaSuggestionWorkspace returnHref="/campaign/new" />;
   }
 
   const hasUsableSeeds = collectEnabledSeeds(w.dnaState) !== undefined;
-  const activeProgressLabel = w.generationProgress?.label ?? (w.isSuggesting ? "Generating World DNA suggestions..." : null);
-  const activeProgressStep =
-    w.generationProgress && w.generationProgress.totalSteps > 0
-      ? `Step ${w.generationProgress.step + 1} of ${w.generationProgress.totalSteps}`
-      : null;
-  const activeSubLabel =
-    w.generationProgress?.subStep !== undefined && w.generationProgress?.subTotal !== undefined
-      ? `${w.generationProgress.subLabel ?? ""} (${w.generationProgress.subStep + 1}/${w.generationProgress.subTotal})`
-      : null;
-  const showCentralDnaLoader = w.isSuggesting && !w.dnaState;
-  const showFooterProgress = Boolean(activeProgressLabel && !showCentralDnaLoader);
-  const createLabel = w.isGenerating
-    ? "Generating World..."
-    : w.creatingCampaign
-      ? "Creating Campaign..."
-      : "Create World";
+  const activeProgressLabel = w.isSuggesting ? "Preparing World DNA suggestions..." : null;
+  const showFooterProgress = Boolean(activeProgressLabel);
+  const createLabel = w.creatingCampaign ? "Creating Campaign..." : "Create Campaign";
   const readyProgressRatio = w.isSuggesting ? 52 : hasUsableSeeds ? 100 : 18;
   const enabledCount = w.dnaState
     ? WORLD_DNA_CARDS.filter((item) => w.dnaState?.[item.category].enabled).length
@@ -88,12 +71,7 @@ export function DnaWorkspace() {
         </div>
       </header>
 
-      {showCentralDnaLoader ? (
-        <div className="wf-v4-card flex min-h-[360px] flex-col items-center justify-center gap-4 text-[var(--fg-2)]">
-          <Loader2 className="h-5 w-5 animate-spin text-[var(--ember-1)]" />
-          <p className="font-serif text-2xl font-semibold text-[var(--fg)]">Generating World DNA suggestions...</p>
-        </div>
-      ) : w.dnaState ? (
+      {w.dnaState ? (
         <>
           <section className="wf-gen-think wf-dna-context-panel" aria-label="World DNA context">
             <div className="wf-gen-think-mark" />
@@ -180,7 +158,7 @@ export function DnaWorkspace() {
             World DNA has not been prepared.
           </h2>
           <p className="wf-prose max-w-[58ch] text-[var(--fg-2)]">
-            Return to concept and prepare suggestions, or start with manual seed cards after a generation error.
+            Return to concept and prepare suggestions, or start with manual seed cards.
           </p>
           <button type="button" className="wf-v4-btn" onClick={() => w.handlePrepareManualDna()}>
             Start With Manual DNA
@@ -190,7 +168,7 @@ export function DnaWorkspace() {
 
       {w.dnaState && !hasUsableSeeds && !w.isBusy ? (
         <div className="mt-5 border border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-sm text-yellow-200/85">
-          Add at least one enabled DNA seed before generating the world.
+          Add at least one enabled DNA seed before creating the campaign.
         </div>
       ) : null}
 
@@ -204,14 +182,7 @@ export function DnaWorkspace() {
             <span className="flex items-center gap-2 text-xs text-[var(--fg-2)]">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {activeProgressLabel}
-              {activeProgressStep ? <span>{activeProgressStep}</span> : null}
-              {activeSubLabel ? <span>{activeSubLabel}</span> : null}
             </span>
-          ) : null}
-          {w.generationError ? (
-            <pre className="max-h-24 max-w-[60vw] overflow-auto whitespace-pre-wrap border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-300 select-all">
-              {w.generationError}
-            </pre>
           ) : null}
         </div>
         <div className="wf-dna-actionbar-main">
@@ -220,7 +191,7 @@ export function DnaWorkspace() {
             Re-roll All
           </button>
           <button type="button" className="wf-v4-btn wf-v4-btn-primary" onClick={() => void w.handleCreateWithDna()} disabled={w.isBusy || !w.dnaState || !hasUsableSeeds}>
-            {(w.creatingCampaign || w.isGenerating) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {w.creatingCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {createLabel}
           </button>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { GenerationProgress, WorldbookLibraryItem } from "@/lib/api";
+import type { WorldbookLibraryItem } from "@/lib/api";
 import type { DnaState } from "@/components/title/utils";
 import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
 
@@ -8,8 +8,7 @@ export type CampaignNewFlowPhaseSnapshot =
   | { kind: "idle" }
   | { kind: "suggesting-all" }
   | { kind: "suggesting-category"; category: string }
-  | { kind: "creating" }
-  | { kind: "generating" };
+  | { kind: "creating" };
 
 export type CampaignNewFlowSession = {
   version: 1;
@@ -22,7 +21,6 @@ export type CampaignNewFlowSession = {
   researchArtifact: WorldgenResearchArtifactV2 | null;
   step: 1 | 2;
   phase: CampaignNewFlowPhaseSnapshot;
-  generationProgress: GenerationProgress | null;
 };
 
 const STORAGE_KEY = "worldforge.campaign-new-flow";
@@ -62,7 +60,6 @@ export function readCampaignNewFlowSession(): CampaignNewFlowSession | null {
           : null,
       step: parsed.step === 2 ? 2 : 1,
       phase: parsed.phase ?? { kind: "idle" },
-      generationProgress: parsed.generationProgress ?? null,
     };
   } catch {
     return null;
@@ -99,6 +96,5 @@ export function isCampaignNewFlowSessionEmpty(session: CampaignNewFlowSession): 
     && session.researchArtifact === null
     && session.step === 1
     && session.phase.kind === "idle"
-    && session.generationProgress === null
   );
 }

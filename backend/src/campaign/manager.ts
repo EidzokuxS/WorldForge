@@ -169,6 +169,7 @@ export async function createCampaign(
   initialContext?: {
     ipContext?: IpResearchContext | null;
     premiseDivergence?: PremiseDivergence | null;
+    researchArtifact?: WorldgenResearchArtifactV2 | null;
     worldgenSourceHint?: string | null;
     worldgenResearchEnabled?: boolean | null;
     worldbookSelection?: CampaignWorldbookSelection[] | null;
@@ -217,6 +218,7 @@ export async function createCampaign(
       seeds,
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,
+      worldgenResearchArtifact: initialContext?.researchArtifact ?? undefined,
       worldgenSourceHint: initialContext?.worldgenSourceHint?.trim() || undefined,
       worldgenResearchEnabled:
         typeof initialContext?.worldgenResearchEnabled === "boolean"

@@ -14,8 +14,6 @@ import type {
   TestConnectionResult,
   TestRoleResult,
   RollSeedResult,
-  GenerateWorldResult,
-  GenerationProgress,
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
@@ -65,8 +63,6 @@ export type {
   TestConnectionResult,
   TestRoleResult,
   RollSeedResult,
-  GenerateWorldResult,
-  GenerationProgress,
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
@@ -1452,51 +1448,6 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
   }
 
   throw new Error(`${handlers.label} stream ended without completion.`);
-}
-
-// ───── World Generation ─────
-
-export async function generateWorld(
-  campaignId: string,
-  onProgress?: (progress: GenerationProgress) => void,
-  ipContext?: IpResearchContext | null,
-  premiseDivergence?: PremiseDivergence | null,
-  researchArtifact?: WorldgenResearchArtifactV2 | null,
-): Promise<GenerateWorldResult> {
-  const body: Record<string, unknown> = { campaignId };
-  if (ipContext) {
-    body.ipContext = ipContext;
-  }
-  if (premiseDivergence) {
-    body.premiseDivergence = premiseDivergence;
-  }
-  if (researchArtifact) {
-    body.researchArtifact = researchArtifact;
-  }
-  const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
-  }
-
-  const contentType = res.headers.get("content-type") ?? "";
-
-  // Fallback: non-SSE response (e.g. validation error returned as JSON)
-  if (!contentType.includes("text/event-stream")) {
-    return (await res.json()) as GenerateWorldResult;
-  }
-
-  return parseSSEStream<GenerateWorldResult>(res.body!, {
-    label: "World generation",
-    onProgress: onProgress
-      ? (data) => onProgress(data as unknown as GenerationProgress)
-      : undefined,
-    onComplete: (data) => data as unknown as GenerateWorldResult,
-  });
 }
 
 export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {

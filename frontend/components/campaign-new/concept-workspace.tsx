@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCampaignNewFlow } from "@/components/campaign-new/flow-provider";
-import { GenerationWorkspace } from "@/components/campaign-new/generation-workspace";
 import { DnaSuggestionWorkspace } from "@/components/campaign-new/dna-suggestion-workspace";
 
 interface ConceptWorkspaceProps {
@@ -16,9 +15,6 @@ interface ConceptWorkspaceProps {
 
 export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
   const w = useCampaignNewFlow();
-  if (w.isGenerating) {
-    return <GenerationWorkspace returnHref="/campaign/new" />;
-  }
   if (w.isSuggesting && !w.dnaState) {
     return <DnaSuggestionWorkspace returnHref="/campaign/new" />;
   }
@@ -30,20 +26,8 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
     missingCampaignName || missingPremise
       ? "Enter a campaign name and premise, or select a source, before continuing into DNA."
       : null;
-  const activeProgressLabel = w.generationProgress?.label ?? (w.isSuggesting ? "Preparing World DNA suggestions..." : null);
-  const activeProgressStep =
-    w.generationProgress && w.generationProgress.totalSteps > 0
-      ? `Step ${w.generationProgress.step + 1} of ${w.generationProgress.totalSteps}`
-      : null;
-  const activeSubLabel =
-    w.generationProgress?.subStep !== undefined && w.generationProgress?.subTotal !== undefined
-      ? `${w.generationProgress.subLabel ?? ""} (${w.generationProgress.subStep + 1}/${w.generationProgress.subTotal})`
-      : null;
-  const createLabel = w.isGenerating
-    ? "Generating World..."
-    : w.creatingCampaign
-      ? "Creating Campaign..."
-      : "Create World Now";
+  const activeProgressLabel = w.isSuggesting ? "Preparing World DNA suggestions..." : null;
+  const createLabel = w.creatingCampaign ? "Creating Campaign..." : "Create Campaign";
   const continueLabel = w.isSuggesting ? "Preparing DNA..." : "Continue to DNA";
 
   return (
@@ -157,7 +141,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
 
         <div className="wf-forge-cta">
           <button type="button" className="wf-v4-btn wf-v4-btn-primary" onClick={() => void w.handleCreateWithSeeds()} disabled={!w.canCreate}>
-            {w.creatingCampaign || w.isGenerating ? (
+            {w.creatingCampaign ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Play className="h-3.5 w-3.5" />
@@ -171,7 +155,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           <Link href="/" className="wf-v4-btn">
             Cancel
           </Link>
-          <span className="wf-forge-cta-note">DNA can be edited before generation</span>
+          <span className="wf-forge-cta-note">DNA can be edited before campaign creation</span>
           {conceptValidationMessage ? (
             <span className="wf-forge-validation">{conceptValidationMessage}</span>
           ) : null}
@@ -179,14 +163,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
             <span className="wf-forge-progress">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {activeProgressLabel}
-              {activeProgressStep ? <span>{activeProgressStep}</span> : null}
-              {activeSubLabel ? <span>{activeSubLabel}</span> : null}
             </span>
-          ) : null}
-          {w.generationError ? (
-            <pre className="wf-forge-error">
-              {w.generationError}
-            </pre>
           ) : null}
         </div>
       </section>
@@ -197,9 +174,9 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           <div className="wf-stage-list">
             <SequenceItem number="i" state="active" label="Concept" detail="Name, premise, sources" />
             <SequenceItem number="ii" state="pending" label="World DNA" detail="Six real seed cards" />
-            <SequenceItem number="iii" state="pending" label="World generation" detail="Backend pipeline" />
-            <SequenceItem number="iv" state="pending" label="World Review" detail="Save before character" />
-            <SequenceItem number="v" state="pending" label="Player character" detail="Player draft" />
+            <SequenceItem number="iii" state="pending" label="Campaign Kernel" detail="Draft shell" />
+            <SequenceItem number="iv" state="pending" label="WorldGraph" detail="Causality map" />
+            <SequenceItem number="v" state="pending" label="Starting setup" detail="First scene" />
           </div>
         </div>
       </aside>

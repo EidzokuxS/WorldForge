@@ -313,6 +313,7 @@ const worldgenResearchArtifactPayloadSchema = worldgenResearchArtifactSchema.nul
 export const createCampaignSchema = createCampaignBaseSchema.extend({
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  researchArtifact: worldgenResearchArtifactPayloadSchema,
   worldgenSourceHint: z
     .string()
     .transform((s) => s.trim())

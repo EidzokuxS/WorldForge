@@ -278,6 +278,165 @@ export interface CampaignMeta {
   generationComplete?: boolean;
 }
 
+export type CampaignKernelPhase =
+  | "draft"
+  | "world_ready"
+  | "cast_ready"
+  | "setup_ready"
+  | "active";
+
+export interface RevampWorldDNA {
+  geography: string;
+  politicalStructure: string;
+  centralConflict: string;
+  culturalFlavor: string;
+  environment: string;
+  wildcard: string;
+}
+
+export type RevampWorldNodeType =
+  | "Location"
+  | "SceneLocation"
+  | "Character"
+  | "PowerNode"
+  | "Pressure"
+  | "Secret"
+  | "Item"
+  | "Hook";
+
+export interface RevampWorldNode {
+  id: string;
+  type: RevampWorldNodeType;
+  name: string;
+  data: Record<string, unknown>;
+}
+
+export type RevampWorldEdgeType =
+  | "located_at"
+  | "route_to"
+  | "knows"
+  | "fears"
+  | "owes"
+  | "protects"
+  | "controls"
+  | "wants_from"
+  | "hides"
+  | "involved_in"
+  | "threatens"
+  | "trusts";
+
+export interface RevampWorldEdge {
+  id: string;
+  fromId: string;
+  toId: string;
+  type: RevampWorldEdgeType;
+  data: Record<string, unknown>;
+}
+
+export interface RevampWorldGraph {
+  nodes: RevampWorldNode[];
+  edges: RevampWorldEdge[];
+}
+
+export type RevampCastSource =
+  | "player_created"
+  | "player_imported"
+  | "npc_imported"
+  | "npc_generated";
+
+export type RevampCampaignRole =
+  | "player"
+  | "companion"
+  | "major_npc"
+  | "minor_npc"
+  | "rival"
+  | "enemy"
+  | "romance"
+  | "background";
+
+export type RevampCastImportance = "primary" | "major" | "minor" | "background";
+
+export interface RevampCastPlacement {
+  locationId: string | null;
+  sceneLocationId: string | null;
+  notes: string[];
+}
+
+export interface RevampCastMember {
+  id: string;
+  source: RevampCastSource;
+  characterDraft: CharacterDraft;
+  campaignRole: RevampCampaignRole;
+  placement: RevampCastPlacement;
+  importance: RevampCastImportance;
+}
+
+export interface RevampCastRegistry {
+  playerCharacter: RevampCastMember | null;
+  importedCast: RevampCastMember[];
+  generatedCast: RevampCastMember[];
+}
+
+export interface RevampStartingSetup {
+  mode: "gm_invented" | "user_guided";
+  anchorSceneId: string;
+  playerCharacterId: string;
+  presentCastIds: string[];
+  nearbyCastIds: string[];
+  activePressureIds: string[];
+  visibleHooks: string[];
+  hiddenTruthIds: string[];
+  openingSituation: string;
+  openingQuestion: string;
+}
+
+export interface RevampChatTurn {
+  role: ChatRole;
+  content: string;
+  createdAt: number;
+}
+
+export interface RevampChatSession {
+  turns: RevampChatTurn[];
+}
+
+export interface CampaignKernel {
+  campaignId: string;
+  phase: CampaignKernelPhase;
+  premise: string;
+  worldDna: RevampWorldDNA | null;
+  worldGraph: RevampWorldGraph;
+  castRegistry: RevampCastRegistry;
+  startingSetup: RevampStartingSetup | null;
+  chatSession: RevampChatSession;
+  turnIndex: number;
+}
+
+export function createDraftCampaignKernel(
+  campaign: Pick<CampaignMeta, "id" | "premise">,
+): CampaignKernel {
+  return {
+    campaignId: campaign.id,
+    phase: "draft",
+    premise: campaign.premise,
+    worldDna: null,
+    worldGraph: {
+      nodes: [],
+      edges: [],
+    },
+    castRegistry: {
+      playerCharacter: null,
+      importedCast: [],
+      generatedCast: [],
+    },
+    startingSetup: null,
+    chatSession: {
+      turns: [],
+    },
+    turnIndex: 0,
+  };
+}
+
 export const LOCATION_KINDS = [
   "macro",
   "persistent_sublocation",

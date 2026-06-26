@@ -1,0 +1,31 @@
+# Task
+
+Review the A4 Locations Adapter planning text for WorldForge.
+
+# Model Role
+
+Act as GLM-5.2 Coding Plan reviewer.
+
+# Source Files
+
+- `rpi/revamp/REVAMP_ARCHITECTURE.md`
+- `rpi/revamp/implement/a4-locations.md`
+- `shared/src/types.ts`
+- `backend/src/worldgen/types.ts`
+
+# Review Rules
+
+- Apply humanizer/deslop pressure: flag vague claims, filler, inflated wording, negative framing, hidden fallback language, and generic AI planning text.
+- Check whether A4 stays inside a pure locations adapter.
+- Check whether the mapping from `ScaffoldLocation[]` to `RevampWorldGraph` is implementable.
+- Check whether A4 accidentally reintroduces old generation ownership.
+- Do not edit files.
+
+# Output
+
+Return:
+
+1. Verdict: approve or revise.
+2. Required wording changes, if any.
+3. Scope risks, if any.
+4. One-sentence implementation recommendation.

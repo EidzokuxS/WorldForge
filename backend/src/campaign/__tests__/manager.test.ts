@@ -365,6 +365,23 @@ describe("createCampaign", () => {
     expect(configData.worldgenResearchEnabled).toBe(false);
   });
 
+  it("persists worldgen research artifact in config.json during campaign creation", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    await createCampaign("My Game", "JJK world with Naruto chakra", undefined, {
+      researchArtifact: jjkWithNarutoPowerSystemArtifact,
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const configData = JSON.parse(configCall![1] as string);
+    expect(configData.worldgenResearchArtifact).toEqual(jjkWithNarutoPowerSystemArtifact);
+  });
+
   it("connects DB, runs migrations, and inserts campaign row", async () => {
     vi.spyOn(fs, "existsSync").mockReturnValue(true);
     vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");

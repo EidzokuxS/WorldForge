@@ -237,7 +237,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                 ) : (
                   <Plus className="h-4 w-4" />
                 )}
-                Create World
+                Create Campaign
               </Button>
               <Button
                 onClick={() => void w.handleNextToDna()}
@@ -279,7 +279,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
               {w.isSuggesting && !w.dnaState ? (
                 <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating World DNA suggestions...
+                  Preparing World DNA suggestions...
                 </div>
               ) : w.dnaState ? (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -379,7 +379,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                Create World
+                Create Campaign
               </Button>
             </DialogFooter>
           </>

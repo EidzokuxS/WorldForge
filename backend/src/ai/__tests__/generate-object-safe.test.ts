@@ -54,10 +54,9 @@ const {
   safeGenerateObject,
 } = await import("../generate-object-safe.js");
 
-const repairPolicyPath = path.resolve(
+const repairPolicySourcePath = path.resolve(
   process.cwd(),
-  "..",
-  ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REPAIR-POLICY.md",
+  "src/ai/generate-object-safe.ts",
 );
 const failureFixtureDir = path.resolve(
   process.cwd(),
@@ -97,8 +96,8 @@ describe("safeGenerateObject", () => {
     vi.clearAllMocks();
   });
 
-  it("documents the structured output repair policy source of truth", () => {
-    const policy = fs.readFileSync(repairPolicyPath, "utf8");
+  it("keeps the structured output repair policy source of truth in production code", () => {
+    const policy = fs.readFileSync(repairPolicySourcePath, "utf8");
 
     expect(policy).toContain("STRUCTURED_OUTPUT_CONTRACT: repair-policy.v1");
     expect(policy).toContain("may coerce");
@@ -120,7 +119,7 @@ describe("safeGenerateObject", () => {
     for (const entry of manifest.fixtures) {
       expect(entry.file).toMatch(/\.json$/);
       expect(entry.source).not.toContain("MISSING_SOURCE");
-      expect(entry.source).toMatch(/\.planning\/phases\/(73|74)-|backend\/src\//);
+      expect(entry.source).toMatch(/backend\/src\//);
       expect(entry.providerModel.length).toBeGreaterThan(2);
       expect(entry.targetSchemaFamily.length).toBeGreaterThan(2);
       expect(entry.failureClass.length).toBeGreaterThan(8);

@@ -143,12 +143,6 @@ export function DnaSuggestionWorkspace({ returnHref }: DnaSuggestionWorkspacePro
           </div>
         </section>
 
-        {w.generationError ? (
-          <section className="wf-gen-section">
-            <pre className="wf-forge-error">{w.generationError}</pre>
-          </section>
-        ) : null}
-
         <div className="wf-gen-actions">
           <Link href={returnHref} className="wf-v4-btn">Edit inputs</Link>
         </div>

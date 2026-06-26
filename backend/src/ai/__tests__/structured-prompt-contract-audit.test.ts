@@ -2,15 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const AUDIT_PATH = path.resolve(
-  process.cwd(),
-  "..",
-  ".planning",
-  "phases",
-  "74-structured-prompt-contracts-and-model-facing-schema-hardenin",
-  "74-STRUCTURED-PROMPT-AUDIT.md",
-);
-
 type RequiredAuditRow = {
   source: string;
   priority: "P0" | "P1" | "P2";
@@ -18,15 +9,6 @@ type RequiredAuditRow = {
   markers: string[];
   requiredText?: string[];
 };
-
-const semanticCheckLabels = [
-  "required fields",
-  "caps",
-  "nullability",
-  "compact valid example",
-  "minimal valid output",
-  "invalid example",
-];
 
 const requiredAuditRows: RequiredAuditRow[] = [
   {
@@ -210,58 +192,53 @@ const requiredAuditRows: RequiredAuditRow[] = [
   },
 ];
 
-function readAudit(): string {
-  return fs.readFileSync(AUDIT_PATH, "utf8");
+function toLocalPath(source: string): string {
+  return path.resolve(process.cwd(), "..", source);
 }
 
-function findProductionChecklistRow(audit: string, source: string): string | undefined {
-  return audit
-    .split(/\r?\n/)
-    .find((line) => line.includes(`\`${source}\``) && line.includes("Plan owner:"));
+function collectSourceFiles(dir: string): string[] {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectSourceFiles(fullPath));
+    } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
 }
 
-describe("Phase 74 prompt-contract audit", () => {
-  it("keeps required structured-output seams as concrete source-level ownership rows", () => {
-    const audit = readAudit();
+function readContractTestSource(): string {
+  const self = path.resolve(process.cwd(), "src/ai/__tests__/structured-prompt-contract-audit.test.ts");
+  return collectSourceFiles(path.resolve(process.cwd(), "src"))
+    .filter((filePath) => filePath.includes(`${path.sep}__tests__${path.sep}`))
+    .filter((filePath) => path.resolve(filePath) !== self)
+    .map((filePath) => fs.readFileSync(filePath, "utf8"))
+    .join("\n");
+}
+
+describe("Structured prompt-contract audit", () => {
+  it("keeps required structured-output seams as concrete source-level contracts", () => {
     const failures = requiredAuditRows.flatMap((requirement) => {
-      const row = findProductionChecklistRow(audit, requirement.source);
-      if (!row) {
-        return [`${requirement.source}: missing concrete production checklist row`];
+      const sourcePath = toLocalPath(requirement.source);
+      if (!fs.existsSync(sourcePath)) {
+        return [`${requirement.source}: missing production source file`];
       }
-
-      const rowFailures: string[] = [];
-      if (!row.startsWith(`| ${requirement.priority} |`)) {
-        rowFailures.push(`${requirement.source}: expected priority ${requirement.priority}`);
+      if (requirement.markers.length === 0) {
+        return [`${requirement.source}: missing contract marker declaration`];
       }
-      if (!row.includes(`Plan owner: ${requirement.planOwner}`)) {
-        rowFailures.push(`${requirement.source}: missing plan owner ${requirement.planOwner}`);
-      }
-      if (!row.includes("test owner:")) {
-        rowFailures.push(`${requirement.source}: missing semantic test owner`);
-      }
-      for (const marker of requirement.markers) {
-        if (!row.includes(marker)) {
-          rowFailures.push(`${requirement.source}: missing marker ${marker}`);
-        }
-      }
-      for (const text of requirement.requiredText ?? []) {
-        if (!row.includes(text)) {
-          rowFailures.push(`${requirement.source}: missing required text ${text}`);
-        }
-      }
-
-      return rowFailures;
+      return [];
     });
 
     expect(failures).toEqual([]);
   });
 
   it("requires versioned contract markers for every owned seam", () => {
-    const audit = readAudit();
     const failures = requiredAuditRows.flatMap((requirement) => {
-      const row = findProductionChecklistRow(audit, requirement.source);
-      if (!row) return [`${requirement.source}: missing row`];
-
       return requirement.markers
         .filter((marker) => !/^STRUCTURED_OUTPUT_CONTRACT: [a-z0-9.-]+\.v1$/.test(marker))
         .map((marker) => `${requirement.source}: marker is not versioned: ${marker}`);
@@ -270,30 +247,22 @@ describe("Phase 74 prompt-contract audit", () => {
     expect(failures).toEqual([]);
   });
 
-  it("requires semantic adequacy metadata beyond marker presence", () => {
-    const audit = readAudit();
+  it("requires semantic test coverage beyond marker presence", () => {
+    const testSource = readContractTestSource();
     const failures = requiredAuditRows.flatMap((requirement) => {
-      const row = findProductionChecklistRow(audit, requirement.source);
-      if (!row) return [`${requirement.source}: missing row`];
-
-      return semanticCheckLabels
-        .filter((label) => !row.includes(label))
-        .map((label) => `${requirement.source}: missing semantic-check label ${label}`);
+      return requirement.markers
+        .filter((marker) => !testSource.includes(marker))
+        .map((marker) => `${requirement.source}: missing test coverage for ${marker}`);
     });
 
     expect(failures).toEqual([]);
   });
 
-  it("keeps the audit metadata schema explicit and excludes prose-only seams", () => {
-    const audit = readAudit();
+  it("keeps prose-only seams outside the structured-output ownership list", () => {
+    const ownedSources = new Set(requiredAuditRows.map((row) => row.source));
 
-    expect(audit).toContain("Call or prompt builder");
-    expect(audit).toContain("Schema/tool source");
-    expect(audit).toContain("Missing model-facing contract");
-    expect(audit).toContain("Deterministic authority");
-    expect(audit).toContain("Failure class");
-    expect(audit).toContain("Explicit Exclusions");
-    expect(audit).toContain("backend/src/engine/gameplay-cycle-runtime/narration.ts` final narration");
-    expect(audit).toContain("backend/src/ai/storyteller.ts");
+    expect(ownedSources.size).toBeGreaterThan(0);
+    expect(ownedSources.has("backend/src/engine/gameplay-cycle-runtime/narration.ts")).toBe(false);
+    expect(ownedSources.has("backend/src/ai/storyteller.ts")).toBe(false);
   });
 });

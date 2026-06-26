@@ -11,9 +11,6 @@ const flowState = {
   isSuggesting: false,
   suggestingCategory: null,
   creatingCampaign: false,
-  isGenerating: false,
-  generationProgress: null as { step: number; totalSteps: number; label: string; subStep?: number; subTotal?: number; subLabel?: string } | null,
-  generationError: null as string | null,
   handleResuggestAll: vi.fn(),
   handleResuggestCategory: vi.fn(),
   handleCreateWithDna: vi.fn(),
@@ -47,9 +44,6 @@ describe("CampaignDnaPage", () => {
     flowState.isSuggesting = false;
     flowState.suggestingCategory = null;
     flowState.creatingCampaign = false;
-    flowState.isGenerating = false;
-    flowState.generationProgress = null;
-    flowState.generationError = null;
     flowState.dnaState = {
       geography: { enabled: true, value: "Storm coast", isCustom: false },
       politicalStructure: { enabled: true, value: "Guild council", isCustom: false },
@@ -67,35 +61,21 @@ describe("CampaignDnaPage", () => {
     expect(screen.getByText("World DNA - review")).toBeInTheDocument();
     expect(screen.getByText("Geography")).toBeInTheDocument();
     expect(screen.getByText(/Storm coast/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create World" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Campaign" })).toBeInTheDocument();
     expect(document.querySelectorAll(".wf-dna-seed-card")).toHaveLength(6);
     expect(document.querySelector(".wf-dna-shell")).toBeNull();
     expect(document.querySelector(".wf-set-toggle")).toBeNull();
   });
 
-  it("renders the V4 world-generation surface while work is in flight", () => {
+  it("shows campaign-shell creation state without entering the old worldgen surface", () => {
     flowState.isBusy = true;
     flowState.creatingCampaign = true;
-    flowState.isGenerating = true;
-    flowState.generationProgress = {
-      step: 3,
-      totalSteps: 10,
-      label: "Forging factions",
-      subStep: 3,
-      subTotal: 5,
-      subLabel: "Faction: Shibuya Incident Alliance",
-    };
 
     render(<CampaignDnaPage />);
 
-    expect(screen.getByTestId("worldgen-surface")).toBeInTheDocument();
-    expect(screen.getByText("Forging - step 4 of 10")).toBeInTheDocument();
-    expect(screen.getAllByText(/Faction: Shibuya Incident Alliance - 4 of 5/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryByText("Generation stages")).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".wf-gen-loc")).toHaveLength(0);
-    expect(screen.getByTestId("engine-trace")).toBeInTheDocument();
-    expect(document.querySelectorAll(".wf-gen-dna-card")).toHaveLength(6);
-    expect(screen.queryByRole("button", { name: "Generating World..." })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Creating Campaign..." })).toBeInTheDocument();
+    expect(screen.queryByTestId("worldgen-surface")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".wf-dna-seed-card")).toHaveLength(6);
   });
 
   it("replaces the dead fallback with actionable recovery guidance when DNA is still empty", () => {
@@ -116,7 +96,7 @@ describe("CampaignDnaPage", () => {
 
     expect(screen.getByTestId("dna-suggestion-surface")).toBeInTheDocument();
     expect(screen.getByText("World DNA - preparing suggestions")).toBeInTheDocument();
-    expect(screen.queryByText("Generating World DNA suggestions...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Preparing World DNA suggestions...")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Re-roll All" })).not.toBeInTheDocument();
     expect(document.querySelector(".wf-dna-shell")).toBeNull();
   });

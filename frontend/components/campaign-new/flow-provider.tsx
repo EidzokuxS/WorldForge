@@ -76,11 +76,9 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
         ? { kind: "suggesting-category" as const, category: wizard.suggestingCategory }
         : wizard.isSuggesting
           ? { kind: "suggesting-all" as const }
-          : wizard.isGenerating
-            ? { kind: "generating" as const }
-            : wizard.creatingCampaign
-              ? { kind: "creating" as const }
-              : { kind: "idle" as const };
+          : wizard.creatingCampaign
+            ? { kind: "creating" as const }
+            : { kind: "idle" as const };
 
     const session = {
       version: 1 as const,
@@ -93,7 +91,6 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
       researchArtifact: wizard.researchArtifact,
       step: wizard.step,
       phase,
-      generationProgress: wizard.generationProgress,
     };
 
     if (isCampaignNewFlowSessionEmpty(session)) {
@@ -108,8 +105,6 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
     wizard.campaignPremise,
     wizard.creatingCampaign,
     wizard.dnaState,
-    wizard.generationProgress,
-    wizard.isGenerating,
     wizard.isSuggesting,
     wizard.researchArtifact,
     wizard.researchEnabled,

@@ -45,7 +45,6 @@ function writeDraftSession() {
     researchArtifact: null,
     step: 1,
     phase: { kind: "idle" },
-    generationProgress: null,
   }));
 }
 

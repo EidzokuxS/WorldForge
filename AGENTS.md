@@ -12,6 +12,8 @@ This project is indexed by GitNexus as **WorldForge** (6610 symbols, 19521 relat
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- Route any UX/UI task or visible interface change through GLM-5.2 Coding Plan in Droid before implementation, then record the resulting plan or verdict in the active task notes. The project owner explicitly approves this Droid GLM-5.2 review path for WorldForge UX/UI development.
+- Route prompts, model instructions, visible copy, and substantial prose through GLM review with the `humanizer` and `deslop` skills before landing them, then record the verdict or rewrite note in the active task notes.
 
 ## When Debugging
 

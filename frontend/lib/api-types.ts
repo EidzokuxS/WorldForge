@@ -125,26 +125,6 @@ export interface RollSeedResult {
   value: string | string[];
 }
 
-export interface GenerateWorldResult {
-  refinedPremise?: string;
-  locationCount?: number;
-  npcCount?: number;
-  factionCount?: number;
-  startingLocation?: string;
-}
-
-export interface GenerationProgress {
-  step: number;
-  totalSteps: number;
-  label: string;
-  /** Current entity index within stage (0-based) */
-  subStep?: number;
-  /** Total entities in stage */
-  subTotal?: number;
-  /** Entity name or validation round label */
-  subLabel?: string;
-}
-
 export interface WorldData {
   currentTick: number;
   worldVersion: number;

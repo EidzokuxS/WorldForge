@@ -6,7 +6,6 @@ import { useNewCampaignWizard } from "../use-new-campaign-wizard";
 
 const mockPush = vi.fn();
 
-const mockGenerateWorld = vi.fn();
 const mockSuggestSeed = vi.fn();
 const mockSuggestSeeds = vi.fn();
 const mockClassifyWorldBook = vi.fn();
@@ -35,7 +34,6 @@ vi.mock("@/lib/settings", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  generateWorld: (...args: unknown[]) => mockGenerateWorld(...args),
   suggestSeed: (...args: unknown[]) => mockSuggestSeed(...args),
   suggestSeeds: (...args: unknown[]) => mockSuggestSeeds(...args),
   classifyWorldBook: (...args: unknown[]) => mockClassifyWorldBook(...args),
@@ -156,12 +154,6 @@ describe("useNewCampaignWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockGenerateWorld.mockResolvedValue({
-      startingLocation: "North Gate",
-      locationCount: 3,
-      npcCount: 2,
-      factionCount: 1,
-    });
     mockLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -297,11 +289,13 @@ describe("useNewCampaignWizard", () => {
         worldbookSelection: [LIBRARY_ITEMS[1]],
       }),
     );
+    expect(mockLoadCampaign).toHaveBeenCalledWith("campaign-1");
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
     expect(mockWorldbookToIpResearchContext).not.toHaveBeenCalled();
     expect(onCreated).toHaveBeenCalledTimes(1);
   });
 
-  it("passes the source hint and research flag through direct world creation", async () => {
+  it("passes the source hint and research flag through direct campaign creation", async () => {
     const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
 
     act(() => {
@@ -324,11 +318,11 @@ describe("useNewCampaignWizard", () => {
         worldgenResearchEnabled: false,
       }),
     );
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
   });
 
-  it("retries world generation on the already-created campaign after generation failure", async () => {
+  it("creates a revamp campaign shell without running old worldgen", async () => {
     const onCreated = vi.fn();
-    mockGenerateWorld.mockRejectedValueOnce(new Error("provider failed"));
     const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, onCreated));
 
     act(() => {
@@ -341,26 +335,12 @@ describe("useNewCampaignWizard", () => {
     });
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
-    expect(mockGenerateWorld).toHaveBeenCalledTimes(1);
-    expect(onCreated).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await result.current.handleCreateWithSeeds();
-    });
-
-    expect(mockApiPost).toHaveBeenCalledTimes(1);
-    expect(mockGenerateWorld).toHaveBeenCalledTimes(2);
-    expect(mockGenerateWorld).toHaveBeenLastCalledWith(
-      "campaign-1",
-      expect.any(Function),
-      null,
-      null,
-      null,
-    );
+    expect(mockLoadCampaign).toHaveBeenCalledWith("campaign-1");
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
     expect(onCreated).toHaveBeenCalledTimes(1);
   });
 
-  it("carries the research artifact from DNA suggestions into reroll and generation", async () => {
+  it("carries the research artifact from DNA suggestions into reroll and campaign shell payload", async () => {
     const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, vi.fn()));
 
     mockSuggestSeeds.mockResolvedValueOnce({
@@ -401,12 +381,13 @@ describe("useNewCampaignWizard", () => {
       await result.current.handleCreateWithDna();
     });
 
-    expect(mockGenerateWorld).toHaveBeenCalledWith(
-      "campaign-1",
-      expect.any(Function),
-      null,
-      null,
-      RESEARCH_ARTIFACT,
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/campaigns",
+      expect.objectContaining({
+        name: "Shibuya Nexus",
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        researchArtifact: RESEARCH_ARTIFACT,
+      }),
     );
   });
 
@@ -473,16 +454,10 @@ describe("useNewCampaignWizard", () => {
       await result.current.handleCreateWithDna();
     });
 
-    expect(mockGenerateWorld).toHaveBeenCalledWith(
-      "campaign-1",
-      expect.any(Function),
-      null,
-      null,
-      null,
-    );
+    expect(mockApiPost.mock.calls[0]?.[1]).not.toHaveProperty("researchArtifact");
   });
 
-  it("carries a restored research artifact from the saved campaign-new session into generation", async () => {
+  it("carries a restored research artifact from the saved campaign-new session into campaign shell payload", async () => {
     const dnaState = {
       geography: {
         enabled: true,
@@ -505,7 +480,6 @@ describe("useNewCampaignWizard", () => {
       dnaState,
       step: 2 as const,
       phase: { kind: "idle" as const },
-      generationProgress: null,
       researchArtifact: RESEARCH_ARTIFACT,
     };
     const { result } = renderHook(() =>
@@ -516,12 +490,13 @@ describe("useNewCampaignWizard", () => {
       await result.current.handleCreateWithDna();
     });
 
-    expect(mockGenerateWorld).toHaveBeenCalledWith(
-      "campaign-1",
-      expect.any(Function),
-      null,
-      null,
-      RESEARCH_ARTIFACT,
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/campaigns",
+      expect.objectContaining({
+        name: "Shibuya Nexus",
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        researchArtifact: RESEARCH_ARTIFACT,
+      }),
     );
   });
 

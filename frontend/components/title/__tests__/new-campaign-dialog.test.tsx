@@ -36,11 +36,9 @@ function createMockWizard(
     isBusy: false,
     canCreate: false,
     creatingCampaign: false,
-    isGenerating: false,
     isSuggesting: false,
     suggestingCategory: null,
     dnaState: null,
-    generationProgress: null,
     setCampaignName: vi.fn(),
     setCampaignPremise: vi.fn(),
     setCampaignFranchise: vi.fn(),
@@ -61,7 +59,6 @@ function createMockWizard(
     worldbookLibraryLoading: false,
     worldbookStatus: "idle",
     worldbookError: null,
-    generationError: null,
     handleWorldbookUpload: vi.fn(),
     toggleWorldbookSelection: vi.fn(),
     ...overrides,
@@ -122,7 +119,7 @@ describe("NewCampaignDialog", () => {
         "Describe your world (optional - selected worldbooks provide context)..."
       )
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create World/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Create Campaign/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Next → World DNA/i })).toBeEnabled();
   });
 

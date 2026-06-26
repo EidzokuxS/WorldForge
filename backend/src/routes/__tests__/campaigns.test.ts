@@ -108,6 +108,26 @@ const app = new Hono();
 app.route("/api/campaigns", campaignRoutes);
 
 const CAMPAIGN_ID = "abc-123";
+const RESEARCH_ARTIFACT = {
+  version: 2,
+  rawPremise: "Jujutsu Kaisen world with Naruto power system",
+  rawKnownIP: "Jujutsu Kaisen",
+  researchBrief: {
+    interpretationSummary: "Use JJK as world basis and Naruto as power overlay.",
+    ambiguityNotes: [],
+    sourceUsageRules: [],
+    searchJobs: [],
+  },
+  searchResults: [],
+  generatedContext: {
+    keyFacts: ["Tokyo Jujutsu High anchors the setting."],
+    tonalNotes: ["urban occult"],
+  },
+  provenance: {
+    createdAt: "2026-06-26T00:00:00.000Z",
+    model: "test-model",
+  },
+} as const;
 const PUBLIC_HANDLE_PATTERN = /^pdto_(actor|checkpoint|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/;
 
 function expectPublicHandle(value: unknown, kind?: string) {
@@ -673,6 +693,32 @@ describe("POST /api/campaigns", () => {
       "Custom researcher in VotV",
       undefined,
       { ipContext, premiseDivergence },
+    );
+  });
+
+  it("passes research artifact through to createCampaign when provided", async () => {
+    mockedCreate.mockResolvedValue({ id: CAMPAIGN_ID, name: "Test" } as any);
+
+    const res = await app.request("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Shibuya Nexus",
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        researchArtifact: RESEARCH_ARTIFACT,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Shibuya Nexus",
+      "Jujutsu Kaisen world with Naruto power system",
+      undefined,
+      {
+        ipContext: undefined,
+        premiseDivergence: undefined,
+        researchArtifact: RESEARCH_ARTIFACT,
+      },
     );
   });
 

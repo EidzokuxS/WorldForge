@@ -9,7 +9,6 @@ import {
   chatUndo,
   deleteCheckpointApi,
   deleteLoreCardById,
-  generateWorld,
   generateCharacter,
   getWorldData,
   importV2Card,
@@ -360,25 +359,6 @@ describe("worldgen API helpers", () => {
     expect(lastBody()).not.toHaveProperty("researchArtifact");
   });
 
-  it("generateWorld includes a researchArtifact only when one exists", async () => {
-    fetchMock.mockImplementation(async () => new Response(
-      JSON.stringify({ startingLocation: "Tokyo Jujutsu High" }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    ));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await generateWorld("campaign-1", undefined, null, null, RESEARCH_ARTIFACT);
-    expect(lastBody()).toMatchObject({
-      campaignId: "campaign-1",
-      researchArtifact: RESEARCH_ARTIFACT,
-    });
-
-    await generateWorld("campaign-1", undefined, null, null, null);
-    expect(lastBody()).not.toHaveProperty("researchArtifact");
-  });
 });
 
 describe("gameplay API helpers", () => {

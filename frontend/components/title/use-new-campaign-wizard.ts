@@ -4,21 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  generateWorld,
   suggestSeed,
   suggestSeeds,
   importWorldbookLibrary,
   listWorldbookLibrary,
   apiPost,
   loadCampaign,
-  getWorldData,
-  getWorldgenDebugProgress,
 } from "@/lib/api";
-import type {
-  GenerateWorldResult,
-  GenerationProgress,
-  WorldbookLibraryItem,
-} from "@/lib/api";
+import type { WorldbookLibraryItem } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import type { IpResearchContext, PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
@@ -39,8 +32,6 @@ import {
 } from "./utils";
 
 const DEFAULT_API_ERROR = "Unknown API error.";
-const GENERATION_RECOVERY_POLL_MS = 5000;
-const GENERATION_RECOVERY_ATTEMPTS = 360;
 
 function sortWorldbookItems(items: WorldbookLibraryItem[]): WorldbookLibraryItem[] {
   return [...items].sort((left, right) => {
@@ -78,8 +69,7 @@ type Phase =
   | { kind: "idle" }
   | { kind: "suggesting-all" }
   | { kind: "suggesting-category"; category: SeedCategory }
-  | { kind: "creating" }
-  | { kind: "generating" };
+  | { kind: "creating" };
 
 type UseNewCampaignWizardOptions = {
   initialSession?: CampaignNewFlowSession | null;
@@ -106,9 +96,6 @@ export function useNewCampaignWizard(
   const [researchEnabled, setResearchEnabled] = useState(initialSession?.researchEnabled ?? true);
   const [dnaState, setDnaState] = useState<DnaState | null>(initialSession?.dnaState ?? null);
   const [phase, setPhase] = useState<Phase>((initialSession?.phase as Phase | undefined) ?? { kind: "idle" });
-  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(
-    initialSession?.generationProgress ?? null,
-  );
   const [ipContext, setIpResearchContext] = useState<IpResearchContext | null>(null);
   const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
   const [researchArtifact, setResearchArtifact] = useState<WorldgenResearchArtifactV2 | null>(
@@ -122,12 +109,9 @@ export function useNewCampaignWizard(
   const [worldbookLibraryLoading, setWorldbookLibraryLoading] = useState(false);
   const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
   const [worldbookError, setWorldbookError] = useState<string | null>(null);
-  const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generationRetryCampaignId, setGenerationRetryCampaignId] = useState<string | null>(null);
 
   const isBusy = phase.kind !== "idle";
-  const creatingCampaign = phase.kind === "creating" || phase.kind === "generating";
-  const isGenerating = phase.kind === "generating";
+  const creatingCampaign = phase.kind === "creating";
   const isSuggesting = phase.kind === "suggesting-all";
   const suggestingCategory =
     phase.kind === "suggesting-category" ? phase.category : null;
@@ -147,9 +131,6 @@ export function useNewCampaignWizard(
     setPremiseDivergence(null);
     setResearchArtifact(null);
     setPhase({ kind: "idle" });
-    setGenerationProgress(null);
-    setGenerationError(null);
-    setGenerationRetryCampaignId(null);
     // Reusable worldbooks are global library data, not part of the campaign draft.
     // A fresh-start reset should clear selections while keeping the loaded shelf visible.
     setSelectedWorldbooks([]);
@@ -162,9 +143,6 @@ export function useNewCampaignWizard(
     setIpResearchContext(null);
     setPremiseDivergence(null);
     setResearchArtifact(null);
-    setGenerationProgress(null);
-    setGenerationError(null);
-    setGenerationRetryCampaignId(null);
     if (step === 2) {
       setStep(1);
     }
@@ -231,114 +209,6 @@ export function useNewCampaignWizard(
     resetFlow();
   }
 
-  function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      window.setTimeout(resolve, ms);
-    });
-  }
-
-  function isRecoverableGenerationError(error: unknown): boolean {
-    const message = getErrorMessage(error, DEFAULT_API_ERROR).toLowerCase();
-    return message.includes("network error")
-      || message.includes("failed to fetch")
-      || message.includes("stream ended without completion");
-  }
-
-  async function readCompletedGenerationResult(campaignId: string): Promise<GenerateWorldResult> {
-    await loadCampaign(campaignId);
-    const world = await getWorldData(campaignId);
-    return {
-      refinedPremise: "",
-      locationCount: world.locations.length,
-      npcCount: world.npcs.length,
-      factionCount: world.factions.length,
-      startingLocation:
-        world.locations.find((location) => location.isStarting)?.name
-        ?? world.locations[0]?.name
-        ?? "Unknown",
-    };
-  }
-
-  async function recoverInterruptedGeneration(campaignId: string): Promise<GenerateWorldResult | null> {
-    for (let attempt = 0; attempt < GENERATION_RECOVERY_ATTEMPTS; attempt += 1) {
-      const [campaign, debug] = await Promise.all([
-        loadCampaign(campaignId).catch(() => null),
-        getWorldgenDebugProgress().catch(() => null),
-      ]);
-
-      if (campaign?.generationComplete) {
-        return readCompletedGenerationResult(campaignId);
-      }
-
-      const activeGeneration = debug?.active.some(
-        (operation) => operation.kind === "generate-world" && operation.campaignId === campaignId,
-      ) ?? false;
-
-      if (!activeGeneration) {
-        break;
-      }
-
-      setGenerationProgress((current) => current ?? {
-        step: 0,
-        totalSteps: 5,
-        label: "Reconnecting to running generation",
-      });
-      await sleep(GENERATION_RECOVERY_POLL_MS);
-    }
-
-    return null;
-  }
-
-  async function tryGenerateWorld(
-    campaignId: string,
-  ): Promise<boolean> {
-    if (!settings || !isGeneratorConfigured(settings)) return true;
-
-    setPhase({ kind: "generating" });
-    setGenerationProgress(null);
-    setGenerationError(null);
-    try {
-      const generation = await generateWorld(campaignId, (progress) => {
-        setGenerationProgress(progress);
-      }, ipContext, premiseDivergence, researchArtifact);
-      toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
-        description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
-      });
-      return true;
-    } catch (error) {
-      if (isRecoverableGenerationError(error)) {
-        const recovered = await recoverInterruptedGeneration(campaignId);
-        if (recovered) {
-          toast.success(`World generated: ${recovered.startingLocation ?? "Unknown"}`, {
-            description: `${recovered.locationCount ?? 0} locations, ${recovered.npcCount ?? 0} NPCs, ${recovered.factionCount ?? 0} factions`,
-          });
-          return true;
-        }
-
-        try {
-          const restarted = await generateWorld(campaignId, (progress) => {
-            setGenerationProgress(progress);
-          }, ipContext, premiseDivergence, researchArtifact);
-          toast.success(`World generated: ${restarted.startingLocation ?? "Unknown"}`, {
-            description: `${restarted.locationCount ?? 0} locations, ${restarted.npcCount ?? 0} NPCs, ${restarted.factionCount ?? 0} factions`,
-          });
-          return true;
-        } catch (retryError) {
-          error = retryError;
-        }
-      }
-
-      const msg = getErrorMessage(error, "World generation failed.");
-      setGenerationError(msg);
-      toast.error("World generation failed", {
-        description: "See error details below the progress bar.",
-      });
-      return false;
-    } finally {
-      setGenerationProgress(null);
-    }
-  }
-
   async function handleWorldbookUpload(file: File) {
     setWorldbookStatus("importing");
     setWorldbookError(null);
@@ -400,6 +270,7 @@ export function useNewCampaignWizard(
         seeds?: Partial<WorldSeeds>;
         ipContext?: IpResearchContext | null;
         premiseDivergence?: PremiseDivergence | null;
+        researchArtifact?: WorldgenResearchArtifactV2 | null;
         worldgenSourceHint?: string;
         worldgenResearchEnabled?: boolean;
         worldbookSelection?: WorldbookLibraryItem[];
@@ -416,6 +287,9 @@ export function useNewCampaignWizard(
       if (premiseDivergence) {
         payload.premiseDivergence = premiseDivergence;
       }
+      if (researchArtifact) {
+        payload.researchArtifact = researchArtifact;
+      }
       const sourceHint = campaignFranchise.trim();
       if (sourceHint) {
         payload.worldgenSourceHint = sourceHint;
@@ -425,32 +299,16 @@ export function useNewCampaignWizard(
         payload.worldbookSelection = selectedWorldbooks;
       }
 
-      const created = generationRetryCampaignId
-        ? await loadCampaign(generationRetryCampaignId)
-        : await apiPost<CampaignMeta>("/api/campaigns", payload);
-      if (!generationRetryCampaignId) {
-        toast.success("Campaign created", { description: created.name });
-        setGenerationRetryCampaignId(created.id);
-      }
+      const created = await apiPost<CampaignMeta>("/api/campaigns", payload);
+      toast.success("Campaign shell created", { description: created.name });
 
-      // Load campaign so it becomes active BEFORE generation (generate needs active campaign)
       await loadCampaign(created.id);
 
-      // Close the dialog before generation starts, but keep local state intact
-      // until the request resolves so we do not churn wizard state mid-SSE.
       setOpen(false);
-      const generated = await tryGenerateWorld(created.id);
-
-      if (!generated) {
-        // Generation failed — stay on creation page so the user sees the error
-        setPhase({ kind: "idle" });
-        return;
-      }
-
       resetFlow();
       clearCampaignNewFlowSession();
       onCreated();
-      router.push(`/campaign/${created.id}/review`);
+      router.push(`/campaign/${created.id}/revamp`);
     } catch (error) {
       toast.error("Failed to create campaign", {
         description: getErrorMessage(error, DEFAULT_API_ERROR),
@@ -581,7 +439,6 @@ export function useNewCampaignWizard(
   }
 
   function handleSeedToggle(category: SeedCategory, enabled: boolean) {
-    setGenerationRetryCampaignId(null);
     setDnaState((current) => {
       if (!current) return current;
       return { ...current, [category]: { ...current[category], enabled } };
@@ -589,7 +446,6 @@ export function useNewCampaignWizard(
   }
 
   function handleSeedTextChange(category: SeedCategory, value: string) {
-    setGenerationRetryCampaignId(null);
     setDnaState((current) => {
       if (!current) return current;
       return {
@@ -608,14 +464,14 @@ export function useNewCampaignWizard(
       setStep(2);
       setDnaState(createEmptyDnaState());
       toast.error("Prepare World DNA first.", {
-        description: "Continue from concept to generate suggestions, or add at least one manual seed before creating the world.",
+        description: "Continue from concept to prepare suggestions, or add at least one manual seed before creating the campaign.",
       });
       return;
     }
 
     const enabledSeeds = collectEnabledSeeds(dnaState);
     if (!enabledSeeds) {
-      toast.error("Add at least one DNA seed before generating the world.");
+      toast.error("Add at least one DNA seed before creating the campaign.");
       return;
     }
     await createCampaignWithSeeds(enabledSeeds);
@@ -648,9 +504,6 @@ export function useNewCampaignWizard(
     // Derived state
     isBusy,
     creatingCampaign,
-    isGenerating,
-    generationProgress,
-    generationError,
     isSuggesting,
     suggestingCategory,
     canCreate,

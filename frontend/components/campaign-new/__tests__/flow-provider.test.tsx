@@ -81,8 +81,6 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         dnaState,
         isBusy: false,
         creatingCampaign: false,
-        isGenerating: false,
-        generationProgress: null,
         researchArtifact,
         isSuggesting: false,
         suggestingCategory: null,

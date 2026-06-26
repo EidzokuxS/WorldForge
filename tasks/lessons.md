@@ -10,6 +10,8 @@
 - If cleanup hits locked files, stop, identify the owning process, stop only that process, then retry the narrow cleanup.
 - When cleaning visible root noise, inspect inside visible workflow folders too; `tasks/` should stay as `todo.md` plus `lessons.md` unless a current task requires more.
 - For repo presentation cleanup, sweep every top-level directory in one pass; do not hide obsolete tracked evidence inside another visible folder when the goal is a clean workspace.
+- Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
+- When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
 
 ## Revamp Acceptance
 
@@ -21,6 +23,8 @@
 
 ## UI And Narration
 
+- Send every UX/UI task or visible interface change to GLM-5.2 Coding Plan in Droid before implementation, then carry its verdict into the active task notes.
+- Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
 - Narration owns lived moment, pressure, sensory surface, visible behavior, and action handoff.
 - Route option labels are UI/action handles. Prose should summarize visible ways onward unless the player asks about one explicit route.
@@ -42,3 +46,4 @@
 - Read user-supplied attachments from disk when they shape current work; summaries do not replace the artifact.
 - Oracle/Pro asks need actual case files: code paths, failing output, target contract, current diff, and proof artifacts.
 - If an Oracle/browser wrapper fails, distinguish tool failure from model advice.
+- Treat empty or zero-height browser message containers as extraction limits. Verify chat completeness through attachment/export/scroll evidence before describing missing content.
