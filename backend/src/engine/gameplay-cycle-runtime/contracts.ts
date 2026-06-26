@@ -3564,20 +3564,25 @@ const cleanNarrationProofValidationIssueSchema = z.object({
 export const cleanNarrationProofSchema = z.object({
   version: z.literal("gameplay-runtime.clean-narration-proof.v1"),
   result: cleanNarrationResultSchema,
-  promptInput: cleanNarratorPromptInputSchema,
+  promptInput: cleanNarratorPromptInputSchema.nullable(),
   candidate: cleanNarrationCandidateSchema.nullable(),
   validation: z.object({
     status: z.enum(["accepted", "deterministic_authority_projection", "typed_hard_result"]),
     issues: z.array(cleanNarrationProofValidationIssueSchema).max(24),
   }).strict(),
 }).strict().superRefine((proof, ctx) => {
-  if (proof.result.packetId !== proof.promptInput.packetId) {
-    ctx.addIssue({ code: "custom", path: ["result", "packetId"], message: "Narration proof result packetId must match promptInput." });
-  }
-  if (proof.result.turnId !== proof.promptInput.turnId) {
-    ctx.addIssue({ code: "custom", path: ["result", "turnId"], message: "Narration proof result turnId must match promptInput." });
+  if (proof.promptInput !== null) {
+    if (proof.result.packetId !== proof.promptInput.packetId) {
+      ctx.addIssue({ code: "custom", path: ["result", "packetId"], message: "Narration proof result packetId must match promptInput." });
+    }
+    if (proof.result.turnId !== proof.promptInput.turnId) {
+      ctx.addIssue({ code: "custom", path: ["result", "turnId"], message: "Narration proof result turnId must match promptInput." });
+    }
   }
   if (proof.result.source === "model") {
+    if (proof.promptInput === null) {
+      ctx.addIssue({ code: "custom", path: ["promptInput"], message: "Model narration proof must preserve the prompt input." });
+    }
     if (proof.validation.status !== "accepted") {
       ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Model narration proof must carry accepted validation status." });
     }
@@ -3596,6 +3601,9 @@ export const cleanNarrationProofSchema = z.object({
     }
   }
   if (proof.result.source === "deterministic_authority_projection") {
+    if (proof.promptInput === null) {
+      ctx.addIssue({ code: "custom", path: ["promptInput"], message: "Deterministic narration proof must preserve the prompt input." });
+    }
     if (proof.validation.status !== "deterministic_authority_projection") {
       ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Deterministic narration proof must carry deterministic validation status." });
     }
@@ -3604,6 +3612,9 @@ export const cleanNarrationProofSchema = z.object({
     }
   }
   if (proof.result.source === "typed_hard_result") {
+    if (proof.promptInput !== null) {
+      ctx.addIssue({ code: "custom", path: ["promptInput"], message: "Typed hard-result proof must not depend on the model prompt input." });
+    }
     if (proof.validation.status !== "typed_hard_result") {
       ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Typed hard-result narration proof must carry typed hard-result validation status." });
     }

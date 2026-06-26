@@ -578,7 +578,7 @@ describe("gameplay-cycle-runtime primitive 5 player-facing turn persistence cont
     }
 
     expect(order).toEqual(["commit:Scene placement: You are at Market.", "done"]);
-    expect(committedNarration?.promptInput.version).toBe("gameplay-runtime.clean-narrator-prompt-input.v1");
+    expect(committedNarration?.promptInput?.version).toBe("gameplay-runtime.clean-narrator-prompt-input.v1");
     expect(committedNarration?.candidate?.finalText).toBe("Scene placement: You are at Market.");
     expect(committedNarration?.result.source).toBe("model");
     const done = events.at(-1);

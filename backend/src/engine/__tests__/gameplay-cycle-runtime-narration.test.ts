@@ -13,6 +13,7 @@ import {
   buildCleanNarrationSystemPrompt,
   buildCleanNarratorPromptInput,
   CleanNarrationGenerationError,
+  CleanNarrationValidationError,
   renderCleanAuthorityProjection,
   runCleanNarration,
   validateCleanNarrationCandidate,
@@ -3133,9 +3134,28 @@ describe("clean Stage 6 narration contracts", () => {
         issues: [],
       },
     });
-    expect(result.proof?.promptInput.packetId).toBe(view.packetId);
+    expect(result.proof?.promptInput?.packetId).toBe(view.packetId);
     expect(result.proof?.candidate?.finalText).toBe(result.text);
     expect(result.text).not.toMatch(/\b(Player location changed|Travel cost|minute\(s\)|arrive at|backend|receipt)\b/iu);
+  });
+
+  it("rejects invalid normal-turn model prose instead of projecting a fallback narration", async () => {
+    const view = movementWithSceneTextureView();
+
+    await expect(runCleanNarration({
+      narratorView: view,
+      provider,
+      generateCandidate: async () => ({
+        ...acceptedCandidate(view, [{
+          text: "A hidden service ladder opens behind the canvas awnings.",
+          evidenceRefs: ["e2"],
+          backendFactRefs: ["e2.f1"],
+          claimKinds: ["scene_texture"],
+          hardClaims: ["route_status"],
+        }]),
+        finalText: "A hidden service ladder opens behind the canvas awnings.",
+      }),
+    })).rejects.toBeInstanceOf(CleanNarrationValidationError);
   });
 
   it("canonicalizes stacked punctuation in hard-claim metadata ids", () => {
@@ -6960,6 +6980,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("typed_hard_result");
     expect(result.text).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network|screen|lit|unlit/iu);
+    expect(result.proof?.promptInput).toBeNull();
     expect(result.proof?.candidate).toBeNull();
     expect(result.proof?.validation.status).toBe("typed_hard_result");
   });
@@ -7010,6 +7031,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.source).toBe("typed_hard_result");
     expect(result.text).toBe("Canvas awnings hang over the market lanes. Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network|sender|caller/iu);
+    expect(result.proof?.promptInput).toBeNull();
     expect(result.proof?.candidate).toBeNull();
     expect(result.proof?.validation.status).toBe("typed_hard_result");
   });

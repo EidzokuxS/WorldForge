@@ -9596,4 +9596,7 @@ Session: `gm-v1-consequenc-slice`.
     - Combined focused subset contracts/narration/stage4/settlement (490 passed).
     - Expanded narration/prompt/opening/character/worldgen subset (170 passed).
     - `npm --prefix backend run typecheck` passed.
-  - [ ] Run GitNexus `detect_changes`, commit, and push once the expected accumulated scope is confirmed.
+  - [x] Ran GitNexus `detect_changes`, committed, refreshed GitNexus with embeddings, and pushed `be4ffe27 fix(p337): stabilize playable narration ownership` to `origin/develop`.
+  - [x] Re-ran Oracle/GPT-5.5 Pro with the full attached P337 case bundle after the user correction. Session `worldforge-p337-current-review` verified model selection as `Pro Extended` and returned a real answer: keep typed hard-result approach, avoid bounded paraphrase, tighten branch purity, watch first-screen/direct-scene page shape.
+  - [x] Applied the immediate branch-purity follow-up from Oracle: `typed_hard_result` proof now carries `promptInput=null`, so standalone exact hard micro-results do not depend on the model-oriented prompt planner; model/deterministic proofs still preserve promptInput.
+  - [x] Added source-distribution regression: invalid normal-turn model prose rejects with `CleanNarrationValidationError` instead of being rescued by deterministic/typed projection.

@@ -4677,13 +4677,10 @@ export async function runCleanNarration(input: {
   recentPlayerFacingText?: readonly string[];
   generateCandidate?: CleanNarrationCandidateGenerator;
 }): Promise<CleanNarrationRunResult> {
-  const promptInput = buildCleanNarratorPromptInput(input.narratorView, {
-    recentPlayerFacingText: input.recentPlayerFacingText ?? [],
-  });
-  const styleMode = input.styleMode ?? "grounded_clean";
-  const system = buildCleanNarrationSystemPrompt(styleMode);
-  const prompt = buildCleanNarrationPrompt(promptInput);
   if (needsDeterministicAuthorityProjection(input.narratorView)) {
+    const promptInput = buildCleanNarratorPromptInput(input.narratorView, {
+      recentPlayerFacingText: input.recentPlayerFacingText ?? [],
+    });
     const result = assertCleanNarrationResult({
       version: "gameplay-runtime.clean-narration-result.v1",
       packetId: input.narratorView.packetId,
@@ -4720,7 +4717,7 @@ export async function runCleanNarration(input: {
       proof: cleanNarrationProofSchema.parse({
         version: "gameplay-runtime.clean-narration-proof.v1",
         result,
-        promptInput,
+        promptInput: null,
         candidate: null,
         validation: {
           status: "typed_hard_result",
@@ -4729,6 +4726,12 @@ export async function runCleanNarration(input: {
       }),
     };
   }
+  const promptInput = buildCleanNarratorPromptInput(input.narratorView, {
+    recentPlayerFacingText: input.recentPlayerFacingText ?? [],
+  });
+  const styleMode = input.styleMode ?? "grounded_clean";
+  const system = buildCleanNarrationSystemPrompt(styleMode);
+  const prompt = buildCleanNarrationPrompt(promptInput);
   const generateCandidate =
     input.generateCandidate
     ?? ((request: CleanNarrationCandidateRequest) => generateCleanNarrationCandidate({
