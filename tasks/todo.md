@@ -8,14 +8,17 @@ Goal:
 Plan:
 - [x] Inventory the current dirty `develop` slice and keep existing work intact.
 - [x] Verify the current slice with focused runtime tests, typecheck, and GitNexus `detect_changes`.
-- [ ] Commit and push the verified slice to `develop`.
-- [ ] Merge `develop` into `main`, push `main`, then merge `main` back into `develop` and push `develop`.
-- [ ] Create `feat/revamp` from the synchronized baseline.
-- [ ] Start `rpi/revamp/` with the mechanics-audit request and first-pass coverage map.
+- [x] Commit and push the verified slice to `develop`.
+- [x] Merge `develop` into `main`, push `main`, then merge `main` back into `develop` and push `develop`.
+- [x] Create `feat/revamp` from the synchronized baseline.
+- [x] Start `rpi/revamp/` with the mechanics-audit request and first-pass coverage map.
 
 Review:
 - GitNexus `detect_changes(scope=all)` reported MEDIUM risk: 17 touched symbols, 1 affected process (`Stage4Evidence -> UniqueStrings`), no HIGH/CRITICAL warning.
 - Verification passed: focused gameplay-cycle runtime contracts/narration/settlement suite from `backend/` (450/450), backend typecheck, and `git diff --check` with CRLF warnings only.
+- Committed and pushed `fix(p337): stabilize playable route presentation` as `4f794cd0` to `origin/develop`.
+- Fast-forwarded `main` to `develop`, pushed `origin/main`, and confirmed `main`, `develop`, `origin/main`, and `origin/develop` all resolve to `4f794cd0`.
+- Created and pushed `feat/revamp`, then added the initial RPI request and coverage map on the feature branch.
 
 ## Current Session Focus 2026-06-25 - Playable Narrative Contract Reset
 
