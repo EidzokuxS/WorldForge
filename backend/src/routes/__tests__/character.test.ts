@@ -118,8 +118,23 @@ function createMockDb(opts: {
     kind?: string | null;
     parentLocationId?: string | null;
   }>;
-}) {
-  const locs = opts.locations ?? [{ id: "loc-1", name: "Tavern" }];
+} = {}) {
+  const locs = opts.locations ?? [
+    {
+      id: "loc-1",
+      name: "Tavern",
+      kind: "macro",
+      parentLocationId: null,
+      isStarting: false,
+    },
+    {
+      id: "loc-1-scene",
+      name: "Tavern Common Room",
+      kind: "persistent_sublocation",
+      parentLocationId: "loc-1",
+      isStarting: true,
+    },
+  ];
 
   const mockRun = vi.fn();
   const mockGet = vi.fn(() => null);
@@ -548,9 +563,7 @@ describe("Phase 60 route delegation: ingestCharacterDraft", () => {
 describe("POST /api/worldgen/save-character", () => {
   it("persists canonical record and derived tags when saving a draft payload", async () => {
     setActiveCampaign();
-    const { mockValues } = createMockDb({
-      locations: [{ id: "loc-1", name: "Tavern" }],
-    });
+    const { mockValues } = createMockDb();
 
     const draft = makePlayerDraft();
 
@@ -574,9 +587,7 @@ describe("POST /api/worldgen/save-character", () => {
 
   it("caches generated player portraits under the public singleton filename", async () => {
     setActiveCampaign();
-    createMockDb({
-      locations: [{ id: "loc-1", name: "Tavern" }],
-    });
+    createMockDb();
     const imageData = Buffer.from("portrait");
     mockedResolveImageProvider.mockReturnValue({
       provider: { baseUrl: "http://img", apiKey: "k" },
@@ -606,9 +617,7 @@ describe("POST /api/worldgen/save-character", () => {
 
   it("materializes bounded opening-state status flags when saving structured start conditions", async () => {
     setActiveCampaign();
-    const { mockValues } = createMockDb({
-      locations: [{ id: "loc-1", name: "Tavern" }],
-    });
+    const { mockValues } = createMockDb();
 
     const draft = makePlayerDraft({
       socialContext: {
@@ -653,9 +662,9 @@ describe("POST /api/worldgen/save-character", () => {
       socialContext: { currentLocationId: string | null; currentLocationName: string | null };
     };
 
-    expect(characterRecord.socialContext.currentLocationId).toBe("loc-1");
+    expect(characterRecord.socialContext.currentLocationId).toBe("loc-1-scene");
     expect(characterRecord.startConditions).toMatchObject({
-      startLocationId: "loc-1",
+      startLocationId: "loc-1-scene",
       arrivalMode: "on-foot",
       startingVisibility: "noticed",
       entryPressure: ["under watch", "clock running out"],
@@ -749,7 +758,7 @@ describe("POST /api/worldgen/save-character", () => {
     );
   });
 
-  it("starts a selected macro location with matching broad and scene ids", async () => {
+  it("starts a selected macro location at its concrete starting sublocation", async () => {
     setActiveCampaign();
     const { mockValues } = createMockDb({
       locations: [
@@ -758,6 +767,13 @@ describe("POST /api/worldgen/save-character", () => {
           name: "Dense Transit Ward",
           kind: "macro",
           parentLocationId: null,
+          isStarting: true,
+        },
+        {
+          id: "loc-gate",
+          name: "Ward Arrival Gate",
+          kind: "persistent_sublocation",
+          parentLocationId: "loc-macro",
           isStarting: true,
         },
       ],
@@ -800,7 +816,14 @@ describe("POST /api/worldgen/save-character", () => {
     const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
     const insertPayload = firstInsertCall?.[0];
     expect(insertPayload?.currentLocationId).toBe("loc-macro");
-    expect(insertPayload?.currentSceneLocationId).toBe("loc-macro");
+    expect(insertPayload?.currentSceneLocationId).toBe("loc-gate");
+
+    const characterRecord = JSON.parse(String(insertPayload?.characterRecord ?? "{}")) as {
+      socialContext: { currentLocationName: string | null };
+      startConditions: { startLocationId: string | null };
+    };
+    expect(characterRecord.socialContext.currentLocationName).toBe("Ward Arrival Gate");
+    expect(characterRecord.startConditions.startLocationId).toBe("loc-gate");
   });
 
   it("rejects a selected persistent sublocation whose parent row is missing", async () => {
@@ -865,9 +888,7 @@ describe("POST /api/worldgen/save-character", () => {
     } as any;
     mockedGetActive.mockReturnValue(null);
     mockedLoadCampaign.mockResolvedValue(campaign);
-    createMockDb({
-      locations: [{ id: "loc-1", name: "Tavern" }],
-    });
+    createMockDb();
 
     const draft = makePlayerDraft();
     const res = await app.request("/api/worldgen/save-character", {

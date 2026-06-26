@@ -3551,6 +3551,7 @@ export const cleanNarrationResultSchema = z.object({
   source: z.enum([
     "model",
     "deterministic_authority_projection",
+    "typed_hard_result",
   ]),
 }).strict();
 
@@ -3566,7 +3567,7 @@ export const cleanNarrationProofSchema = z.object({
   promptInput: cleanNarratorPromptInputSchema,
   candidate: cleanNarrationCandidateSchema.nullable(),
   validation: z.object({
-    status: z.enum(["accepted", "deterministic_authority_projection"]),
+    status: z.enum(["accepted", "deterministic_authority_projection", "typed_hard_result"]),
     issues: z.array(cleanNarrationProofValidationIssueSchema).max(24),
   }).strict(),
 }).strict().superRefine((proof, ctx) => {
@@ -3600,6 +3601,14 @@ export const cleanNarrationProofSchema = z.object({
     }
     if (proof.candidate !== null) {
       ctx.addIssue({ code: "custom", path: ["candidate"], message: "Deterministic narration proof must not carry a model candidate." });
+    }
+  }
+  if (proof.result.source === "typed_hard_result") {
+    if (proof.validation.status !== "typed_hard_result") {
+      ctx.addIssue({ code: "custom", path: ["validation", "status"], message: "Typed hard-result narration proof must carry typed hard-result validation status." });
+    }
+    if (proof.candidate !== null) {
+      ctx.addIssue({ code: "custom", path: ["candidate"], message: "Typed hard-result narration proof must not carry a model candidate." });
     }
   }
 });

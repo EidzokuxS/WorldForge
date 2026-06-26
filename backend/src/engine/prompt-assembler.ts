@@ -1820,28 +1820,25 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "Do not use markdown, comments, explanations, labels, or extra text.",
     "Use exactly these top-level keys: version, sentences.",
     `version MUST be "${GROUNDED_SENTENCE_DRAFT_VERSION}".`,
-    "Each sentence object MUST include exactly these keys: factRefs, evidenceRefs.",
-    "Any other sentence key, including text, kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid.",
-    `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "factRefs": [exactly 1 backendFacts ref such as "e1.p1"], "evidenceRefs": [1 to 4 short packet evidence refs such as "e1"] }] }.`,
+    "Each sentence object MUST include exactly these keys: text, evidenceRefs.",
+    "Any other sentence key, including factRefs, kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid in the live narration contract.",
+    `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "text": "player-visible narrative prose", "evidenceRefs": [1 to 4 short packet evidence refs such as "e1"] }] }.`,
     "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
     ...(openingScene
       ? [
-          "Opening scene pages establish a playable start page: immediate locus/opening lens, one live pressure or sensory texture beat, and first handles for action. When lens, visible-person, or route/action-handle backendFacts are listed, include them. Select 3-5 different backendFacts across 3-5 sentence objects, skip overlapping facts that repeat the same subject/action, and keep broad lore digest behind local playable handles.",
+          "Opening scene pages establish a playable start page: immediate concrete locus, one live pressure or sensory texture beat, visible people only when clearly present, and a handoff to player agency. Do not look for route-list backendFacts; exact route labels belong to UI/map surfaces. Select 3-5 different backendFacts across 3-5 sentence objects, skip overlapping facts that repeat the same subject/action, and keep broad lore digest behind local playable handles.",
         ]
       : []),
     "If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects.",
-    "Do not output text, kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata and compiles player-visible prose from factRefs and evidenceRefs.",
+    "Do not output factRefs, kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata from text and evidenceRefs.",
     "Every sentence must cite 1-4 short refs from [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]; HARD CAP: each evidenceRefs array MUST contain <= 4 refs, never 5 or more.",
     "If one sentence has many supporting packet facts, cite only the strongest 1-4 short refs or split/prioritize details while staying within the 1-5 sentence limit.",
     "Never put diagnostic source ids, UUIDs, tool result ids, actor ids, or item ids in evidenceRefs; use only short refs listed in [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs].",
     "Do not invent evidenceRefs. A ref is valid only when the same literal short ref appears below as a narratable packet evidence ref.",
-    "Runtime fact ownership is strict: factRefs selects backend-owned facts; the model does not author factual prose.",
-    "Every sentence object MUST include exactly one listed backendFacts ref in factRefs, such as e1.s1 or e1.p1; never repeat the same factRef in another sentence.",
-    "Use evidenceRefs for support. Do not repeat a quote factRef just to support later claim facts.",
-    "Use e1.s1 for the backend-owned evidence summary and e1.p1 for listed precision facts. The backend expands the selected factRef into player-visible text.",
-    "Rows or details without a backendFacts= field are support context only and are not legal evidenceRefs or factRefs.",
-    "Never write NPC answers, route/access status, pressure, visible changes, formal wording, bell timing, seal types, docket rules, route labels, or document wording yourself; select the matching backendFacts refs.",
-    "Never introduce a new formal phrase, bell time, seal type, docket rule, route label, document wording, NPC answer, or route/access status outside backend-owned factRefs.",
+    "Runtime fact ownership is strict: evidenceRefs select backend-owned facts; text authors player-facing prose inside those evidence boundaries.",
+    "Use backendFacts as hard-fact support material, not as default sentence copy. Preserve exact labels, quotes, formal wording, route labels, times, item custody, movement, injury, resource, relationship, and secret/world facts when the sentence states them.",
+    "Rows or details without a backendFacts= field are support context only and are not legal evidenceRefs.",
+    "Never invent NPC answers, route/access status, pressure, visible changes, formal wording, bell timing, seal types, docket rules, route labels, or document wording; cite the matching evidenceRefs and phrase only within their hard-fact limits.",
     "The narratable evidenceRefs list intentionally excludes player_action_request, anchor_event, guardrail, control_return, raw tool_result support rows, support-only visible actors, and the anchor player-action committed_event because they are context, not proof of the settled world.",
     "Do not use player_action_request as the only evidence for success, possession, access, movement, route truth, inventory, NPC consent, object existence, threat, hazard, blocker, or changed world state.",
     "player_action_request and anchor_event prove what the player attempted or asked; they do not prove the NPC answer, route/access truth, permission, possession, threat, hazard, blocker, or result.",
@@ -1852,7 +1849,7 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "When an observation tool makes pressure, risk, route leverage, visible personnel, camera, barrier, witness, or exit information narratable, cite the short ref for the observation_result evidence for that observation.",
     "If the only relevant packet evidence seems to be a raw tool_result support row, cite its paired perceivable_effect short ref instead.",
     "Current carried/equipped/signature inventory rows are support context unless explicitly exposed with backendFacts. For acquire/drop/equip/transfer changes, cite the committed event or perceivable effect that explicitly states the change.",
-    "For movement, route reveal, location creation, or time-passage rows, the row summary may be a support-only state receipt; use only the listed backendFacts precision refs for player-visible prose.",
+    "For movement, route reveal, location creation, or time-passage rows, the row summary may be a support-only state receipt; use only cited backend facts as hard-fact support and phrase the visible scene naturally.",
     "For atmosphere or connective prose, use present actors from the player-facing packet as context, but cite perceivable_response, perceivable_effect, hint_signal, world_thread_signal, or a non-anchor committed_event as the narratable evidence.",
     "",
     "[NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]",
@@ -1967,8 +1964,8 @@ For observation-grounded turns, use [PLAYER-VISIBLE OBSERVATIONS] and observatio
 Treat the raw player action as an attempted request, not as proof that the action already succeeded.
 Do not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.
 If a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.
-Return the final narration as the compact structured draft object required by [GROUNDED SENTENCE DRAFT CONTRACT]; select backend-owned factRefs instead of writing player-visible fact prose yourself.
-Do not output sentences[].text, tool syntax, or backend metadata.
+Return the final narration as the compact structured draft object required by [GROUNDED SENTENCE DRAFT CONTRACT]; write player-visible prose in sentences[].text and cite evidenceRefs.
+Do not output sentences[].factRefs, tool syntax, or backend metadata.
 Keep the output bounded to what the player can perceive in this scene.
 End on a concrete playable next moment rather than closing the scene with generic reflection.
 Return only the structured draft object. No markdown. No prose outside the structured output.`

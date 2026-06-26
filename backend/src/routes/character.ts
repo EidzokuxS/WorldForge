@@ -105,11 +105,24 @@ function resolvePlayerStartPlacement(
   allLocations: CampaignLocationCandidate[],
 ): PlayerStartPlacement {
   if (matchedLocation.kind !== "persistent_sublocation") {
+    const childScenes = allLocations.filter((location) =>
+      location.kind === "persistent_sublocation"
+      && location.parentLocationId === matchedLocation.id,
+    );
+    const selectedScene =
+      childScenes.find((location) => location.isStarting)
+      ?? (childScenes.length === 1 ? childScenes[0] : null);
+    if (!selectedScene) {
+      return {
+        ok: false,
+        error: `Starting location "${matchedLocation.name}" must resolve to one concrete sublocation before play.`,
+      };
+    }
     return {
       ok: true,
       broadLocationId: matchedLocation.id,
-      sceneLocationId: matchedLocation.id,
-      matchedLocation,
+      sceneLocationId: selectedScene.id,
+      matchedLocation: selectedScene,
     };
   }
 

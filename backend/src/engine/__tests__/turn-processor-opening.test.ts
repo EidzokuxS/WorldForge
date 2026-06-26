@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildOpeningNarrationEvidence,
   collectOpeningImmediateNpcNames,
   selectOpeningEvidenceCandidates,
   type OpeningEvidenceCandidate,
 } from "../turn-processor.js";
 import type { SceneAssembly } from "../scene-assembly.js";
+import type { WorldBrainSceneDirection } from "../world-brain.js";
 
 describe("opening narration evidence selection", () => {
   it("uses clear awareness names as immediate opening NPC handles", () => {
@@ -52,7 +54,7 @@ describe("opening narration evidence selection", () => {
       {
         slot: "local_lens",
         sourcePath: "opening.currentScene.name",
-        summary: "You are at The Copper Tap.",
+        summary: "You are in The Copper Tap.",
       },
       {
         slot: "immediate_pressure",
@@ -71,8 +73,8 @@ describe("opening narration evidence selection", () => {
       },
       {
         slot: "action_handle",
-        sourcePath: "opening.currentScene.connectedPaths",
-        summary: "From The Copper Tap, the clearest ways out point toward Lowwater Bazaar and Silt Warrens.",
+        sourcePath: "opening.playerPerceivableSceneDirection.sceneQuestion",
+        summary: "What do you do before the sluice fire catches another seal?",
       },
       {
         slot: "scene_texture",
@@ -95,10 +97,87 @@ describe("opening narration evidence selection", () => {
 
     expect(selected.map((candidate) => candidate.sourcePath)).toEqual([
       "opening.currentScene.name",
-      "opening.currentScene.description[0]",
       "opening.entryPressure[0]",
       "opening.presentNpcNames",
-      "opening.currentScene.connectedPaths",
+      "opening.playerPerceivableSceneDirection.sceneQuestion",
+      "opening.sceneContextLines[0]",
     ]);
+    expect(selected.map((candidate) => candidate.slot)).not.toContain("scene_texture");
+  });
+
+  it("keeps route labels out of opening narration evidence", () => {
+    const visibleDirection: WorldBrainSceneDirection = {
+      situationSummary: "Rainwater gathers at the ticket gates while the crowd hesitates.",
+      sceneQuestion: "What do you do before the crowd closes around you?",
+      focalActorNames: ["Tiamat"],
+      backgroundActorNames: [],
+      presenceReasons: [],
+      causalBeats: [
+        {
+          summary: "Fluorescent lights buzz over a stalled ticket gate.",
+          perceivable: true,
+        },
+      ],
+      narrationGuardrails: [],
+    };
+    const sceneAssembly = {
+      openingScene: true,
+      openingState: {
+        active: true,
+        locationId: "loc-shibuya-side-street",
+        locationName: "Shibuya Side Street",
+        arrivalMode: "on-foot",
+        startingVisibility: "noticed",
+        immediateSituation: "A commuter wave breaks around the narrow side street.",
+        entryPressure: ["sirens cut in and out beyond the station glass"],
+        promptLines: [],
+        sceneContextLines: [],
+      },
+      currentScene: {
+        id: "loc-shibuya-side-street",
+        name: "Shibuya Side Street",
+        description: "Rain beads on closed shutters under a flickering station sign.",
+        tags: ["urban", "station-edge"],
+        kind: "persistent_sublocation",
+        connectedPaths: [
+          { label: "Tokyo Jujutsu High" },
+          { label: "Shibuya Scramble Crossing Rally Point" },
+        ],
+      },
+      presentNpcNames: [],
+      sceneDirection: visibleDirection,
+      playerPerceivableSceneDirection: visibleDirection,
+      awareness: {
+        contract: {},
+        byNpcName: {},
+        clearNpcNames: [],
+        hintSignals: [],
+      },
+      recentContext: [],
+      sceneEffects: [],
+      playerPerceivableConsequences: [],
+    } as unknown as SceneAssembly;
+
+    const evidence = buildOpeningNarrationEvidence({
+      campaignId: "campaign-1",
+      currentTick: 0,
+      sceneAssembly,
+      visibleDirection,
+      visibleSummary: visibleDirection.situationSummary,
+      allowedPresenceActorNames: [],
+      forbiddenTerms: [],
+    });
+    const evidenceText = [
+      ...evidence.evidenceLedger.map((entry) => `${entry.summary} ${entry.sourceId}`),
+      ...evidence.sourceLinkedSummaries.map((summary) => summary.summary),
+    ].join("\n");
+
+    expect(evidenceText).toContain("You are in Shibuya Side Street.");
+    expect(evidenceText).toContain("What do you do before the crowd closes around you?");
+    expect(evidenceText).not.toContain("The opening moment starts");
+    expect(evidenceText).not.toContain("The next move belongs");
+    expect(evidenceText).not.toContain("Tokyo Jujutsu High");
+    expect(evidenceText).not.toContain("Shibuya Scramble Crossing Rally Point");
+    expect(evidenceText).not.toContain("connectedPaths");
   });
 });

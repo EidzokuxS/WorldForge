@@ -2983,10 +2983,21 @@ function entryMatchesQuery(entry: LocalObservationSurfaceEntry, queryText: strin
 }
 
 function localObservationRequiresSurfaceContentProof(effect: LocalObservationEffect): boolean {
-  if (effect.mode !== "target_match") return false;
-  if (!effect.targetRef || !effect.allowBoundedNegative) return false;
+  if (effect.mode !== "target_match" && effect.mode !== "list_surface") return false;
+  if (!effect.allowBoundedNegative) return false;
   const query = normalizeObservationMatch(effect.queryText);
-  return [
+  const asksForSurfaceContent = [
+    "destination name",
+    "public destination",
+    "visible instruction",
+    "visible instructions",
+    "readable instruction",
+    "readable instructions",
+    "top page",
+    "visible label",
+    "visible labels",
+  ].some((marker) => query.includes(marker));
+  const asksForTargetProperty = [
     "hidden mechanism",
     "mechanism",
     "useful clue",
@@ -3012,12 +3023,12 @@ function localObservationRequiresSurfaceContentProof(effect: LocalObservationEff
     "damaged",
     "reveals a route",
     "reveal a route",
-    "visible label",
-    "visible labels",
     "means anything",
     "mean anything",
     "meaning",
   ].some((marker) => query.includes(marker));
+  if (effect.mode === "list_surface") return asksForSurfaceContent;
+  return Boolean(effect.targetRef) && (asksForSurfaceContent || asksForTargetProperty);
 }
 
 function localObservationTargetRefCanUseIdentityMatch(
@@ -3173,7 +3184,9 @@ function executeLocalObservation(input: {
   let matchedEntries: LocalObservationSurfaceEntry[] = [];
   let resultKind: LocalObservationResult["resultKind"];
   if (effect.mode === "list_surface") {
-    matchedEntries = entries.slice(0, 12);
+    matchedEntries = localObservationRequiresSurfaceContentProof(effect)
+      ? uniqueObservationEntries(entries.filter((entry) => entryMatchesQuery(entry, effect.queryText))).slice(0, 12)
+      : entries.slice(0, 12);
     resultKind = matchedEntries.length > 0 ? "positive_list" : "bounded_no_match";
   } else if (
     effect.targetRef
@@ -3279,9 +3292,10 @@ function deviceSurfaceForEffect(input: {
 
 function noRequestedDeviceSurfaceSummary(deviceLabel: string, unavailableFacetKinds: readonly DeviceFacetKind[]): string {
   const labels = uniqueDeviceFacetKinds(unavailableFacetKinds).map(deviceFacetKindLabel);
-  const facetText = deviceFacetKindListLabel(unavailableFacetKinds);
-  const verb = labels.length === 1 ? "appears" : "appear";
-  return `No requested ${facetText} ${verb} on ${deviceLabel}'s visible surface.`;
+  const checkLabel = labels.length === 1
+    ? `requested ${labels[0]} check`
+    : "requested surface check";
+  return `${deviceLabel}'s visible surface shows no readable public result for the ${checkLabel}.`;
 }
 
 function deviceFacetSummary(input: {

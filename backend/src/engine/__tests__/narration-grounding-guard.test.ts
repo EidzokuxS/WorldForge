@@ -1491,7 +1491,29 @@ describe("grounded sentence draft compiler", () => {
     );
   });
 
-  it("requires factRefs in the live final narration path and keeps text placeholders legacy-only", () => {
+  it("accepts authored text in the live final narration path with packet evidence refs", () => {
+    const packet = createPacket();
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            text: "The clerk's warning lands before dusk, leaving the inspection pressure alive in the room.",
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "The clerk's warning lands before dusk, leaving the inspection pressure alive in the room.",
+    );
+    expect(draft.claims[0]?.evidenceRefs).toEqual(["perceivable_response:response-clerk-warning"]);
+  });
+
+  it("still supports the legacy exact factRef mode when explicitly required", () => {
     const packet = createPacket();
 
     expect(() =>

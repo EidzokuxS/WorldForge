@@ -18,3 +18,10 @@ Core rules:
   through normal runtime logic.
 - No regex/prose banlists, repair loops, gameplay fallbacks, deterministic
   narrator replacement, or hidden broad-roster UI.
+- Current prose donor is `Zetta Onyx v1.54` from
+  `R:\Projects\SillytavernUpgrade\Template`, verified through the Template
+  preset inspector. Older 1.37 notes are archive context only.
+- Player/world name spelling in Russian proof notes: `Тиамат`.
+- Opening recovery includes initial staging: concrete player start scene,
+  visible-at-start NPCs, nearby-not-visible state, offscreen key-NPC starts,
+  entry vectors, and map discovery/unknown boundaries before first prose.

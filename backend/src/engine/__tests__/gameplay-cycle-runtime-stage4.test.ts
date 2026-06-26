@@ -1598,12 +1598,48 @@ describe("clean Stage 4 executor DB contracts", () => {
       },
     });
     const summary = result.execution?.receipts[0]?.publicResult.summary ?? "";
-    expect(summary).toBe("No requested message indicator appears on Burner phone's visible surface.");
+    expect(summary).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(summary).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change/iu);
     const clock = getSqliteConnection()
       .prepare("SELECT world_version AS worldVersion, world_time_minutes AS worldTimeMinutes, current_tick AS currentTick FROM world_clocks WHERE campaign_id = ?")
       .get(CAMPAIGN_ID) as { worldVersion: number; worldTimeMinutes: number; currentTick: number };
     expect(clock).toEqual({ worldVersion: 0, worldTimeMinutes: 0, currentTick: 0 });
+  });
+
+  it("keeps multi-facet device no-surface prose generic instead of listing signal, battery, calls, or messages", async () => {
+    const inputFrame = deviceSurfaceFrame({
+      facets: [],
+      availableFacetKinds: [],
+      playerAction: "I check the phone screen for signal, battery, missed calls, messages, or anything open.",
+    });
+
+    const result = await runCleanStage4Execution({
+      frame: inputFrame,
+      checklist: deviceSurfaceChecklist(inputFrame, {
+        facetKinds: [
+          "screen_state",
+          "signal_indicator",
+          "battery_indicator",
+          "call_indicator",
+          "message_indicator",
+          "notification_indicator",
+        ],
+        requestedFacetText: "screen state, signal indicator, battery indicator, call indicator, message indicator, and notification indicator",
+        allowNoSurface: true,
+      }),
+    });
+
+    const summary = result.execution?.receipts[0]?.publicResult.summary ?? "";
+    expect(summary).toBe("Burner phone's visible surface shows no readable public result for the requested surface check.");
+    expect(summary).not.toMatch(/signal|battery|message|call|notification|screen|no messages|no calls|no signal|nothing changed|no change/iu);
+    expect(result.execution?.receipts[0]?.publicResult.deviceSurfaceObservation?.unavailableFacetKinds).toEqual([
+      "screen_state",
+      "signal_indicator",
+      "battery_indicator",
+      "call_indicator",
+      "message_indicator",
+      "notification_indicator",
+    ]);
   });
 
   it("requires an authoritative world clock row before item_transfer execution", async () => {
@@ -3492,6 +3528,52 @@ describe("clean Stage 4 executor DB contracts", () => {
         localObservation: {
           resultKind: "bounded_no_match",
           queryText: "visible threading, contact seating, or relay hardware marks on Brass Tube",
+          targetLabel: null,
+          matchedEntries: [],
+          searchedSurfaceKinds: ["inventory_item", "visible_fact"],
+          boundedNegative: true,
+        },
+      },
+    });
+
+    const manifestSurfaceContentFrame: AuthoritativeSceneFrame = {
+      ...inventoryFrame,
+      frameId: "frame-stage4-local-observation-manifest-surface-content",
+      turnId: "clean-turn-stage4-local-observation-manifest-surface-content",
+      playerAction: "I check the Delivery manifest top page for a public destination name or visible instruction.",
+      inventory: [{ ref: "Delivery manifest", label: "Delivery manifest", equipState: "carried", tags: [] }],
+      citableRefs: ["Player", "Market", "Delivery manifest"],
+    };
+    const manifestSurfaceContentChecklist = checklistForKind("local_observation", manifestSurfaceContentFrame);
+    manifestSurfaceContentChecklist.steps[0] = {
+      ...manifestSurfaceContentChecklist.steps[0]!,
+      targetRefs: ["Delivery manifest", "Market"],
+      evidenceRefs: ["Player", "Market", "Delivery manifest"],
+      intended: {
+        ...manifestSurfaceContentChecklist.steps[0]!.intended,
+        localObservationPlan: {
+          actorRef: "Player",
+          mode: "list_surface",
+          queryText: "whether the Delivery manifest top page shows a public destination name or visible instruction",
+          targetRef: null,
+          surfaceKinds: ["inventory_item", "visible_fact"],
+          allowBoundedNegative: true,
+          anchorRef: "Market",
+        },
+      },
+    };
+    const manifestSurfaceContent = await runCleanStage4Execution({
+      frame: manifestSurfaceContentFrame,
+      checklist: manifestSurfaceContentChecklist,
+    });
+    expect(manifestSurfaceContent.execution?.receipts[0]).toMatchObject({
+      capabilityId: "local_observation",
+      status: "accepted",
+      publicResult: {
+        summary: "No visible evidence answers \"whether the Delivery manifest top page shows a public destination name or visible instruction\" among inventory items and visible facts.",
+        localObservation: {
+          resultKind: "bounded_no_match",
+          queryText: "whether the Delivery manifest top page shows a public destination name or visible instruction",
           targetLabel: null,
           matchedEntries: [],
           searchedSurfaceKinds: ["inventory_item", "visible_fact"],

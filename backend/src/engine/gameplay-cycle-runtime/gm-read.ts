@@ -201,11 +201,12 @@ const gmReadGenerationUncertaintySchema = z.object({
   basis: z.string().trim().max(500).nullable().optional(),
 }).strict();
 
-const gmReadGenerationActionInterpretationSchema = (
-  gmReadActionInterpretationSchema as unknown as {
-    safeExtend: (shape: Record<string, z.ZodType>) => z.ZodType;
-  }
-).safeExtend({
+const gmReadActionInterpretationGenerationShape = (
+  gmReadActionInterpretationSchema as unknown as { shape: z.ZodRawShape }
+).shape;
+
+const gmReadGenerationActionInterpretationSchema = z.object({
+  ...gmReadActionInterpretationGenerationShape,
   method: z.string().trim().max(500).nullable().optional(),
   targetRefs: z.array(gmReadGenerationModelSafeRef).max(12).optional(),
   itemTransferNeed: gmReadGenerationItemTransferNeedSchema.nullable().optional(),
@@ -213,7 +214,7 @@ const gmReadGenerationActionInterpretationSchema = (
   timePassageNeed: gmReadGenerationTimePassageNeedSchema.nullable().optional(),
   sceneBeatNeed: gmReadGenerationSceneBeatNeedSchema.nullable().optional(),
   localObservationNeed: gmReadGenerationLocalObservationNeedSchema.nullable().optional(),
-});
+}).strict();
 
 export const gmReadModelGenerationSchema = gmReadSchema.extend({
   situationSummary: gmReadGenerationRepairableText,
@@ -840,6 +841,23 @@ function normalizeGmReadStraySceneBeatKindCandidate(input: {
   };
 }
 
+function normalizeGmReadIrrelevantSceneBeatNeedCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const actionInterpretation = candidate.actionInterpretation;
+  if (!isRecord(actionInterpretation)) return candidate;
+  if (!isRecord(actionInterpretation.sceneBeatNeed)) return candidate;
+  if (actionInterpretation.interactionKind !== "current_scene_observation") return candidate;
+  if (!isRecord(actionInterpretation.localObservationNeed)) return candidate;
+
+  return {
+    ...candidate,
+    actionInterpretation: {
+      ...actionInterpretation,
+      sceneBeatNeed: undefined,
+    },
+  };
+}
+
 function normalizeGmReadUnsupportedGiveToVisibleActorNeedCandidate(input: {
   candidate: unknown;
   frame: AuthoritativeSceneFrame;
@@ -977,8 +995,10 @@ function normalizeGmReadCandidateForValidation(input: {
     candidate: normalizedStrayLocalCondition,
     frame: input.frame,
   });
+  const normalizedIrrelevantSceneBeat =
+    normalizeGmReadIrrelevantSceneBeatNeedCandidate(normalizedStraySceneBeat);
   const normalizedUnsupportedGiveToActor = normalizeGmReadUnsupportedGiveToVisibleActorNeedCandidate({
-    candidate: normalizedStraySceneBeat,
+    candidate: normalizedIrrelevantSceneBeat,
     frame: input.frame,
   });
   const normalizedSameItemTransferCondition =
@@ -2523,6 +2543,7 @@ export function buildGmReadSystemPrompt(): string {
     "When a scene_local_beat also mentions keeping an already-inventory item close/ready without changing custody or equipment, keep the item phrase inside sceneBeatNeed.requestedBeatText and leave itemTransferNeed null.",
     "When the player simply asks whether an obvious mundane prop such as a stool, chair, cup, broom, curtain, counter, crate, or table is available in a location where it is plainly plausible, use scene_local_beat with a bounded availability/readiness beat instead of localObservationNeed over enumerated surfaces.",
     "When the player listens, smells, feels air/temperature, or otherwise asks for ordinary ambient sensory texture from a current-scene surface, prop, fixture, backdrop, crowd, or background chatter, use scene_local_beat with beatKind=local_interaction. This authorizes only a one-turn sensory/social beat for prose; it does not prove pressure, leaks, codes, hidden mechanisms, structural safety, danger, resources, routes, activation, exact dialogue quotes, NPC private knowledge, or future availability.",
+    "When sensory wording asks what can be inferred from the texture, including whether a sound is coming closer, moving away, approaching the player, coming from a direction/source, connected to danger/safety, or otherwise proving a current property/outcome, use current_scene_observation with localObservationNeed targetRef=null, surfaceKinds including current_scene and visible_fact when available, and allowBoundedNegative=true.",
     "For scene_local_beat, fill sceneBeatNeed. Use beatKind=ordinary_prop_availability when the player only checks whether a mundane prop is available. Use beatKind=ordinary_prop_readiness when the player grabs, holds, braces, or keeps an ordinary prop ready for the immediate beat. Use local_interaction for other one-turn ordinary prop/fixture interactions.",
     "If the player wants durable carry/equip/storage, trade, hidden-property inspection, activation, repair, tracking, special mechanical advantage, future-important use, or a persistent named object, use the appropriate modeled primitive when a SceneFrame ref exists, or clarification/unsupported_or_unclear when it does not.",
     "If the player puts on, wears, straps on, slings onto shoulder/back, fastens onto themselves, or otherwise moves a carried inventory item into a worn/equipped state, use item_transfer with operation=equip_inventory_item.",
@@ -2542,7 +2563,7 @@ export function buildGmReadSystemPrompt(): string {
     "For yes/no visible-surface checks phrased as look for X, any X, signs of X, or visible X, make localObservationNeed.queryText a grammatical whether-shaped query such as \"whether visible sparks, heat shimmer, or warning tags are present\". Do not leave queryText as a bare noun phrase that would make receipt prose read as answers visible sparks.",
     "For harmless surface details, wear, marks, scratches, smell, or texture on an exposed item or target, use localObservationNeed over that exposed surface with targetRef copied from the known item/target. The queryText should ask only for ordinary visible/sensory surface texture. Clue meaning, hidden discovery, activation, and mechanism checks use the separate property/outcome route below.",
     "When the player asks whether visible wear, marks, scratches, or handling detail on a known item/target reveals a hidden mechanism, secret, route, or useful clue, set localObservationNeed.targetRef=null and queryText to the requested property/outcome. A targetRef to the known item/target proves only that exposed entry exists; it must not answer hidden/mechanical/clue meaning.",
-    "When ordinary ambient listening/smelling/feeling asks only for scene texture, crowd noise, background argument, or tavern/street chatter, keep it scene_local_beat; when the same sensory wording asks whether the texture proves a consequential property or outcome such as pressure, leak source, code, hidden mechanism, safety, danger, activation, route truth, exact quoted speech, private knowledge, or a useful clue, use current_scene_observation with localObservationNeed targetRef=null and allowBoundedNegative=true.",
+    "When ordinary ambient listening/smelling/feeling asks only for scene texture, crowd noise, background argument, or tavern/street chatter, keep it scene_local_beat; when the same sensory wording asks whether the texture proves a consequential property or outcome such as pressure, leak source, approach/proximity, direction/source, code, hidden mechanism, safety, danger, activation, route truth, exact quoted speech, private knowledge, or a useful clue, use current_scene_observation with localObservationNeed targetRef=null and allowBoundedNegative=true.",
     "For ordinary one-turn tactile or physical probes that explicitly ask to learn whether current-scene texture shifts, holds, reveals something, or has a property, such as nudging rubble, testing footing, touching a wall, or checking whether a loose surface shifts, use localObservationNeed mode=target_match, targetRef=null, surfaceKinds=[\"current_scene\"], and allowBoundedNegative=true. Do not use this observation route for the plain immediate action of stepping onto a plausible loose board, balancing on a brick, leaning on a crate, or ducking behind a counter; those stay scene_local_beat unless the player explicitly asks for a property/outcome check. Do not cite the current scene or location as targetRef merely because the probe happens there; the receipt owns only the bounded visible/sensory query, not a durable object, item pickup, mutation, hidden mechanism, or route discovery.",
     "For who/anyone/people/person/NPC visible nearby or here, use localObservationNeed mode=list_surface, surfaceKinds=[\"visible_actor\"], targetRef=null, and allowBoundedNegative=true.",
     "For looking around or searching for a named person, role, or NPC in the current scene, use localObservationNeed mode=target_match, surfaceKinds=[\"visible_actor\"], targetRef=null, and queryText with the searched name or role. This produces a bounded visible-actor check and does not create the named actor.",
@@ -2876,7 +2897,7 @@ export function buildGmReadPrompt(
     "Priority: plain immediate action verbs such as step onto, balance on, lean on, duck behind, grab, hold, brace, kick aside, or set between stay scene_local_beat. Use current_scene_observation for a prop only when the player explicitly asks to check/test/inspect whether it shifts, holds, reveals something, has a hidden property, or proves an outcome.",
     "If this immediate scene-prop beat also says to keep an already-inventory item close or ready, keep that phrase in sceneBeatNeed.requestedBeatText and leave itemTransferNeed and localConditionNeed empty.",
     "When the player asks whether an obvious ordinary prop is available in a plausible place, choose interactionKind=scene_local_beat and phrase playerIntent as a bounded current-scene availability beat, for example Ordinary stool/chair is within easy reach for this beat.",
-    "When the player listens, smells, or feels for ordinary ambient scene texture from a surface, prop, fixture, backdrop, crowd, or background chatter, choose interactionKind=scene_local_beat and phrase playerIntent as a natural sensory/social scene beat. A look-around action combined with listening to crowd argument or tavern chatter should still preserve the listening beat instead of collapsing into a generic visible-entry list. Keep classifier terms such as harmless, low-stakes, soft prose, authority, or scene beat out of playerIntent and sceneBeatNeed.requestedBeatText because those fields may shape visible narration. Use current_scene_observation only when the player asks what the sensory detail proves about a consequential property, mechanism, route, danger, safety, resource, activation, code, exact quote, private knowledge, or useful clue.",
+    "When the player listens, smells, or feels for ordinary ambient scene texture from a surface, prop, fixture, backdrop, crowd, or background chatter, choose interactionKind=scene_local_beat and phrase playerIntent as a natural sensory/social scene beat. A look-around action combined with listening to crowd argument or tavern chatter should still preserve the listening beat instead of collapsing into a generic visible-entry list. Keep classifier terms such as harmless, low-stakes, soft prose, authority, or scene beat out of playerIntent and sceneBeatNeed.requestedBeatText because those fields may shape visible narration. Use current_scene_observation only when the player asks what the sensory detail proves about a consequential property, approach/proximity, direction/source, mechanism, route, danger, safety, resource, activation, code, exact quote, private knowledge, or useful clue.",
     "Examples include grabbing or holding a nearby stool/chair as improvised cover, stepping lightly onto a loose board/brick, bracing a door with a loose chair, kicking a crate aside, ducking behind a counter, or breaking an unimportant chair during a scuffle.",
     "This shape records a visible turn event only. It does not create inventory, durable object state, cover effectiveness, hidden mechanisms, combat advantage, resource change, world facts, or future availability.",
     "For this frame, a valid immediate ordinary prop beat example shape is:",
@@ -2966,6 +2987,26 @@ export function buildGmReadPrompt(
           beatKind: "local_interaction",
           requestedBeatText: "Listen to ordinary pipes for their current sound in the damp cellar",
           anchorRef: frame.scene.currentScene.ref,
+          evidenceRefs: ["Player", frame.scene.currentScene.ref],
+        },
+      },
+    }, null, 2),
+    "For this frame, a valid sensory inference example shape is:",
+    JSON.stringify({
+      path: "procedural",
+      liveSceneQuestion: "What can the Player tell from the current sound without moving closer?",
+      actionInterpretation: {
+        interactionKind: "current_scene_observation",
+        playerIntent: "Listen for whether the sound is coming toward the Player.",
+        method: "listen without moving closer",
+        targetRefs: [frame.scene.currentScene.ref],
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether the sound is coming toward the Player",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
           evidenceRefs: ["Player", frame.scene.currentScene.ref],
         },
       },

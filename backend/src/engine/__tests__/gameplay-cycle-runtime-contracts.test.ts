@@ -3263,6 +3263,60 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
       .toBe("Duck behind an iron signal drum for this beat");
   });
 
+  it("ignores irrelevant sceneBeatNeed when current_scene_observation carries localObservationNeed", async () => {
+    const frame = itemTransferActionPlanFrame({
+      playerAction: "I check the manifest for a visible destination on the top page.",
+      citableRefs: ["Player", "Market", "Brass Tube"],
+      targets: [],
+      movementOptions: [],
+      actors: [],
+    });
+    const candidate = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player checks a carried manifest for visible surface text.",
+      liveSceneQuestion: "What visible public surface detail can be checked?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player checks the top page of a carried manifest for visible destination text.",
+        playerIntent: "Check the delivery manifest for a public destination name or visible instruction.",
+        method: "inspect carried paper surface",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "public destination name or visible instruction on the manifest top page",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+        sceneBeatNeed: {
+          actorRef: "Player",
+          beatKind: "local_interaction",
+          requestedBeatText: "Check the delivery manifest for a public destination name or visible instruction.",
+          anchorRef: "Market",
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale: "The observation need owns the question; the scene beat is stray generation noise.",
+    };
+
+    const result = await runCleanGmRead({
+      frame,
+      provider,
+      generateCandidate: async () => candidate,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(result.read.actionInterpretation.localObservationNeed?.queryText)
+      .toBe("public destination name or visible instruction on the manifest top page");
+    expect(result.read.actionInterpretation.sceneBeatNeed).toBeUndefined();
+  });
+
   it("canonicalizes nullable GM Read liveSceneQuestion before player_local_condition validation", async () => {
     const frame = itemTransferActionPlanFrame({
       playerAction: "I keep both hands visible while staying in place.",
@@ -3359,6 +3413,92 @@ describe("gameplay-cycle-runtime primitive 2 GM Read contracts", () => {
     if (result.status !== "accepted") throw new Error("expected accepted");
     expect(result.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
     expect(result.read.actionInterpretation.localObservationNeed?.queryText).toContain("recent loose scrap");
+  });
+
+  it("routes sensory soft-detail follow-up into local observation instead of scene beat echo", async () => {
+    const frame = actionPlanFrame({
+      playerAction:
+        "I stay still and listen toward the next bend without moving closer, trying to tell whether the sound is coming toward me.",
+      scene: {
+        currentLocation: { ref: "Market", label: "Market", description: "A damp passage bends out of sight." },
+        currentScene: { ref: "Market", label: "Market", description: "A damp passage bends out of sight." },
+        visibleFacts: [],
+        recentLocalFacts: [],
+      },
+    });
+    const prompt = buildGmReadPrompt(frame);
+    const candidate: GmRead = {
+      ...validGmRead(frame),
+      path: "procedural",
+      situationSummary: "The player listens without advancing, trying to infer a current sound's movement.",
+      liveSceneQuestion: "What can the Player tell from the current sound without moving closer?",
+      focalRefs: ["Player", "Market"],
+      evidenceRefs: ["Player", "Market"],
+      actionInterpretation: {
+        summary: "The player listens toward the next bend to test whether the sound is approaching.",
+        playerIntent: "Listen for whether the sound is coming toward the Player.",
+        method: "listen without moving closer",
+        targetRefs: ["Market"],
+        interactionKind: "current_scene_observation",
+        localObservationNeed: {
+          actorRef: "Player",
+          mode: "target_match",
+          queryText: "whether the sound is coming toward the Player",
+          targetRef: null,
+          surfaceKinds: ["current_scene", "visible_fact"],
+          allowBoundedNegative: true,
+          evidenceRefs: ["Player", "Market"],
+        },
+      },
+      interpretationRationale:
+        "The posture is manner; the player asks for a bounded sensory inference from current visible/sensory surfaces.",
+    };
+
+    expect(prompt).toContain("valid sensory inference example shape");
+    expect(prompt).toContain("whether the sound is coming toward the Player");
+    expect(buildGmReadSystemPrompt()).toContain("approach/proximity");
+
+    const acceptedRead = validateGmReadCandidate({ frame, candidate });
+    expect(acceptedRead.status).toBe("accepted");
+    if (acceptedRead.status !== "accepted") throw new Error("expected accepted");
+    expect(acceptedRead.read.actionInterpretation.interactionKind).toBe("current_scene_observation");
+    expect(acceptedRead.read.actionInterpretation.localObservationNeed?.targetRef).toBeNull();
+
+    const judgment: JudgeUncertainty = {
+      ...actionPlanJudge(frame, acceptedRead.read),
+      targetRefs: ["Market"],
+      evidenceRefs: ["Player", "Market"],
+      checkRationale: "The sensory inference needs a bounded local observation receipt before narration.",
+      noRollReason: {
+        code: "backend_receipt_required",
+        explanation: "Sensory inference needs local_observation receipt authority.",
+        evidenceRefs: ["Player", "Market"],
+      },
+    };
+    expect(validateJudgeUncertaintyCandidate({ frame, gmRead: acceptedRead.read, candidate: judgment }).status)
+      .toBe("accepted");
+
+    const checklist = await runCleanGmActionChecklist({
+      frame,
+      gmRead: acceptedRead.read,
+      judgment,
+      checklistId: "gm-action-checklist-sensory-inference",
+    });
+
+    expect(checklist.status).toBe("accepted");
+    expect(checklist.checklist.steps).toHaveLength(1);
+    expect(checklist.checklist.steps[0]?.intended).toMatchObject({
+      kind: "local_observation",
+      requiredCapabilityId: "local_observation",
+      localObservationPlan: {
+        actorRef: "Player",
+        queryText: "whether the sound is coming toward the Player",
+        targetRef: null,
+        surfaceKinds: ["current_scene", "visible_fact"],
+        allowBoundedNegative: true,
+      },
+    });
+    expect(checklist.checklist.steps[0]?.intended.sceneBeatPlan).toBeUndefined();
   });
 
   it("canonicalizes stray localConditionNeed kind drift into player_local_condition", async () => {

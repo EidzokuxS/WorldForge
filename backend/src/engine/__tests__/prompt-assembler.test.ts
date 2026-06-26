@@ -1855,17 +1855,17 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("[NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]");
     expect(result.prompt).toContain("Submit exactly one GroundedSentenceDraft structured object");
     expect(result.prompt).toContain("Do not use markdown");
-    expect(result.prompt).toContain("Do not output sentences[].text");
+    expect(result.prompt).toContain("Do not output sentences[].factRefs");
     expect(result.prompt).toContain("HARD CAP: sentences.length MUST be <= 5, never 6 or more");
     expect(result.prompt).toContain("merge or prioritize them inside five or fewer sentence objects");
     expect(result.prompt).toContain("Use exactly these top-level keys: version, sentences.");
     expect(result.prompt).toContain("version MUST be \"grounded-sentence-draft.v2\".");
-    expect(result.prompt).toContain("Any other sentence key, including text");
-    expect(result.prompt).toContain("\"factRefs\": [exactly 1 backendFacts ref");
-    expect(result.prompt).toContain("never repeat the same factRef in another sentence");
+    expect(result.prompt).toContain("Any other sentence key, including factRefs");
+    expect(result.prompt).toContain("\"text\": \"player-visible narrative prose\"");
+    expect(result.prompt).toContain("Use backendFacts as hard-fact support material");
     expect(result.prompt).toContain("\"evidenceRefs\": [1 to 4 short packet evidence refs");
-    expect(result.prompt).toContain("Do not output text, kind, prose, claims, claimSpans");
-    expect(result.prompt).toContain("compiles player-visible prose from factRefs and evidenceRefs");
+    expect(result.prompt).toContain("Do not output factRefs, kind, prose, claims, claimSpans");
+    expect(result.prompt).toContain("derives internal claim metadata from text and evidenceRefs");
     expect(result.prompt).toContain("Every sentence must cite 1-4 short refs");
     expect(result.prompt).toContain("HARD CAP: each evidenceRefs array MUST contain <= 4 refs, never 5 or more");
     expect(result.prompt).toContain("cite only the strongest 1-4 short refs");
@@ -1886,7 +1886,8 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain(
       "For movement, route reveal, location creation, or time-passage rows, the row summary may be a support-only state receipt",
     );
-    expect(result.prompt).toContain("use only the listed backendFacts precision refs");
+    expect(result.prompt).toContain("use only cited backend facts as hard-fact support");
+    expect(result.prompt).toContain("phrase the visible scene naturally");
     expect(result.prompt).toContain(
       "player_action_request and anchor_event prove what the player attempted or asked; they do not prove the NPC answer",
     );
@@ -1938,10 +1939,10 @@ describe("assemblePrompt", () => {
     expect(result.prompt).not.toContain("; supports=");
     expect(result.prompt).toContain("Return only the structured draft object. No markdown. No prose outside the structured output.");
     expect(result.system).toContain("Return exactly one GroundedSentenceDraft structured object");
-    expect(result.system).toContain("sentences[].factRefs with exactly one backendFacts ref");
-    expect(result.system).toContain("Do not output sentences[].text");
-    expect(result.system).not.toContain("sentences[].text field must contain player-visible narrative prose only");
-    expect(result.prompt).toContain("Do not output sentences[].text");
+    expect(result.system).toContain("sentences[].text with player-visible prose plus evidenceRefs");
+    expect(result.system).toContain("Do not output sentences[].factRefs");
+    expect(result.system).not.toContain("sentences[].factRefs with exactly one backendFacts ref");
+    expect(result.prompt).toContain("Do not output sentences[].factRefs");
     expect(result.system).not.toContain("Your output must be narrative prose only.");
     expect(result.prompt).toContain("Iria keeps both palms open.");
     expect(result.prompt).toContain("Mira lowers the knife without dropping her guard.");
@@ -2110,7 +2111,7 @@ describe("assemblePrompt", () => {
       {
         id: "opening:0:visible-fact:1",
         category: "perceivable_effect",
-        summary: "You are at Shibuya station concourse, inside Shibuya.",
+        summary: "You are in Shibuya Station Side Street.",
         sourceId: "opening:0:visible-fact:1",
         summaryBackendFact: true,
         claimSupport: ["playable_beat"],
@@ -2128,7 +2129,7 @@ describe("assemblePrompt", () => {
       {
         id: "opening:0:visible-fact:3",
         category: "perceivable_effect",
-        summary: "Chakra saturation in the tunnels drops temperatures and shorts streetlights.",
+        summary: "What do you do before chakra saturation in the tunnels shorts another row of streetlights?",
         sourceId: "opening:0:visible-fact:3",
         summaryBackendFact: true,
         claimSupport: ["playable_beat"],
@@ -2146,12 +2147,16 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain(
       "Opening scene pages establish a playable start page",
     );
-    expect(result.prompt).toContain("When lens, visible-person, or route/action-handle backendFacts are listed, include them");
+    expect(result.prompt).toContain("Do not look for route-list backendFacts");
+    expect(result.prompt).toContain("exact route labels belong to UI/map surfaces");
     expect(result.prompt).toContain("Select 3-5 different backendFacts");
     expect(result.prompt).toContain("skip overlapping facts that repeat the same subject/action");
-    expect(result.prompt).toContain("You are at Shibuya station concourse, inside Shibuya.");
+    expect(result.prompt).toContain("You are in Shibuya Station Side Street.");
     expect(result.prompt).toContain("Civilians crowd the shopping streets and station concourses.");
-    expect(result.prompt).toContain("Chakra saturation in the tunnels drops temperatures and shorts streetlights.");
+    expect(result.prompt).toContain(
+      "What do you do before chakra saturation in the tunnels shorts another row of streetlights?",
+    );
+    expect(result.prompt).not.toContain("The opening moment starts");
   });
 
   it("isolates NarratorPacket final-visible prompts from sceneAssembly failed or skipped effect prose", async () => {
@@ -2345,7 +2350,7 @@ describe("assemblePrompt", () => {
 
     expect(result.prompt).toContain("[GROUNDED SENTENCE DRAFT CONTRACT]");
     expect(result.prompt).toContain(
-      "Do not output text, kind, prose, claims, claimSpans",
+      "Do not output factRefs, kind, prose, claims, claimSpans",
     );
     expect(result.prompt).toContain(
       "Every sentence must cite 1-4 short refs",

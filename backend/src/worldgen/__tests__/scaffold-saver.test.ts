@@ -107,8 +107,17 @@ function buildScaffold(): WorldScaffold {
         name: "Castle Keep",
         description: "A fortified castle atop a hill.",
         tags: ["fortified", "military"],
-        isStarting: true,
+        isStarting: false,
         connectedTo: ["Dark Forest"],
+      },
+      {
+        name: "Castle Gatehouse",
+        description: "A guarded gatehouse where travelers first enter the keep.",
+        tags: ["fortified", "threshold"],
+        isStarting: true,
+        connectedTo: [],
+        kind: "persistent_sublocation",
+        parentLocationName: "Castle Keep",
       },
       {
         name: "Dark Forest",
@@ -307,9 +316,9 @@ describe("saveScaffoldToDb", () => {
 
     expect(playerUpdates.at(-1)?.data).toEqual({
       currentLocationId: "uuid-1",
-      currentSceneLocationId: "uuid-1",
+      currentSceneLocationId: "uuid-2",
     });
-    expect(itemUpdates.at(-1)?.data).toEqual({ locationId: "uuid-1" });
+    expect(itemUpdates.at(-1)?.data).toEqual({ locationId: "uuid-2" });
     expect(itemUpdates.at(-1)?.where).toEqual({
       _and: [
         { _eq: { col: "items.campaignId", val: "campaign-1" } },
@@ -323,14 +332,14 @@ describe("saveScaffoldToDb", () => {
     const locationInserts = dbCalls.filter(
       (c) => c.op === "insert" && c.table === "locations",
     );
-    expect(locationInserts.length).toBe(2);
+    expect(locationInserts.length).toBe(3);
 
     const first = locationInserts[0]!.data as Record<string, unknown>;
     expect(first.name).toBe("Castle Keep");
     expect(first.campaignId).toBe("campaign-1");
     expect(first.description).toBe("A fortified castle atop a hill.");
     expect(first.tags).toBe(JSON.stringify(["fortified", "military"]));
-    expect(first.isStarting).toBe(true);
+    expect(first.isStarting).toBe(false);
     expect(first.kind).toBe("macro");
     expect(first.parentLocationId).toBeNull();
     expect(first.anchorLocationId).toBeNull();
@@ -338,6 +347,11 @@ describe("saveScaffoldToDb", () => {
     expect(first.expiresAtTick).toBeNull();
     expect(first.archivedAtTick).toBeNull();
     expect(first.connectedTo).toBe("[]");
+
+    const startingScene = getLocationByName("Castle Gatehouse");
+    expect(startingScene.isStarting).toBe(true);
+    expect(startingScene.kind).toBe("persistent_sublocation");
+    expect(startingScene.parentLocationId).toBe(getLocationByName("Castle Keep").id);
   });
 
   it("persists explicit dense scaffold sublocations with parent ids", () => {
@@ -406,14 +420,17 @@ describe("saveScaffoldToDb", () => {
     );
   });
 
-  it("keeps legacy flat scaffold locations macro-compatible", () => {
+  it("persists macro locations plus a concrete starting scene", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
 
-    for (const location of getLocationInserts()) {
-      expect(location.kind).toBe("macro");
-      expect(location.parentLocationId).toBeNull();
-      expect(location.persistence).toBe("persistent");
-    }
+    const keep = getLocationByName("Castle Keep");
+    const forest = getLocationByName("Dark Forest");
+    const gatehouse = getLocationByName("Castle Gatehouse");
+    expect(keep.kind).toBe("macro");
+    expect(forest.kind).toBe("macro");
+    expect(gatehouse.kind).toBe("persistent_sublocation");
+    expect(gatehouse.parentLocationId).toBe(keep.id);
+    expect(gatehouse.persistence).toBe("persistent");
   });
 
   it("rejects persistent sublocations with invalid explicit parent references", () => {
@@ -433,17 +450,20 @@ describe("saveScaffoldToDb", () => {
     const locationUpdates = dbCalls.filter(
       (c) => c.op === "update" && c.table === "locations",
     );
-    expect(locationUpdates.length).toBe(2);
+    expect(locationUpdates.length).toBe(3);
 
     const firstData = locationUpdates[0]!.data as Record<string, unknown>;
     const secondData = locationUpdates[1]!.data as Record<string, unknown>;
+    const thirdData = locationUpdates[2]!.data as Record<string, unknown>;
 
     const firstConnected = JSON.parse(firstData.connectedTo as string) as string[];
     const secondConnected = JSON.parse(secondData.connectedTo as string) as string[];
+    const thirdConnected = JSON.parse(thirdData.connectedTo as string) as string[];
 
-    // uuid-1 is Castle Keep, uuid-2 is Dark Forest
-    expect(firstConnected).toContain("uuid-2");
+    // uuid-1 is Castle Keep, uuid-2 is Castle Gatehouse, uuid-3 is Dark Forest
+    expect(firstConnected).toEqual(expect.arrayContaining(["uuid-2", "uuid-3"]));
     expect(secondConnected).toContain("uuid-1");
+    expect(thirdConnected).toContain("uuid-1");
   });
 
   it("updateAdjacency inserts normalized location edges with default travel cost", () => {
@@ -452,7 +472,7 @@ describe("saveScaffoldToDb", () => {
       (c) => c.op === "insert" && c.table === "location_edges",
     );
 
-    expect(edgeInserts.length).toBe(2);
+    expect(edgeInserts.length).toBe(4);
     for (const edge of edgeInserts) {
       const data = edge.data as Record<string, unknown>;
       expect(data.campaignId).toBe("campaign-1");
@@ -473,7 +493,7 @@ describe("saveScaffoldToDb", () => {
     const edgeInserts = dbCalls.filter(
       (c) => c.op === "insert" && c.table === "location_edges",
     );
-    expect(edgeInserts).toHaveLength(2);
+    expect(edgeInserts).toHaveLength(4);
     expect(edgeInserts).not.toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -489,7 +509,7 @@ describe("saveScaffoldToDb", () => {
     const firstConnected = JSON.parse(
       (locationUpdates[0]!.data as Record<string, unknown>).connectedTo as string,
     ) as string[];
-    expect(firstConnected).toEqual(["uuid-2"]);
+    expect(firstConnected).toEqual(expect.arrayContaining(["uuid-2", "uuid-3"]));
   });
 
   it("insertFactions creates rows with name, tags/goals/assets as JSON", () => {
@@ -634,7 +654,7 @@ describe("saveScaffoldToDb", () => {
     expect(getNpcInserts()).toHaveLength(0);
   });
 
-  it("keeps omitted sceneLocationName compatible with legacy broad-only placement", () => {
+  it("keeps broad-only NPC placement on the macro row until a scene is specified", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
 
     const aldric = getNpcByName("Captain Aldric");
@@ -697,14 +717,14 @@ describe("saveScaffoldToDb", () => {
       long_term: ["Keep the refugees alive", "Break the siege"],
     });
     expect(persistedNpc.tier).toBe("persistent");
-    expect(persistedNpc.currentLocationId).toBe("uuid-2");
+    expect(persistedNpc.currentLocationId).toBe("uuid-3");
     expect(characterRecord.identity.displayName).toBe("Marshal Selene Voss");
     expect(characterRecord.identity.tier).toBe("supporting");
     expect(characterRecord.profile.personaSummary).toBe(
       "Now leads from the front and trusts the village scouts.",
     );
     expect(characterRecord.socialContext).toMatchObject({
-      currentLocationId: "uuid-2",
+      currentLocationId: "uuid-3",
       currentLocationName: "Dark Forest",
       factionName: null,
     });

@@ -1344,9 +1344,9 @@ function deviceSurfaceObservationView(): CleanNarratorView {
       ref: "e1",
       authority: "device_surface_observation_receipt",
       claimKinds: ["device_surface_observation", "device_surface_unavailable"],
-      text: "No requested message indicator appears on Burner phone's visible surface.",
+      text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
       backendFacts: [
-        { factRef: "e1.f1", role: "device_surface_beat", value: "No requested message indicator appears on Burner phone's visible surface.", text: "Device surface beat: No requested message indicator appears on Burner phone's visible surface.", exact: true },
+        { factRef: "e1.f1", role: "device_surface_beat", value: "Burner phone's visible surface shows no readable public result for the requested message indicator check.", text: "Device surface beat: Burner phone's visible surface shows no readable public result for the requested message indicator check.", exact: true },
         { factRef: "e1.f2", role: "device_label", text: "Device label: Burner phone.", exact: true },
         { factRef: "e1.f3", role: "requested_surface_facets", text: "Requested surface facets: message indicator.", exact: true },
         { factRef: "e1.f4", role: "unavailable_surface_facets", text: "Unavailable surface facets: message indicator.", exact: true },
@@ -3379,9 +3379,9 @@ describe("clean Stage 6 narration contracts", () => {
     const oldFactView = deviceSurfaceObservationView();
     oldFactView.acceptedEvidence[0] = {
       ...oldFactView.acceptedEvidence[0]!,
-      text: "No requested message indicator appears on Burner phone's visible surface.",
+      text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
       backendFacts: [
-        { factRef: "e1.f1", text: "No requested message indicator appears on Burner phone's visible surface.", exact: true },
+        { factRef: "e1.f1", text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.", exact: true },
         { factRef: "e1.f2", text: "Device: Burner phone.", exact: true },
         { factRef: "e1.f3", text: "Requested surface facets: message indicator.", exact: true },
         { factRef: "e1.f4", text: "Unavailable surface facets: message indicator.", exact: true },
@@ -3675,7 +3675,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(renderCleanAuthorityProjection(withOpaqueFactText(
       deviceSurfaceObservationView(),
       "device_surface_beat",
-    ))).toBe("No requested message indicator appears on Burner phone's visible surface.");
+    ))).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(() => renderCleanAuthorityProjection(withoutFactValue(
       deviceSurfaceObservationView(),
       "device_surface_beat",
@@ -6914,7 +6914,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("For device_surface_observation");
     const text = renderCleanAuthorityProjection(deviceSurfaceObservationView());
 
-    expect(text).toBe("No requested message indicator appears on Burner phone's visible surface.");
+    expect(text).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network/iu);
     const promptInput = buildCleanNarratorPromptInput(deviceSurfaceObservationView());
     const deviceSurfaceStep = promptInput.narrativePageTask.sentencePlan.find((step) =>
@@ -6922,8 +6922,10 @@ describe("clean Stage 6 narration contracts", () => {
     );
     expect(deviceSurfaceStep?.proseMaterials.find((material) => material.factRef === "e1.f1")?.copyMode)
       .toBe("copy_exact");
+    expect(deviceSurfaceStep?.proseMaterials.map((material) => material.factRef)).toEqual(["e1.f1", "e1.f2", "e1.f5", "e1.f6"]);
     expect(deviceSurfaceStep?.materialObligations.exactCopyFactRefs).toEqual(["e1.f1"]);
     expect(deviceSurfaceStep?.materialObligations.phraseFromMaterialFactRefs).not.toContain("e1.f1");
+    expect(deviceSurfaceStep?.materialObligations.phraseFromMaterialFactRefs).toEqual([]);
 
     const unsupported = validateCleanNarrationCandidate({
       view: deviceSurfaceObservationView(),
@@ -6945,31 +6947,30 @@ describe("clean Stage 6 narration contracts", () => {
     expect(unsupported.issues.some((issue) => issue.code === "claim_not_supported")).toBe(true);
   });
 
-  it("uses model-authored device_surface_observation prose without scene_texture", async () => {
+  it("renders device_surface_unavailable as a typed hard-result without calling the model", async () => {
     const view = deviceSurfaceObservationView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(view, [{
-        text: "No requested message indicator appears on Burner phone's visible surface.",
-        evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
-        claimKinds: ["device_surface_observation", "device_surface_unavailable"],
-      }]),
+      generateCandidate: async () => {
+        throw new Error("device_surface_unavailable hard-result should not call the model");
+      },
     });
 
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("No requested message indicator appears on Burner phone's visible surface.");
+    expect(result.source).toBe("typed_hard_result");
+    expect(result.text).toBe("Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|no messages|no calls|no signal|nothing changed|no change|instructions|network|screen|lit|unlit/iu);
+    expect(result.proof?.candidate).toBeNull();
+    expect(result.proof?.validation.status).toBe("typed_hard_result");
   });
 
   it("accepts deterministic-looking device_surface_observation text by structured refs", () => {
     const result = validateCleanNarrationCandidate({
       view: deviceSurfaceObservationView(),
       candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
-        text: "No requested message indicator appears on Burner phone's visible surface.",
+        text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f5", "e1.f6"],
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
@@ -6977,30 +6978,40 @@ describe("clean Stage 6 narration contracts", () => {
     expect(result.status).toBe("accepted");
   });
 
-  it("uses accepted scene_texture for device_surface_observation prose when texture is available", async () => {
+  it("rejects device_surface_unavailable paraphrase that expands the exact bounded beat", () => {
+    const result = validateCleanNarrationCandidate({
+      view: deviceSurfaceObservationView(),
+      candidate: acceptedCandidate(deviceSurfaceObservationView(), [{
+        text: "The Burner phone stays dark at Market; its surface gives nothing back on signal, battery, notifications, messages, or call indicators.",
+        evidenceRefs: ["e1"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f5", "e1.f6"],
+        claimKinds: ["device_surface_observation", "device_surface_unavailable"],
+      }]),
+    });
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejected");
+    expect(result.issues.some((issue) =>
+      issue.code === "sentence_plan_not_supported"
+      && issue.message.includes("e1.f1")
+    )).toBe(true);
+  });
+
+  it("renders device_surface_unavailable with accepted scene_texture as a typed hard-result", async () => {
     const view = deviceSurfaceObservationWithSceneTextureView();
     const result = await runCleanNarration({
       narratorView: view,
       provider,
-      generateCandidate: async () => acceptedCandidate(view, [
-        {
-          text: "Rain taps the brass gutters.",
-          evidenceRefs: ["e2"],
-          backendFactRefs: ["e2.f2"],
-          claimKinds: ["scene_texture"],
-        },
-        {
-          text: "No requested message indicator appears on Burner phone's visible surface.",
-          evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
-          claimKinds: ["device_surface_observation", "device_surface_unavailable"],
-        },
-      ]),
+      generateCandidate: async () => {
+        throw new Error("device_surface_unavailable hard-result should not call the model");
+      },
     });
 
-    expect(result.source).toBe("model");
-    expect(result.text).toBe("Rain taps the brass gutters. No requested message indicator appears on Burner phone's visible surface.");
+    expect(result.source).toBe("typed_hard_result");
+    expect(result.text).toBe("Canvas awnings hang over the market lanes. Burner phone's visible surface shows no readable public result for the requested message indicator check.");
     expect(result.text).not.toMatch(/frame\/worldVersion|message_indicator|private message|no messages|no calls|no signal|nothing changed|no change|instructions|network|sender|caller/iu);
+    expect(result.proof?.candidate).toBeNull();
+    expect(result.proof?.validation.status).toBe("typed_hard_result");
   });
 
   it("accepts device_surface_observation prose with structurally cited texture choices", () => {
@@ -7008,9 +7019,9 @@ describe("clean Stage 6 narration contracts", () => {
     const missingTexture = validateCleanNarrationCandidate({
       view,
       candidate: acceptedCandidate(view, [{
-        text: "No requested message indicator appears on Burner phone's visible surface.",
+        text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
         evidenceRefs: ["e1"],
-        backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+        backendFactRefs: ["e1.f1", "e1.f2", "e1.f5", "e1.f6"],
         claimKinds: ["device_surface_observation", "device_surface_unavailable"],
       }]),
     });
@@ -7026,9 +7037,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "No requested message indicator appears on Burner phone's visible surface.",
+          text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f5", "e1.f6"],
           claimKinds: ["device_surface_observation", "device_surface_unavailable"],
         },
       ]),
@@ -7048,9 +7059,9 @@ describe("clean Stage 6 narration contracts", () => {
           claimKinds: ["scene_texture"],
         },
         {
-          text: "No requested message indicator appears on Burner phone's visible surface.",
+          text: "Burner phone's visible surface shows no readable public result for the requested message indicator check.",
           evidenceRefs: ["e1"],
-          backendFactRefs: ["e1.f1", "e1.f2", "e1.f3", "e1.f4"],
+          backendFactRefs: ["e1.f1", "e1.f2", "e1.f5", "e1.f6"],
           claimKinds: ["device_surface_observation", "device_surface_unavailable"],
         },
       ]),
@@ -7465,15 +7476,17 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("Style role: write playable text-RPG adventure prose from accepted facts");
     expect(buildCleanNarrationSystemPrompt()).toContain("Default successful turns use one to three short fiction beats");
     expect(buildCleanNarrationSystemPrompt()).toContain("Adventure prose floor:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Opening scene handling:");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Treat opening fact summaries as raw material, not finished copy");
     expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_prose_rules>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37 is the prose donor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.54 is the prose donor");
     expect(buildCleanNarrationSystemPrompt()).toContain("HardClaims field values: write exact ids only");
     expect(buildCleanNarrationSystemPrompt()).toContain("Backend fact roles belong in backendFactRefs");
     expect(buildCleanNarrationSystemPrompt()).toContain("Put natural prose clauses in sentence.text");
     expect(buildCleanNarrationSystemPrompt()).toContain("Citation proof: evidenceRefs and backendFactRefs are opaque citation tokens.");
     expect(buildCleanNarrationSystemPrompt()).toContain("avoid backend framing phrases such as 'current scene'");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("Page move proof: every accepted_evidence sentence must include pageMoveRefs");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.54");
     expect(buildCleanNarrationSystemPrompt()).toContain("Cinematic Realism");
     expect(buildCleanNarrationSystemPrompt()).toContain("BOLT v2 Writing Room");
     expect(buildCleanNarrationSystemPrompt()).toContain("Forward Motion");
@@ -7593,7 +7606,7 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_bolt_v2>");
     expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_adult_mode>");
     expect(buildCleanNarrationSystemPrompt()).toContain("<worldforge_door_rotation>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.37 is the prose donor");
+    expect(buildCleanNarrationSystemPrompt()).toContain("Zetta Onyx v1.54 is the prose donor");
     expect(buildCleanNarrationSystemPrompt()).toContain("Every sentence earns its place by moving the scene forward");
     expect(buildCleanNarrationSystemPrompt()).toContain("For local scene_beat, write the world response now");
     expect(buildCleanNarrationSystemPrompt()).toContain("Run a private writing room before JSON");
@@ -7703,23 +7716,26 @@ describe("clean Stage 6 narration contracts", () => {
     expect(buildCleanNarrationSystemPrompt()).toContain("bare actor labels do not become posture, vigilance, resistance");
     expect(buildCleanNarrationSystemPrompt()).toContain("treat local_observation_beat wording as proof material, not prose to copy");
     expect(buildCleanNarrationSystemPrompt()).toContain("avoid receipt/legal phrasing");
-    expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <checked thing> shows at <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("No visible sign of <finding> shows on <target> at <scene>");
-    expect(buildCleanNarrationSystemPrompt()).toContain("The visible scene gives no clear sign that <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("<target> gives no visible cue about <question-body> at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The sound stays unresolved in <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("The scene gives texture but no clear answer about <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("<target> stays visually silent on <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("Do not turn any/some/a target in the checked query into every/all targets");
     expect(buildCleanNarrationSystemPrompt()).toContain("use every/all only when accepted observed_entry_labels enumerate the complete visible set");
     expect(buildCleanNarrationSystemPrompt()).toContain("keep the visible-sign qualifier attached");
     expect(buildCleanNarrationSystemPrompt()).toContain("no visible sign of degraded insulation");
     expect(buildCleanNarrationSystemPrompt()).toContain("For list-shaped property checks");
-    expect(buildCleanNarrationSystemPrompt()).toContain("no visible sign of <A>, <B>, or <C> on <target>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("use a scanned-surface frame");
+    expect(buildCleanNarrationSystemPrompt()).toContain("no visible sign of <A>, <B>, or <C> shows at <scene>");
+    expect(buildCleanNarrationSystemPrompt()).toContain("no visible useful handle");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("No visible sign at <scene> settles whether");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("visible surface gives you no usable sign");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("nothing visible answers <question-body>");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("answers whether");
     expect(buildCleanNarrationSystemPrompt()).not.toContain("settles whether");
+    expect(buildCleanNarrationSystemPrompt()).not.toContain("The visible scene gives no clear sign that <question-body> at <scene>");
     expect(buildCleanNarrationSystemPrompt()).toContain("phrase person-property queries as a visible no-match");
-    expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, answer the question as unresolved by visible evidence");
+    expect(buildCleanNarrationSystemPrompt()).toContain("For whether-shaped observation_query, phrase the scene as giving texture without resolving the asked direction");
     expect(buildCleanNarrationSystemPrompt()).toContain("Player posture, motion, grip, search action, actor action");
     expect(buildCleanNarrationSystemPrompt()).toContain("Support-actor surface:");
     expect(buildCleanNarrationSystemPrompt()).toContain("use the support_actor_presence sentence plan as a scene-presence task card");

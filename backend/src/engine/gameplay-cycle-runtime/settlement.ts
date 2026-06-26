@@ -546,9 +546,10 @@ function deviceFacetKindListLabel(kinds: readonly string[]): string {
 
 function noRequestedDeviceSurfaceBeat(deviceLabel: string, unavailableFacetKinds: readonly string[]): string {
   const labels = uniqueStrings(unavailableFacetKinds.map(deviceFacetKindLabel));
-  const facetText = deviceFacetKindListLabel(unavailableFacetKinds);
-  const verb = labels.length === 1 ? "appears" : "appear";
-  return `No requested ${facetText} ${verb} on ${deviceLabel}'s visible surface.`;
+  const checkLabel = labels.length === 1
+    ? `requested ${labels[0]} check`
+    : "requested surface check";
+  return `${deviceLabel}'s visible surface shows no readable public result for the ${checkLabel}.`;
 }
 
 function deviceSurfaceStoryBeat(observation: {

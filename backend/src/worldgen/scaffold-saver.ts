@@ -478,10 +478,9 @@ function resolveStartingPlacement(
       sceneLocationId: startingEntry.id,
     };
   }
-  return {
-    broadLocationId: startingEntry.id,
-    sceneLocationId: startingEntry.id,
-  };
+  throw new Error(
+    `Starting location "${startingEntry.location.name}" must be a concrete persistent_sublocation.`,
+  );
 }
 
 function reanchorExistingRuntimeEntities(

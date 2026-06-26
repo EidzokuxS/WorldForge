@@ -1,5 +1,32 @@
 # Rebuild GM Turn Cycle
 
+## Current Session Focus 2026-06-25 - Playable Narrative Contract Reset
+
+Goal:
+- Replace the opening/play narration contract that prints backend scene facts with a playable text-RPG presentation contract: UI owns map/status/routes, narrator owns dramatic scene beats, immediate pressure, sensory texture, NPC behavior, and first actionable hooks.
+
+Plan:
+- [x] Capture why the current Shibuya opening fails as game prose.
+- [x] Consult Oracle/GPT-5.5 Pro on the minimal presentation architecture reset.
+- [x] Define the concrete P337 slice that can make opening plus sustained turns feel like a game quickly.
+- [x] Implement the minimal clean-runtime slice for opening evidence, concrete start placement, and current Zetta donor label.
+- [x] Add focused tests for route labels staying out of opening evidence, macro starts resolving to concrete sublocations, and scaffold persistence requiring a concrete starting scene.
+- [ ] Run typecheck, expanded backend tests, GitNexus detect_changes, and a real opening/action proof when feasible.
+
+Review:
+- First bad Oracle attempt was under-contextualized and stopped; the corrected run `p337-playable-contract-case` sent a 143k-token bundle with opening/Stage6/UI code, playtest contract, r21 transcript, Zetta Onyx 1.37, Tarot/Marinara docs, P336 prose review, and prior diagnosis attachment.
+- User correction on 2026-06-25 supersedes the stale donor label: current Zetta donor source is `Zetta Onyx v1.54`, verified through the Template preset inspector.
+- Oracle/GPT-5.5 Pro diagnosis: runtime truth controls are not the missing piece; the opening path still treats truth receipts as the page task.
+- Root cause: `buildOpeningNarrationEvidence` feeds sentence-ready backend/UI facts such as `You are at X, inside Y` and route summaries into Stage 6; the model is obeying the wrong task.
+- Marinara live reference was inspected through `http://127.0.0.1:7860` on a safe branch of the active `Chainsaw Man` game. Evidence is captured in `docs/narration/p337-marinara-live-reference.md` and `output/marinara-reference-20260625/`.
+- Marinara loop: map/UI owns discovery and unknown locations; Justice adjudicates action; Emperor writes the scenario beat; Tower renders prose; Chariot/HUD applies state deltas. WorldForge's intended GM/Settlement path already owns the Emperor role.
+- P337 slice: keep clean runtime and Stage 6 validator, but stop opening from bypassing the GM-shaped handoff. Replace sentence-ready receipt evidence with an `opening_playable_scene` handoff/page task that expresses start reason, POV knowledge, visible pressure, and action hooks without becoming a second GM.
+- Initial staging is part of the opening contract: before first prose, the campaign must place player and key NPCs into concrete scenes/sublocations, create missing child scenes when needed, mark which actors are visible/nearby/offscreen, and preserve player knowledge/discovery boundaries.
+- UI/prose split: UI owns scene name, parent location, route chips, inventory/status, and clear actor chips; narrator owns lived moment, pressure, sensory surface, visible behavior, and action handoff.
+- Acceptance gate: Shibuya/Tiamat failure world must produce a playable 3-5 beat opening with NPCs distributed into concrete start scenes, no broad-location cast pile, no route dump, no broad/hidden actor leakage, no "inside Shibuya" receipt sentence, no Jujutsu High/safe-retreat knowledge leak for an outsider, then resolve a first custom action through the normal runtime and continue into a sustained 10/30/60-turn readability lane.
+- Current implementation progress: `buildOpeningNarrationEvidence` no longer loads graph route labels or emits `You are at X, inside Y`; `/save-character` resolves macro starts to one concrete starting child scene; `saveScaffoldToDb` now rejects macro-only starting placement; focused tests are green for opening/character/scaffold and Stage 6 narration.
+- A later short Oracle prompt without the goal attachment was invalidated and will not be used as evidence.
+
 ## Current Session Focus 2026-06-20 - Opening Scene Playable Page Contract
 
 Goal:
@@ -9550,3 +9577,23 @@ Session: `gm-v1-consequenc-slice`.
       - Audit: 60/60 turns settled with zero hard structural issues; retired gameplay stores stayed zero; final state at Charter Gallery carried only Brass Tube + Courier satchel, with Auditor Spire and Lowwater Bazaar open.
       - r21 is diagnostic, not pristine acceptance, because T33 contains the pre-fix clarification. The exact same action passed post-fix on T34 as playable scene prose.
     - [ ] Optional final acceptance remains: run a fresh pristine post-fix lane from opening through distance again if the bar is "no diagnostic turn anywhere in the transcript."
+
+- P337 clean-runtime continuation:
+  - [x] Saved the full Oracle case brief at `tasks/oracle-p337-device-hard-result-case.md`; browser Oracle failed before model selection/cookie attachment, so that run is a wrapper/session failure rather than a Pro answer.
+  - [x] Fixed `device_surface_unavailable` as a narrow typed hard-result render for the accepted hard micro-result. This keeps normal turns model-authored while avoiding exact-copy rollback for a hard sentence with no prose latitude.
+  - [x] Fixed GM Read raw-ingress shape so stray irrelevant typed needs are canonicalized after generation and the final accepted owner remains strict.
+  - [x] Fixed Stage 4 surface-content ownership so an inventory item does not answer a requested readable destination/instruction unless matching public surface evidence exists.
+  - [x] Live-tested the current Shibuya/JJK lane through the real backend after the fixes:
+    - Burner-phone screen check settled with the exact no-public-result hard sentence and no structural issues.
+    - Look/listen turns rendered scene pressure without backend receipt leakage.
+    - Movement from Shibuya Pedestrian Underpass to Shibuya District and then to Shibuya Back-Alley Meeting Point advanced location/time.
+    - Manifest top-page check returned bounded no visible destination/instruction instead of item-presence filler.
+    - Nishimura Koji dialogue answered with a complete quote and no custody mutation.
+  - [x] Verified focused and expanded static gates after the current fixes:
+    - `gameplay-cycle-runtime-narration.test.ts` (141 passed).
+    - `gameplay-cycle-runtime-contracts.test.ts` (265 passed).
+    - `gameplay-cycle-runtime-stage4.test.ts` (49 passed).
+    - Combined focused subset contracts/narration/stage4/settlement (490 passed).
+    - Expanded narration/prompt/opening/character/worldgen subset (170 passed).
+    - `npm --prefix backend run typecheck` passed.
+  - [ ] Run GitNexus `detect_changes`, commit, and push once the expected accumulated scope is confirmed.

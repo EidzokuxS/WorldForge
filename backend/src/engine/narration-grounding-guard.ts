@@ -74,14 +74,14 @@ const groundedSentenceSchema = z.object({
     .string()
     .min(1)
     .max(GROUNDED_SENTENCE_DRAFT_TEXT_MAX_LENGTH)
-    .describe("Legacy placeholder skeleton. Prefer factRefs in final runtime narration.")
+    .describe("Player-visible narrative prose for this sentence. Use cited evidenceRefs for grounding.")
     .optional(),
   factRefs: z
     .array(groundedSentenceBackendFactRefSchema)
     .min(1)
     .max(GROUNDED_SENTENCE_DRAFT_FACT_REF_MAX)
     .optional()
-    .describe("Exactly one backend-owned fact ref to expand into player-visible text. Prefer this over text."),
+    .describe("Legacy exact fact selector. Normal final narration should use text plus evidenceRefs."),
   evidenceRefs: z
     .array(groundedSentenceEvidenceRefSchema)
     .min(GROUNDED_SENTENCE_DRAFT_EVIDENCE_REF_MIN)

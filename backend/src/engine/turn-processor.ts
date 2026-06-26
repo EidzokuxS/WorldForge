@@ -43,8 +43,6 @@ import {
 import { resolveActionTargetContext } from "./target-context.js";
 import { applyStartConditionEffects } from "./start-condition-runtime.js";
 import {
-  listConnectedPaths,
-  loadLocationGraph,
   resolveLocationTarget,
   resolveTravelPath,
 } from "./location-graph.js";
@@ -976,8 +974,8 @@ async function runVisibleNarrationDraftWithGuard(args: {
         const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
           packet: narratorPacket,
           draft: result.object,
-          requireBackendOwnedFactText: true,
-          requireFactRefs: true,
+          requireBackendOwnedFactText: false,
+          requireFactRefs: false,
         });
         log.event("storyteller.visible.call.end", {
           label,
@@ -2711,43 +2709,6 @@ function formatOpeningNameList(names: readonly string[]): string {
   return `${trimmed.slice(0, -1).join(", ")}, and ${trimmed[trimmed.length - 1]}`;
 }
 
-function buildOpeningRouteHandleCandidates(input: {
-  campaignId: string;
-  currentTick: number;
-  sceneAssembly: SceneAssembly;
-  lens: OpeningSceneLens | null;
-}): Array<{ summary: string; sourcePath: string }> {
-  const scene = input.sceneAssembly.currentScene;
-  if (!scene) {
-    return [];
-  }
-
-  const graph = loadLocationGraph({ campaignId: input.campaignId });
-  const connectedPaths = listConnectedPaths({
-    campaignId: input.campaignId,
-    fromLocationId: scene.id,
-    edges: graph.edges,
-    locations: graph.locations,
-    currentTick: input.currentTick,
-  });
-  const routeNames = uniqueRefs(connectedPaths.map((path) => path.locationName)).slice(0, 4);
-  if (routeNames.length === 0) {
-    return [];
-  }
-
-  const anchorLabel = input.lens?.label ?? scene.name;
-  const routeList = formatOpeningNameList(routeNames);
-  const summary =
-    routeNames.length === 1
-      ? `From ${anchorLabel}, the clearest way out leads toward ${routeList}.`
-      : `From ${anchorLabel}, the clearest ways out point toward ${routeList}.`;
-
-  return [{
-    sourcePath: "opening.currentScene.connectedPaths",
-    summary,
-  }];
-}
-
 function collectOpeningForbiddenActorNames(sceneAssembly: SceneAssembly): string[] {
   return uniqueRefs(
     Object.entries(sceneAssembly.awareness.byNpcName)
@@ -2888,14 +2849,17 @@ export function selectOpeningEvidenceCandidates(
   };
 
   add(firstForSlot("local_lens"));
-  add(firstForSlot("scene_texture"));
   add(firstForSlot("immediate_pressure", [
     "opening.entryPressure",
     "opening.immediateSituation",
     "opening.playerPerceivableSceneDirection.situationSummary",
   ]));
   add(firstForSlot("visible_people"));
-  add(firstForSlot("action_handle"));
+  add(firstForSlot("action_handle", [
+    "opening.playerPerceivableSceneDirection.sceneQuestion",
+    "opening.playerHandoff",
+  ]));
+  add(firstForSlot("sensed_handle"));
 
   for (const candidate of candidates) {
     if (selected.length >= 3) break;
@@ -2905,7 +2869,7 @@ export function selectOpeningEvidenceCandidates(
   return selected;
 }
 
-function buildOpeningNarrationEvidence(input: {
+export function buildOpeningNarrationEvidence(input: {
   campaignId: string;
   currentTick: number;
   sceneAssembly: SceneAssembly;
@@ -2939,15 +2903,10 @@ function buildOpeningNarrationEvidence(input: {
     addCandidate(
       "local_lens",
       openingLens.sourcePath,
-      openingLens.kind === "macro_lens" && openingLens.parentSceneName
-        ? `You are at ${openingLens.label}, inside ${openingLens.parentSceneName}.`
-        : `You are at ${openingLens.label}.`,
+      `You are in ${openingLens.label}.`,
     );
   }
 
-  addCandidate("sensed_handle", "opening.startingVisibility", input.sceneAssembly.openingState?.startingVisibility
-    ? `Your arrival is ${input.sceneAssembly.openingState.startingVisibility}.`
-    : null);
   addCandidate("immediate_pressure", "opening.immediateSituation", input.sceneAssembly.openingState?.immediateSituation);
   for (const [index, pressure] of (input.sceneAssembly.openingState?.entryPressure ?? []).entries()) {
     addCandidate("immediate_pressure", `opening.entryPressure[${index}]`, pressure);
@@ -2956,14 +2915,12 @@ function buildOpeningNarrationEvidence(input: {
     addCandidate("sensed_handle", `opening.sceneContextLines[${index}]`, line);
   }
 
-  for (const route of buildOpeningRouteHandleCandidates({
-    campaignId: input.campaignId,
-    currentTick: input.currentTick,
-    sceneAssembly: input.sceneAssembly,
-    lens: openingLens,
-  })) {
-    addCandidate("action_handle", route.sourcePath, route.summary);
-  }
+  addCandidate(
+    "action_handle",
+    "opening.playerPerceivableSceneDirection.sceneQuestion",
+    input.visibleDirection.sceneQuestion,
+  );
+  addCandidate("action_handle", "opening.playerHandoff", "What do you do from here?");
 
   if (input.allowedPresenceActorNames.length > 0) {
     const visiblePeople = formatOpeningNameList(input.allowedPresenceActorNames);
@@ -4117,8 +4074,8 @@ function reusableNarrationFromAcceptedAttempt(
     const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
       packet,
       draft: sourceDraft,
-      requireBackendOwnedFactText: true,
-      requireFactRefs: true,
+      requireBackendOwnedFactText: false,
+      requireFactRefs: false,
     });
     if (compiledDraft.prose !== attempt.finalText) {
       log.warn("Ignoring reusable narrator attempt whose stored text no longer matches its backend-owned draft", {
