@@ -48,6 +48,12 @@
 - Rewrote active `tasks/todo.md` and `tasks/lessons.md` as concise current-state files.
 - Adjusted `.gitignore` so active workflow files are no longer treated as ignored accidents.
 - Kept old task/lesson bulk in git history instead of the active working files.
+- Ran a second root-noise pass after visual inspection.
+- Removed ignored root scratch files: `scorecard.png`, `settings.json`, `settings.json.bak`, `start.bat`, and root shortcuts.
+- Removed ignored `.codex/` local state.
+- Moved ignored `.agents/` project skill cache to `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
+- Deleted stale tracked `.continuation-state.md`.
+- Archived tracked legacy `CLAUDE.md` to `docs/archive/agent-instructions/CLAUDE.md`.
 
 ## After
 
@@ -56,19 +62,20 @@
   - `.gitnexus/`: 92.60 MB
   - `.claude/`: 79.43 MB
   - `docs/`: 21.02 MB
-  - `.planning/`: 15.82 MB
   - `backend/`: 10.00 MB
-  - `tasks/`: 1.62 MB before active file compaction is committed in git
   - `frontend/`: 1.61 MB
   - `output/`: 1.23 MB, tracked proof island only plus no bulk ignored run debris
+  - `.planning/`: 0.35 MB after second root-noise pass
+  - `tasks/`: 0.22 MB after active file compaction
 - `campaigns/` was removed after user confirmed campaigns can be deleted.
 - `node_modules/`, `frontend/.next/`, and `shared/dist/` were removed.
+- Second pass removed visible ignored root scratch and ignored planning bulk.
 
 ## Kept
 
 - `.gitnexus/`, because project rules require GitNexus impact and change detection.
 - `.claude/worktrees/`, because registered worktrees are active workspace state.
-- `.agents/` and `.codex/`, because they contain local agent/skill context.
+- `.agents/` content was preserved outside the repo root in `C:\tmp\WorldForge-local-tooling-backup-20260626\.agents`.
 - Tracked proof/evidence files under `.planning/`, `output/`, `docs/`, `e2e/`, `tasks/`, and `rpi/`.
 
 ## Follow-Ups

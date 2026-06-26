@@ -57,6 +57,7 @@ pinchtab/
 .agents/
 .claude/
 .codex/
+.continuation-state.md
 .serena/
 .desloppify/
 .playwright-cli/

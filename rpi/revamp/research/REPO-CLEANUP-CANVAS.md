@@ -36,7 +36,7 @@ Output:
 - [inspected] Before cleanup, ignored inventory was about 132k entries.
 - [inspected] Largest local roots were `output/` 3982.17 MB, `campaigns/` 3915.96 MB, root `node_modules/` 796.86 MB, and `frontend/.next/` about 462 MB.
 - [inspected] Tracked/ignored overlap existed in `.planning`, `output`, `e2e`, `tasks`, and `rpi`.
-- [proposed] Keep `.gitnexus`, `.claude/worktrees`, `.agents`, `.codex`, and active revamp files.
+- [proposed] Keep `.gitnexus`, `.claude/worktrees`, and active revamp files; move local agent caches out of the root when they are only visual noise.
 
 ### A3 Planning/Docs Hygiene
 Status: complete
@@ -79,10 +79,11 @@ Output:
 - [inspected] Broad paths such as `output`, `.planning`, `tasks`, `rpi`, and `e2e` contain tracked islands.
 - [proposed] Use path manifests before tracked cleanup.
 - [proposed] Keep `.gitnexus` and active worktrees.
+- [executed] Second pass removed visible root scratch and moved `.agents` out of the repository root.
 - [proposed] Convert broad ignore rules into scoped intent for `tasks`, `rpi`, and `e2e`.
 
 ## Integration Notes
 
 - +1 status: workers complete; cleanup implementation complete; verification complete with GitNexus ENOBUFS limitation recorded.
-- Implemented: ignored local purge, active task/lesson compaction, scoped ignore repair, cleanup manifest, `AGENTS.md` / `.env.example` unhidden for tracking.
+- Implemented: ignored local purge, active task/lesson compaction, scoped ignore repair, cleanup manifest, `AGENTS.md` / `.env.example` unhidden for tracking, visible root-noise pass.
 - Discarded alternatives: deleting tracked proof evidence by broad path; changing source/test behavior during cleanup.
