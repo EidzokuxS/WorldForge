@@ -1,9 +1,9 @@
 # WorldForge Active Tasks
 
-## Current Focus: Mechanics Revamp A8
+## Current Focus: Mechanics Revamp A9
 
 Goal:
-- Build the early Campaign Kernel substrate through the first GM answer. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, A7 persists starting setup, and A8 persists the opening assistant turn.
+- Build the early Campaign Kernel substrate through the first player chat response. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, A7 persists starting setup, A8 persists the opening assistant turn, and A9 persists the first user plus assistant turn pair.
 
 Source:
 - `rpi/revamp/REQUEST.md`
@@ -16,6 +16,7 @@ Source:
 - `rpi/revamp/implement/a6-graph.md`
 - `rpi/revamp/implement/a7-setup.md`
 - `rpi/revamp/implement/a8-opening.md`
+- `rpi/revamp/implement/a9-chat.md`
 
 Plan:
 - [x] Lock A0 revamp architecture contract.
@@ -44,14 +45,17 @@ Plan:
 - [x] A8 implement deterministic opening result from setup, active scene, present cast, and routes.
 - [x] A8 persist the opening as the first assistant turn, advance to `active`, and expose `/api/revamp/campaigns/:id/opening`.
 - [x] A8 prove suggested actions, first assistant turn persistence, active phase, and fail-closed invalid opening cases.
+- [x] A9 implement deterministic chat response from active kernel context and one user message.
+- [x] A9 persist the user turn plus assistant turn and expose `/api/revamp/campaigns/:id/chat/message`.
+- [x] A9 prove intent classification, turn persistence, route boundary, typechecks, and old chat/worldgen/provider exclusion.
 
 6+1 Lanes:
 - L1 Source Lock: keep attachment architecture, `REQUEST.md`, and coverage map as source hierarchy.
-- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, setup anchor contract, and opening turn contract.
+- L2 Current-State Map: identify the revamp create-campaign data, current location input shape, character draft/scaffold NPC input shape, player cast API seam, cast-to-graph placement contract, setup anchor contract, opening turn contract, and first chat turn contract.
 - L3 Reference Extraction: use old DNA seed and location shapes only as reference.
 - L4 Kernel Protocol: write A3 and A5b kernel state to campaign `kernel.json`; keep A4/A5a/A6 as pure graph/cast outputs.
-- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, setup persistence, and opening persistence.
-- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7/A8.
+- L5 Proof Harness: prove draft -> world_ready, location graph adaptation, cast registry adaptation, revamp player cast persistence, graph composition, setup persistence, opening persistence, and chat turn persistence.
+- L6 Risk Cleanup: inspect stale worldgen ownership assumptions without widening A3/A4/A5a/A5b/A6/A7/A8/A9.
 - +1 Integrator: choose the smallest vertical slice and reject scope creep.
 
 Review:
@@ -98,3 +102,6 @@ Review:
 - GLM-5.2 reviewed the A8 opening plan and returned `Plan is up-to-date.`
 - A8 added `backend/src/revamp/opening-gm.ts`, `backend/src/revamp/opening-kernel.ts`, `RevampOpeningResult`, and `POST /api/revamp/campaigns/:id/opening`.
 - A8 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/routes/__tests__/revamp.test.ts` -> `58 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed.
+- Droid GLM-5.2 review for A9 was attempted with `.codex/droid-prompts/a9-chat-loop-plan.md`; Droid CLI returned an authentication failure because `FACTORY_API_KEY` is absent in this shell.
+- A9 added `backend/src/revamp/chat-gm.ts`, `backend/src/revamp/chat-kernel.ts`, `RevampGmResponse`, `RevampSoftStateHint`, and `POST /api/revamp/campaigns/:id/chat/message`.
+- A9 proof: revamp focused vitest `src/revamp/__tests__/dna-adapter.test.ts src/revamp/__tests__/locations-adapter.test.ts src/revamp/__tests__/cast-registry-adapter.test.ts src/revamp/__tests__/cast-kernel.test.ts src/revamp/__tests__/world-graph-builder.test.ts src/revamp/__tests__/graph-kernel.test.ts src/revamp/__tests__/starting-setup.test.ts src/revamp/__tests__/setup-kernel.test.ts src/revamp/__tests__/opening-gm.test.ts src/revamp/__tests__/opening-kernel.test.ts src/revamp/__tests__/chat-gm.test.ts src/revamp/__tests__/chat-kernel.test.ts src/routes/__tests__/revamp.test.ts` -> `69 passed`; `npm --prefix shared run build` passed; `npm --prefix backend run typecheck` passed; `npm --prefix frontend run typecheck` passed.

@@ -22,6 +22,7 @@ import {
   saveRevampPlayerCharacter,
 } from "../revamp/cast-kernel.js";
 import { composeRevampKernelWorldGraph } from "../revamp/graph-kernel.js";
+import { createRevampChatMessage } from "../revamp/chat-kernel.js";
 import { createRevampOpening } from "../revamp/opening-kernel.js";
 import { createRevampStartingSetup } from "../revamp/setup-kernel.js";
 
@@ -53,6 +54,10 @@ const revampSavePlayerSchema = z.object({
 const revampStartSetupSchema = z.object({
   mode: z.enum(["gm_invented", "user_guided"]).default("gm_invented"),
   userStart: z.string().trim().max(2000).optional(),
+}).strip();
+
+const revampChatMessageSchema = z.object({
+  message: z.string().trim().min(1, "Message is required.").max(4000),
 }).strip();
 
 function locationNamesFromKernel(nodes: RevampWorldNode[]): string[] {
@@ -306,6 +311,28 @@ app.post("/campaigns/:id/opening", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to create revamp opening.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/chat/message", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const result = await parseBody(c, revampChatMessageSchema);
+    if ("response" in result) return result.response;
+
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    return c.json(createRevampChatMessage({
+      campaignId,
+      message: result.data.message,
+    }));
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to process revamp chat message.") },
       getErrorStatus(error),
     );
   }

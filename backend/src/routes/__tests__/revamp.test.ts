@@ -314,6 +314,65 @@ function writeSetupReadyKernelWithOpeningGraph(): void {
   });
 }
 
+function writeActiveKernelWithChatGraph(): void {
+  writeCampaignKernel(CAMPAIGN_ID, {
+    ...createDraftCampaignKernel({
+      id: CAMPAIGN_ID,
+      premise: "A railway city under curfew.",
+    }),
+    phase: "active",
+    worldGraph: {
+      nodes: [
+        {
+          id: "scene:platform-office",
+          type: "SceneLocation",
+          name: "Platform Office",
+          data: { description: "A cramped office lit by timetable lamps." },
+        },
+        {
+          id: "cast:player_created:mira",
+          type: "Character",
+          name: "Mira Vale",
+          data: {},
+        },
+      ],
+      edges: [],
+    },
+    castRegistry: {
+      playerCharacter: {
+        id: "cast:player_created:mira",
+        source: "player_created",
+        characterDraft: makeDraft("Mira Vale"),
+        campaignRole: "player",
+        placement: {
+          locationId: null,
+          sceneLocationId: "scene:platform-office",
+          notes: [],
+        },
+        importance: "primary",
+      },
+      importedCast: [],
+      generatedCast: [],
+    },
+    startingSetup: {
+      mode: "gm_invented",
+      anchorSceneId: "scene:platform-office",
+      playerCharacterId: "cast:player_created:mira",
+      presentCastIds: ["cast:player_created:mira"],
+      nearbyCastIds: [],
+      activePressureIds: [],
+      visibleHooks: [],
+      hiddenTruthIds: [],
+      openingSituation: "Start at Platform Office. A cramped office lit by timetable lamps.",
+      openingQuestion: "What do you do?",
+    },
+    chatSession: {
+      turns: [{ role: "assistant", content: "Opening.", createdAt: 100 }],
+    },
+    turnIndex: 1,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   ingestMock.mockReset();
@@ -528,5 +587,34 @@ describe("revamp routes", () => {
     expect(storedKernel?.phase).toBe("active");
     expect(storedKernel?.chatSession.turns[0]?.role).toBe("assistant");
     expect(storedKernel?.chatSession.turns[0]?.content).toBe(body.opening.text);
+  });
+
+  it("processes a chat message through the revamp API boundary", async () => {
+    writeActiveKernelWithChatGraph();
+
+    const res = await app.request(`/api/revamp/campaigns/${CAMPAIGN_ID}/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Look around" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel.phase).toBe("active");
+    expect(body.kernel.turnIndex).toBe(3);
+    expect(body.response.text).toContain("You take in Platform Office.");
+    expect(body.response.suggestedActions).toEqual(["Look around"]);
+    expect(body.userTurn).toMatchObject({
+      role: "user",
+      content: "Look around",
+    });
+    expect(body.assistantTurn).toMatchObject({
+      role: "assistant",
+      content: body.response.text,
+    });
+    const storedKernel = readCampaignKernel(CAMPAIGN_ID);
+    expect(storedKernel?.chatSession.turns).toHaveLength(3);
+    expect(storedKernel?.chatSession.turns[1]?.role).toBe("user");
+    expect(storedKernel?.chatSession.turns[2]?.content).toBe(body.response.text);
   });
 });

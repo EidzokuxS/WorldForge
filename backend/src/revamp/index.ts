@@ -39,6 +39,17 @@ export type {
 } from "./opening-kernel.js";
 
 export {
+  buildRevampGmResponse,
+} from "./chat-gm.js";
+
+export {
+  createRevampChatMessage,
+} from "./chat-kernel.js";
+export type {
+  CreateRevampChatMessageResult,
+} from "./chat-kernel.js";
+
+export {
   buildRevampCastRegistry,
 } from "./cast-registry-adapter.js";
 export type {

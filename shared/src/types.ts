@@ -405,6 +405,24 @@ export interface RevampOpeningResult {
   suggestedActions: string[];
 }
 
+export type RevampSoftStateHintType =
+  | "inspect_scene"
+  | "address_cast"
+  | "route_intent"
+  | "freeform_action";
+
+export interface RevampSoftStateHint {
+  type: RevampSoftStateHintType;
+  targetId?: string;
+  summary: string;
+}
+
+export interface RevampGmResponse {
+  text: string;
+  suggestedActions: string[];
+  softStateHints: RevampSoftStateHint[];
+}
+
 export interface CampaignKernel {
   campaignId: string;
   phase: CampaignKernelPhase;
