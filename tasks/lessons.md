@@ -26,8 +26,8 @@
 - A planned playtest gate is a hard gate: execute the player path and record the evidence before moving to the next architecture item.
 - Backend-only work after the accepted scope boundary is exploratory code, not accepted product work, until the owner explicitly scopes it and manual playtests prove the player path.
 - World DNA is an optional but first-class player step; do not hide it inside a backend transition when the current flow needs player review or editing.
-- Campaign Forge World DNA starts as a generated draft from the campaign Premise; the player edits that draft, then player-character creation consumes the accepted World DNA context.
-- Preserve the working campaign creation flow: `/campaign/new` gathers concept, `/campaign/new/dna` generates and edits World DNA, and Forge consumes the saved result. Do not move that generation step into Forge.
+- When the user chooses the DNA path, World DNA starts as a generated draft from the campaign Premise and can be edited before world generation.
+- Preserve both setup paths: concept can create a world from premise/source context, and `/campaign/new/dna` remains the optional seed-editing route before campaign creation.
 - Accepted World DNA is the blueprint layer. Player-character creation opens after the created world signal, currently `campaign.generationComplete === true`, so characters can be placed inside the actual world.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
@@ -46,7 +46,7 @@
 - Do not use mechanical proof screenshots as a substitute for product UI. Proof artifacts verify behavior after the product surface exists.
 - Accepted World DNA remains editable until world generation starts. The pre-world Forge surface must offer edit, single-field reroll, all-field reroll, save, and save-before-create instead of a locked summary.
 - Keep idle setup surfaces quiet. Future-step status cards, progress labels, and explanatory footer notes appear when the process is running, complete, blocked, or actionable.
-- Gate player-character creation behind accepted World DNA. The player should create a character from the generated world context, not from a premise-only shell.
+- Gate player-character creation behind the created world signal, currently `campaign.generationComplete === true`. World DNA can enrich that context, but missing DNA must not block premise-only world creation.
 - Keep graph/kernel mechanics off player-facing setup screens. Compose and persistence steps run internally after their player-facing prerequisite is complete.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
 - Narration owns lived moment, pressure, sensory surface, visible behavior, and action handoff.

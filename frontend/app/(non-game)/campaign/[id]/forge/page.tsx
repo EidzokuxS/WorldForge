@@ -44,7 +44,7 @@ type WorldDnaSummaryRow = {
 };
 
 type WorldDnaDraft = Record<keyof CampaignWorldDna, string>;
-type WorldDnaStatus = "Ready" | "No DNA" | "Locked";
+type WorldDnaStatus = "Ready" | "Optional";
 type StageState = "done" | "active" | "pending";
 type WorldGenerationStatus = "idle" | "running" | "complete";
 type DnaBusyState = "idle" | "saving" | "saving-generate" | "reroll-all" | SeedCategory;
@@ -84,7 +84,7 @@ function worldDnaStatus(kernel: CampaignKernel): WorldDnaStatus {
   if (kernel.worldDna) {
     return "Ready";
   }
-  return kernel.phase === "draft" || kernel.phase === "world_ready" ? "No DNA" : "Locked";
+  return "Optional";
 }
 
 function worldDnaRows(worldDna: CampaignWorldDna): WorldDnaSummaryRow[] {
@@ -163,6 +163,10 @@ function draftToWorldSeeds(draft: WorldDnaDraft): WorldSeeds | null {
     environment,
     wildcard,
   };
+}
+
+function dnaDraftHasText(draft: WorldDnaDraft): boolean {
+  return Object.values(draft).some((value) => value.trim().length > 0);
 }
 
 function FormStep({
@@ -275,6 +279,8 @@ function WorldGenerationSurface({
   const showGenerationDetails = running || complete;
   const dnaOperationBusy = dnaBusy !== "idle";
   const controlsDisabled = running || complete || dnaOperationBusy;
+  const hasAcceptedDna = Boolean(kernel.worldDna);
+  const hasDnaDraft = hasAcceptedDna || dnaDirty || dnaDraftHasText(dnaDraft);
   const seedsReady = draftToWorldSeeds(dnaDraft) !== null;
   const progressRatio = complete
     ? 100
@@ -366,7 +372,7 @@ function WorldGenerationSurface({
       return;
     }
 
-    if (dnaDirty) {
+    if (hasDnaDraft && dnaDirty) {
       const saved = await saveDna("saving-generate");
       if (!saved) {
         return;
@@ -381,14 +387,15 @@ function WorldGenerationSurface({
       <aside className="wf-gen-rail wf-gen-rail-dna" aria-label="Campaign setup stages">
         <div className="wf-gen-rail-h">Forge</div>
         {WORLD_GENERATION_RAIL.map((stage, index) => {
-          const state: StageState = index < 2 || (complete && index === 2)
+          const state: StageState = index === 0 || (hasDnaDraft && index === 1) || (complete && index === 2)
             ? "done"
             : index === 2 || (complete && index === 3) ? "active" : "pending";
+          const detail = !hasDnaDraft && stage.title === "World DNA" ? "optional tuning" : stage.detail;
           return (
             <WorldGenerationStage
               key={stage.title}
               title={stage.title}
-              detail={stage.detail}
+              detail={detail}
               mark={state === "done" ? "done" : roman(index + 1)}
               state={state}
             />
@@ -401,8 +408,8 @@ function WorldGenerationSurface({
           <div>
             <p className="wf-gen-sub">World generation</p>
             <h1 className="wf-gen-h">
-              {complete ? "World ready for " : running ? "Creating the " : "Tune the "}
-              <em>{complete ? "review." : running ? "world." : "World DNA."}</em>
+              {complete ? "World ready for " : running ? "Creating the " : hasDnaDraft ? "Tune the " : "Create the "}
+              <em>{complete ? "review." : running ? "world." : hasDnaDraft ? "World DNA." : "world."}</em>
             </h1>
           </div>
           {showGenerationDetails ? (
@@ -433,69 +440,83 @@ function WorldGenerationSurface({
           </section>
         ) : null}
 
-        <section className="wf-gen-section">
-          <div className="wf-gen-section-h">
-            <span className="wf-gen-kicker">i</span>
-            <h2 className="wf-gen-h2">World <em>DNA</em></h2>
-            <span className="wf-gen-pill" data-state={dnaOperationBusy ? "forging" : undefined}>
-              {dnaPill}
-            </span>
-          </div>
-          <div className="wf-dna-editor-grid" role="list" aria-label="Editable World DNA">
-            {WORLD_DNA_CARDS.map((item, index) => {
-              const category = item.category as keyof CampaignWorldDna;
-              const isRerolling = dnaBusy === item.category;
+        {hasDnaDraft ? (
+          <section className="wf-gen-section">
+            <div className="wf-gen-section-h">
+              <span className="wf-gen-kicker">i</span>
+              <h2 className="wf-gen-h2">World <em>DNA</em></h2>
+              <span className="wf-gen-pill" data-state={dnaOperationBusy ? "forging" : undefined}>
+                {dnaPill}
+              </span>
+            </div>
+            <div className="wf-dna-editor-grid" role="list" aria-label="Editable World DNA">
+              {WORLD_DNA_CARDS.map((item, index) => {
+                const category = item.category as keyof CampaignWorldDna;
+                const isRerolling = dnaBusy === item.category;
 
-              return (
-                <article
-                  key={item.category}
-                  className="wf-dna-seed-card"
-                  role="listitem"
-                  data-enabled="true"
-                  data-busy={isRerolling ? "true" : "false"}
-                >
-                  <div className="wf-dna-seed-head">
-                    <div>
-                      <div className="wf-dna-seed-code">D{String(index + 1).padStart(2, "0")}</div>
-                      <h3 className="wf-dna-seed-title">{item.label}</h3>
+                return (
+                  <article
+                    key={item.category}
+                    className="wf-dna-seed-card"
+                    role="listitem"
+                    data-enabled="true"
+                    data-busy={isRerolling ? "true" : "false"}
+                  >
+                    <div className="wf-dna-seed-head">
+                      <div>
+                        <div className="wf-dna-seed-code">D{String(index + 1).padStart(2, "0")}</div>
+                        <h3 className="wf-dna-seed-title">{item.label}</h3>
+                      </div>
+                      <span className="wf-gen-tag">{dnaDirty ? "draft" : "seed"}</span>
                     </div>
-                    <span className="wf-gen-tag">{dnaDirty ? "draft" : "seed"}</span>
-                  </div>
 
-                  <textarea
-                    className="wf-dna-seed-text"
-                    value={dnaDraft[category]}
-                    onChange={(event) => {
-                      setDnaDraft((current) => ({
-                        ...current,
-                        [category]: event.target.value,
-                      }));
-                      setDnaDirty(true);
-                    }}
-                    disabled={controlsDisabled}
-                    aria-label={`${item.label} seed text`}
-                    placeholder="Seed text"
-                  />
-
-                  <div className="wf-dna-seed-actions">
-                    <span className="wf-gen-tag">
-                      {isRerolling ? "rolling" : dnaDraft[category].trim() ? "ready" : "empty"}
-                    </span>
-                    <button
-                      type="button"
-                      className="wf-dna-card-action"
-                      onClick={() => void handleRerollCategory(item.category)}
+                    <textarea
+                      className="wf-dna-seed-text"
+                      value={dnaDraft[category]}
+                      onChange={(event) => {
+                        setDnaDraft((current) => ({
+                          ...current,
+                          [category]: event.target.value,
+                        }));
+                        setDnaDirty(true);
+                      }}
                       disabled={controlsDisabled}
-                    >
-                      {isRerolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                      Re-roll
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+                      aria-label={`${item.label} seed text`}
+                      placeholder="Seed text"
+                    />
+
+                    <div className="wf-dna-seed-actions">
+                      <span className="wf-gen-tag">
+                        {isRerolling ? "rolling" : dnaDraft[category].trim() ? "ready" : "empty"}
+                      </span>
+                      <button
+                        type="button"
+                        className="wf-dna-card-action"
+                        onClick={() => void handleRerollCategory(item.category)}
+                        disabled={controlsDisabled}
+                      >
+                        {isRerolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                        Re-roll
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
+          <section className="wf-gen-section" data-testid="world-source-panel">
+            <div className="wf-gen-section-h">
+              <span className="wf-gen-kicker">i</span>
+              <h2 className="wf-gen-h2">World <em>source</em></h2>
+              <span className="wf-gen-pill">ready</span>
+            </div>
+            <div className="wf-campaign-forge-preview">
+              <h3>Premise</h3>
+              <p>{kernel.premise || campaign.premise || "No premise set yet."}</p>
+            </div>
+          </section>
+        )}
 
         {showGenerationDetails ? (
           <section className="wf-gen-section">
@@ -549,22 +570,24 @@ function WorldGenerationSurface({
                 disabled={controlsDisabled}
               >
                 {dnaBusy === "reroll-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                Re-roll all six
+                {hasDnaDraft ? "Re-roll all six" : "Draft World DNA"}
               </button>
-              <button
-                type="button"
-                className="wf-v4-btn"
-                onClick={() => void saveDna("saving")}
-                disabled={controlsDisabled || !dnaDirty || !seedsReady}
-              >
-                {dnaBusy === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {dnaBusy === "saving" ? "Saving DNA" : "Save DNA"}
-              </button>
+              {hasDnaDraft ? (
+                <button
+                  type="button"
+                  className="wf-v4-btn"
+                  onClick={() => void saveDna("saving")}
+                  disabled={controlsDisabled || !dnaDirty || !seedsReady}
+                >
+                  {dnaBusy === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {dnaBusy === "saving" ? "Saving DNA" : "Save DNA"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="wf-v4-btn wf-v4-btn-primary"
                 onClick={() => void handleCreateWorld()}
-                disabled={running || dnaOperationBusy || !seedsReady}
+                disabled={running || dnaOperationBusy || (hasDnaDraft && !seedsReady)}
               >
                 {running || dnaBusy === "saving-generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 {dnaBusy === "saving-generate" ? "Saving DNA" : running ? "Creating world" : "Create world"}
@@ -772,7 +795,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   }, [campaign?.generationComplete, campaignId, kernel]);
 
   async function handleCreateWorld() {
-    if (!campaign || !kernel?.worldDna || campaign.generationComplete === true || worldGenerationStatus === "running") {
+    if (!campaign || campaign.generationComplete === true || worldGenerationStatus === "running") {
       return;
     }
 
@@ -814,7 +837,6 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     const trimmedConcept = concept.trim();
     if (
       campaign?.generationComplete !== true
-      || !kernel?.worldDna
       || !trimmedConcept
       || characterBusy !== "idle"
       || preparingCampaign
@@ -841,7 +863,6 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   async function handleImport(file: File) {
     if (
       campaign?.generationComplete !== true
-      || !kernel?.worldDna
       || characterBusy !== "idle"
       || preparingCampaign
     ) {
@@ -872,7 +893,6 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   async function handleSavePlayer() {
     if (
       campaign?.generationComplete !== true
-      || !kernel?.worldDna
       || !draft
       || characterBusy !== "idle"
       || preparingCampaign
@@ -923,9 +943,9 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const currentWorldDnaStatus = worldDnaStatus(kernel);
   const worldDnaAccepted = Boolean(kernel.worldDna);
   const worldBuilt = campaign.generationComplete === true;
-  const showWorldGeneration = worldDnaAccepted && (!worldBuilt || worldGenerationStatus !== "idle");
-  const playerUnlocked = worldDnaAccepted && worldBuilt;
-  const worldDnaMeta = worldDnaAccepted ? currentWorldDnaStatus : "required";
+  const showWorldGeneration = !worldBuilt || worldGenerationStatus !== "idle";
+  const playerUnlocked = worldBuilt;
+  const worldDnaMeta = worldDnaAccepted ? currentWorldDnaStatus : "Optional";
   const worldDnaStage: StageState = currentWorldDnaStatus === "Ready" ? "done" : "active";
   const playerStage: StageState = savedPlayer && playerUnlocked ? "done" : playerUnlocked ? "active" : "pending";
   const playerMeta = savedPlayer && playerUnlocked
@@ -933,14 +953,12 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     : playerUnlocked ? "draft" : "locked";
   const playerStageDetail = savedPlayer && playerUnlocked
     ? preparingCampaign ? "preparing campaign" : "saved"
-    : playerUnlocked ? "create or import" : worldDnaAccepted ? "create the world first" : "waiting for World DNA";
+    : playerUnlocked ? "create or import" : "create the world first";
   const playerStepDescription = playerUnlocked
     ? "Create or import the player character, then save it."
-    : worldDnaAccepted ? "Create the world before setting up the player." : "World DNA is required first.";
-  const playerLockHeading = worldDnaAccepted ? "Create the world first" : "Player creation locked";
-  const playerLockBody = worldDnaAccepted
-    ? "The player starts inside the world. Create the world, then set up the player here."
-    : "Accept World DNA first. The player will be built from that world context.";
+    : "Create the world before setting up the player.";
+  const playerLockHeading = "Create the world first";
+  const playerLockBody = "The player starts inside the generated world. Create the world, then set up the player here.";
 
   if (showWorldGeneration) {
     return (
@@ -986,7 +1004,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
             description={
               kernel.worldDna
                 ? "Accepted DNA from campaign creation."
-                : "Accept World DNA before creating the player."
+                : "The world is created from the premise."
             }
           >
             <div className="wf-campaign-forge-dna-summary" data-testid="world-dna-panel">
@@ -1004,14 +1022,14 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
                 </div>
               ) : (
                 <div className="wf-campaign-forge-preview">
-                  <h3>World DNA required</h3>
+                  <h3>No World DNA</h3>
                   <p>
-                    Player creation starts after World DNA is accepted.
+                    The world is created from the premise.
                   </p>
                 </div>
               )}
               <span className="wf-campaign-forge-hint" data-testid="world-dna-status">
-                {kernel.worldDna ? "World DNA accepted." : "World DNA required before player creation."}
+                {kernel.worldDna ? "World DNA accepted." : "Optional"}
               </span>
             </div>
           </FormStep>

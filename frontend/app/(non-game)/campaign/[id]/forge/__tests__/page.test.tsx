@@ -248,7 +248,24 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByText("Kernel payload")).not.toBeInTheDocument();
   });
 
-  it("shows a premise-only state when the campaign was created without World DNA", async () => {
+  it("creates the world from a premise-only campaign without requiring World DNA", async () => {
+    let finishGeneration: (() => void) | undefined;
+    mockedGenerateWorld.mockImplementation((_campaignId, options) => new Promise((resolve) => {
+      options?.onProgress?.({
+        step: 1,
+        totalSteps: 8,
+        label: "Refining premise...",
+      });
+      finishGeneration = () => resolve({
+        refinedPremise: "Refined world",
+        locationCount: 12,
+        npcCount: 14,
+        factionCount: 5,
+        loreCardCount: 20,
+        loreStorageFailed: false,
+        startingLocation: "Lantern Gate",
+      });
+    }));
     mockedLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -264,13 +281,64 @@ describe("CampaignForgePage", () => {
     await renderPage("campaign-1");
 
     await waitFor(() => {
-      expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("worldgen-surface")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("World DNA required")).toBeInTheDocument();
-    expect(screen.getByText("World DNA required before player creation.")).toBeInTheDocument();
-    expect(screen.getByText("Player creation locked")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create the world." })).toBeInTheDocument();
+    expect(screen.getByTestId("world-source-panel")).toBeInTheDocument();
+    expect(screen.getByText("A haunted coast of guild cities.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create world" })).toBeEnabled();
+    expect(screen.queryByRole("list", { name: "Editable World DNA" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save DNA" })).not.toBeInTheDocument();
+    expect(screen.queryByText("World DNA required")).not.toBeInTheDocument();
+    expect(screen.queryByText("World DNA required before player creation.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Player creation locked")).not.toBeInTheDocument();
+    expect(screen.queryByText("Accept World DNA first")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create world" }));
+
+    await waitFor(() => {
+      expect(mockedGenerateWorld).toHaveBeenCalledWith("campaign-1", {
+        onProgress: expect.any(Function),
+      });
+    });
+
+    await act(async () => {
+      finishGeneration?.();
+    });
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/campaign/campaign-1/review");
+    });
+  });
+
+  it("opens player setup after a premise-only world is created", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 1,
+      generationComplete: true,
+    });
+    mockedLoadCampaignKernel.mockResolvedValue({
+      kernel: makeKernel(),
+    });
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("campaign-forge")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("No World DNA")).toBeInTheDocument();
+    expect(screen.getByTestId("world-dna-status")).toHaveTextContent("Optional");
+    expect(screen.getByLabelText("Player concept")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create draft/ })).toBeDisabled();
+    expect(screen.queryByText("World DNA required")).not.toBeInTheDocument();
+    expect(screen.queryByText("Player creation locked")).not.toBeInTheDocument();
+    expect(screen.queryByText("Accept World DNA first")).not.toBeInTheDocument();
   });
 
   it("shows the product world generation surface when World DNA exists before the world is created", async () => {

@@ -677,6 +677,50 @@ describe("POST /api/worldgen/suggest-seed", () => {
 // POST /api/worldgen/generate
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/generate", () => {
+  it("generates a world from a premise-only campaign without seeds", async () => {
+    mockedGetActiveCampaign.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Premise Only",
+      premise: "A lighthouse city under black rain",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Premise Only",
+      premise: "A lighthouse city under black rain",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A lighthouse city survives the black rain.",
+        locations: [{ name: "Lantern Gate", description: "Gate", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain("event: complete");
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        name: "Premise Only",
+        premise: "A lighthouse city under black rain",
+        seeds: undefined,
+      }),
+      expect.any(Function),
+    );
+  });
+
   it("builds and persists a worldgen research frame from cached ipContext, divergence, and seeds", async () => {
     const ipContext = {
       franchise: "Jujutsu Kaisen",
