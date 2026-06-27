@@ -28,6 +28,7 @@
 - World DNA is an optional but first-class player step; do not hide it inside a backend transition when the current flow needs player review or editing.
 - Campaign Forge World DNA starts as a generated draft from the campaign Premise; the player edits that draft, then player-character creation consumes the accepted World DNA context.
 - Preserve the working campaign creation flow: `/campaign/new` gathers concept, `/campaign/new/dna` generates and edits World DNA, and Forge consumes the saved result. Do not move that generation step into Forge.
+- Accepted World DNA is the blueprint layer. Player-character creation opens after the created world signal, currently `campaign.generationComplete === true`, so characters can be placed inside the actual world.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.

@@ -191,7 +191,8 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
 
   useEffect(() => {
     if (
-      !kernel?.worldDna
+      campaign?.generationComplete !== true
+      || !kernel?.worldDna
       || !kernel.castRegistry.playerCharacter
       || kernel.phase !== "cast_ready"
       || characterNodeIsPresent(kernel)
@@ -232,11 +233,17 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     return () => {
       cancelled = true;
     };
-  }, [campaignId, kernel]);
+  }, [campaign?.generationComplete, campaignId, kernel]);
 
   async function handleDescribe() {
     const trimmedConcept = concept.trim();
-    if (!kernel?.worldDna || !trimmedConcept || characterBusy !== "idle" || preparingCampaign) {
+    if (
+      campaign?.generationComplete !== true
+      || !kernel?.worldDna
+      || !trimmedConcept
+      || characterBusy !== "idle"
+      || preparingCampaign
+    ) {
       return;
     }
 
@@ -257,7 +264,12 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   }
 
   async function handleImport(file: File) {
-    if (!kernel?.worldDna || characterBusy !== "idle" || preparingCampaign) {
+    if (
+      campaign?.generationComplete !== true
+      || !kernel?.worldDna
+      || characterBusy !== "idle"
+      || preparingCampaign
+    ) {
       return;
     }
 
@@ -283,7 +295,13 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   }
 
   async function handleSavePlayer() {
-    if (!kernel?.worldDna || !draft || characterBusy !== "idle" || preparingCampaign) {
+    if (
+      campaign?.generationComplete !== true
+      || !kernel?.worldDna
+      || !draft
+      || characterBusy !== "idle"
+      || preparingCampaign
+    ) {
       return;
     }
 
@@ -329,13 +347,24 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const playerControlsDisabled = isCharacterBusy || preparingCampaign;
   const currentWorldDnaStatus = worldDnaStatus(kernel);
   const worldDnaAccepted = Boolean(kernel.worldDna);
+  const worldBuilt = campaign.generationComplete === true;
+  const playerUnlocked = worldDnaAccepted && worldBuilt;
   const worldDnaMeta = worldDnaAccepted ? currentWorldDnaStatus : "required";
   const worldDnaStage: StageState = currentWorldDnaStatus === "Ready" ? "done" : "active";
-  const playerStage: StageState = savedPlayer ? "done" : worldDnaAccepted ? "active" : "pending";
-  const playerMeta = savedPlayer ? (preparingCampaign ? "preparing" : "saved") : worldDnaAccepted ? "draft" : "locked";
-  const playerStageDetail = savedPlayer
+  const playerStage: StageState = savedPlayer && playerUnlocked ? "done" : playerUnlocked ? "active" : "pending";
+  const playerMeta = savedPlayer && playerUnlocked
+    ? (preparingCampaign ? "preparing" : "saved")
+    : playerUnlocked ? "draft" : "locked";
+  const playerStageDetail = savedPlayer && playerUnlocked
     ? preparingCampaign ? "preparing campaign" : "saved"
-    : worldDnaAccepted ? "create or import" : "waiting for World DNA";
+    : playerUnlocked ? "create or import" : worldDnaAccepted ? "create the world first" : "waiting for World DNA";
+  const playerStepDescription = playerUnlocked
+    ? "Create or import the player character, then save it."
+    : worldDnaAccepted ? "Create the world before setting up the player." : "World DNA is required first.";
+  const playerLockHeading = worldDnaAccepted ? "Create the world first" : "Player creation locked";
+  const playerLockBody = worldDnaAccepted
+    ? "The player starts inside the world. Create the world, then set up the player here."
+    : "Accept World DNA first. The player will be built from that world context.";
 
   return (
     <main className="wf-forge-shell wf-v4-page-theater" data-testid="campaign-forge">
@@ -363,7 +392,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
             meta={currentWorldDnaStatus}
             description={
               kernel.worldDna
-                ? "Accepted DNA from campaign creation. Player drafts use this context."
+                ? "Accepted DNA from campaign creation."
                 : "Accept World DNA before creating the player."
             }
           >
@@ -389,7 +418,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
                 </div>
               )}
               <span className="wf-campaign-forge-hint" data-testid="world-dna-status">
-                {kernel.worldDna ? "Ready for player creation." : "World DNA required before player creation."}
+                {kernel.worldDna ? "World DNA accepted." : "World DNA required before player creation."}
               </span>
             </div>
           </FormStep>
@@ -398,16 +427,16 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
             number="ii."
             title="Player"
             meta={playerMeta}
-            description={worldDnaAccepted ? "Create or import the player character, then save it." : "World DNA is required first."}
+            description={playerStepDescription}
           >
             <div data-testid="player-cast-panel">
-              {savedPlayer ? (
+              {savedPlayer && playerUnlocked ? (
                 <div className="mb-5">
                   <CharacterDraftPreview draft={savedPlayer.characterDraft} />
                 </div>
               ) : null}
 
-              {worldDnaAccepted ? (
+              {playerUnlocked ? (
                 <>
                   <div className="flex flex-wrap gap-2" role="tablist" aria-label="Player creation modes">
                     <button
@@ -538,9 +567,9 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
                 </>
               ) : (
                 <div className="wf-campaign-forge-preview">
-                  <h3>Player creation locked</h3>
+                  <h3>{playerLockHeading}</h3>
                   <p>
-                    Accept World DNA first. The player will be built from that world context.
+                    {playerLockBody}
                   </p>
                 </div>
               )}

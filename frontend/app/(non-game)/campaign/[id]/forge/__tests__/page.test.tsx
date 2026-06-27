@@ -162,6 +162,16 @@ beforeEach(() => {
 
 describe("CampaignForgePage", () => {
   it("renders saved World DNA without raw kernel JSON or a second DNA editor", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 1,
+      generationComplete: true,
+      seeds: FULL_SEEDS,
+    });
+
     await renderPage("campaign-1");
 
     await waitFor(() => {
@@ -177,7 +187,7 @@ describe("CampaignForgePage", () => {
     expect(within(dnaList).getByText("D01")).toBeInTheDocument();
     expect(within(dnaList).getByRole("heading", { name: "Geography" })).toBeInTheDocument();
     expect(screen.getByText("Storm coast")).toBeInTheDocument();
-    expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
+    expect(screen.getByText("World DNA accepted.")).toBeInTheDocument();
     expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
@@ -213,7 +223,38 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
   });
 
+  it("locks player creation when World DNA exists before the world is created", async () => {
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("World DNA accepted.")).toBeInTheDocument();
+    expect(screen.getByText("Create the world first")).toBeInTheDocument();
+    expect(screen.getByText("The player starts inside the world. Create the world, then set up the player here."))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Describe/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Import card/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Player override")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Create draft/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Choose card/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Save player/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
+  });
+
   it("keeps saved World DNA visible after the player is saved", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 1,
+      generationComplete: true,
+      seeds: FULL_SEEDS,
+    });
     mockedLoadCampaignKernel.mockResolvedValue({
       kernel: makeKernel({
         phase: "cast_ready",
@@ -251,7 +292,7 @@ describe("CampaignForgePage", () => {
     await renderPage("campaign-1");
 
     await waitFor(() => {
-      expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
+      expect(screen.getByText("World DNA accepted.")).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: /Use World DNA/ })).not.toBeInTheDocument();
@@ -260,6 +301,15 @@ describe("CampaignForgePage", () => {
   });
 
   it("creates a player, saves cast, and prepares the campaign without showing graph controls", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 1,
+      generationComplete: true,
+      seeds: FULL_SEEDS,
+    });
     const draft = makeDraft();
     const savedKernel = makeKernel({
       phase: "cast_ready",
