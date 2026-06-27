@@ -23,6 +23,8 @@
 - A green test suite or one-turn smoke does not prove playability.
 - Every mechanics slice that changes player flow needs a manual playtest note: exact path, player action tried, observed result, and whether it is pristine acceptance or diagnostic.
 - A planned playtest gate is a hard gate: execute the player path and record the evidence before moving to the next architecture item.
+- Backend-only work after the accepted scope boundary is exploratory code, not accepted product work, until the owner explicitly scopes it and manual playtests prove the player path.
+- World DNA is an optional but first-class player step; do not hide it inside a backend transition when the current flow needs player review or editing.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.
