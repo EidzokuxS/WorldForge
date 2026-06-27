@@ -47,7 +47,7 @@ type WorldDnaDraft = Record<keyof CampaignWorldDna, string>;
 type WorldDnaStatus = "Ready" | "Optional";
 type StageState = "done" | "active" | "pending";
 type WorldGenerationStatus = "idle" | "running" | "complete";
-type DnaBusyState = "idle" | "saving" | "saving-generate" | "reroll-all" | SeedCategory;
+type DnaBusyState = "idle" | "saving-generate" | "reroll-all" | SeedCategory;
 
 const WORLD_DNA_FIELDS: Array<{
   key: keyof CampaignWorldDna;
@@ -167,6 +167,13 @@ function draftToWorldSeeds(draft: WorldDnaDraft): WorldSeeds | null {
 
 function dnaDraftHasText(draft: WorldDnaDraft): boolean {
   return Object.values(draft).some((value) => value.trim().length > 0);
+}
+
+function formatElapsedTime(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = String(safeSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function worldGenerationRailState(
@@ -302,6 +309,8 @@ function WorldGenerationSurface({
   const [dnaDirty, setDnaDirty] = useState(false);
   const [dnaBusy, setDnaBusy] = useState<DnaBusyState>("idle");
   const [dnaError, setDnaError] = useState<string | null>(null);
+  const generationStartedAtRef = useRef<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const running = status === "running";
   const completedResult = status === "complete" ? result : null;
   const complete = completedResult !== null;
@@ -326,7 +335,7 @@ function WorldGenerationSurface({
       : running ? "running" : dnaDirty ? "edited" : "ready";
   const dnaPill = dnaBusy === "reroll-all"
     ? "rerolling"
-    : dnaBusy === "saving" || dnaBusy === "saving-generate"
+    : dnaBusy === "saving-generate"
       ? "saving"
       : dnaDirty ? "edited" : "editable";
 
@@ -336,10 +345,31 @@ function WorldGenerationSurface({
     }
   }, [dnaDirty, kernel.worldDna]);
 
-  async function saveDna(nextBusy: Extract<DnaBusyState, "saving" | "saving-generate">): Promise<boolean> {
+  useEffect(() => {
+    if (!running) {
+      generationStartedAtRef.current = null;
+      if (!complete) {
+        setElapsedSeconds(0);
+      }
+      return;
+    }
+
+    generationStartedAtRef.current = Date.now();
+    setElapsedSeconds(0);
+    const timerId = window.setInterval(() => {
+      const startedAt = generationStartedAtRef.current;
+      if (startedAt !== null) {
+        setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timerId);
+  }, [complete, running]);
+
+  async function saveDna(nextBusy: Extract<DnaBusyState, "saving-generate">): Promise<boolean> {
     const seeds = draftToWorldSeeds(dnaDraft);
     if (!seeds) {
-      setDnaError("Fill all six World DNA fields before saving.");
+      setDnaError("Fill all six seed cards first.");
       return false;
     }
 
@@ -436,7 +466,7 @@ function WorldGenerationSurface({
             {showGenerationDetails ? <p className="wf-gen-sub">World generation</p> : null}
             <h1 className="wf-gen-h">
               {complete ? "World ready for " : running ? "Creating the " : hasDnaDraft ? "Tune the " : "Create the "}
-              <em>{complete ? "review." : running ? "world." : hasDnaDraft ? "World DNA." : "world."}</em>
+              <em>{complete ? "review." : running ? "world." : hasDnaDraft ? "blueprint." : "world."}</em>
             </h1>
           </div>
           {showGenerationDetails ? (
@@ -446,7 +476,12 @@ function WorldGenerationSurface({
               </div>
               <div className="wf-gen-progress-meta">
                 <span>{activeLabel}</span>
-                <span><b>{progressMeta}</b></span>
+                <span>
+                  <b>{progressMeta}</b>
+                  {running ? (
+                    <span data-testid="worldgen-elapsed"> <b>{formatElapsedTime(elapsedSeconds)}</b> elapsed</span>
+                  ) : null}
+                </span>
               </div>
             </div>
           ) : null}
@@ -471,12 +506,12 @@ function WorldGenerationSurface({
           <section className="wf-gen-section">
             <div className="wf-gen-section-h">
               <span className="wf-gen-kicker">i</span>
-              <h2 className="wf-gen-h2">World <em>DNA</em></h2>
+              <h2 className="wf-gen-h2">Seed cards</h2>
               <span className="wf-gen-pill" data-state={dnaOperationBusy ? "forging" : undefined}>
                 {dnaPill}
               </span>
             </div>
-            <div className="wf-dna-editor-grid" role="list" aria-label="Editable World DNA">
+            <div className="wf-dna-editor-grid" role="list" aria-label="Editable seed cards">
               {WORLD_DNA_CARDS.map((item, index) => {
                 const category = item.category as keyof CampaignWorldDna;
                 const isRerolling = dnaBusy === item.category;
@@ -599,17 +634,6 @@ function WorldGenerationSurface({
                 {dnaBusy === "reroll-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                 {hasDnaDraft ? "Re-roll all six" : "Draft World DNA"}
               </button>
-              {hasDnaDraft ? (
-                <button
-                  type="button"
-                  className="wf-v4-btn"
-                  onClick={() => void saveDna("saving")}
-                  disabled={controlsDisabled || !dnaDirty || !seedsReady}
-                >
-                  {dnaBusy === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {dnaBusy === "saving" ? "Saving DNA" : "Save DNA"}
-                </button>
-              ) : null}
               <button
                 type="button"
                 className="wf-v4-btn wf-v4-btn-primary"
@@ -617,7 +641,7 @@ function WorldGenerationSurface({
                 disabled={running || dnaOperationBusy || (hasDnaDraft && !seedsReady)}
               >
                 {running || dnaBusy === "saving-generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {dnaBusy === "saving-generate" ? "Saving DNA" : running ? "Creating world" : "Create world"}
+                {dnaBusy === "saving-generate" ? "Saving edits" : running ? "Creating world" : "Create world"}
               </button>
             </div>
           )}

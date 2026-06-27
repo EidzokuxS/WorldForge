@@ -48,6 +48,9 @@
 - Keep idle setup surfaces quiet. Future-step status cards, progress labels, and explanatory footer notes appear when the process is running, complete, blocked, or actionable.
 - Setup rail state must name the surface currently on screen: editable DNA cards mean World DNA is active; World generation becomes active only while the world build is running.
 - Avoid top-of-hero sublabels when the heading already names the state.
+- Avoid repeating the active setup step across the rail, H1, and section title. Use the rail for the step name, then use the H1 and section title for the player's current work.
+- Running generation surfaces need visible elapsed time next to stage progress.
+- When the primary action persists dirty edits before continuing, do not expose a separate Save button for the same draft.
 - Gate player-character creation behind the created world signal, currently `campaign.generationComplete === true`. World DNA can enrich that context, but missing DNA must not block premise-only world creation.
 - Keep graph/kernel mechanics off player-facing setup screens. Compose and persistence steps run internally after their player-facing prerequisite is complete.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.

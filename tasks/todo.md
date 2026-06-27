@@ -163,3 +163,8 @@ Review:
 - Droid GLM-5.2 reviewed `.codex/droid-prompts/forge-dna-generation-state-labels.md` and returned `Plan is up-to-date.`
 - Forge now marks the setup rail as `World DNA` active while editable DNA cards are on screen, keeps `World generation` pending until the build runs, and removes the redundant `World DNA - preparing suggestions` preparation sublabel.
 - Verification: focused frontend vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx app/(non-game)/campaign/new/__tests__/page.test.tsx app/(non-game)/campaign/new/dna/__tests__/page.test.tsx` -> `22 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.
+- Owner correction: running world generation needs a visible timer, the idle DNA editor should not repeat `World DNA` across the rail/H1/section, and standalone `Save DNA` is redundant because `Create world` saves dirty seed edits before starting.
+- Droid GLM-5.2 reviewed `.codex/droid-prompts/forge-dna-timer-action-noise.md` and returned `Approved for implementation`.
+- GLM copy review with `humanizer` and `deslop` reviewed `.codex/droid-prompts/forge-dna-timer-copy-humanizer-deslop.md` and `.codex/droid-prompts/forge-dna-timer-extra-copy-humanizer-deslop.md`; both returned `GO`.
+- Forge now uses `Tune the blueprint.` and `Seed cards` on the idle DNA edit surface, removes the standalone `Save DNA` action, keeps save-before-create in the `Create world` path, and shows elapsed time beside the running generation stage count.
+- Verification: focused Forge vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.

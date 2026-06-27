@@ -297,7 +297,7 @@ describe("CampaignForgePage", () => {
     expectCampaignStage("World DNA", "done");
     expectCampaignStage("World generation", "pending");
     expect(screen.getByRole("button", { name: "Create world" })).toBeEnabled();
-    expect(screen.queryByRole("list", { name: "Editable World DNA" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Editable seed cards" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save DNA" })).not.toBeInTheDocument();
     expect(screen.queryByText("World DNA required")).not.toBeInTheDocument();
     expect(screen.queryByText("World DNA required before player creation.")).not.toBeInTheDocument();
@@ -358,15 +358,19 @@ describe("CampaignForgePage", () => {
     });
 
     expect(document.querySelector(".wf-gen-head .wf-gen-sub")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Tune the World DNA." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tune the blueprint." })).toBeInTheDocument();
     expectCampaignStage("World DNA", "active");
     expectCampaignStage("World generation", "pending");
     expect(screen.getByRole("button", { name: "Create world" })).toBeInTheDocument();
-    const dnaList = screen.getByRole("list", { name: "Editable World DNA" });
+    const surface = screen.getByTestId("worldgen-surface");
+    expect(within(surface).getAllByText("World DNA")).toHaveLength(1);
+    expect(within(screen.getByLabelText("Campaign setup stages")).getByText("World DNA")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Seed cards" })).toBeInTheDocument();
+    const dnaList = screen.getByRole("list", { name: "Editable seed cards" });
     expect(within(dnaList).getAllByRole("listitem")).toHaveLength(6);
     expect(screen.getByLabelText("Geography seed text")).toHaveValue("Storm coast");
     expect(screen.getByRole("button", { name: "Re-roll all six" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save DNA" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save DNA" })).not.toBeInTheDocument();
     expect(screen.queryByText("Player setup opens after world review.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("World generation progress")).not.toBeInTheDocument();
     expect(screen.queryByText("World DNA is ready to edit.")).not.toBeInTheDocument();
@@ -384,32 +388,6 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByRole("button", { name: /Save player/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
-  });
-
-  it("saves edited World DNA through the kernel boundary", async () => {
-    await renderPage("campaign-1");
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Geography seed text")).toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByLabelText("Geography seed text"), {
-      target: { value: "Flooded stations" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save DNA" }));
-
-    await waitFor(() => {
-      expect(mockedApplyWorldDna).toHaveBeenCalledWith("campaign-1", {
-        seeds: {
-          geography: "Flooded stations",
-          politicalStructure: "Guild council",
-          centralConflict: "Trade war",
-          culturalFlavor: ["Lantern rites"],
-          environment: "Storm season",
-          wildcard: "Talking maps",
-        },
-      });
-    });
   });
 
   it("re-rolls one World DNA field without exposing debug context", async () => {
@@ -553,6 +531,8 @@ describe("CampaignForgePage", () => {
     expectCampaignStage("World DNA", "done");
     expectCampaignStage("World generation", "active");
     expect(screen.getByRole("heading", { name: "World build" })).toBeInTheDocument();
+    expect(screen.getByText("3 of 8 stages")).toBeInTheDocument();
+    expect(screen.getByTestId("worldgen-elapsed")).toHaveTextContent("0:00 elapsed");
     expect(screen.queryByText("Queued for generation.")).not.toBeInTheDocument();
     expect(screen.queryByText("queued")).not.toBeInTheDocument();
     expect(screen.getAllByText("Location: Lantern Gate").length).toBeGreaterThan(0);
