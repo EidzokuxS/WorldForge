@@ -1,0 +1,57 @@
+import type {
+  CampaignKernel,
+  CampaignOpeningResult,
+} from "@worldforge/shared";
+import { assertSafeId } from "../campaign/paths.js";
+import { AppError } from "../lib/index.js";
+import { readOrCreateCampaignKernel } from "./cast-kernel.js";
+import { writeCampaignKernel } from "./dna-adapter.js";
+import { buildCampaignOpening } from "./opening-gm.js";
+
+export interface CreateCampaignOpeningResult {
+  kernel: CampaignKernel;
+  opening: CampaignOpeningResult;
+}
+
+export function createCampaignOpening(input: {
+  campaignId: string;
+  createdAt?: number;
+}): CreateCampaignOpeningResult {
+  assertSafeId(input.campaignId);
+  const currentKernel = readOrCreateCampaignKernel(input.campaignId);
+
+  if (currentKernel.phase !== "setup_ready") {
+    throw new AppError(`Campaign kernel phase ${currentKernel.phase} cannot create A8 opening.`, 409);
+  }
+  if (!currentKernel.startingSetup) {
+    throw new AppError("A8 opening requires starting setup.", 409);
+  }
+  if (currentKernel.chatSession.turns.length !== 0) {
+    throw new AppError("A8 opening requires an empty chat session.", 409);
+  }
+
+  const opening = buildCampaignOpening({
+    worldGraph: currentKernel.worldGraph,
+    castRegistry: currentKernel.castRegistry,
+    startingSetup: currentKernel.startingSetup,
+    worldDna: currentKernel.worldDna,
+  });
+  const nextKernel: CampaignKernel = {
+    ...currentKernel,
+    phase: "active",
+    chatSession: {
+      turns: [
+        {
+          role: "assistant",
+          content: opening.text,
+          createdAt: input.createdAt ?? Date.now(),
+        },
+      ],
+      pendingSoftStateHints: [],
+    },
+    turnIndex: 1,
+  };
+
+  writeCampaignKernel(input.campaignId, nextKernel);
+  return { kernel: nextKernel, opening };
+}

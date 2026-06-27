@@ -27,7 +27,7 @@ import loreRoutes from "./routes/lore.js";
 import settingsRoutes from "./routes/settings.js";
 import worldgenRoutes from "./routes/worldgen.js";
 import characterRoutes from "./routes/character.js";
-import revampRoutes from "./routes/revamp.js";
+import campaignKernelRoutes from "./routes/campaign-kernel.js";
 import imageRoutes from "./routes/images.js";
 import personaTemplateRoutes from "./routes/persona-templates.js";
 
@@ -84,7 +84,7 @@ app.route("/api/campaigns", loreRoutes);
 app.route("/api/campaigns/:id/persona-templates", personaTemplateRoutes);
 app.route("/api/worldgen", worldgenRoutes);
 app.route("/api/worldgen", characterRoutes);
-app.route("/api/revamp", revampRoutes);
+app.route("/api/kernel", campaignKernelRoutes);
 app.route("/api", aiRoutes);
 app.route("/api/chat", chatRoutes);
 app.route("/api/images", imageRoutes);

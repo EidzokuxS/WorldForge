@@ -39,8 +39,8 @@ tasks/*
 !tasks/lessons.md
 rpi/*
 !rpi/
-!rpi/revamp/
-!rpi/revamp/**
+!rpi/campaign-kernel/
+!rpi/campaign-kernel/**
 .planning/
 
 # E2E test artifacts

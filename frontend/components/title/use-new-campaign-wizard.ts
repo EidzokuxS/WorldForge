@@ -308,7 +308,7 @@ export function useNewCampaignWizard(
       resetFlow();
       clearCampaignNewFlowSession();
       onCreated();
-      router.push(`/campaign/${created.id}/revamp`);
+      router.push(`/campaign/${created.id}/forge`);
     } catch (error) {
       toast.error("Failed to create campaign", {
         description: getErrorMessage(error, DEFAULT_API_ERROR),

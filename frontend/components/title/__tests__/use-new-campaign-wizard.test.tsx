@@ -290,7 +290,7 @@ describe("useNewCampaignWizard", () => {
       }),
     );
     expect(mockLoadCampaign).toHaveBeenCalledWith("campaign-1");
-    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/forge");
     expect(mockWorldbookToIpResearchContext).not.toHaveBeenCalled();
     expect(onCreated).toHaveBeenCalledTimes(1);
   });
@@ -318,10 +318,10 @@ describe("useNewCampaignWizard", () => {
         worldgenResearchEnabled: false,
       }),
     );
-    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/forge");
   });
 
-  it("creates a revamp campaign shell without running old worldgen", async () => {
+  it("creates a campaign kernel shell without running old worldgen", async () => {
     const onCreated = vi.fn();
     const { result } = renderHook(() => useNewCampaignWizard(SETTINGS, onCreated));
 
@@ -336,7 +336,7 @@ describe("useNewCampaignWizard", () => {
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockLoadCampaign).toHaveBeenCalledWith("campaign-1");
-    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/revamp");
+    expect(mockPush).toHaveBeenCalledWith("/campaign/campaign-1/forge");
     expect(onCreated).toHaveBeenCalledTimes(1);
   });
 

@@ -2,7 +2,7 @@
 
 ## Operating Rules
 
-- Keep active task files short. Long forensic history belongs in git history or current docs that still serve the revamp.
+- Keep active task files short. Long forensic history belongs in git history or current docs that still serve the mechanics rebuild.
 - Treat fallback and backward-compatibility paths as defects unless the user explicitly authorizes a migration window.
 - Fix root causes. Do not add guard piles, compatibility shims, or regex prose gates to hide broken ownership.
 - Before editing code symbols, run GitNexus impact. Before committing, run GitNexus `detect_changes`.
@@ -15,9 +15,10 @@
 - After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
 - For manual UI playtests, use the in-app browser when it is available; reserve external browser automation for headless regression artifacts or explicit requests.
 - For Droid GLM reviews, verify the active custom model alias from Factory settings and a real `droid exec --model ... --list-tools` call before recording any blocker.
-- In `feat/revamp`, legacy code is quarantine reference: revamp player paths, APIs, and UI land on revamp-owned routes with explicit adapter boundaries for legacy data shapes.
+- In `feat/revamp`, legacy code is quarantine reference: mechanics player paths, APIs, and UI land on mechanics-owned routes with explicit adapter boundaries for legacy data shapes.
+- Workstream labels are internal bookkeeping. Player-facing routes, UI text, current files, symbols, test titles, and helpers use domain names from the AGENTS naming convention.
 
-## Revamp Acceptance
+## Mechanics Acceptance
 
 - A green test suite or one-turn smoke does not prove playability.
 - Every mechanics slice that changes player flow needs a manual playtest note: exact path, player action tried, observed result, and whether it is pristine acceptance or diagnostic.
@@ -31,7 +32,7 @@
 
 - Send every UX/UI task or visible interface change to GLM-5.2 Coding Plan in Droid before implementation, then carry its verdict into the active task notes.
 - Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
-- Treat `docs/UI Concept.html` as the revamp style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
+- Treat `docs/UI Concept.html` as the mechanics UI style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
 - Narration owns lived moment, pressure, sensory surface, visible behavior, and action handoff.
 - Route option labels are UI/action handles. Prose should summarize visible ways onward unless the player asks about one explicit route.

@@ -285,7 +285,7 @@ export type CampaignKernelPhase =
   | "setup_ready"
   | "active";
 
-export interface RevampWorldDNA {
+export interface CampaignWorldDna {
   geography: string;
   politicalStructure: string;
   centralConflict: string;
@@ -294,7 +294,7 @@ export interface RevampWorldDNA {
   wildcard: string;
 }
 
-export type RevampWorldNodeType =
+export type CampaignWorldNodeType =
   | "Location"
   | "SceneLocation"
   | "Character"
@@ -304,14 +304,14 @@ export type RevampWorldNodeType =
   | "Item"
   | "Hook";
 
-export interface RevampWorldNode {
+export interface CampaignWorldNode {
   id: string;
-  type: RevampWorldNodeType;
+  type: CampaignWorldNodeType;
   name: string;
   data: Record<string, unknown>;
 }
 
-export type RevampWorldEdgeType =
+export type CampaignWorldEdgeType =
   | "located_at"
   | "route_to"
   | "knows"
@@ -325,26 +325,26 @@ export type RevampWorldEdgeType =
   | "threatens"
   | "trusts";
 
-export interface RevampWorldEdge {
+export interface CampaignWorldEdge {
   id: string;
   fromId: string;
   toId: string;
-  type: RevampWorldEdgeType;
+  type: CampaignWorldEdgeType;
   data: Record<string, unknown>;
 }
 
-export interface RevampWorldGraph {
-  nodes: RevampWorldNode[];
-  edges: RevampWorldEdge[];
+export interface CampaignWorldGraph {
+  nodes: CampaignWorldNode[];
+  edges: CampaignWorldEdge[];
 }
 
-export type RevampCastSource =
+export type CampaignCastSource =
   | "player_created"
   | "player_imported"
   | "npc_imported"
   | "npc_generated";
 
-export type RevampCampaignRole =
+export type CampaignCastRole =
   | "player"
   | "companion"
   | "major_npc"
@@ -354,30 +354,30 @@ export type RevampCampaignRole =
   | "romance"
   | "background";
 
-export type RevampCastImportance = "primary" | "major" | "minor" | "background";
+export type CampaignCastImportance = "primary" | "major" | "minor" | "background";
 
-export interface RevampCastPlacement {
+export interface CampaignCastPlacement {
   locationId: string | null;
   sceneLocationId: string | null;
   notes: string[];
 }
 
-export interface RevampCastMember {
+export interface CampaignCastMember {
   id: string;
-  source: RevampCastSource;
+  source: CampaignCastSource;
   characterDraft: CharacterDraft;
-  campaignRole: RevampCampaignRole;
-  placement: RevampCastPlacement;
-  importance: RevampCastImportance;
+  campaignRole: CampaignCastRole;
+  placement: CampaignCastPlacement;
+  importance: CampaignCastImportance;
 }
 
-export interface RevampCastRegistry {
-  playerCharacter: RevampCastMember | null;
-  importedCast: RevampCastMember[];
-  generatedCast: RevampCastMember[];
+export interface CampaignCastRegistry {
+  playerCharacter: CampaignCastMember | null;
+  importedCast: CampaignCastMember[];
+  generatedCast: CampaignCastMember[];
 }
 
-export interface RevampStartingSetup {
+export interface CampaignStartingSetup {
   mode: "gm_invented" | "user_guided";
   anchorSceneId: string;
   playerCharacterId: string;
@@ -390,72 +390,72 @@ export interface RevampStartingSetup {
   openingQuestion: string;
 }
 
-export interface RevampChatTurn {
+export interface CampaignChatTurn {
   role: ChatRole;
   content: string;
   createdAt: number;
 }
 
-export interface RevampChatSession {
-  turns: RevampChatTurn[];
-  pendingSoftStateHints: RevampSoftStateHint[];
+export interface CampaignChatSession {
+  turns: CampaignChatTurn[];
+  pendingSoftStateHints: CampaignSoftStateHint[];
 }
 
-export interface RevampRuntimeState {
+export interface CampaignRuntimeState {
   currentSceneId: string | null;
 }
 
-export interface RevampOpeningResult {
+export interface CampaignOpeningResult {
   text: string;
   suggestedActions: string[];
 }
 
-export type RevampSoftStateHintType =
+export type CampaignSoftStateHintType =
   | "inspect_scene"
   | "address_cast"
   | "route_intent"
   | "freeform_action";
 
-export interface RevampSoftStateHint {
-  type: RevampSoftStateHintType;
+export interface CampaignSoftStateHint {
+  type: CampaignSoftStateHintType;
   targetId?: string;
   summary: string;
 }
 
-export interface RevampGmResponse {
+export interface CampaignGmResponse {
   text: string;
   suggestedActions: string[];
-  softStateHints: RevampSoftStateHint[];
+  softStateHints: CampaignSoftStateHint[];
 }
 
-export interface RevampDebugSceneSummary {
+export interface CampaignDebugSceneSummary {
   id: string;
   name: string;
   description: string;
 }
 
-export interface RevampDebugCastSummary {
+export interface CampaignDebugCastSummary {
   id: string;
   name: string;
-  source: RevampCastSource;
-  campaignRole: RevampCampaignRole;
+  source: CampaignCastSource;
+  campaignRole: CampaignCastRole;
   isPlayer: boolean;
 }
 
-export interface RevampDebugRouteSummary {
+export interface CampaignDebugRouteSummary {
   edgeId: string;
   toSceneId: string;
   name: string;
 }
 
-export interface RevampDebugTurnSummary {
+export interface CampaignDebugTurnSummary {
   index: number;
   role: ChatRole;
   contentPreview: string;
   createdAt: number;
 }
 
-export interface RevampDebugSnapshot {
+export interface CampaignDebugSnapshot {
   campaignId: string;
   phase: CampaignKernelPhase;
   turnIndex: number;
@@ -466,14 +466,14 @@ export interface RevampDebugSnapshot {
     turns: number;
     pendingSoftStateHints: number;
   };
-  currentScene: RevampDebugSceneSummary | null;
-  presentCast: RevampDebugCastSummary[];
-  routes: RevampDebugRouteSummary[];
-  pendingSoftStateHints: RevampSoftStateHint[];
-  recentTurns: RevampDebugTurnSummary[];
+  currentScene: CampaignDebugSceneSummary | null;
+  presentCast: CampaignDebugCastSummary[];
+  routes: CampaignDebugRouteSummary[];
+  pendingSoftStateHints: CampaignSoftStateHint[];
+  recentTurns: CampaignDebugTurnSummary[];
 }
 
-export type RevampStateWriterChangeType =
+export type CampaignStateWriterChangeType =
   | "MoveCharacter"
   | "RevealSecret"
   | "ChangeRelationship"
@@ -483,19 +483,19 @@ export type RevampStateWriterChangeType =
   | "CreateHook"
   | "ResolveHook";
 
-export type RevampStateWriterChangeStatus = "applied" | "rejected";
+export type CampaignStateWriterChangeStatus = "applied" | "rejected";
 
-export interface RevampStateWriterChange {
-  type: RevampStateWriterChangeType;
-  status: RevampStateWriterChangeStatus;
+export interface CampaignStateWriterChange {
+  type: CampaignStateWriterChangeType;
+  status: CampaignStateWriterChangeStatus;
   actorId?: string;
   fromSceneId?: string;
   toSceneId?: string;
   reason: string;
 }
 
-export interface RevampStateWriterResult {
-  changes: RevampStateWriterChange[];
+export interface CampaignStateWriterResult {
+  changes: CampaignStateWriterChange[];
   appliedCount: number;
   rejectedCount: number;
 }
@@ -504,12 +504,12 @@ export interface CampaignKernel {
   campaignId: string;
   phase: CampaignKernelPhase;
   premise: string;
-  worldDna: RevampWorldDNA | null;
-  worldGraph: RevampWorldGraph;
-  castRegistry: RevampCastRegistry;
-  startingSetup: RevampStartingSetup | null;
-  chatSession: RevampChatSession;
-  runtimeState: RevampRuntimeState;
+  worldDna: CampaignWorldDna | null;
+  worldGraph: CampaignWorldGraph;
+  castRegistry: CampaignCastRegistry;
+  startingSetup: CampaignStartingSetup | null;
+  chatSession: CampaignChatSession;
+  runtimeState: CampaignRuntimeState;
   turnIndex: number;
 }
 
