@@ -11,8 +11,9 @@ import {
   Save,
   Upload,
   UserRound,
+  Wand2,
 } from "lucide-react";
-import type { CampaignKernel, CampaignWorldDna, CharacterDraft } from "@worldforge/shared";
+import type { CampaignKernel, CampaignWorldDna, CharacterDraft, SeedCategory, WorldSeeds } from "@worldforge/shared";
 
 import {
   generateWorld,
@@ -21,12 +22,16 @@ import {
   type WorldGenerationComplete,
   type WorldGenerationProgress,
 } from "@/lib/api";
+import { WORLD_DNA_CARDS } from "@/components/title/utils";
 import {
+  applyWorldDna,
   composeCampaignGraph,
   importPlayerCard,
   loadCampaignKernel,
   parsePlayerCharacterDraft,
   savePlayerCast,
+  suggestCampaignWorldDna,
+  suggestCampaignWorldDnaCategory,
 } from "@/lib/campaign-kernel-api";
 import { getErrorMessage } from "@/lib/settings";
 import { parseV2CardFile as parseCharacterCardFile } from "@/lib/v2-card-parser";
@@ -38,9 +43,11 @@ type WorldDnaSummaryRow = {
   value: string;
 };
 
+type WorldDnaDraft = Record<keyof CampaignWorldDna, string>;
 type WorldDnaStatus = "Ready" | "No DNA" | "Locked";
 type StageState = "done" | "active" | "pending";
 type WorldGenerationStatus = "idle" | "running" | "complete";
+type DnaBusyState = "idle" | "saving" | "saving-generate" | "reroll-all" | SeedCategory;
 
 const WORLD_DNA_FIELDS: Array<{
   key: keyof CampaignWorldDna;
@@ -56,7 +63,7 @@ const WORLD_DNA_FIELDS: Array<{
 
 const WORLD_GENERATION_RAIL = [
   { title: "Concept", detail: "name and premise" },
-  { title: "World DNA", detail: "six accepted laws" },
+  { title: "World DNA", detail: "edit before build" },
   { title: "World generation", detail: "locations, cast, lore" },
   { title: "World Review", detail: "inspect before play" },
   { title: "Player character", detail: "after world review" },
@@ -86,6 +93,76 @@ function worldDnaRows(worldDna: CampaignWorldDna): WorldDnaSummaryRow[] {
     label: field.label,
     value: worldDna[field.key],
   }));
+}
+
+function suggestedValueToText(value: string | string[]): string {
+  return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function worldDnaToDraft(worldDna: CampaignWorldDna): WorldDnaDraft {
+  return {
+    geography: worldDna.geography,
+    politicalStructure: worldDna.politicalStructure,
+    centralConflict: worldDna.centralConflict,
+    culturalFlavor: worldDna.culturalFlavor,
+    environment: worldDna.environment,
+    wildcard: worldDna.wildcard,
+  };
+}
+
+function worldSeedsToDraft(seeds: WorldSeeds): WorldDnaDraft {
+  return {
+    geography: seeds.geography ?? "",
+    politicalStructure: seeds.politicalStructure ?? "",
+    centralConflict: seeds.centralConflict ?? "",
+    culturalFlavor: Array.isArray(seeds.culturalFlavor) ? seeds.culturalFlavor.join(", ") : "",
+    environment: seeds.environment ?? "",
+    wildcard: seeds.wildcard ?? "",
+  };
+}
+
+function splitCulturalFlavorDraft(value: string): string[] {
+  const semicolonParts = value
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (semicolonParts.length > 1) {
+    return semicolonParts;
+  }
+
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function draftToWorldSeeds(draft: WorldDnaDraft): WorldSeeds | null {
+  const geography = draft.geography.trim();
+  const politicalStructure = draft.politicalStructure.trim();
+  const centralConflict = draft.centralConflict.trim();
+  const culturalFlavor = splitCulturalFlavorDraft(draft.culturalFlavor);
+  const environment = draft.environment.trim();
+  const wildcard = draft.wildcard.trim();
+
+  if (
+    !geography
+    || !politicalStructure
+    || !centralConflict
+    || culturalFlavor.length === 0
+    || !environment
+    || !wildcard
+  ) {
+    return null;
+  }
+
+  return {
+    geography,
+    politicalStructure,
+    centralConflict,
+    culturalFlavor,
+    environment,
+    wildcard,
+  };
 }
 
 function FormStep({
@@ -171,6 +248,9 @@ function WorldGenerationSurface({
   result,
   error,
   onStart,
+  onSaveDna,
+  onRerollAll,
+  onRerollCategory,
 }: {
   campaign: CampaignMeta;
   kernel: CampaignKernel;
@@ -178,27 +258,125 @@ function WorldGenerationSurface({
   progress: WorldGenerationProgress | null;
   result: WorldGenerationComplete | null;
   error: string | null;
-  onStart: () => void;
+  onStart: () => Promise<void>;
+  onSaveDna: (seeds: WorldSeeds) => Promise<void>;
+  onRerollAll: () => Promise<WorldSeeds>;
+  onRerollCategory: (category: SeedCategory) => Promise<string | string[]>;
 }) {
+  const [dnaDraft, setDnaDraft] = useState<WorldDnaDraft>(() => (
+    kernel.worldDna ? worldDnaToDraft(kernel.worldDna) : worldSeedsToDraft(campaign.seeds ?? {})
+  ));
+  const [dnaDirty, setDnaDirty] = useState(false);
+  const [dnaBusy, setDnaBusy] = useState<DnaBusyState>("idle");
+  const [dnaError, setDnaError] = useState<string | null>(null);
   const running = status === "running";
   const completedResult = status === "complete" ? result : null;
   const complete = completedResult !== null;
+  const dnaOperationBusy = dnaBusy !== "idle";
+  const controlsDisabled = running || complete || dnaOperationBusy;
+  const seedsReady = draftToWorldSeeds(dnaDraft) !== null;
   const progressRatio = complete
     ? 100
     : progress?.step && progress?.totalSteps
       ? Math.max(16, Math.min(94, Math.round((progress.step / progress.totalSteps) * 100)))
-      : running ? 28 : 14;
+      : running ? 28 : dnaDirty ? 42 : 22;
   const activeLabel = progress?.subLabel || progress?.label || (
-    running ? "Creating the world." : "Ready to start world generation."
+    running ? "Creating the world." : dnaDirty ? "World DNA has unsaved edits." : "World DNA is ready to edit."
   );
   const progressMeta = complete
     ? "ready for review"
     : progress?.step && progress?.totalSteps
       ? `${progress.step} of ${progress.totalSteps} stages`
-      : running ? "running" : "waiting";
+      : running ? "running" : dnaDirty ? "edited" : "ready";
+  const dnaPill = dnaBusy === "reroll-all"
+    ? "rerolling"
+    : dnaBusy === "saving" || dnaBusy === "saving-generate"
+      ? "saving"
+      : dnaDirty ? "edited" : "editable";
+
+  useEffect(() => {
+    if (!dnaDirty && kernel.worldDna) {
+      setDnaDraft(worldDnaToDraft(kernel.worldDna));
+    }
+  }, [dnaDirty, kernel.worldDna]);
+
+  async function saveDna(nextBusy: Extract<DnaBusyState, "saving" | "saving-generate">): Promise<boolean> {
+    const seeds = draftToWorldSeeds(dnaDraft);
+    if (!seeds) {
+      setDnaError("Fill all six World DNA fields before saving.");
+      return false;
+    }
+
+    setDnaBusy(nextBusy);
+    setDnaError(null);
+    try {
+      await onSaveDna(seeds);
+      setDnaDirty(false);
+      return true;
+    } catch (saveFailure) {
+      setDnaError(getErrorMessage(saveFailure, "Failed to save World DNA."));
+      return false;
+    } finally {
+      setDnaBusy("idle");
+    }
+  }
+
+  async function handleRerollCategory(category: SeedCategory) {
+    if (controlsDisabled) {
+      return;
+    }
+
+    setDnaBusy(category);
+    setDnaError(null);
+    try {
+      const value = await onRerollCategory(category);
+      setDnaDraft((current) => ({
+        ...current,
+        [category]: suggestedValueToText(value),
+      }));
+      setDnaDirty(true);
+    } catch (rerollFailure) {
+      setDnaError(getErrorMessage(rerollFailure, "Failed to re-roll World DNA field."));
+    } finally {
+      setDnaBusy("idle");
+    }
+  }
+
+  async function handleRerollAll() {
+    if (controlsDisabled) {
+      return;
+    }
+
+    setDnaBusy("reroll-all");
+    setDnaError(null);
+    try {
+      const seeds = await onRerollAll();
+      setDnaDraft(worldSeedsToDraft(seeds));
+      setDnaDirty(true);
+    } catch (rerollFailure) {
+      setDnaError(getErrorMessage(rerollFailure, "Failed to re-roll World DNA."));
+    } finally {
+      setDnaBusy("idle");
+    }
+  }
+
+  async function handleCreateWorld() {
+    if (running || complete || dnaOperationBusy) {
+      return;
+    }
+
+    if (dnaDirty) {
+      const saved = await saveDna("saving-generate");
+      if (!saved) {
+        return;
+      }
+    }
+
+    await onStart();
+  }
 
   return (
-    <main className="wf-gen-shell wf-v4-page-theater" data-testid="worldgen-surface">
+    <main className="wf-gen-shell wf-dna-edit-shell wf-v4-page-theater" data-testid="worldgen-surface">
       <aside className="wf-gen-rail wf-gen-rail-dna" aria-label="Campaign setup stages">
         <div className="wf-gen-rail-h">Forge</div>
         {WORLD_GENERATION_RAIL.map((stage, index) => {
@@ -222,8 +400,8 @@ function WorldGenerationSurface({
           <div>
             <p className="wf-gen-sub">World generation</p>
             <h1 className="wf-gen-h">
-              {complete ? "World ready for " : running ? "Creating the " : "Create the "}
-              <em>{complete ? "review." : "world."}</em>
+              {complete ? "World ready for " : running ? "Creating the " : "Tune the "}
+              <em>{complete ? "review." : running ? "world." : "World DNA."}</em>
             </h1>
           </div>
           <div className="wf-gen-progress" aria-label="World generation progress">
@@ -248,7 +426,7 @@ function WorldGenerationSurface({
                 ? formatWorldGenerationSummary(completedResult)
                 : running
                   ? activeLabel
-                  : "World DNA is locked. Start generation to create locations, factions, characters, lore cards, and the review surface."}
+                  : "Edit the six seed laws, save DNA, or create the world from the current draft."}
               {running ? <span className="wf-gen-cursor" /> : null}
             </p>
           </div>
@@ -258,18 +436,64 @@ function WorldGenerationSurface({
           <div className="wf-gen-section-h">
             <span className="wf-gen-kicker">i</span>
             <h2 className="wf-gen-h2">World <em>DNA</em></h2>
-            <span className="wf-gen-pill">locked</span>
+            <span className="wf-gen-pill" data-state={dnaOperationBusy ? "forging" : undefined}>
+              {dnaPill}
+            </span>
           </div>
-          {kernel.worldDna ? (
-            <div className="wf-gen-dna" role="list" aria-label="Accepted World DNA">
-              {worldDnaRows(kernel.worldDna).map((row) => (
-                <article className="wf-gen-dna-card" role="listitem" key={row.label}>
-                  <div className="wf-gen-dna-card-k">{row.code} {row.label}</div>
-                  <div className="wf-gen-dna-card-v">{row.value}</div>
+          <div className="wf-dna-editor-grid" role="list" aria-label="Editable World DNA">
+            {WORLD_DNA_CARDS.map((item, index) => {
+              const category = item.category as keyof CampaignWorldDna;
+              const isRerolling = dnaBusy === item.category;
+
+              return (
+                <article
+                  key={item.category}
+                  className="wf-dna-seed-card"
+                  role="listitem"
+                  data-enabled="true"
+                  data-busy={isRerolling ? "true" : "false"}
+                >
+                  <div className="wf-dna-seed-head">
+                    <div>
+                      <div className="wf-dna-seed-code">D{String(index + 1).padStart(2, "0")}</div>
+                      <h3 className="wf-dna-seed-title">{item.label}</h3>
+                    </div>
+                    <span className="wf-gen-tag">{dnaDirty ? "draft" : "seed"}</span>
+                  </div>
+
+                  <textarea
+                    className="wf-dna-seed-text"
+                    value={dnaDraft[category]}
+                    onChange={(event) => {
+                      setDnaDraft((current) => ({
+                        ...current,
+                        [category]: event.target.value,
+                      }));
+                      setDnaDirty(true);
+                    }}
+                    disabled={controlsDisabled}
+                    aria-label={`${item.label} seed text`}
+                    placeholder="Seed text"
+                  />
+
+                  <div className="wf-dna-seed-actions">
+                    <span className="wf-gen-tag">
+                      {isRerolling ? "rolling" : dnaDraft[category].trim() ? "ready" : "empty"}
+                    </span>
+                    <button
+                      type="button"
+                      className="wf-dna-card-action"
+                      onClick={() => void handleRerollCategory(item.category)}
+                      disabled={controlsDisabled}
+                    >
+                      {isRerolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                      Re-roll
+                    </button>
+                  </div>
                 </article>
-              ))}
-            </div>
-          ) : null}
+              );
+            })}
+          </div>
         </section>
 
         <section className="wf-gen-section">
@@ -294,28 +518,48 @@ function WorldGenerationSurface({
           </div>
         </section>
 
-        {error ? (
+        {dnaError || error ? (
           <section className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm text-red-200">
-            {error}
+            {dnaError ?? error}
           </section>
         ) : null}
 
-        <div className="wf-gen-actions">
+        <div className="wf-gen-actions wf-dna-actionbar">
           {complete ? (
             <Link href={`/campaign/${campaign.id}/review`} className="wf-v4-btn wf-v4-btn-primary">
               <Check className="h-4 w-4" />
               Review world
             </Link>
           ) : (
-            <button
-              type="button"
-              className="wf-v4-btn wf-v4-btn-primary"
-              onClick={onStart}
-              disabled={running}
-            >
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {running ? "Creating world" : "Create world"}
-            </button>
+            <div className="wf-dna-actionbar-main">
+              <button
+                type="button"
+                className="wf-v4-btn"
+                onClick={() => void handleRerollAll()}
+                disabled={controlsDisabled}
+              >
+                {dnaBusy === "reroll-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                Re-roll all six
+              </button>
+              <button
+                type="button"
+                className="wf-v4-btn"
+                onClick={() => void saveDna("saving")}
+                disabled={controlsDisabled || !dnaDirty || !seedsReady}
+              >
+                {dnaBusy === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {dnaBusy === "saving" ? "Saving DNA" : "Save DNA"}
+              </button>
+              <button
+                type="button"
+                className="wf-v4-btn wf-v4-btn-primary"
+                onClick={() => void handleCreateWorld()}
+                disabled={running || dnaOperationBusy || !seedsReady}
+              >
+                {running || dnaBusy === "saving-generate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {dnaBusy === "saving-generate" ? "Saving DNA" : running ? "Creating world" : "Create world"}
+              </button>
+            </div>
           )}
           <span className="wf-forge-cta-note">
             Player setup opens after world review.
@@ -544,6 +788,22 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     }
   }
 
+  async function handleSaveWorldDna(seeds: WorldSeeds) {
+    const result = await applyWorldDna(campaignId, { seeds });
+    setCampaign(result.campaign);
+    setKernel(result.kernel);
+  }
+
+  async function handleRerollWorldDna(): Promise<WorldSeeds> {
+    const result = await suggestCampaignWorldDna(campaignId);
+    return result.seeds;
+  }
+
+  async function handleRerollWorldDnaCategory(category: SeedCategory): Promise<string | string[]> {
+    const result = await suggestCampaignWorldDnaCategory(campaignId, category);
+    return result.value;
+  }
+
   async function handleDescribe() {
     const trimmedConcept = concept.trim();
     if (
@@ -685,7 +945,10 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
         progress={worldGenerationProgress}
         result={worldGenerationResult}
         error={worldGenerationError}
-        onStart={() => void handleCreateWorld()}
+        onStart={handleCreateWorld}
+        onSaveDna={handleSaveWorldDna}
+        onRerollAll={handleRerollWorldDna}
+        onRerollCategory={handleRerollWorldDnaCategory}
       />
     );
   }

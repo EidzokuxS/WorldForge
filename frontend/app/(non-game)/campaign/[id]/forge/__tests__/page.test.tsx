@@ -20,11 +20,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/campaign-kernel-api", () => ({
+  applyWorldDna: vi.fn(),
   loadCampaignKernel: vi.fn(),
   parsePlayerCharacterDraft: vi.fn(),
   importPlayerCard: vi.fn(),
   savePlayerCast: vi.fn(),
   composeCampaignGraph: vi.fn(),
+  suggestCampaignWorldDna: vi.fn(),
+  suggestCampaignWorldDnaCategory: vi.fn(),
 }));
 
 vi.mock("@/lib/v2-card-parser", () => ({
@@ -34,19 +37,25 @@ vi.mock("@/lib/v2-card-parser", () => ({
 import { loadCampaign } from "@/lib/api";
 import { generateWorld } from "@/lib/api";
 import {
+  applyWorldDna,
   composeCampaignGraph,
   loadCampaignKernel,
   parsePlayerCharacterDraft,
   savePlayerCast,
+  suggestCampaignWorldDna,
+  suggestCampaignWorldDnaCategory,
 } from "@/lib/campaign-kernel-api";
 import CampaignForgePage from "@/app/(non-game)/campaign/[id]/forge/page";
 
 const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGenerateWorld = vi.mocked(generateWorld);
+const mockedApplyWorldDna = vi.mocked(applyWorldDna);
 const mockedLoadCampaignKernel = vi.mocked(loadCampaignKernel);
 const mockedParsePlayerCharacterDraft = vi.mocked(parsePlayerCharacterDraft);
 const mockedSavePlayerCast = vi.mocked(savePlayerCast);
 const mockedComposeCampaignGraph = vi.mocked(composeCampaignGraph);
+const mockedSuggestCampaignWorldDna = vi.mocked(suggestCampaignWorldDna);
+const mockedSuggestCampaignWorldDnaCategory = vi.mocked(suggestCampaignWorldDnaCategory);
 
 const FULL_SEEDS = {
   geography: "Storm coast",
@@ -169,6 +178,36 @@ beforeEach(() => {
       worldDna: FULL_WORLD_DNA,
     }),
   });
+  mockedApplyWorldDna.mockResolvedValue({
+    campaign: {
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 2,
+      generationComplete: false,
+      seeds: FULL_SEEDS,
+    },
+    kernel: makeKernel({
+      phase: "world_ready",
+      worldDna: FULL_WORLD_DNA,
+    }),
+    worldDna: FULL_WORLD_DNA,
+  });
+  mockedSuggestCampaignWorldDna.mockResolvedValue({
+    seeds: {
+      geography: "Flooded stations",
+      politicalStructure: "Signal cabinet",
+      centralConflict: "Families barter illegal platform passes",
+      culturalFlavor: ["Rail noir", "Signal liturgy"],
+      environment: "Salt rain under glass canopies",
+      wildcard: "Tickets remember every hand that held them",
+    },
+  });
+  mockedSuggestCampaignWorldDnaCategory.mockResolvedValue({
+    category: "geography",
+    value: "Flooded stations",
+  });
 });
 
 describe("CampaignForgePage", () => {
@@ -242,9 +281,13 @@ describe("CampaignForgePage", () => {
     });
 
     expect(screen.getAllByText("World generation").length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "Create the world." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tune the World DNA." })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create world" })).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Accepted World DNA" })).toBeInTheDocument();
+    const dnaList = screen.getByRole("list", { name: "Editable World DNA" });
+    expect(within(dnaList).getAllByRole("listitem")).toHaveLength(6);
+    expect(screen.getByLabelText("Geography seed text")).toHaveValue("Storm coast");
+    expect(screen.getByRole("button", { name: "Re-roll all six" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save DNA" })).toBeDisabled();
     expect(screen.getByText("Player setup opens after world review.")).toBeInTheDocument();
     expect(screen.getByText("World Review")).toBeInTheDocument();
     expect(screen.getByText("Player character")).toBeInTheDocument();
@@ -257,6 +300,115 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByRole("button", { name: /Save player/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
+  });
+
+  it("saves edited World DNA through the kernel boundary", async () => {
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Geography seed text")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Geography seed text"), {
+      target: { value: "Flooded stations" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save DNA" }));
+
+    await waitFor(() => {
+      expect(mockedApplyWorldDna).toHaveBeenCalledWith("campaign-1", {
+        seeds: {
+          geography: "Flooded stations",
+          politicalStructure: "Guild council",
+          centralConflict: "Trade war",
+          culturalFlavor: ["Lantern rites"],
+          environment: "Storm season",
+          wildcard: "Talking maps",
+        },
+      });
+    });
+  });
+
+  it("re-rolls one World DNA field without exposing debug context", async () => {
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Geography seed text")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Re-roll" })[0]!);
+
+    await waitFor(() => {
+      expect(mockedSuggestCampaignWorldDnaCategory).toHaveBeenCalledWith("campaign-1", "geography");
+    });
+    expect(screen.getByLabelText("Geography seed text")).toHaveValue("Flooded stations");
+    expect(screen.queryByText("_researchArtifact")).not.toBeInTheDocument();
+    expect(screen.queryByText("_ipContext")).not.toBeInTheDocument();
+  });
+
+  it("re-rolls all six World DNA fields into the editable draft", async () => {
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Re-roll all six" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-roll all six" }));
+
+    await waitFor(() => {
+      expect(mockedSuggestCampaignWorldDna).toHaveBeenCalledWith("campaign-1");
+    });
+    expect(screen.getByLabelText("Geography seed text")).toHaveValue("Flooded stations");
+    expect(screen.getByLabelText("Cultural Flavor seed text")).toHaveValue("Rail noir, Signal liturgy");
+  });
+
+  it("auto-saves dirty World DNA before creating the world", async () => {
+    mockedGenerateWorld.mockResolvedValue({
+      refinedPremise: "Refined world",
+      locationCount: 12,
+      npcCount: 14,
+      factionCount: 5,
+      loreCardCount: 20,
+      loreStorageFailed: false,
+      startingLocation: "Lantern Gate",
+    });
+    mockedLoadCampaign
+      .mockResolvedValueOnce({
+        id: "campaign-1",
+        name: "Arcadia",
+        premise: "A haunted coast of guild cities.",
+        createdAt: 1,
+        updatedAt: 1,
+        generationComplete: false,
+        seeds: FULL_SEEDS,
+      })
+      .mockResolvedValueOnce({
+        id: "campaign-1",
+        name: "Arcadia",
+        premise: "A haunted coast of guild cities.",
+        createdAt: 1,
+        updatedAt: 2,
+        generationComplete: true,
+        seeds: FULL_SEEDS,
+      });
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Geography seed text")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Geography seed text"), {
+      target: { value: "Flooded stations" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create world" }));
+
+    await waitFor(() => {
+      expect(mockedApplyWorldDna).toHaveBeenCalled();
+      expect(mockedGenerateWorld).toHaveBeenCalled();
+    });
+    expect(mockedApplyWorldDna.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedGenerateWorld.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("starts world generation and routes to world review after completion", async () => {

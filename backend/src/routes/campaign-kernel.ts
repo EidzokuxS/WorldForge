@@ -6,6 +6,7 @@ import {
   type CampaignWorldDna,
   type CharacterDraft,
   type CampaignWorldNode as KernelWorldNode,
+  type SeedCategory,
   type WorldSeeds,
 } from "@worldforge/shared";
 import {
@@ -14,13 +15,24 @@ import {
   type IngestionContext,
   type IngestionInput,
 } from "../character/ingestion/index.js";
-import { loadIpContext, loadPremiseDivergence, saveWorldSeeds } from "../campaign/index.js";
+import {
+  loadIpContext,
+  loadPremiseDivergence,
+  loadWorldgenResearchArtifact,
+  saveIpContext,
+  savePremiseDivergence,
+  saveWorldgenResearchArtifact,
+  saveWorldSeeds,
+} from "../campaign/index.js";
 import { readCampaignConfig } from "../campaign/manager.js";
 import { assertSafeId } from "../campaign/paths.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import { parseBody, requireLoadedCampaign, resolveGenerator } from "./helpers.js";
 import { characterDraftSchema } from "./schemas.js";
+import { suggestSingleSeed, suggestWorldSeeds } from "../worldgen/index.js";
+import { researchWorldgenArtifact } from "../worldgen/ip-researcher.js";
+import { composeSelectedWorldbooks } from "../worldbook-library/index.js";
 import {
   readOrCreateCampaignKernel,
   saveCampaignPlayerCharacter as savePlayerCharacterInKernel,
@@ -34,6 +46,15 @@ import { createCampaignStartingSetup } from "../campaign-kernel/setup-kernel.js"
 import { applyCampaignStateWriter } from "../campaign-kernel/state-writer.js";
 
 const app = new Hono();
+
+const seedCategorySchema = z.enum([
+  "geography",
+  "politicalStructure",
+  "centralConflict",
+  "culturalFlavor",
+  "environment",
+  "wildcard",
+]);
 
 const playerSourceSchema = z.enum(["player_created", "player_imported"]);
 
@@ -69,6 +90,10 @@ const worldSeedsSchema = z.object({
 
 const applyWorldDnaSchema = z.object({
   seeds: worldSeedsSchema.optional(),
+}).strip();
+
+const suggestWorldDnaCategorySchema = z.object({
+  category: seedCategorySchema,
 }).strip();
 
 const startSetupSchema = z.object({
@@ -181,6 +206,68 @@ async function preparePlayerIngestion(c: Context, campaignId: string) {
   };
 }
 
+async function prepareWorldDnaSuggestion(c: Context, campaignId: string) {
+  const campaign = await requireLoadedCampaign(c, campaignId);
+  if (campaign instanceof Response) {
+    return campaign;
+  }
+
+  const settings = loadSettings();
+  const gen = resolveGenerator(settings);
+  if ("error" in gen) {
+    return c.json({ error: gen.error }, gen.status);
+  }
+
+  const config = readCampaignConfig(campaignId);
+  let researchArtifact = loadWorldgenResearchArtifact(campaignId);
+  let ipContext = researchArtifact ? null : loadIpContext(campaignId);
+  let premiseDivergence = researchArtifact ? null : loadPremiseDivergence(campaignId);
+
+  if (!ipContext && !researchArtifact && config.worldbookSelection?.length) {
+    const composed = await composeSelectedWorldbooks(config.worldbookSelection, campaign.premise);
+    ipContext = composed.ipContext;
+    saveIpContext(campaignId, ipContext);
+  }
+
+  if (!ipContext && !researchArtifact && config.worldgenResearchEnabled !== false) {
+    researchArtifact = await researchWorldgenArtifact(
+      {
+        premise: campaign.premise,
+        name: campaign.name,
+        knownIP: config.worldgenSourceHint,
+        research: settings.research,
+      },
+      gen.resolved,
+      settings.research.maxSearchSteps,
+    );
+    if (researchArtifact) {
+      ipContext = null;
+      premiseDivergence = null;
+      saveWorldgenResearchArtifact(campaignId, researchArtifact);
+    }
+  }
+
+  const premise =
+    campaign.premise.trim()
+    || researchArtifact?.rawPremise.trim()
+    || (ipContext ? `A world based on the ${ipContext.franchise} setting` : "");
+  if (!premise) {
+    return c.json(
+      { error: "Campaign premise or source context is required before World DNA can be re-rolled." },
+      400,
+    );
+  }
+
+  return {
+    campaign,
+    gen: gen.resolved,
+    ipContext,
+    premise,
+    premiseDivergence,
+    researchArtifact,
+  };
+}
+
 function pipelineErrorResponse(c: Context, error: unknown, fallback: string) {
   if (error instanceof IngestionPipelineError) {
     return c.json(
@@ -237,6 +324,64 @@ app.post("/campaigns/:id/world-dna/apply", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to apply World DNA.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/world-dna/suggest", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const ctx = await prepareWorldDnaSuggestion(c, campaignId);
+    if (ctx instanceof Response) return ctx;
+
+    const result = await suggestWorldSeeds({
+      premise: ctx.premise,
+      name: ctx.campaign.name,
+      role: ctx.gen,
+      ipContext: ctx.ipContext,
+      premiseDivergence: ctx.premiseDivergence,
+      researchArtifact: ctx.researchArtifact,
+    });
+    if (result.premiseDivergence) {
+      savePremiseDivergence(campaignId, result.premiseDivergence);
+    }
+
+    return c.json({ seeds: result.seeds });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to re-roll World DNA.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/world-dna/suggest-category", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const result = await parseBody(c, suggestWorldDnaCategorySchema);
+    if ("response" in result) return result.response;
+
+    const ctx = await prepareWorldDnaSuggestion(c, campaignId);
+    if (ctx instanceof Response) return ctx;
+
+    const category = result.data.category as SeedCategory;
+    const value = await suggestSingleSeed({
+      premise: ctx.premise,
+      name: ctx.campaign.name,
+      category,
+      role: ctx.gen,
+      ipContext: ctx.ipContext,
+      premiseDivergence: ctx.premiseDivergence,
+      researchArtifact: ctx.researchArtifact,
+    });
+
+    return c.json({ category, value });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to re-roll World DNA field.") },
       getErrorStatus(error),
     );
   }

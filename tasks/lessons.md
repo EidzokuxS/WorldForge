@@ -44,6 +44,7 @@
 - Render accepted World DNA and similar generated world facts as structured review surfaces, with separated fields and visible hierarchy; dense raw label/value prose blocks are a UI defect.
 - Campaign setup screens must follow the approved Concept -> World DNA -> World generation -> World Review -> Player sequence from `docs/UI Concept.html`. Mechanics proof shells can prove data flow, but product routes should render the approved step surface.
 - Do not use mechanical proof screenshots as a substitute for product UI. Proof artifacts verify behavior after the product surface exists.
+- Accepted World DNA remains editable until world generation starts. The pre-world Forge surface must offer edit, single-field reroll, all-field reroll, save, and save-before-create instead of a locked summary.
 - Gate player-character creation behind accepted World DNA. The player should create a character from the generated world context, not from a premise-only shell.
 - Keep graph/kernel mechanics off player-facing setup screens. Compose and persistence steps run internally after their player-facing prerequisite is complete.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.

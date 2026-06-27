@@ -1,6 +1,7 @@
 import type {
   CampaignKernel,
   CharacterDraft,
+  SeedCategory,
   WorldSeeds,
 } from "@worldforge/shared";
 import type { CampaignMeta } from "@/lib/api";
@@ -58,6 +59,15 @@ export type ApplyWorldDnaResponse = {
   worldDna: NonNullable<CampaignKernel["worldDna"]>;
 };
 
+export type SuggestCampaignWorldDnaResponse = {
+  seeds: WorldSeeds;
+};
+
+export type SuggestCampaignWorldDnaCategoryResponse = {
+  category: SeedCategory;
+  value: string | string[];
+};
+
 export type ComposeCampaignGraphResponse = {
   kernel: CampaignKernel;
   worldGraph: CampaignKernel["worldGraph"];
@@ -74,6 +84,21 @@ export function applyWorldDna(
   } = {},
 ): Promise<ApplyWorldDnaResponse> {
   return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/apply`, body);
+}
+
+export function suggestCampaignWorldDna(
+  campaignId: string,
+): Promise<SuggestCampaignWorldDnaResponse> {
+  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/suggest`, {});
+}
+
+export function suggestCampaignWorldDnaCategory(
+  campaignId: string,
+  category: SeedCategory,
+): Promise<SuggestCampaignWorldDnaCategoryResponse> {
+  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/suggest-category`, {
+    category,
+  });
 }
 
 export function parsePlayerCharacterDraft(

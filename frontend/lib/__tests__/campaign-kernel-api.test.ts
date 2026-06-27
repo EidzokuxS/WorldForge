@@ -7,6 +7,8 @@ import {
   loadCampaignKernel,
   parsePlayerCharacterDraft,
   savePlayerCast,
+  suggestCampaignWorldDna,
+  suggestCampaignWorldDnaCategory,
 } from "../campaign-kernel-api";
 
 function ok(body: unknown): Response {
@@ -133,6 +135,43 @@ describe("campaign kernel API helpers", () => {
         culturalFlavor: ["Lantern rites"],
       },
     });
+    expect(fetchMock.mock.calls[0]?.[0]).not.toContain("/api/worldgen");
+  });
+
+  it("re-rolls all World DNA through the kernel API", async () => {
+    fetchMock.mockResolvedValue(ok({
+      seeds: {
+        geography: "New coast",
+        politicalStructure: "New council",
+        centralConflict: "New war",
+        culturalFlavor: ["New rites"],
+        environment: "New storm",
+        wildcard: "New maps",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await suggestCampaignWorldDna("camp-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/kernel/campaigns/camp-1/world-dna/suggest",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(lastBody()).toEqual({});
+    expect(fetchMock.mock.calls[0]?.[0]).not.toContain("/api/worldgen");
+  });
+
+  it("re-rolls one World DNA category through the kernel API", async () => {
+    fetchMock.mockResolvedValue(ok({ category: "geography", value: "New coast" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await suggestCampaignWorldDnaCategory("camp-1", "geography");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/kernel/campaigns/camp-1/world-dna/suggest-category",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(lastBody()).toEqual({ category: "geography" });
     expect(fetchMock.mock.calls[0]?.[0]).not.toContain("/api/worldgen");
   });
 
