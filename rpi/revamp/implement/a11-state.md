@@ -85,5 +85,5 @@ Output:
 
 ## integration notes
 
-- Droid GLM-5.2 remains blocked in this shell by missing `FACTORY_API_KEY`.
+- Droid GLM-5.2 custom model alias was verified with `droid exec --model custom:GLM-5.2-(Z.AI-Coding)-0 --list-tools`.
 - The A11 slice is backend state logic, so no UX/UI surface was implemented.

@@ -76,7 +76,7 @@ Output:
 ### A6 cleanup and risk
 Status: complete
 Owner: A6
-Scope: keep A10 backend-only while Droid GLM auth is unavailable.
+Scope: keep A10 backend-only and leave UI work to a later dedicated slice.
 Output:
 
 - [rejected] A10 does not add a frontend UI.
@@ -85,5 +85,5 @@ Output:
 
 ## integration notes
 
-- Droid GLM-5.2 remains blocked in this shell by missing `FACTORY_API_KEY`.
+- Droid GLM-5.2 custom model alias was verified with `droid exec --model custom:GLM-5.2-(Z.AI-Coding)-0 --list-tools`.
 - The A10 slice is backend JSON, so no UX/UI surface was implemented.

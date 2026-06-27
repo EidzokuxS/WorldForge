@@ -13,11 +13,14 @@
 - Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
 - When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
 - After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
+- For manual UI playtests, use the in-app browser when it is available; reserve external browser automation for headless regression artifacts or explicit requests.
+- For Droid GLM reviews, verify the active custom model alias from Factory settings and a real `droid exec --model ... --list-tools` call before recording any blocker.
 
 ## Revamp Acceptance
 
 - A green test suite or one-turn smoke does not prove playability.
 - Every mechanics slice that changes player flow needs a manual playtest note: exact path, player action tried, observed result, and whether it is pristine acceptance or diagnostic.
+- A planned playtest gate is a hard gate: execute the player path and record the evidence before moving to the next architecture item.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.

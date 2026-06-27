@@ -10,7 +10,7 @@ Process the first real player message after the A8 opening and persist a simple 
 - Require `startingSetup`.
 - Require a non-empty chat session whose first turn is the A8 assistant opening.
 - Require a non-empty trimmed user message.
-- Build context from the player cast, anchor scene, present cast, visible routes, recent turns, and world tone input.
+- Build context from the player cast, runtime current scene, present cast, visible routes, recent turns, and world tone input.
 - Produce `RevampGmResponse` with text, suggested actions, and soft state hints.
 - Append the trimmed user turn.
 - Append the assistant turn.
@@ -40,7 +40,7 @@ Scope: inspect the active kernel state left by A8.
 Output:
 
 - [inspected] A8 leaves `phase: active`, `turnIndex: 1`, and one assistant opening turn.
-- [inspected] `startingSetup.anchorSceneId` is the current scene source for A9.
+- [inspected] `runtimeState.currentSceneId` is the current scene source for A9.
 - [inspected] `presentCastIds` and `route_to` edges are enough for first action handles.
 
 ### A3 reference extraction
@@ -88,5 +88,6 @@ Output:
 ## integration notes
 
 - Droid GLM-5.2 review prompt was written to `.codex/droid-prompts/a9-chat-loop-plan.md`.
-- Droid CLI returned `Authentication failed. Please log in using /login or set a valid FACTORY_API_KEY environment variable.`
-- The implemented contract stayed inside the prompt scope.
+- Droid GLM-5.2 custom model alias was verified with `droid exec --model custom:GLM-5.2-(Z.AI-Coding)-0 --list-tools`.
+- Droid GLM-5.2 A9 review returned `Revise`: scene source field, soft state hint persistence, freeform copy, and Look copy multiline format.
+- Current A9 code covers the review items: `createRevampChatMessage` reads `runtimeState.currentSceneId`, persists `chatSession.pendingSoftStateHints`, uses the revised freeform line, and formats Look output as scene, present cast, and routes on separated lines.
