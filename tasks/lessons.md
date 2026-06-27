@@ -36,6 +36,7 @@
 
 - Send every UX/UI task or visible interface change to GLM-5.2 Coding Plan in Droid before implementation, then carry its verdict into the active task notes.
 - If the first GLM invocation fails or appears silent, fix the GLM/Droid invocation or use the approved GLM channel; do not implement or restyle the UI by hand.
+- Give Droid GLM reviews a real work window. Treat a few minutes of silence as normal model processing and wait for an explicit completion or error signal before judging the run.
 - Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
 - Treat `docs/UI Concept.html` as the mechanics UI style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
