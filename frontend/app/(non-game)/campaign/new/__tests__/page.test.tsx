@@ -144,7 +144,8 @@ describe("CampaignConceptPage", () => {
     render(<CampaignConceptPage />);
 
     expect(screen.getByTestId("dna-suggestion-surface")).toBeInTheDocument();
-    expect(screen.getByText("World DNA - preparing suggestions")).toBeInTheDocument();
+    expect(screen.queryByText("World DNA - preparing suggestions")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preparing World DNA." })).toBeInTheDocument();
     expect(screen.getAllByText("Alpha Codex").length).toBeGreaterThan(0);
     expect(document.querySelector(".wf-forge-cta")).toBeNull();
     expect(document.querySelector(".wf-forge-shell")).toBeNull();

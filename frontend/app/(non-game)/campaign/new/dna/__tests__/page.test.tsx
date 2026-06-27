@@ -95,7 +95,8 @@ describe("CampaignDnaPage", () => {
     render(<CampaignDnaPage />);
 
     expect(screen.getByTestId("dna-suggestion-surface")).toBeInTheDocument();
-    expect(screen.getByText("World DNA - preparing suggestions")).toBeInTheDocument();
+    expect(screen.queryByText("World DNA - preparing suggestions")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preparing World DNA." })).toBeInTheDocument();
     expect(screen.queryByText("Preparing World DNA suggestions...")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Re-roll All" })).not.toBeInTheDocument();
     expect(document.querySelector(".wf-dna-shell")).toBeNull();

@@ -60,7 +60,6 @@ export function DnaSuggestionWorkspace({ returnHref }: DnaSuggestionWorkspacePro
       <main className="wf-gen-main">
         <header className="wf-gen-head">
           <div>
-            <p className="wf-gen-sub">World DNA - preparing suggestions</p>
             <h1 className="wf-gen-h">Preparing <em>World DNA.</em></h1>
           </div>
           <div className="wf-gen-progress" aria-label="World DNA preparation progress">

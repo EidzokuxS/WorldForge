@@ -160,6 +160,12 @@ async function renderPage(campaignId: string) {
   });
 }
 
+function expectCampaignStage(label: string, state: "done" | "active" | "pending") {
+  const rail = screen.getByLabelText("Campaign setup stages");
+  const stage = within(rail).getByText(label).closest(".wf-gen-stage");
+  expect(stage).toHaveAttribute("data-state", state);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   pushMock.mockReset();
@@ -287,6 +293,9 @@ describe("CampaignForgePage", () => {
     expect(screen.getByRole("heading", { name: "Create the world." })).toBeInTheDocument();
     expect(screen.getByTestId("world-source-panel")).toBeInTheDocument();
     expect(screen.getByText("A haunted coast of guild cities.")).toBeInTheDocument();
+    expect(document.querySelector(".wf-gen-head .wf-gen-sub")).toBeNull();
+    expectCampaignStage("World DNA", "done");
+    expectCampaignStage("World generation", "pending");
     expect(screen.getByRole("button", { name: "Create world" })).toBeEnabled();
     expect(screen.queryByRole("list", { name: "Editable World DNA" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save DNA" })).not.toBeInTheDocument();
@@ -348,8 +357,10 @@ describe("CampaignForgePage", () => {
       expect(screen.getByTestId("worldgen-surface")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText("World generation").length).toBeGreaterThan(0);
+    expect(document.querySelector(".wf-gen-head .wf-gen-sub")).toBeNull();
     expect(screen.getByRole("heading", { name: "Tune the World DNA." })).toBeInTheDocument();
+    expectCampaignStage("World DNA", "active");
+    expectCampaignStage("World generation", "pending");
     expect(screen.getByRole("button", { name: "Create world" })).toBeInTheDocument();
     const dnaList = screen.getByRole("list", { name: "Editable World DNA" });
     expect(within(dnaList).getAllByRole("listitem")).toHaveLength(6);
@@ -539,6 +550,8 @@ describe("CampaignForgePage", () => {
       });
     });
     expect(screen.getByLabelText("World generation progress")).toBeInTheDocument();
+    expectCampaignStage("World DNA", "done");
+    expectCampaignStage("World generation", "active");
     expect(screen.getByRole("heading", { name: "World build" })).toBeInTheDocument();
     expect(screen.queryByText("Queued for generation.")).not.toBeInTheDocument();
     expect(screen.queryByText("queued")).not.toBeInTheDocument();

@@ -169,6 +169,35 @@ function dnaDraftHasText(draft: WorldDnaDraft): boolean {
   return Object.values(draft).some((value) => value.trim().length > 0);
 }
 
+function worldGenerationRailState(
+  index: number,
+  input: {
+    hasDnaDraft: boolean;
+    running: boolean;
+    complete: boolean;
+  },
+): StageState {
+  if (index === 0) {
+    return "done";
+  }
+  if (index === 1) {
+    if (input.running || input.complete || !input.hasDnaDraft) {
+      return "done";
+    }
+    return "active";
+  }
+  if (index === 2) {
+    if (input.complete) {
+      return "done";
+    }
+    return input.running ? "active" : "pending";
+  }
+  if (index === 3) {
+    return input.complete ? "active" : "pending";
+  }
+  return "pending";
+}
+
 function FormStep({
   number,
   title,
@@ -387,9 +416,7 @@ function WorldGenerationSurface({
       <aside className="wf-gen-rail wf-gen-rail-dna" aria-label="Campaign setup stages">
         <div className="wf-gen-rail-h">Forge</div>
         {WORLD_GENERATION_RAIL.map((stage, index) => {
-          const state: StageState = index === 0 || (hasDnaDraft && index === 1) || (complete && index === 2)
-            ? "done"
-            : index === 2 || (complete && index === 3) ? "active" : "pending";
+          const state = worldGenerationRailState(index, { hasDnaDraft, running, complete });
           const detail = !hasDnaDraft && stage.title === "World DNA" ? "optional tuning" : stage.detail;
           return (
             <WorldGenerationStage
@@ -406,7 +433,7 @@ function WorldGenerationSurface({
       <section className="wf-gen-main">
         <header className="wf-gen-head">
           <div>
-            <p className="wf-gen-sub">World generation</p>
+            {showGenerationDetails ? <p className="wf-gen-sub">World generation</p> : null}
             <h1 className="wf-gen-h">
               {complete ? "World ready for " : running ? "Creating the " : hasDnaDraft ? "Tune the " : "Create the "}
               <em>{complete ? "review." : running ? "world." : hasDnaDraft ? "World DNA." : "world."}</em>

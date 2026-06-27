@@ -46,6 +46,8 @@
 - Do not use mechanical proof screenshots as a substitute for product UI. Proof artifacts verify behavior after the product surface exists.
 - Accepted World DNA remains editable until world generation starts. The pre-world Forge surface must offer edit, single-field reroll, all-field reroll, save, and save-before-create instead of a locked summary.
 - Keep idle setup surfaces quiet. Future-step status cards, progress labels, and explanatory footer notes appear when the process is running, complete, blocked, or actionable.
+- Setup rail state must name the surface currently on screen: editable DNA cards mean World DNA is active; World generation becomes active only while the world build is running.
+- Avoid top-of-hero sublabels when the heading already names the state.
 - Gate player-character creation behind the created world signal, currently `campaign.generationComplete === true`. World DNA can enrich that context, but missing DNA must not block premise-only world creation.
 - Keep graph/kernel mechanics off player-facing setup screens. Compose and persistence steps run internally after their player-facing prerequisite is complete.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
