@@ -179,7 +179,8 @@ describe("CampaignForgePage", () => {
     expect(screen.getByText("Storm coast")).toBeInTheDocument();
     expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
     expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("graph-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("kernel-phase")).toHaveTextContent("world_ready");
     expect(screen.queryByLabelText("Geography")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Use World DNA/ })).not.toBeInTheDocument();
@@ -206,9 +207,10 @@ describe("CampaignForgePage", () => {
       expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("No World DNA saved")).toBeInTheDocument();
-    expect(screen.getByText("Premise-only player creation is available.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Player concept")).toBeEnabled();
+    expect(screen.getByText("World DNA required")).toBeInTheDocument();
+    expect(screen.getByText("World DNA required before player creation.")).toBeInTheDocument();
+    expect(screen.getByText("Player creation locked")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
   });
 
   it("keeps saved World DNA visible after the player is saved", async () => {
@@ -232,6 +234,17 @@ describe("CampaignForgePage", () => {
           importedCast: [],
           generatedCast: [],
         },
+        worldGraph: {
+          nodes: [
+            {
+              id: "cast:player_created:mira-vale",
+              type: "Character",
+              name: "Mira Vale",
+              data: {},
+            },
+          ],
+          edges: [],
+        },
       }),
     });
 
@@ -242,13 +255,15 @@ describe("CampaignForgePage", () => {
     });
 
     expect(screen.queryByRole("button", { name: /Use World DNA/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
     expect(screen.getByText("Storm coast")).toBeInTheDocument();
   });
 
-  it("creates a player, saves cast, and composes the graph through campaign kernel helpers", async () => {
+  it("creates a player, saves cast, and prepares the campaign without showing graph controls", async () => {
     const draft = makeDraft();
     const savedKernel = makeKernel({
       phase: "cast_ready",
+      worldDna: FULL_WORLD_DNA,
       castRegistry: {
         playerCharacter: {
           id: "cast:player_created:mira-vale",
@@ -296,7 +311,7 @@ describe("CampaignForgePage", () => {
       expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: /Compose graph/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Player concept"), {
       target: { value: "A courier with a sealed pass." },
     });
@@ -319,12 +334,10 @@ describe("CampaignForgePage", () => {
     });
     expect(screen.getByTestId("kernel-phase")).toHaveTextContent("cast_ready");
 
-    fireEvent.click(screen.getByRole("button", { name: /Compose graph/ }));
-
     await waitFor(() => {
       expect(mockedComposeCampaignGraph).toHaveBeenCalledWith("campaign-1");
     });
-    expect(screen.getByText("Graph ready.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Compose graph/ })).toBeDisabled();
+    expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
   });
 });

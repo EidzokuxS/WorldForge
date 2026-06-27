@@ -4,7 +4,6 @@ import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   FileText,
-  GitBranch,
   Loader2,
   Save,
   Upload,
@@ -115,15 +114,6 @@ function SequenceItem({
   );
 }
 
-function RailMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="wf-campaign-forge-metric">
-      <span>{label}</span>
-      <b>{value}</b>
-    </div>
-  );
-}
-
 function CharacterDraftPreview({ draft }: { draft: CharacterDraft }) {
   return (
     <div className="wf-campaign-forge-preview">
@@ -155,7 +145,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [graphBusy, setGraphBusy] = useState(false);
+  const [preparingCampaign, setPreparingCampaign] = useState(false);
   const [characterMode, setCharacterMode] = useState<"describe" | "import">("describe");
   const [concept, setConcept] = useState("");
   const [overrideText, setOverrideText] = useState("");
@@ -164,6 +154,8 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const [draftSource, setDraftSource] = useState<"player_created" | "player_imported">("player_created");
   const [characterBusy, setCharacterBusy] = useState<"idle" | "parsing" | "importing" | "saving">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const campaignPreparationAttemptRef = useRef<string | null>(null);
+  const campaignPreparationBusyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,9 +189,54 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     };
   }, [campaignId]);
 
+  useEffect(() => {
+    if (
+      !kernel?.worldDna
+      || !kernel.castRegistry.playerCharacter
+      || kernel.phase !== "cast_ready"
+      || characterNodeIsPresent(kernel)
+      || campaignPreparationBusyRef.current
+    ) {
+      return;
+    }
+
+    const attemptKey = `${campaignId}:${kernel.castRegistry.playerCharacter.id}`;
+    if (campaignPreparationAttemptRef.current === attemptKey) {
+      return;
+    }
+
+    let cancelled = false;
+    campaignPreparationAttemptRef.current = attemptKey;
+    campaignPreparationBusyRef.current = true;
+    setPreparingCampaign(true);
+    setActionError(null);
+
+    void composeCampaignGraph(campaignId)
+      .then((result) => {
+        if (!cancelled) {
+          setKernel(result.kernel);
+        }
+      })
+      .catch((composeFailure) => {
+        if (!cancelled) {
+          setActionError(getErrorMessage(composeFailure, "Failed to prepare campaign after saving the player."));
+        }
+      })
+      .finally(() => {
+        campaignPreparationBusyRef.current = false;
+        if (!cancelled) {
+          setPreparingCampaign(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, kernel]);
+
   async function handleDescribe() {
     const trimmedConcept = concept.trim();
-    if (!trimmedConcept || characterBusy !== "idle") {
+    if (!kernel?.worldDna || !trimmedConcept || characterBusy !== "idle" || preparingCampaign) {
       return;
     }
 
@@ -220,7 +257,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   }
 
   async function handleImport(file: File) {
-    if (characterBusy !== "idle") {
+    if (!kernel?.worldDna || characterBusy !== "idle" || preparingCampaign) {
       return;
     }
 
@@ -246,13 +283,14 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   }
 
   async function handleSavePlayer() {
-    if (!draft || characterBusy !== "idle") {
+    if (!kernel?.worldDna || !draft || characterBusy !== "idle" || preparingCampaign) {
       return;
     }
 
     setCharacterBusy("saving");
     setActionError(null);
     try {
+      campaignPreparationAttemptRef.current = null;
       const result = await savePlayerCast(campaignId, {
         draft,
         source: draftSource,
@@ -262,23 +300,6 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
       setActionError(getErrorMessage(saveFailure, "Failed to save player cast."));
     } finally {
       setCharacterBusy("idle");
-    }
-  }
-
-  async function handleComposeGraph() {
-    if (!kernel?.castRegistry.playerCharacter || kernel.phase !== "cast_ready" || characterNodeIsPresent(kernel) || graphBusy) {
-      return;
-    }
-
-    setGraphBusy(true);
-    setActionError(null);
-    try {
-      const result = await composeCampaignGraph(campaignId);
-      setKernel(result.kernel);
-    } catch (composeFailure) {
-      setActionError(getErrorMessage(composeFailure, "Failed to compose graph."));
-    } finally {
-      setGraphBusy(false);
     }
   }
 
@@ -305,12 +326,16 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
 
   const savedPlayer = kernel.castRegistry.playerCharacter;
   const isCharacterBusy = characterBusy !== "idle";
+  const playerControlsDisabled = isCharacterBusy || preparingCampaign;
   const currentWorldDnaStatus = worldDnaStatus(kernel);
-  const graphReady = characterNodeIsPresent(kernel);
-  const canComposeGraph = Boolean(savedPlayer) && kernel.phase === "cast_ready" && !graphReady && !graphBusy;
+  const worldDnaAccepted = Boolean(kernel.worldDna);
+  const worldDnaMeta = worldDnaAccepted ? currentWorldDnaStatus : "required";
   const worldDnaStage: StageState = currentWorldDnaStatus === "Ready" ? "done" : "active";
-  const playerStage: StageState = savedPlayer ? "done" : "active";
-  const graphStage: StageState = graphReady ? "done" : savedPlayer ? "active" : "pending";
+  const playerStage: StageState = savedPlayer ? "done" : worldDnaAccepted ? "active" : "pending";
+  const playerMeta = savedPlayer ? (preparingCampaign ? "preparing" : "saved") : worldDnaAccepted ? "draft" : "locked";
+  const playerStageDetail = savedPlayer
+    ? preparingCampaign ? "preparing campaign" : "saved"
+    : worldDnaAccepted ? "create or import" : "waiting for World DNA";
 
   return (
     <main className="wf-forge-shell wf-v4-page-theater" data-testid="campaign-forge">
@@ -339,7 +364,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
             description={
               kernel.worldDna
                 ? "Accepted DNA from campaign creation. Player drafts use this context."
-                : "This campaign was created without World DNA. Player drafts use the premise."
+                : "Accept World DNA before creating the player."
             }
           >
             <div className="wf-campaign-forge-dna-summary" data-testid="world-dna-panel">
@@ -357,14 +382,14 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
                 </div>
               ) : (
                 <div className="wf-campaign-forge-preview">
-                  <h3>No World DNA saved</h3>
+                  <h3>World DNA required</h3>
                   <p>
-                    Player creation will use the premise only. Start a new campaign through World DNA when the world needs generated seeds first.
+                    Player creation starts after World DNA is accepted.
                   </p>
                 </div>
               )}
               <span className="wf-campaign-forge-hint" data-testid="world-dna-status">
-                {kernel.worldDna ? "Ready for player creation." : "Premise-only player creation is available."}
+                {kernel.worldDna ? "Ready for player creation." : "World DNA required before player creation."}
               </span>
             </div>
           </FormStep>
@@ -372,8 +397,8 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
           <FormStep
             number="ii."
             title="Player"
-            meta={savedPlayer ? "saved" : "draft"}
-            description="Create or import the player character, then save it."
+            meta={playerMeta}
+            description={worldDnaAccepted ? "Create or import the player character, then save it." : "World DNA is required first."}
           >
             <div data-testid="player-cast-panel">
               {savedPlayer ? (
@@ -382,160 +407,143 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Player creation modes">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={characterMode === "describe"}
-                  className="wf-v4-btn"
-                  disabled={isCharacterBusy}
-                  onClick={() => setCharacterMode("describe")}
-                >
-                  <FileText className="h-4 w-4" />
-                  Describe
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={characterMode === "import"}
-                  className="wf-v4-btn"
-                  disabled={isCharacterBusy}
-                  onClick={() => setCharacterMode("import")}
-                >
-                  <Upload className="h-4 w-4" />
-                  Import card
-                </button>
-              </div>
-
-              {characterMode === "describe" ? (
-                <div className="mt-4 grid gap-3">
-                  <textarea
-                    value={concept}
-                    onChange={(event) => setConcept(event.target.value)}
-                    rows={5}
-                    disabled={isCharacterBusy}
-                    placeholder="Describe the player character."
-                    aria-label="Player concept"
-                  />
-                  <button
-                    type="button"
-                    className="wf-v4-btn w-fit"
-                    disabled={isCharacterBusy || !concept.trim()}
-                    onClick={() => void handleDescribe()}
-                  >
-                    {characterBusy === "parsing" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <FileText className="h-4 w-4" />
-                    )}
-                    Create draft
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-4 grid gap-3">
-                  <label className="wf-campaign-forge-field">
-                    <span>Import mode</span>
-                    <select
-                      value={importMode}
-                      onChange={(event) => setImportMode(event.target.value as CharacterImportMode)}
-                      disabled={isCharacterBusy}
-                      className="wf-campaign-forge-select"
+              {worldDnaAccepted ? (
+                <>
+                  <div className="flex flex-wrap gap-2" role="tablist" aria-label="Player creation modes">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={characterMode === "describe"}
+                      className="wf-v4-btn"
+                      disabled={playerControlsDisabled}
+                      onClick={() => setCharacterMode("describe")}
                     >
-                      <option value="native">Native resident</option>
-                      <option value="outsider">Outsider</option>
-                    </select>
-                  </label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json,.png"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        void handleImport(file);
-                      }
-                      event.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="wf-v4-btn w-fit"
-                    disabled={isCharacterBusy}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    {characterBusy === "importing" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
+                      <FileText className="h-4 w-4" />
+                      Describe
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={characterMode === "import"}
+                      className="wf-v4-btn"
+                      disabled={playerControlsDisabled}
+                      onClick={() => setCharacterMode("import")}
+                    >
                       <Upload className="h-4 w-4" />
-                    )}
-                    Choose card
-                  </button>
+                      Import card
+                    </button>
+                  </div>
+
+                  {characterMode === "describe" ? (
+                    <div className="mt-4 grid gap-3">
+                      <textarea
+                        value={concept}
+                        onChange={(event) => setConcept(event.target.value)}
+                        rows={5}
+                        disabled={playerControlsDisabled}
+                        placeholder="Describe the player character."
+                        aria-label="Player concept"
+                      />
+                      <button
+                        type="button"
+                        className="wf-v4-btn w-fit"
+                        disabled={playerControlsDisabled || !concept.trim()}
+                        onClick={() => void handleDescribe()}
+                      >
+                        {characterBusy === "parsing" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileText className="h-4 w-4" />
+                        )}
+                        Create draft
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3">
+                      <label className="wf-campaign-forge-field">
+                        <span>Import mode</span>
+                        <select
+                          value={importMode}
+                          onChange={(event) => setImportMode(event.target.value as CharacterImportMode)}
+                          disabled={playerControlsDisabled}
+                          className="wf-campaign-forge-select"
+                        >
+                          <option value="native">Native resident</option>
+                          <option value="outsider">Outsider</option>
+                        </select>
+                      </label>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json,.png"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            void handleImport(file);
+                          }
+                          event.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="wf-v4-btn w-fit"
+                        disabled={playerControlsDisabled}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        {characterBusy === "importing" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        Choose card
+                      </button>
+                    </div>
+                  )}
+
+                  <label className="wf-campaign-forge-field mt-4">
+                    <span>Override</span>
+                    <textarea
+                      value={overrideText}
+                      onChange={(event) => setOverrideText(event.target.value)}
+                      rows={3}
+                      disabled={playerControlsDisabled}
+                      placeholder="Instructions for this draft."
+                      aria-label="Player override"
+                    />
+                  </label>
+
+                  {draft ? (
+                    <div className="mt-4 grid gap-3">
+                      <CharacterDraftPreview draft={draft} />
+                      <button
+                        type="button"
+                        className="wf-v4-btn w-fit"
+                        disabled={playerControlsDisabled || !draft.identity.displayName.trim()}
+                        onClick={() => void handleSavePlayer()}
+                      >
+                        {characterBusy === "saving" || preparingCampaign ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        {preparingCampaign ? "Preparing campaign" : "Save player"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {preparingCampaign ? (
+                    <span className="wf-campaign-forge-hint mt-4 block">Preparing campaign.</span>
+                  ) : null}
+                </>
+              ) : (
+                <div className="wf-campaign-forge-preview">
+                  <h3>Player creation locked</h3>
+                  <p>
+                    Accept World DNA first. The player will be built from that world context.
+                  </p>
                 </div>
               )}
-
-              <label className="wf-campaign-forge-field mt-4">
-                <span>Override</span>
-                <textarea
-                  value={overrideText}
-                  onChange={(event) => setOverrideText(event.target.value)}
-                  rows={3}
-                  disabled={isCharacterBusy}
-                  placeholder="Instructions for this draft."
-                  aria-label="Player override"
-                />
-              </label>
-
-              {draft ? (
-                <div className="mt-4 grid gap-3">
-                  <CharacterDraftPreview draft={draft} />
-                  <button
-                    type="button"
-                    className="wf-v4-btn w-fit"
-                    disabled={isCharacterBusy || !draft.identity.displayName.trim()}
-                    onClick={() => void handleSavePlayer()}
-                  >
-                    {characterBusy === "saving" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                    Save player
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </FormStep>
-
-          <FormStep
-            number="iii."
-            title="Graph"
-            meta={graphReady ? "ready" : "waiting"}
-            description="Build the graph after the player is saved."
-          >
-            <div className="grid gap-4" data-testid="graph-panel">
-              <div className="wf-campaign-forge-metrics">
-                <RailMetric label="nodes" value={kernel.worldGraph.nodes.length} />
-                <RailMetric label="edges" value={kernel.worldGraph.edges.length} />
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  className="wf-v4-btn"
-                  disabled={!canComposeGraph}
-                  onClick={() => void handleComposeGraph()}
-                >
-                  {graphBusy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <GitBranch className="h-4 w-4" />
-                  )}
-                  Compose graph
-                </button>
-                <span className="wf-campaign-forge-hint">
-                  {graphReady ? "Graph ready." : savedPlayer ? "Ready to compose." : "Save the player first."}
-                </span>
-              </div>
             </div>
           </FormStep>
         </div>
@@ -543,22 +551,13 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
 
       <aside className="wf-forge-side">
         <div className="wf-forge-sequence">
-          <p className="wf-kicker wf-kicker-ember">Forge sequence</p>
+          <p className="wf-kicker wf-kicker-ember">Campaign setup</p>
           <div className="wf-stage-list">
-            <SequenceItem number="i" state={worldDnaStage} label="World DNA" detail={currentWorldDnaStatus} />
-            <SequenceItem number="ii" state={playerStage} label="Player" detail={savedPlayer ? "saved" : "create or import"} />
-            <SequenceItem number="iii" state={graphStage} label="Graph" detail={graphReady ? "ready" : "compose after player"} />
+            <SequenceItem number="i" state={worldDnaStage} label="World DNA" detail={worldDnaMeta} />
+            <SequenceItem number="ii" state={playerStage} label="Player" detail={playerStageDetail} />
           </div>
         </div>
-
-        <div className="wf-rail-card wf-campaign-forge-rail-card">
-          <p className="wf-kicker">Kernel state</p>
-          <RailMetric label="phase" value={kernel.phase} />
-          <div className="sr-only" data-testid="kernel-phase">{kernel.phase}</div>
-          <RailMetric label="World DNA" value={currentWorldDnaStatus} />
-          <RailMetric label="Player" value={savedPlayer ? savedPlayer.characterDraft.identity.displayName : "empty"} />
-          <RailMetric label="Graph nodes" value={kernel.worldGraph.nodes.length} />
-        </div>
+        <div className="sr-only" data-testid="kernel-phase">{kernel.phase}</div>
       </aside>
     </main>
   );

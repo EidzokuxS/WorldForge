@@ -126,3 +126,9 @@ Review:
 - Forge saved-DNA display now renders the accepted six-field World DNA as `D01-D06` structured cards instead of a dense label/value prose wall.
 - Forge saved-DNA display proof: focused frontend vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `4 passed`; `npm --prefix frontend run typecheck` passed.
 - Visual proof: in-app browser bridge timed out on tab reads during verification, so a local Edge headless screenshot captured the current localhost page instead: `output/playtests/campaign-forge-dna-cards-20260627.png`.
+- Droid GLM-5.2 reviewed the Forge player-after-world and hide-graph prompt via `.codex/droid-prompts/forge-player-flow-hide-graph.md` and returned `Plan is up-to-date.`
+- Forge player flow now requires accepted World DNA before player creation controls render. Campaigns without World DNA show a locked Player section instead.
+- Forge no longer exposes Graph as a player-facing step: no `Graph` section, no node/edge metrics, no `Compose graph` button, and no graph rail item.
+- Graph composition remains internal: after player save, Forge calls the existing compose helper when the saved kernel is `cast_ready` and lacks a character node.
+- Forge player flow proof: focused frontend vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `4 passed`; `npm --prefix frontend run typecheck` passed.
+- Manual in-app browser proof on 2026-06-27: reloaded `/campaign/064bba91-3d35-4a8d-bef2-d08340172f79/forge`; DOM reported `graphPanel=false`, `hasComposeGraphButton=false`, `hasGraphWord=false`, `worldDnaPanel=true`, `playerPanel=true`, `playerConcept=true`; screenshot: `output/playtests/campaign-forge-player-after-dna-no-graph-20260627.png`.
