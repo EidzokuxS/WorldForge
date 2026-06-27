@@ -2,16 +2,25 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
+  Check,
   FileText,
   Loader2,
+  Play,
   Save,
   Upload,
   UserRound,
 } from "lucide-react";
 import type { CampaignKernel, CampaignWorldDna, CharacterDraft } from "@worldforge/shared";
 
-import { loadCampaign, type CampaignMeta } from "@/lib/api";
+import {
+  generateWorld,
+  loadCampaign,
+  type CampaignMeta,
+  type WorldGenerationComplete,
+  type WorldGenerationProgress,
+} from "@/lib/api";
 import {
   composeCampaignGraph,
   importPlayerCard,
@@ -31,6 +40,7 @@ type WorldDnaSummaryRow = {
 
 type WorldDnaStatus = "Ready" | "No DNA" | "Locked";
 type StageState = "done" | "active" | "pending";
+type WorldGenerationStatus = "idle" | "running" | "complete";
 
 const WORLD_DNA_FIELDS: Array<{
   key: keyof CampaignWorldDna;
@@ -43,6 +53,21 @@ const WORLD_DNA_FIELDS: Array<{
   { key: "environment", label: "Environment" },
   { key: "wildcard", label: "Wildcard" },
 ];
+
+const WORLD_GENERATION_RAIL = [
+  { title: "Concept", detail: "name and premise" },
+  { title: "World DNA", detail: "six accepted laws" },
+  { title: "World generation", detail: "locations, cast, lore" },
+  { title: "World Review", detail: "inspect before play" },
+  { title: "Player character", detail: "after world review" },
+] as const;
+
+const WORLD_GENERATION_CARDS = [
+  { title: "Locations", idle: "Queued for generation." },
+  { title: "Factions", idle: "Queued for generation." },
+  { title: "Characters", idle: "Queued for generation." },
+  { title: "Lore cards", idle: "Queued for generation." },
+] as const;
 
 function characterNodeIsPresent(kernel: CampaignKernel): boolean {
   return kernel.worldGraph.nodes.some((node) => node.type === "Character");
@@ -138,13 +163,261 @@ function CharacterDraftPreview({ draft }: { draft: CharacterDraft }) {
   );
 }
 
+function WorldGenerationSurface({
+  campaign,
+  kernel,
+  status,
+  progress,
+  result,
+  error,
+  onStart,
+}: {
+  campaign: CampaignMeta;
+  kernel: CampaignKernel;
+  status: WorldGenerationStatus;
+  progress: WorldGenerationProgress | null;
+  result: WorldGenerationComplete | null;
+  error: string | null;
+  onStart: () => void;
+}) {
+  const running = status === "running";
+  const completedResult = status === "complete" ? result : null;
+  const complete = completedResult !== null;
+  const progressRatio = complete
+    ? 100
+    : progress?.step && progress?.totalSteps
+      ? Math.max(16, Math.min(94, Math.round((progress.step / progress.totalSteps) * 100)))
+      : running ? 28 : 14;
+  const activeLabel = progress?.subLabel || progress?.label || (
+    running ? "Creating the world." : "Ready to start world generation."
+  );
+  const progressMeta = complete
+    ? "ready for review"
+    : progress?.step && progress?.totalSteps
+      ? `${progress.step} of ${progress.totalSteps} stages`
+      : running ? "running" : "waiting";
+
+  return (
+    <main className="wf-gen-shell wf-v4-page-theater" data-testid="worldgen-surface">
+      <aside className="wf-gen-rail wf-gen-rail-dna" aria-label="Campaign setup stages">
+        <div className="wf-gen-rail-h">Forge</div>
+        {WORLD_GENERATION_RAIL.map((stage, index) => {
+          const state: StageState = index < 2 || (complete && index === 2)
+            ? "done"
+            : index === 2 || (complete && index === 3) ? "active" : "pending";
+          return (
+            <WorldGenerationStage
+              key={stage.title}
+              title={stage.title}
+              detail={stage.detail}
+              mark={state === "done" ? "done" : roman(index + 1)}
+              state={state}
+            />
+          );
+        })}
+      </aside>
+
+      <section className="wf-gen-main">
+        <header className="wf-gen-head">
+          <div>
+            <p className="wf-gen-sub">World generation</p>
+            <h1 className="wf-gen-h">
+              {complete ? "World ready for " : running ? "Creating the " : "Create the "}
+              <em>{complete ? "review." : "world."}</em>
+            </h1>
+          </div>
+          <div className="wf-gen-progress" aria-label="World generation progress">
+            <div className="wf-gen-progress-bar">
+              <div style={{ width: `${progressRatio}%` }} />
+            </div>
+            <div className="wf-gen-progress-meta">
+              <span>{activeLabel}</span>
+              <span><b>{progressMeta}</b></span>
+            </div>
+          </div>
+        </header>
+
+        <section className="wf-gen-think" aria-label="Current world generation work">
+          <div className="wf-gen-think-mark" />
+          <div>
+            <div className="wf-gen-think-h">
+              Engine - {complete ? "world ready" : running ? "generation running" : "ready"}
+            </div>
+            <p className="wf-gen-think-prose">
+              {complete
+                ? formatWorldGenerationSummary(completedResult)
+                : running
+                  ? activeLabel
+                  : "World DNA is locked. Start generation to create locations, factions, characters, lore cards, and the review surface."}
+              {running ? <span className="wf-gen-cursor" /> : null}
+            </p>
+          </div>
+        </section>
+
+        <section className="wf-gen-section">
+          <div className="wf-gen-section-h">
+            <span className="wf-gen-kicker">i</span>
+            <h2 className="wf-gen-h2">World <em>DNA</em></h2>
+            <span className="wf-gen-pill">locked</span>
+          </div>
+          {kernel.worldDna ? (
+            <div className="wf-gen-dna" role="list" aria-label="Accepted World DNA">
+              {worldDnaRows(kernel.worldDna).map((row) => (
+                <article className="wf-gen-dna-card" role="listitem" key={row.label}>
+                  <div className="wf-gen-dna-card-k">{row.code} {row.label}</div>
+                  <div className="wf-gen-dna-card-v">{row.value}</div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="wf-gen-section">
+          <div className="wf-gen-section-h">
+            <span className="wf-gen-kicker">ii</span>
+            <h2 className="wf-gen-h2">World <em>build</em></h2>
+            <span className="wf-gen-pill" data-state={running ? "forging" : undefined}>
+              {complete ? "ready" : running ? "running" : "waiting"}
+            </span>
+          </div>
+          <div className="wf-gen-locs">
+            {WORLD_GENERATION_CARDS.map((card, index) => (
+              <article key={card.title} className="wf-gen-loc" data-state={worldGenerationCardState(status, index)}>
+                <div className="wf-gen-loc-num">{String(index + 1).padStart(2, "0")}</div>
+                <div className="wf-gen-loc-h">{card.title}</div>
+                <div className="wf-gen-loc-sub">{worldGenerationCardDetail(card.title, card.idle, completedResult)}</div>
+                <div className="wf-gen-loc-tag">
+                  <span className="wf-gen-tag">{worldGenerationCardTag(status, index)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {error ? (
+          <section className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm text-red-200">
+            {error}
+          </section>
+        ) : null}
+
+        <div className="wf-gen-actions">
+          {complete ? (
+            <Link href={`/campaign/${campaign.id}/review`} className="wf-v4-btn wf-v4-btn-primary">
+              <Check className="h-4 w-4" />
+              Review world
+            </Link>
+          ) : (
+            <button
+              type="button"
+              className="wf-v4-btn wf-v4-btn-primary"
+              onClick={onStart}
+              disabled={running}
+            >
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {running ? "Creating world" : "Create world"}
+            </button>
+          )}
+          <span className="wf-forge-cta-note">
+            Player setup opens after world review.
+          </span>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function WorldGenerationStage({
+  title,
+  detail,
+  mark,
+  state,
+}: {
+  title: string;
+  detail: string;
+  mark: string;
+  state: StageState;
+}) {
+  return (
+    <div className="wf-gen-stage" data-state={state}>
+      <div className="wf-gen-stage-mark">
+        {state === "done" ? <Check className="h-3 w-3" /> : state === "active" ? ">" : mark}
+      </div>
+      <div>
+        <div className="wf-gen-stage-h">{title}</div>
+        <div className="wf-gen-stage-sub">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function formatWorldGenerationSummary(result: WorldGenerationComplete): string {
+  const pieces = [
+    `${result.locationCount} locations`,
+    `${result.npcCount} characters`,
+    `${result.factionCount} factions`,
+    `${result.loreCardCount} lore cards`,
+  ];
+  const loreNote = result.loreStorageFailed ? " Lore search needs attention during review." : "";
+  return `${pieces.join(", ")}. Starting point: ${result.startingLocation}.${loreNote}`;
+}
+
+function worldGenerationCardState(status: WorldGenerationStatus, index: number): "done" | "forging" | "queued" {
+  if (status === "complete") {
+    return "done";
+  }
+  if (status === "running") {
+    return index === 0 ? "forging" : "queued";
+  }
+  return "queued";
+}
+
+function worldGenerationCardTag(status: WorldGenerationStatus, index: number): string {
+  if (status === "complete") {
+    return "ready";
+  }
+  if (status === "running" && index === 0) {
+    return "active";
+  }
+  return "queued";
+}
+
+function worldGenerationCardDetail(
+  title: string,
+  idle: string,
+  result: WorldGenerationComplete | null,
+): string {
+  if (!result) {
+    return idle;
+  }
+  if (title === "Locations") {
+    return `${result.locationCount} locations created.`;
+  }
+  if (title === "Factions") {
+    return `${result.factionCount} factions created.`;
+  }
+  if (title === "Characters") {
+    return `${result.npcCount} characters created.`;
+  }
+  return `${result.loreCardCount} lore cards created.`;
+}
+
+function roman(value: number): string {
+  const numerals = ["i", "ii", "iii", "iv", "v"];
+  return numerals[value - 1] ?? String(value);
+}
+
 export default function CampaignForgePage(props: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = use(props.params);
+  const router = useRouter();
   const [campaign, setCampaign] = useState<CampaignMeta | null>(null);
   const [kernel, setKernel] = useState<CampaignKernel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [worldGenerationStatus, setWorldGenerationStatus] = useState<WorldGenerationStatus>("idle");
+  const [worldGenerationProgress, setWorldGenerationProgress] = useState<WorldGenerationProgress | null>(null);
+  const [worldGenerationResult, setWorldGenerationResult] = useState<WorldGenerationComplete | null>(null);
+  const [worldGenerationError, setWorldGenerationError] = useState<string | null>(null);
   const [preparingCampaign, setPreparingCampaign] = useState(false);
   const [characterMode, setCharacterMode] = useState<"describe" | "import">("describe");
   const [concept, setConcept] = useState("");
@@ -163,6 +436,10 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
     setLoading(true);
     setLoadError(null);
     setActionError(null);
+    setWorldGenerationStatus("idle");
+    setWorldGenerationProgress(null);
+    setWorldGenerationResult(null);
+    setWorldGenerationError(null);
     void Promise.all([
       loadCampaign(campaignId),
       loadCampaignKernel(campaignId),
@@ -188,6 +465,15 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
       cancelled = true;
     };
   }, [campaignId]);
+
+  async function refreshCampaignForgeState() {
+    const [loaded, kernelResponse] = await Promise.all([
+      loadCampaign(campaignId),
+      loadCampaignKernel(campaignId),
+    ]);
+    setCampaign(loaded);
+    setKernel(kernelResponse.kernel);
+  }
 
   useEffect(() => {
     if (
@@ -234,6 +520,29 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
       cancelled = true;
     };
   }, [campaign?.generationComplete, campaignId, kernel]);
+
+  async function handleCreateWorld() {
+    if (!campaign || !kernel?.worldDna || campaign.generationComplete === true || worldGenerationStatus === "running") {
+      return;
+    }
+
+    setWorldGenerationStatus("running");
+    setWorldGenerationProgress(null);
+    setWorldGenerationResult(null);
+    setWorldGenerationError(null);
+    try {
+      const result = await generateWorld(campaignId, {
+        onProgress: (progress) => setWorldGenerationProgress(progress),
+      });
+      setWorldGenerationResult(result);
+      setWorldGenerationStatus("complete");
+      await refreshCampaignForgeState();
+      router.push(`/campaign/${campaignId}/review`);
+    } catch (generationFailure) {
+      setWorldGenerationStatus("idle");
+      setWorldGenerationError(getErrorMessage(generationFailure, "World generation failed."));
+    }
+  }
 
   async function handleDescribe() {
     const trimmedConcept = concept.trim();
@@ -348,6 +657,7 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const currentWorldDnaStatus = worldDnaStatus(kernel);
   const worldDnaAccepted = Boolean(kernel.worldDna);
   const worldBuilt = campaign.generationComplete === true;
+  const showWorldGeneration = worldDnaAccepted && (!worldBuilt || worldGenerationStatus !== "idle");
   const playerUnlocked = worldDnaAccepted && worldBuilt;
   const worldDnaMeta = worldDnaAccepted ? currentWorldDnaStatus : "required";
   const worldDnaStage: StageState = currentWorldDnaStatus === "Ready" ? "done" : "active";
@@ -365,6 +675,20 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
   const playerLockBody = worldDnaAccepted
     ? "The player starts inside the world. Create the world, then set up the player here."
     : "Accept World DNA first. The player will be built from that world context.";
+
+  if (showWorldGeneration) {
+    return (
+      <WorldGenerationSurface
+        campaign={campaign}
+        kernel={kernel}
+        status={worldGenerationStatus}
+        progress={worldGenerationProgress}
+        result={worldGenerationResult}
+        error={worldGenerationError}
+        onStart={() => void handleCreateWorld()}
+      />
+    );
+  }
 
   return (
     <main className="wf-forge-shell wf-v4-page-theater" data-testid="campaign-forge">

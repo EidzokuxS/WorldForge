@@ -9,6 +9,14 @@ import {
 
 vi.mock("@/lib/api", () => ({
   loadCampaign: vi.fn(),
+  generateWorld: vi.fn(),
+}));
+
+const pushMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: pushMock,
+  }),
 }));
 
 vi.mock("@/lib/campaign-kernel-api", () => ({
@@ -24,6 +32,7 @@ vi.mock("@/lib/v2-card-parser", () => ({
 }));
 
 import { loadCampaign } from "@/lib/api";
+import { generateWorld } from "@/lib/api";
 import {
   composeCampaignGraph,
   loadCampaignKernel,
@@ -33,6 +42,7 @@ import {
 import CampaignForgePage from "@/app/(non-game)/campaign/[id]/forge/page";
 
 const mockedLoadCampaign = vi.mocked(loadCampaign);
+const mockedGenerateWorld = vi.mocked(generateWorld);
 const mockedLoadCampaignKernel = vi.mocked(loadCampaignKernel);
 const mockedParsePlayerCharacterDraft = vi.mocked(parsePlayerCharacterDraft);
 const mockedSavePlayerCast = vi.mocked(savePlayerCast);
@@ -143,6 +153,7 @@ async function renderPage(campaignId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pushMock.mockReset();
   mockedLoadCampaign.mockResolvedValue({
     id: "campaign-1",
     name: "Arcadia",
@@ -223,17 +234,20 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
   });
 
-  it("locks player creation when World DNA exists before the world is created", async () => {
+  it("shows the product world generation surface when World DNA exists before the world is created", async () => {
     await renderPage("campaign-1");
 
     await waitFor(() => {
-      expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("worldgen-surface")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("World DNA accepted.")).toBeInTheDocument();
-    expect(screen.getByText("Create the world first")).toBeInTheDocument();
-    expect(screen.getByText("The player starts inside the world. Create the world, then set up the player here."))
-      .toBeInTheDocument();
+    expect(screen.getAllByText("World generation").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Create the world." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create world" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Accepted World DNA" })).toBeInTheDocument();
+    expect(screen.getByText("Player setup opens after world review.")).toBeInTheDocument();
+    expect(screen.getByText("World Review")).toBeInTheDocument();
+    expect(screen.getByText("Player character")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Describe/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Import card/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Player concept")).not.toBeInTheDocument();
@@ -243,6 +257,72 @@ describe("CampaignForgePage", () => {
     expect(screen.queryByRole("button", { name: /Save player/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("graph-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Compose graph/ })).not.toBeInTheDocument();
+  });
+
+  it("starts world generation and routes to world review after completion", async () => {
+    let finishGeneration: (() => void) | undefined;
+    mockedGenerateWorld.mockImplementation((_campaignId, options) => new Promise((resolve) => {
+      options?.onProgress?.({
+        step: 3,
+        totalSteps: 8,
+        label: "Building locations...",
+        subStep: 2,
+        subTotal: 6,
+        subLabel: "Location: Lantern Gate",
+      });
+      finishGeneration = () => resolve({
+        refinedPremise: "Refined world",
+        locationCount: 12,
+        npcCount: 14,
+        factionCount: 5,
+        loreCardCount: 20,
+        loreStorageFailed: false,
+        startingLocation: "Lantern Gate",
+      });
+    }));
+    mockedLoadCampaign
+      .mockResolvedValueOnce({
+        id: "campaign-1",
+        name: "Arcadia",
+        premise: "A haunted coast of guild cities.",
+        createdAt: 1,
+        updatedAt: 1,
+        generationComplete: false,
+        seeds: FULL_SEEDS,
+      })
+      .mockResolvedValueOnce({
+        id: "campaign-1",
+        name: "Arcadia",
+        premise: "A haunted coast of guild cities.",
+        createdAt: 1,
+        updatedAt: 2,
+        generationComplete: true,
+        seeds: FULL_SEEDS,
+      });
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Create world" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create world" }));
+
+    await waitFor(() => {
+      expect(mockedGenerateWorld).toHaveBeenCalledWith("campaign-1", {
+        onProgress: expect.any(Function),
+      });
+    });
+    expect(screen.getAllByText("Location: Lantern Gate").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Creating world" })).toBeDisabled();
+
+    await act(async () => {
+      finishGeneration?.();
+    });
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/campaign/campaign-1/review");
+    });
   });
 
   it("keeps saved World DNA visible after the player is saved", async () => {

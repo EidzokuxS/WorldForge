@@ -1860,3 +1860,86 @@ export function importWorldBook(
     { campaignId, entries },
   );
 }
+
+// ───── World Generation ─────
+
+export interface WorldGenerationProgress {
+  step?: number;
+  totalSteps?: number;
+  label?: string;
+  subStep?: number;
+  subTotal?: number;
+  subLabel?: string;
+}
+
+export interface WorldGenerationComplete {
+  refinedPremise: string;
+  locationCount: number;
+  npcCount: number;
+  factionCount: number;
+  loreCardCount: number;
+  loreStorageFailed: boolean;
+  startingLocation: string;
+}
+
+export async function generateWorld(
+  campaignId: string,
+  options: { onProgress?: (progress: WorldGenerationProgress) => void } = {},
+): Promise<WorldGenerationComplete> {
+  const response = await apiStreamPost("/api/worldgen/generate", {
+    campaignId,
+    ipContext: null,
+    premiseDivergence: null,
+    researchArtifact: null,
+  });
+
+  if (!response.body) {
+    throw new Error("World generation stream did not start.");
+  }
+
+  return parseSSEStream(response.body, {
+    label: "World generation",
+    onProgress: (data) => {
+      options.onProgress?.(normalizeWorldGenerationProgress(data));
+    },
+    onComplete: normalizeWorldGenerationComplete,
+    onError: (data): never => {
+      throw new Error(readSseError(data, "World generation failed."));
+    },
+  });
+}
+
+function normalizeWorldGenerationProgress(data: Record<string, unknown>): WorldGenerationProgress {
+  return {
+    step: optionalNumber(data.step),
+    totalSteps: optionalNumber(data.totalSteps),
+    label: optionalString(data.label),
+    subStep: optionalNumber(data.subStep),
+    subTotal: optionalNumber(data.subTotal),
+    subLabel: optionalString(data.subLabel),
+  };
+}
+
+function normalizeWorldGenerationComplete(data: Record<string, unknown>): WorldGenerationComplete {
+  return {
+    refinedPremise: optionalString(data.refinedPremise) ?? "",
+    locationCount: optionalNumber(data.locationCount) ?? 0,
+    npcCount: optionalNumber(data.npcCount) ?? 0,
+    factionCount: optionalNumber(data.factionCount) ?? 0,
+    loreCardCount: optionalNumber(data.loreCardCount) ?? 0,
+    loreStorageFailed: data.loreStorageFailed === true,
+    startingLocation: optionalString(data.startingLocation) ?? "Unknown",
+  };
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readSseError(data: Record<string, unknown>, fallback: string): string {
+  return typeof data.error === "string" && data.error.trim() ? data.error : fallback;
+}

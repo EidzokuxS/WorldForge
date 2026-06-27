@@ -9,6 +9,7 @@ import {
   chatUndo,
   deleteCheckpointApi,
   deleteLoreCardById,
+  generateWorld,
   generateCharacter,
   getWorldData,
   importV2Card,
@@ -357,6 +358,59 @@ describe("worldgen API helpers", () => {
 
     await suggestSeed("Premise", "geography", null, null, null);
     expect(lastBody()).not.toHaveProperty("researchArtifact");
+  });
+
+  it("generateWorld streams progress and returns the completion payload", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode(
+          "event: progress\n"
+          + "data: {\"step\":3,\"totalSteps\":8,\"label\":\"Building locations...\",\"subStep\":2,\"subTotal\":6,\"subLabel\":\"Location: Lantern Gate\"}\n\n"
+          + "event: complete\n"
+          + "data: {\"refinedPremise\":\"Refined world\",\"locationCount\":12,\"npcCount\":14,\"factionCount\":5,\"loreCardCount\":20,\"loreStorageFailed\":false,\"startingLocation\":\"Lantern Gate\"}\n\n",
+        ));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const progress: unknown[] = [];
+    const result = await generateWorld("camp-1", {
+      onProgress: (event) => progress.push(event),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "camp-1",
+        ipContext: null,
+        premiseDivergence: null,
+        researchArtifact: null,
+      }),
+    });
+    expect(progress).toEqual([{
+      step: 3,
+      totalSteps: 8,
+      label: "Building locations...",
+      subStep: 2,
+      subTotal: 6,
+      subLabel: "Location: Lantern Gate",
+    }]);
+    expect(result).toEqual({
+      refinedPremise: "Refined world",
+      locationCount: 12,
+      npcCount: 14,
+      factionCount: 5,
+      loreCardCount: 20,
+      loreStorageFailed: false,
+      startingLocation: "Lantern Gate",
+    });
   });
 
 });
