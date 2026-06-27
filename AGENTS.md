@@ -1,3 +1,10 @@
+# WorldForge Project Rules
+
+- Work on revamp in the isolated `feat/revamp` branch; keep legacy systems as reference material and put new player routes, APIs, and UI behind revamp-owned paths.
+- Revamp code uses explicit adapter boundaries for legacy data shapes; direct imports from old worldgen, chat, or player flows require a task note naming the reason and proof.
+- Build UX/UI from `docs/UI Concept.html` as the style canon and send every UI slice to Droid GLM-5.2 Coding Plan before implementation.
+- For missing required graphics, create or generate assets that match `docs/UI Concept.html`; store them with the revamp surface and record the source/proof in task notes.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
