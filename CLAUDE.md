@@ -1,23 +1,3 @@
-# WorldForge Project Rules
-
-- Work on the isolated `feat/revamp` branch; keep legacy systems as reference material and put mechanics player routes, APIs, and UI behind mechanics-owned paths.
-- New mechanics code uses explicit adapter boundaries for legacy data shapes; direct imports from old worldgen, chat, or player flows require a task note naming the reason and proof.
-- Build UX/UI from `docs/UI Concept.html` as the style canon and send every UI slice to Droid GLM-5.2 Coding Plan before implementation.
-- For missing required graphics, create or generate assets that match `docs/UI Concept.html`; store them with the feature surface and record the source/proof in task notes.
-- Route prompts, model instructions, visible copy, and substantial prose through GLM review with the `humanizer` and `deslop` skills before landing them; record the verdict or rewrite note in task notes.
-- Keep Droid/GLM review notes with the active task, not only in chat, so verification survives context compaction.
-
-## Naming Convention
-
-- Name public surfaces with product/domain words: `campaign`, `forge`, `play`, `world`, `character`, `kernel`, `debug`, `state`, `graph`, `cast`.
-- Keep workstream labels out of player-facing URLs, UI copy, visible errors, screenshots, test titles that read like user behavior, and design artifacts.
-- Use lowercase kebab-case for route folders and URL segments: `/campaign/[id]/forge`, `campaign-kernel.md`, `ui-concept.html`.
-- Use PascalCase for React components and classes: `CampaignForgePage`, `PlayerCastPanel`.
-- Use camelCase for functions, variables, hooks, and test ids; hooks start with `use`, API helpers start with a verb: `loadCampaignKernel`, `savePlayerCast`.
-- Use `*.test.ts` or `*.test.tsx` beside the feature under test. Test names describe user or contract behavior with domain words.
-- Use internal workstream names only inside historical notes, branch names, RPI folders, and untouched seams. When a touched file or symbol carries a workstream label into current code, rename it to the domain name in the same patch.
-- New files, symbols, routes, and copy fail review when they contain `revamp`, `v2`, `new`, `legacy`, `tmp`, `old`, `experimental`, or similar status labels instead of domain language.
-
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

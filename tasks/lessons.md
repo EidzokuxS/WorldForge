@@ -14,6 +14,7 @@
 - Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
 - When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
 - After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
+- After `npx gitnexus analyze`, keep root `CLAUDE.md` if the generator recreates it. Do not delete it as cleanup unless the owner explicitly asks for that file to be removed.
 - For manual UI playtests, use the in-app browser when it is available; reserve external browser automation for headless regression artifacts or explicit requests.
 - For Droid GLM reviews, verify the active custom model alias from Factory settings and a real `droid exec --model ... --list-tools` call before recording any blocker.
 - In `feat/revamp`, legacy code is quarantine reference: mechanics player paths, APIs, and UI land on mechanics-owned routes with explicit adapter boundaries for legacy data shapes.
