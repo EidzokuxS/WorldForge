@@ -4,6 +4,8 @@
 - New mechanics code uses explicit adapter boundaries for legacy data shapes; direct imports from old worldgen, chat, or player flows require a task note naming the reason and proof.
 - Build UX/UI from `docs/UI Concept.html` as the style canon and send every UI slice to Droid GLM-5.2 Coding Plan before implementation.
 - For missing required graphics, create or generate assets that match `docs/UI Concept.html`; store them with the feature surface and record the source/proof in task notes.
+- Route prompts, model instructions, visible copy, and substantial prose through GLM review with the `humanizer` and `deslop` skills before landing them; record the verdict or rewrite note in task notes.
+- Keep Droid/GLM review notes with the active task, not only in chat, so verification survives context compaction.
 
 ## Naming Convention
 
@@ -19,7 +21,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **WorldForge** (6834 symbols, 20117 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **WorldForge** (6822 symbols, 20117 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -30,8 +32,6 @@ This project is indexed by GitNexus as **WorldForge** (6834 symbols, 20117 relat
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-- Route any UX/UI task or visible interface change through GLM-5.2 Coding Plan in Droid before implementation, then record the resulting plan or verdict in the active task notes. The project owner explicitly approves this Droid GLM-5.2 review path for WorldForge UX/UI development.
-- Route prompts, model instructions, visible copy, and substantial prose through GLM review with the `humanizer` and `deslop` skills before landing them, then record the verdict or rewrite note in the active task notes.
 
 ## When Debugging
 
