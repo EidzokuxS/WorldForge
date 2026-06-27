@@ -10,6 +10,7 @@
 - If cleanup hits locked files, stop, identify the owning process, stop only that process, then retry the narrow cleanup.
 - When cleaning visible root noise, inspect inside visible workflow folders too; `tasks/` should stay as `todo.md` plus `lessons.md` unless a current task requires more.
 - For repo presentation cleanup, sweep every top-level directory in one pass; do not hide obsolete tracked evidence inside another visible folder when the goal is a clean workspace.
+- Never delete ignored local configuration or secret-bearing files such as `settings.json`, `settings.json.bak`, `.env`, or provider key stores during cleanup. Move them to a named local backup outside the repo first.
 - Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
 - When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
 - After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
