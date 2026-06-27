@@ -168,3 +168,7 @@ Review:
 - GLM copy review with `humanizer` and `deslop` reviewed `.codex/droid-prompts/forge-dna-timer-copy-humanizer-deslop.md` and `.codex/droid-prompts/forge-dna-timer-extra-copy-humanizer-deslop.md`; both returned `GO`.
 - Forge now uses `Tune the blueprint.` and `Seed cards` on the idle DNA edit surface, removes the standalone `Save DNA` action, keeps save-before-create in the `Create world` path, and shows elapsed time beside the running generation stage count.
 - Verification: focused Forge vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.
+- Owner correction: the idle DNA screen has only one content block, so the secondary `Seed cards` heading created a false hierarchy under `Tune the blueprint.`
+- Droid GLM-5.2 reviewed `.codex/droid-prompts/forge-dna-remove-secondary-heading.md` and returned the implementation result: remove the redundant header row, keep H1/cards/actions/aria label, leave premise-only and running headings alone.
+- Forge now renders the editable seed cards directly under the H1 in the idle DNA state.
+- Verification: focused Forge vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.

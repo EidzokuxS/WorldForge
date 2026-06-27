@@ -50,6 +50,7 @@
 - Setup rail state must name the surface currently on screen: editable DNA cards mean World DNA is active; World generation becomes active only while the world build is running.
 - Avoid top-of-hero sublabels when the heading already names the state.
 - Avoid repeating the active setup step across the rail, H1, and section title. Use the rail for the step name, then use the H1 and section title for the player's current work.
+- Avoid adding a secondary section heading when the screen contains a single content block under a clear H1.
 - Running generation surfaces need visible elapsed time next to stage progress.
 - When the primary action persists dirty edits before continuing, do not expose a separate Save button for the same draft.
 - Gate player-character creation behind the created world signal, currently `campaign.generationComplete === true`. World DNA can enrich that context, but missing DNA must not block premise-only world creation.

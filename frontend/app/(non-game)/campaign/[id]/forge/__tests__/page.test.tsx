@@ -365,7 +365,7 @@ describe("CampaignForgePage", () => {
     const surface = screen.getByTestId("worldgen-surface");
     expect(within(surface).getAllByText("World DNA")).toHaveLength(1);
     expect(within(screen.getByLabelText("Campaign setup stages")).getByText("World DNA")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Seed cards" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Seed cards" })).not.toBeInTheDocument();
     const dnaList = screen.getByRole("list", { name: "Editable seed cards" });
     expect(within(dnaList).getAllByRole("listitem")).toHaveLength(6);
     expect(screen.getByLabelText("Geography seed text")).toHaveValue("Storm coast");

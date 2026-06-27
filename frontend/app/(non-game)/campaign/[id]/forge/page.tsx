@@ -333,11 +333,6 @@ function WorldGenerationSurface({
     : progress?.step && progress?.totalSteps
       ? `${progress.step} of ${progress.totalSteps} stages`
       : running ? "running" : dnaDirty ? "edited" : "ready";
-  const dnaPill = dnaBusy === "reroll-all"
-    ? "rerolling"
-    : dnaBusy === "saving-generate"
-      ? "saving"
-      : dnaDirty ? "edited" : "editable";
 
   useEffect(() => {
     if (!dnaDirty && kernel.worldDna) {
@@ -504,13 +499,6 @@ function WorldGenerationSurface({
 
         {hasDnaDraft ? (
           <section className="wf-gen-section">
-            <div className="wf-gen-section-h">
-              <span className="wf-gen-kicker">i</span>
-              <h2 className="wf-gen-h2">Seed cards</h2>
-              <span className="wf-gen-pill" data-state={dnaOperationBusy ? "forging" : undefined}>
-                {dnaPill}
-              </span>
-            </div>
             <div className="wf-dna-editor-grid" role="list" aria-label="Editable seed cards">
               {WORLD_DNA_CARDS.map((item, index) => {
                 const category = item.category as keyof CampaignWorldDna;
