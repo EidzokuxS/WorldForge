@@ -288,7 +288,12 @@ describe("CampaignForgePage", () => {
     expect(screen.getByLabelText("Geography seed text")).toHaveValue("Storm coast");
     expect(screen.getByRole("button", { name: "Re-roll all six" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save DNA" })).toBeDisabled();
-    expect(screen.getByText("Player setup opens after world review.")).toBeInTheDocument();
+    expect(screen.queryByText("Player setup opens after world review.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("World generation progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("World DNA is ready to edit.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "World build" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued for generation.")).not.toBeInTheDocument();
+    expect(screen.queryByText("queued")).not.toBeInTheDocument();
     expect(screen.getByText("World Review")).toBeInTheDocument();
     expect(screen.getByText("Player character")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Describe/ })).not.toBeInTheDocument();
@@ -465,6 +470,10 @@ describe("CampaignForgePage", () => {
         onProgress: expect.any(Function),
       });
     });
+    expect(screen.getByLabelText("World generation progress")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "World build" })).toBeInTheDocument();
+    expect(screen.queryByText("Queued for generation.")).not.toBeInTheDocument();
+    expect(screen.queryByText("queued")).not.toBeInTheDocument();
     expect(screen.getAllByText("Location: Lantern Gate").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Creating world" })).toBeDisabled();
 

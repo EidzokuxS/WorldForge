@@ -70,10 +70,10 @@ const WORLD_GENERATION_RAIL = [
 ] as const;
 
 const WORLD_GENERATION_CARDS = [
-  { title: "Locations", idle: "Queued for generation." },
-  { title: "Factions", idle: "Queued for generation." },
-  { title: "Characters", idle: "Queued for generation." },
-  { title: "Lore cards", idle: "Queued for generation." },
+  { title: "Locations" },
+  { title: "Factions" },
+  { title: "Characters" },
+  { title: "Lore cards" },
 ] as const;
 
 function characterNodeIsPresent(kernel: CampaignKernel): boolean {
@@ -272,6 +272,7 @@ function WorldGenerationSurface({
   const running = status === "running";
   const completedResult = status === "complete" ? result : null;
   const complete = completedResult !== null;
+  const showGenerationDetails = running || complete;
   const dnaOperationBusy = dnaBusy !== "idle";
   const controlsDisabled = running || complete || dnaOperationBusy;
   const seedsReady = draftToWorldSeeds(dnaDraft) !== null;
@@ -404,33 +405,33 @@ function WorldGenerationSurface({
               <em>{complete ? "review." : running ? "world." : "World DNA."}</em>
             </h1>
           </div>
-          <div className="wf-gen-progress" aria-label="World generation progress">
-            <div className="wf-gen-progress-bar">
-              <div style={{ width: `${progressRatio}%` }} />
+          {showGenerationDetails ? (
+            <div className="wf-gen-progress" aria-label="World generation progress">
+              <div className="wf-gen-progress-bar">
+                <div style={{ width: `${progressRatio}%` }} />
+              </div>
+              <div className="wf-gen-progress-meta">
+                <span>{activeLabel}</span>
+                <span><b>{progressMeta}</b></span>
+              </div>
             </div>
-            <div className="wf-gen-progress-meta">
-              <span>{activeLabel}</span>
-              <span><b>{progressMeta}</b></span>
-            </div>
-          </div>
+          ) : null}
         </header>
 
-        <section className="wf-gen-think" aria-label="Current world generation work">
-          <div className="wf-gen-think-mark" />
-          <div>
-            <div className="wf-gen-think-h">
-              Engine - {complete ? "world ready" : running ? "generation running" : "ready"}
+        {showGenerationDetails ? (
+          <section className="wf-gen-think" aria-label="Current world generation work">
+            <div className="wf-gen-think-mark" />
+            <div>
+              <div className="wf-gen-think-h">
+                Engine - {complete ? "world ready" : "generation running"}
+              </div>
+              <p className="wf-gen-think-prose">
+                {complete ? formatWorldGenerationSummary(completedResult) : activeLabel}
+                {running ? <span className="wf-gen-cursor" /> : null}
+              </p>
             </div>
-            <p className="wf-gen-think-prose">
-              {complete
-                ? formatWorldGenerationSummary(completedResult)
-                : running
-                  ? activeLabel
-                  : "Edit the six seed laws, save DNA, or create the world from the current draft."}
-              {running ? <span className="wf-gen-cursor" /> : null}
-            </p>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         <section className="wf-gen-section">
           <div className="wf-gen-section-h">
@@ -496,27 +497,36 @@ function WorldGenerationSurface({
           </div>
         </section>
 
-        <section className="wf-gen-section">
-          <div className="wf-gen-section-h">
-            <span className="wf-gen-kicker">ii</span>
-            <h2 className="wf-gen-h2">World <em>build</em></h2>
-            <span className="wf-gen-pill" data-state={running ? "forging" : undefined}>
-              {complete ? "ready" : running ? "running" : "waiting"}
-            </span>
-          </div>
-          <div className="wf-gen-locs">
-            {WORLD_GENERATION_CARDS.map((card, index) => (
-              <article key={card.title} className="wf-gen-loc" data-state={worldGenerationCardState(status, index)}>
-                <div className="wf-gen-loc-num">{String(index + 1).padStart(2, "0")}</div>
-                <div className="wf-gen-loc-h">{card.title}</div>
-                <div className="wf-gen-loc-sub">{worldGenerationCardDetail(card.title, card.idle, completedResult)}</div>
-                <div className="wf-gen-loc-tag">
-                  <span className="wf-gen-tag">{worldGenerationCardTag(status, index)}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+        {showGenerationDetails ? (
+          <section className="wf-gen-section">
+            <div className="wf-gen-section-h">
+              <span className="wf-gen-kicker">ii</span>
+              <h2 className="wf-gen-h2">World <em>build</em></h2>
+              <span className="wf-gen-pill" data-state={running ? "forging" : undefined}>
+                {complete ? "ready" : "running"}
+              </span>
+            </div>
+            <div className="wf-gen-locs">
+              {WORLD_GENERATION_CARDS.map((card, index) => {
+                const cardDetail = worldGenerationCardDetail(card.title, completedResult);
+                const cardTag = worldGenerationCardTag(status, index);
+
+                return (
+                  <article key={card.title} className="wf-gen-loc" data-state={worldGenerationCardState(status, index)}>
+                    <div className="wf-gen-loc-num">{String(index + 1).padStart(2, "0")}</div>
+                    <div className="wf-gen-loc-h">{card.title}</div>
+                    {cardDetail ? <div className="wf-gen-loc-sub">{cardDetail}</div> : null}
+                    {cardTag ? (
+                      <div className="wf-gen-loc-tag">
+                        <span className="wf-gen-tag">{cardTag}</span>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
 
         {dnaError || error ? (
           <section className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm text-red-200">
@@ -561,9 +571,6 @@ function WorldGenerationSurface({
               </button>
             </div>
           )}
-          <span className="wf-forge-cta-note">
-            Player setup opens after world review.
-          </span>
         </div>
       </section>
     </main>
@@ -622,16 +629,15 @@ function worldGenerationCardTag(status: WorldGenerationStatus, index: number): s
   if (status === "running" && index === 0) {
     return "active";
   }
-  return "queued";
+  return "";
 }
 
 function worldGenerationCardDetail(
   title: string,
-  idle: string,
   result: WorldGenerationComplete | null,
 ): string {
   if (!result) {
-    return idle;
+    return "";
   }
   if (title === "Locations") {
     return `${result.locationCount} locations created.`;

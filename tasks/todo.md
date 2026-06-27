@@ -149,3 +149,7 @@ Review:
 - Forge pre-world surface now renders editable six-card World DNA, `Re-roll`, `Re-roll all six`, `Save DNA`, and `Create world`. Dirty `Create world` saves DNA through the kernel API before starting generation.
 - Kernel API now provides campaign-scoped World DNA suggestion endpoints that read saved campaign source context and return only seed values.
 - Verification: backend focused vitest `src/routes/__tests__/campaign-kernel.test.ts` -> `16 passed`; frontend focused vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx lib/__tests__/campaign-kernel-api.test.ts` -> `18 passed`; `npm --prefix frontend run typecheck`; `npm --prefix backend run typecheck`; `git diff --check`.
+- Owner correction: pre-world Forge had noisy idle copy: footer note beside `Create world`, visible `queued` cards, and progress/status subtext before generation started.
+- Droid GLM-5.2 reviewed the cleanup prompt via `.codex/droid-prompts/forge-worldgen-noise-cleanup.md` and returned `GO`: hide progress/think/build details until generation is running or complete, remove the footer note, remove visible `queued`, and keep internal state attributes only for styling.
+- Forge pre-world idle now focuses on editable DNA plus primary actions. World generation progress, engine work, and build cards appear only during running/complete states.
+- Verification: focused frontend vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck` passed; `git diff --check` passed.
