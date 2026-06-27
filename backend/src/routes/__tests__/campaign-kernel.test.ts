@@ -8,7 +8,10 @@ import {
   type CharacterDraft,
 } from "@worldforge/shared";
 
-const { ingestMock } = vi.hoisted(() => ({ ingestMock: vi.fn() }));
+const { ingestMock, saveWorldSeedsMock } = vi.hoisted(() => ({
+  ingestMock: vi.fn(),
+  saveWorldSeedsMock: vi.fn(),
+}));
 
 vi.mock("../../character/ingestion/index.js", async () => {
   const actualErrors = await vi.importActual<any>("../../character/ingestion/errors.js");
@@ -23,6 +26,7 @@ vi.mock("../../campaign/index.js", () => ({
   loadCampaign: vi.fn(),
   loadIpContext: vi.fn(() => null),
   loadPremiseDivergence: vi.fn(() => null),
+  saveWorldSeeds: saveWorldSeedsMock,
 }));
 
 vi.mock("../../settings/index.js", () => ({
@@ -44,6 +48,7 @@ vi.mock("../../ai/index.js", () => ({
 }));
 
 import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
+import { readCampaignConfig } from "../../campaign/manager.js";
 import { readCampaignKernel, writeCampaignKernel } from "../../campaign-kernel/dna-adapter.js";
 import campaignKernelRoutes from "../campaign-kernel.js";
 
@@ -58,7 +63,16 @@ let campaignRoot: string;
 const mockedGetActiveCampaign = vi.mocked(getActiveCampaign);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
 
-function writeConfig(): void {
+const FULL_SEEDS = {
+  geography: "Railway wards",
+  politicalStructure: "Curfew council",
+  centralConflict: "Guilds smuggle people through closed stations",
+  culturalFlavor: ["Brass timetables", "Storm lanterns"],
+  environment: "Coastal rail city",
+  wildcard: "Living signals",
+};
+
+function writeConfig(config: Record<string, unknown> = {}): void {
   const campaignDir = path.join(campaignRoot, CAMPAIGN_ID);
   fs.mkdirSync(campaignDir, { recursive: true });
   fs.writeFileSync(
@@ -69,6 +83,7 @@ function writeConfig(): void {
         premise: "A railway city under curfew.",
         createdAt: 1,
         updatedAt: 1,
+        ...config,
       },
       null,
       2,
@@ -471,11 +486,31 @@ function writeActiveKernelWithRouteHint(): void {
 beforeEach(() => {
   vi.clearAllMocks();
   ingestMock.mockReset();
+  saveWorldSeedsMock.mockReset();
   originalCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
   campaignRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-a5b-route-"));
   process.env.GSD_CAMPAIGNS_ROOT = campaignRoot;
   writeConfig();
   setLoadedCampaign();
+  saveWorldSeedsMock.mockImplementation((campaignId: string, seeds: typeof FULL_SEEDS) => {
+    const configPath = path.join(campaignRoot, campaignId, "config.json");
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+    const updatedAt = 2;
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ ...config, seeds, updatedAt }, null, 2),
+      "utf-8",
+    );
+    return {
+      id: campaignId,
+      name: String(config.name),
+      premise: String(config.premise ?? ""),
+      createdAt: Number(config.createdAt),
+      updatedAt,
+      seeds,
+      generationComplete: false,
+    };
+  });
 });
 
 afterEach(() => {
@@ -503,6 +538,64 @@ describe("campaign kernel routes", () => {
         generatedCast: [],
       },
     });
+  });
+
+  it("prepares saved World DNA for the Forge kernel view", async () => {
+    writeConfig({ seeds: FULL_SEEDS });
+
+    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/kernel`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      phase: "world_ready",
+      worldDna: {
+        geography: "Railway wards",
+        politicalStructure: "Curfew council",
+        centralConflict: "Guilds smuggle people through closed stations",
+        culturalFlavor: "Brass timetables; Storm lanterns",
+        environment: "Coastal rail city",
+        wildcard: "Living signals",
+      },
+    });
+    expect(readCampaignKernel(CAMPAIGN_ID)?.worldDna).toEqual(body.kernel.worldDna);
+  });
+
+  it("keeps Forge in draft when saved World DNA is absent", async () => {
+    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/kernel`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel.phase).toBe("draft");
+    expect(body.kernel.worldDna).toBeNull();
+    expect(readCampaignKernel(CAMPAIGN_ID)).toBeNull();
+  });
+
+  it("applies World DNA through the kernel API boundary", async () => {
+    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/world-dna/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seeds: FULL_SEEDS }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kernel).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      phase: "world_ready",
+      worldDna: {
+        geography: "Railway wards",
+        politicalStructure: "Curfew council",
+        centralConflict: "Guilds smuggle people through closed stations",
+        culturalFlavor: "Brass timetables; Storm lanterns",
+        environment: "Coastal rail city",
+        wildcard: "Living signals",
+      },
+    });
+    expect(body.campaign.seeds).toEqual(FULL_SEEDS);
+    expect(readCampaignConfig(CAMPAIGN_ID).seeds).toEqual(FULL_SEEDS);
+    expect(readCampaignKernel(CAMPAIGN_ID)?.worldDna).toEqual(body.kernel.worldDna);
   });
 
   it("returns a debug snapshot through the kernel API boundary", async () => {
@@ -547,6 +640,7 @@ describe("campaign kernel routes", () => {
   });
 
   it("parses a player draft through the kernel API boundary", async () => {
+    writeConfig({ seeds: FULL_SEEDS });
     ingestMock.mockResolvedValueOnce(makeDraft());
 
     const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/player/parse`, {
@@ -570,11 +664,16 @@ describe("campaign kernel routes", () => {
       locationNames: [],
       factionNames: [],
     });
+    const ctx = ingestMock.mock.calls[0]?.[1];
+    expect(ctx.campaign.premise).toContain("Accepted World DNA:");
+    expect(ctx.campaign.premise).toContain("Geography: Railway wards");
+    expect(ctx.campaign.premise).toContain("Wildcard: Living signals");
     const body = await res.json();
     expect(body.draft.identity.displayName).toBe("Mira Vale");
   });
 
   it("imports a player card through the kernel API boundary", async () => {
+    writeConfig({ seeds: FULL_SEEDS });
     ingestMock.mockResolvedValueOnce(makeDraft("Imported Hero"));
 
     const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/player/import-card`, {
@@ -605,6 +704,9 @@ describe("campaign kernel routes", () => {
         importMode: "outsider",
       },
     });
+    const ctx = ingestMock.mock.calls[0]?.[1];
+    expect(ctx.campaign.premise).toContain("Accepted World DNA:");
+    expect(ctx.campaign.premise).toContain("Central conflict: Guilds smuggle people through closed stations");
   });
 
   it("saves a player draft into kernel cast registry", async () => {

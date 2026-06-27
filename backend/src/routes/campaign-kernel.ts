@@ -2,8 +2,11 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
+  type CampaignKernel,
+  type CampaignWorldDna,
   type CharacterDraft,
   type CampaignWorldNode as KernelWorldNode,
+  type WorldSeeds,
 } from "@worldforge/shared";
 import {
   ingestCharacterDraft,
@@ -11,7 +14,8 @@ import {
   type IngestionContext,
   type IngestionInput,
 } from "../character/ingestion/index.js";
-import { loadIpContext, loadPremiseDivergence } from "../campaign/index.js";
+import { loadIpContext, loadPremiseDivergence, saveWorldSeeds } from "../campaign/index.js";
+import { readCampaignConfig } from "../campaign/manager.js";
 import { assertSafeId } from "../campaign/paths.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
@@ -22,6 +26,7 @@ import {
   saveCampaignPlayerCharacter as savePlayerCharacterInKernel,
 } from "../campaign-kernel/cast-kernel.js";
 import { composeCampaignKernelWorldGraph as composeCampaignWorldGraph } from "../campaign-kernel/graph-kernel.js";
+import { advanceCampaignKernelToWorldReady } from "../campaign-kernel/dna-adapter.js";
 import { createCampaignChatMessage } from "../campaign-kernel/chat-kernel.js";
 import { buildCampaignDebugSnapshot } from "../campaign-kernel/debug-snapshot.js";
 import { createCampaignOpening } from "../campaign-kernel/opening-kernel.js";
@@ -53,6 +58,19 @@ const savePlayerSchema = z.object({
   source: playerSourceSchema.default("player_created"),
 }).strip();
 
+const worldSeedsSchema = z.object({
+  geography: z.string().trim().min(1, "Geography is required.").max(2000),
+  politicalStructure: z.string().trim().min(1, "Political structure is required.").max(2000),
+  centralConflict: z.string().trim().min(1, "Central conflict is required.").max(2000),
+  culturalFlavor: z.array(z.string().trim().min(1)).min(1, "Cultural flavor is required.").max(12),
+  environment: z.string().trim().min(1, "Environment is required.").max(2000),
+  wildcard: z.string().trim().min(1, "Wildcard is required.").max(2000),
+}).strip();
+
+const applyWorldDnaSchema = z.object({
+  seeds: worldSeedsSchema.optional(),
+}).strip();
+
 const startSetupSchema = z.object({
   mode: z.enum(["gm_invented", "user_guided"]).default("gm_invented"),
   userStart: z.string().trim().max(2000).optional(),
@@ -67,6 +85,57 @@ function locationNamesFromKernel(nodes: KernelWorldNode[]): string[] {
     .filter((node) => node.type === "Location" || node.type === "SceneLocation")
     .map((node) => node.name.trim())
     .filter(Boolean);
+}
+
+function hasCompleteWorldSeeds(seeds: Partial<WorldSeeds> | undefined): seeds is WorldSeeds {
+  return Boolean(
+    seeds?.geography?.trim()
+      && seeds.politicalStructure?.trim()
+      && seeds.centralConflict?.trim()
+      && seeds.environment?.trim()
+      && seeds.wildcard?.trim()
+      && Array.isArray(seeds.culturalFlavor)
+      && seeds.culturalFlavor.some((value) => value.trim()),
+  );
+}
+
+function readForgeKernel(campaignId: string): CampaignKernel {
+  const kernel = readOrCreateCampaignKernel(campaignId);
+  if (kernel.phase !== "draft" || kernel.worldDna) {
+    return kernel;
+  }
+
+  const config = readCampaignConfig(campaignId);
+  if (!hasCompleteWorldSeeds(config.seeds)) {
+    return kernel;
+  }
+
+  return advanceCampaignKernelToWorldReady(campaignId);
+}
+
+function formatWorldDnaForPlayerContext(worldDna: CampaignWorldDna | null): string {
+  if (!worldDna) {
+    return "";
+  }
+
+  return [
+    "Accepted World DNA:",
+    `Geography: ${worldDna.geography}`,
+    `Political structure: ${worldDna.politicalStructure}`,
+    `Central conflict: ${worldDna.centralConflict}`,
+    `Cultural flavor: ${worldDna.culturalFlavor}`,
+    `Environment: ${worldDna.environment}`,
+    `Wildcard: ${worldDna.wildcard}`,
+  ].join("\n");
+}
+
+function playerPremiseContext(input: {
+  campaignPremise: string;
+  kernel: CampaignKernel;
+}): string {
+  const premise = input.kernel.premise || input.campaignPremise;
+  const worldDna = formatWorldDnaForPlayerContext(input.kernel.worldDna);
+  return worldDna ? `${premise}\n\n${worldDna}` : premise;
 }
 
 function buildPlayerIngestionContext(input: {
@@ -101,7 +170,7 @@ async function preparePlayerIngestion(c: Context, campaignId: string) {
     return c.json({ error: gen.error }, gen.status);
   }
 
-  const kernel = readOrCreateCampaignKernel(campaignId);
+  const kernel = readForgeKernel(campaignId);
   const locationNames = locationNamesFromKernel(kernel.worldGraph.nodes);
   return {
     campaign,
@@ -136,10 +205,38 @@ app.get("/campaigns/:id/kernel", async (c) => {
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
-    return c.json({ kernel: readOrCreateCampaignKernel(campaignId) });
+    return c.json({ kernel: readForgeKernel(campaignId) });
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to load campaign kernel.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/campaigns/:id/world-dna/apply", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    assertSafeId(campaignId);
+    const result = await parseBody(c, applyWorldDnaSchema);
+    if ("response" in result) return result.response;
+
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    const campaignMeta = result.data.seeds
+      ? saveWorldSeeds(campaignId, result.data.seeds as WorldSeeds)
+      : campaign;
+    const kernel = advanceCampaignKernelToWorldReady(campaignId);
+
+    return c.json({
+      campaign: campaignMeta,
+      kernel,
+      worldDna: kernel.worldDna,
+    });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to apply World DNA.") },
       getErrorStatus(error),
     );
   }
@@ -186,7 +283,10 @@ app.post("/campaigns/:id/player/parse", async (c) => {
       input,
       buildPlayerIngestionContext({
         campaignId,
-        premise: ctx.kernel.premise || ctx.campaign.premise,
+        premise: playerPremiseContext({
+          campaignPremise: ctx.campaign.premise,
+          kernel: ctx.kernel,
+        }),
         gen: ctx.gen,
         settings: ctx.settings,
         locationNames: ctx.locationNames,
@@ -229,7 +329,10 @@ app.post("/campaigns/:id/player/import-card", async (c) => {
       input,
       buildPlayerIngestionContext({
         campaignId,
-        premise: ctx.kernel.premise || ctx.campaign.premise,
+        premise: playerPremiseContext({
+          campaignPremise: ctx.campaign.premise,
+          kernel: ctx.kernel,
+        }),
         gen: ctx.gen,
         settings: ctx.settings,
         locationNames: ctx.locationNames,

@@ -483,6 +483,23 @@ export function loadWorldgenResearchArtifact(
   }
 }
 
+export function saveWorldSeeds(campaignId: string, seeds: WorldSeeds): CampaignMeta {
+  const config = updateCampaignConfig(campaignId, (current) => ({
+    ...current,
+    seeds,
+  }));
+
+  return {
+    id: campaignId,
+    name: config.name,
+    premise: config.premise,
+    createdAt: config.createdAt,
+    updatedAt: config.updatedAt ?? config.createdAt,
+    seeds: config.seeds,
+    generationComplete: config.generationComplete,
+  };
+}
+
 export function getActiveCampaign(): CampaignMeta | null {
   return activeCampaign;
 }

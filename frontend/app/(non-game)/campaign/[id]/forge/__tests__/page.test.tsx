@@ -16,6 +16,7 @@ vi.mock("@/lib/campaign-kernel-api", () => ({
   parsePlayerCharacterDraft: vi.fn(),
   importPlayerCard: vi.fn(),
   savePlayerCast: vi.fn(),
+  composeCampaignGraph: vi.fn(),
 }));
 
 vi.mock("@/lib/v2-card-parser", () => ({
@@ -24,6 +25,7 @@ vi.mock("@/lib/v2-card-parser", () => ({
 
 import { loadCampaign } from "@/lib/api";
 import {
+  composeCampaignGraph,
   loadCampaignKernel,
   parsePlayerCharacterDraft,
   savePlayerCast,
@@ -34,6 +36,25 @@ const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedLoadCampaignKernel = vi.mocked(loadCampaignKernel);
 const mockedParsePlayerCharacterDraft = vi.mocked(parsePlayerCharacterDraft);
 const mockedSavePlayerCast = vi.mocked(savePlayerCast);
+const mockedComposeCampaignGraph = vi.mocked(composeCampaignGraph);
+
+const FULL_SEEDS = {
+  geography: "Storm coast",
+  politicalStructure: "Guild council",
+  centralConflict: "Trade war",
+  culturalFlavor: ["Lantern rites"],
+  environment: "Storm season",
+  wildcard: "Talking maps",
+};
+
+const FULL_WORLD_DNA = {
+  geography: "Storm coast",
+  politicalStructure: "Guild council",
+  centralConflict: "Trade war",
+  culturalFlavor: "Lantern rites",
+  environment: "Storm season",
+  wildcard: "Talking maps",
+};
 
 function makeDraft(name = "Mira Vale"): CharacterDraft {
   return {
@@ -129,12 +150,18 @@ beforeEach(() => {
     createdAt: 1,
     updatedAt: 1,
     generationComplete: false,
+    seeds: FULL_SEEDS,
   });
-  mockedLoadCampaignKernel.mockResolvedValue({ kernel: makeKernel() });
+  mockedLoadCampaignKernel.mockResolvedValue({
+    kernel: makeKernel({
+      phase: "world_ready",
+      worldDna: FULL_WORLD_DNA,
+    }),
+  });
 });
 
 describe("CampaignForgePage", () => {
-  it("renders the persisted Campaign Kernel shell and kernel boundary", async () => {
+  it("renders saved World DNA without raw kernel JSON or a second DNA editor", async () => {
     await renderPage("campaign-1");
 
     await waitFor(() => {
@@ -144,14 +171,77 @@ describe("CampaignForgePage", () => {
     expect(mockedLoadCampaign).toHaveBeenCalledWith("campaign-1");
     expect(mockedLoadCampaignKernel).toHaveBeenCalledWith("campaign-1");
     expect(screen.getByRole("heading", { name: "Arcadia" })).toBeInTheDocument();
-    expect(screen.getByTestId("kernel-phase")).toHaveTextContent("draft");
-    expect(screen.getByTestId("kernel-boundary")).toHaveTextContent(
-      "Player cast writes to the Campaign Kernel.",
-    );
-    expect(screen.getByText(/"campaignId": "campaign-1"/)).toBeInTheDocument();
+    expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+    expect(screen.getByText("Storm coast")).toBeInTheDocument();
+    expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
+    expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("graph-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("kernel-phase")).toHaveTextContent("world_ready");
+    expect(screen.queryByLabelText("Geography")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Use World DNA/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/"campaignId": "campaign-1"/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Kernel payload")).not.toBeInTheDocument();
   });
 
-  it("creates and saves a player cast through campaign kernel helpers", async () => {
+  it("shows a premise-only state when the campaign was created without World DNA", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A haunted coast of guild cities.",
+      createdAt: 1,
+      updatedAt: 1,
+      generationComplete: false,
+    });
+    mockedLoadCampaignKernel.mockResolvedValue({
+      kernel: makeKernel(),
+    });
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("No World DNA saved")).toBeInTheDocument();
+    expect(screen.getByText("Premise-only player creation is available.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Player concept")).toBeEnabled();
+  });
+
+  it("keeps saved World DNA visible after the player is saved", async () => {
+    mockedLoadCampaignKernel.mockResolvedValue({
+      kernel: makeKernel({
+        phase: "cast_ready",
+        worldDna: FULL_WORLD_DNA,
+        castRegistry: {
+          playerCharacter: {
+            id: "cast:player_created:mira-vale",
+            source: "player_created",
+            characterDraft: makeDraft(),
+            campaignRole: "player",
+            placement: {
+              locationId: null,
+              sceneLocationId: null,
+              notes: [],
+            },
+            importance: "primary",
+          },
+          importedCast: [],
+          generatedCast: [],
+        },
+      }),
+    });
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /Use World DNA/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Storm coast")).toBeInTheDocument();
+  });
+
+  it("creates a player, saves cast, and composes the graph through campaign kernel helpers", async () => {
     const draft = makeDraft();
     const savedKernel = makeKernel({
       phase: "cast_ready",
@@ -172,10 +262,28 @@ describe("CampaignForgePage", () => {
         generatedCast: [],
       },
     });
+    const composedKernel = makeKernel({
+      ...savedKernel,
+      worldGraph: {
+        nodes: [
+          {
+            id: "cast:player_created:mira-vale",
+            type: "Character",
+            name: "Mira Vale",
+            data: {},
+          },
+        ],
+        edges: [],
+      },
+    });
     mockedParsePlayerCharacterDraft.mockResolvedValue({ draft });
     mockedSavePlayerCast.mockResolvedValue({
       kernel: savedKernel,
       playerCharacter: savedKernel.castRegistry.playerCharacter!,
+    });
+    mockedComposeCampaignGraph.mockResolvedValue({
+      kernel: composedKernel,
+      worldGraph: composedKernel.worldGraph,
     });
 
     await renderPage("campaign-1");
@@ -184,6 +292,7 @@ describe("CampaignForgePage", () => {
       expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();
     });
 
+    expect(screen.getByRole("button", { name: /Compose graph/ })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Player concept"), {
       target: { value: "A courier with a sealed pass." },
     });
@@ -196,7 +305,7 @@ describe("CampaignForgePage", () => {
     });
     expect(screen.getByText("Mira Vale")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Save player cast/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save player/ }));
 
     await waitFor(() => {
       expect(mockedSavePlayerCast).toHaveBeenCalledWith("campaign-1", {
@@ -205,5 +314,13 @@ describe("CampaignForgePage", () => {
       });
     });
     expect(screen.getByTestId("kernel-phase")).toHaveTextContent("cast_ready");
+
+    fireEvent.click(screen.getByRole("button", { name: /Compose graph/ }));
+
+    await waitFor(() => {
+      expect(mockedComposeCampaignGraph).toHaveBeenCalledWith("campaign-1");
+    });
+    expect(screen.getByText("Graph ready.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Compose graph/ })).toBeDisabled();
   });
 });

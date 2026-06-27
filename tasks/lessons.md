@@ -25,6 +25,8 @@
 - A planned playtest gate is a hard gate: execute the player path and record the evidence before moving to the next architecture item.
 - Backend-only work after the accepted scope boundary is exploratory code, not accepted product work, until the owner explicitly scopes it and manual playtests prove the player path.
 - World DNA is an optional but first-class player step; do not hide it inside a backend transition when the current flow needs player review or editing.
+- Campaign Forge World DNA starts as a generated draft from the campaign Premise; the player edits that draft, then player-character creation consumes the accepted World DNA context.
+- Preserve the working campaign creation flow: `/campaign/new` gathers concept, `/campaign/new/dna` generates and edits World DNA, and Forge consumes the saved result. Do not move that generation step into Forge.
 - Acceptance must follow the actual player path: create campaign, save, opening, action loop, state reload, and longplay.
 - Longplay evidence must separate diagnostic lanes from pristine acceptance lanes.
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.
@@ -33,6 +35,7 @@
 ## UI And Narration
 
 - Send every UX/UI task or visible interface change to GLM-5.2 Coding Plan in Droid before implementation, then carry its verdict into the active task notes.
+- If the first GLM invocation fails or appears silent, fix the GLM/Droid invocation or use the approved GLM channel; do not implement or restyle the UI by hand.
 - Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
 - Treat `docs/UI Concept.html` as the mechanics UI style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.

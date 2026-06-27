@@ -13,6 +13,7 @@ export {
   loadWorldgenResearchFrame,
   saveWorldgenResearchArtifact,
   loadWorldgenResearchArtifact,
+  saveWorldSeeds,
   getActiveCampaign,
   advanceCampaignTick,
   incrementTick,

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CharacterDraft } from "@worldforge/shared";
 import {
+  applyWorldDna,
+  composeCampaignGraph,
   importPlayerCard,
   loadCampaignKernel,
   parsePlayerCharacterDraft,
@@ -102,6 +104,38 @@ describe("campaign kernel API helpers", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/kernel/campaigns/camp-1/kernel");
   });
 
+  it("applies World DNA through the kernel API", async () => {
+    fetchMock.mockResolvedValue(ok({
+      campaign: { id: "camp-1" },
+      kernel: { campaignId: "camp-1" },
+      worldDna: { geography: "Coast" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await applyWorldDna("camp-1", {
+      seeds: {
+        geography: "Coast",
+        politicalStructure: "Guild council",
+        centralConflict: "Trade war",
+        culturalFlavor: ["Lantern rites"],
+        environment: "Storm season",
+        wildcard: "Talking maps",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/kernel/campaigns/camp-1/world-dna/apply",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(lastBody()).toMatchObject({
+      seeds: {
+        geography: "Coast",
+        culturalFlavor: ["Lantern rites"],
+      },
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).not.toContain("/api/worldgen");
+  });
+
   it("parses player drafts through the kernel API", async () => {
     fetchMock.mockResolvedValue(ok({ draft: makeDraft() }));
     vi.stubGlobal("fetch", fetchMock);
@@ -167,5 +201,18 @@ describe("campaign kernel API helpers", () => {
       draft,
       source: "player_created",
     });
+  });
+
+  it("composes campaign graph through the kernel API", async () => {
+    fetchMock.mockResolvedValue(ok({ kernel: { campaignId: "camp-1" }, worldGraph: { nodes: [], edges: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await composeCampaignGraph("camp-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/kernel/campaigns/camp-1/graph/compose",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(lastBody()).toEqual({});
   });
 });

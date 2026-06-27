@@ -1,7 +1,9 @@
 import type {
   CampaignKernel,
   CharacterDraft,
+  WorldSeeds,
 } from "@worldforge/shared";
+import type { CampaignMeta } from "@/lib/api";
 import type { CharacterImportMode } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
@@ -50,8 +52,28 @@ export type SavePlayerCastResponse = {
   playerCharacter: PlayerCastMember;
 };
 
+export type ApplyWorldDnaResponse = {
+  campaign: CampaignMeta;
+  kernel: CampaignKernel;
+  worldDna: NonNullable<CampaignKernel["worldDna"]>;
+};
+
+export type ComposeCampaignGraphResponse = {
+  kernel: CampaignKernel;
+  worldGraph: CampaignKernel["worldGraph"];
+};
+
 export function loadCampaignKernel(campaignId: string): Promise<CampaignKernelResponse> {
   return apiGet(`${KERNEL_API_BASE}/campaigns/${campaignId}/kernel`);
+}
+
+export function applyWorldDna(
+  campaignId: string,
+  body: {
+    seeds?: WorldSeeds;
+  } = {},
+): Promise<ApplyWorldDnaResponse> {
+  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/apply`, body);
 }
 
 export function parsePlayerCharacterDraft(
@@ -94,4 +116,8 @@ export function savePlayerCast(
   },
 ): Promise<SavePlayerCastResponse> {
   return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/cast/player`, body);
+}
+
+export function composeCampaignGraph(campaignId: string): Promise<ComposeCampaignGraphResponse> {
+  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/graph/compose`, {});
 }
