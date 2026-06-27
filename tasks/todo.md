@@ -122,3 +122,7 @@ Review:
 - Manual in-app browser proof on 2026-06-27: filled `/campaign/new`, clicked `Continue to DNA`, waited through real source-context research plus Z.AI `glm-5.2` native-JSON calls, reached `/campaign/new/dna` with `6 of 6 seeds active`, clicked `Create Campaign`, and landed on `/campaign/064bba91-3d35-4a8d-bef2-d08340172f79/forge`.
 - Live generation result: kernel API reports campaign `064bba91-3d35-4a8d-bef2-d08340172f79` in phase `world_ready` with saved `worldDna`; proof screenshot: `output/playtests/zai-dna-generation-forge-20260627.png`.
 - Diagnostic note: the playtest reused stale draft `Franchise/IP` text (`JoJo before part 6`) as source context even after the visible field was cleared. Treat that as a campaign-new draft-state bug to fix in a separate focused pass.
+- Droid GLM-5.2 reviewed the Forge saved-DNA display prompt via `.codex/droid-prompts/campaign-forge-dna-display.md` and returned `Plan is up-to-date.`
+- Forge saved-DNA display now renders the accepted six-field World DNA as `D01-D06` structured cards instead of a dense label/value prose wall.
+- Forge saved-DNA display proof: focused frontend vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `4 passed`; `npm --prefix frontend run typecheck` passed.
+- Visual proof: in-app browser bridge timed out on tab reads during verification, so a local Edge headless screenshot captured the current localhost page instead: `output/playtests/campaign-forge-dna-cards-20260627.png`.

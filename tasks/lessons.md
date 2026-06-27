@@ -40,6 +40,7 @@
 - Give Droid GLM reviews a real work window. Treat a few minutes of silence as normal model processing and wait for an explicit completion or error signal before judging the run.
 - Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
 - Treat `docs/UI Concept.html` as the mechanics UI style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
+- Render accepted World DNA and similar generated world facts as structured review surfaces, with separated fields and visible hierarchy; dense raw label/value prose blocks are a UI defect.
 - UI owns scene labels, route chips, status, inventory, visible actor chips, and structured action handles.
 - Narration owns lived moment, pressure, sensory surface, visible behavior, and action handoff.
 - Route option labels are UI/action handles. Prose should summarize visible ways onward unless the player asks about one explicit route.

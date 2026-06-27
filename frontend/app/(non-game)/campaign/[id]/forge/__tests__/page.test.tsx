@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createDraftCampaignKernel,
@@ -172,6 +172,10 @@ describe("CampaignForgePage", () => {
     expect(mockedLoadCampaignKernel).toHaveBeenCalledWith("campaign-1");
     expect(screen.getByRole("heading", { name: "Arcadia" })).toBeInTheDocument();
     expect(screen.getByTestId("world-dna-panel")).toBeInTheDocument();
+    const dnaList = within(screen.getByTestId("world-dna-panel")).getByRole("list", { name: "Accepted World DNA" });
+    expect(within(dnaList).getAllByRole("listitem")).toHaveLength(6);
+    expect(within(dnaList).getByText("D01")).toBeInTheDocument();
+    expect(within(dnaList).getByRole("heading", { name: "Geography" })).toBeInTheDocument();
     expect(screen.getByText("Storm coast")).toBeInTheDocument();
     expect(screen.getByText("Ready for player creation.")).toBeInTheDocument();
     expect(screen.getByTestId("player-cast-panel")).toBeInTheDocument();

@@ -25,6 +25,7 @@ import { parseV2CardFile as parseCharacterCardFile } from "@/lib/v2-card-parser"
 import type { CharacterImportMode } from "@/lib/types";
 
 type WorldDnaSummaryRow = {
+  code: string;
   label: string;
   value: string;
 };
@@ -56,7 +57,8 @@ function worldDnaStatus(kernel: CampaignKernel): WorldDnaStatus {
 }
 
 function worldDnaRows(worldDna: CampaignWorldDna): WorldDnaSummaryRow[] {
-  return WORLD_DNA_FIELDS.map((field) => ({
+  return WORLD_DNA_FIELDS.map((field, index) => ({
+    code: `D${String(index + 1).padStart(2, "0")}`,
     label: field.label,
     value: worldDna[field.key],
   }));
@@ -342,14 +344,17 @@ export default function CampaignForgePage(props: { params: Promise<{ id: string 
           >
             <div className="wf-campaign-forge-dna-summary" data-testid="world-dna-panel">
               {kernel.worldDna ? (
-                <dl className="wf-campaign-forge-dna-list">
+                <div className="wf-campaign-forge-dna-list" role="list" aria-label="Accepted World DNA">
                   {worldDnaRows(kernel.worldDna).map((row) => (
-                    <div key={row.label}>
-                      <dt>{row.label}</dt>
-                      <dd>{row.value}</dd>
-                    </div>
+                    <article className="wf-campaign-forge-dna-card" role="listitem" key={row.label}>
+                      <div className="wf-campaign-forge-dna-card-head">
+                        <span className="wf-campaign-forge-dna-code">{row.code}</span>
+                        <h3>{row.label}</h3>
+                      </div>
+                      <p>{row.value}</p>
+                    </article>
                   ))}
-                </dl>
+                </div>
               ) : (
                 <div className="wf-campaign-forge-preview">
                   <h3>No World DNA saved</h3>
