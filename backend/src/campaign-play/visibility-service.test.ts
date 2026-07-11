@@ -1,0 +1,828 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { closeDb } from "../db/index.js";
+import {
+  openCampaignWorldDatabase,
+  type CampaignWorldDatabaseHandle,
+} from "../campaign-world/world-database.js";
+import { createCampaignWorldRepository } from "../campaign-world/world-repository.js";
+import {
+  advanceBuildToPersistence,
+  candidateFixture,
+  createMigratedCampaign,
+  sourceFixture,
+} from "../campaign-world/world-repository.test-support.js";
+import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
+import {
+  openCampaignPlayDatabase,
+  type CampaignPlayDatabaseHandle,
+} from "./campaign-play-database.js";
+import {
+  canonicalizeCampaignPlayProjection,
+  hashCampaignPlayProjection,
+  type CampaignPlayProjectionRecord,
+} from "./campaign-play-projection.js";
+import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
+import {
+  createCampaignPlayOpeningPlanner,
+  type CampaignPlayOpeningProposal,
+} from "./opening-planner.js";
+import {
+  deriveCampaignPlayCommandId,
+  executeCampaignPlayRulebookBatch,
+  preflightCampaignPlayRulebook,
+  type CampaignPlayRulebookFrame,
+} from "./rulebook.js";
+import { createCampaignPlayVisibilityService } from "./visibility-service.js";
+
+const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
+const HASH_A = "a".repeat(64);
+const TEST_MODEL_PRICING = { currency: "USD", tokenUnit: 1_000_000,
+  inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
+const HASH_B = "b".repeat(64);
+let root = "";
+let previousCampaignsRoot: string | undefined;
+let handles: Array<CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle> = [];
+
+beforeEach(() => {
+  previousCampaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-visibility-"));
+  process.env.GSD_CAMPAIGNS_ROOT = root;
+  handles = [];
+});
+
+afterEach(() => {
+  for (const handle of handles) handle.close();
+  closeDb();
+  if (previousCampaignsRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;
+  else process.env.GSD_CAMPAIGNS_ROOT = previousCampaignsRoot;
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+function track<T extends CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle>(handle: T): T {
+  handles.push(handle);
+  return handle;
+}
+
+function acceptPlayableWorld(): void {
+  createMigratedCampaign(root, CAMPAIGN_ID);
+  const handle = openCampaignWorldDatabase(CAMPAIGN_ID);
+  try {
+    const repository = createCampaignWorldRepository(handle);
+    const source = sourceFixture(CAMPAIGN_ID);
+    repository.acquireBuild({
+      buildId: "build-visibility",
+      source,
+      expectedSourceDigest: source.sourceDigest,
+      providerId: "test-provider",
+      model: "test-model",
+      startedAt: 1_000,
+    });
+    advanceBuildToPersistence(repository, "build-visibility");
+    const candidate = candidateFixture(source);
+    const draft = {
+      ...candidate.draft,
+      placements: candidate.draft.placements.map((placement) =>
+        placement.id === "placement-b"
+          ? { ...placement, locationId: "location-a" }
+          : placement),
+    };
+    const review = repository.completeBuild({
+      buildId: "build-visibility",
+      candidate: {
+        ...candidate,
+        draft,
+        contentHash: calculateCampaignWorldContentHash(source.sourceDigest, draft),
+      },
+      completedAt: 1_100,
+    });
+    repository.acceptWorld({
+      expectedVersion: review.version,
+      expectedContentHash: review.contentHash,
+      acceptedAt: 1_200,
+    });
+  } finally {
+    handle.close();
+  }
+}
+
+function modelEvidence() {
+  return {
+    actualProviderId: "test-provider",
+    actualModel: "planner",
+    actualStrategy: "strict_object" as const,
+    inputTokens: 10,
+    outputTokens: 10,
+    durationMs: 20,
+    finishReason: "stop",
+  };
+}
+
+function openingProposal(): CampaignPlayOpeningProposal {
+  const actorPlans = ["a", "b", "c", "d"].map((suffix) => {
+    const actorId = `actor-${suffix}`;
+    const goalId = `goal-${suffix}`;
+    const targets = suffix === "b"
+      ? [
+          { kind: "location" as const, id: "location-b" },
+          { kind: "location" as const, id: "location-a" },
+          { kind: "goal" as const, id: goalId },
+        ]
+      : [{ kind: "goal" as const, id: goalId }];
+    const intent = {
+      kind: "attempt" as const,
+      targets,
+      method: `Advance ${goalId} from the current situation`,
+      stakes: "The actor's own objective",
+    };
+    return {
+      actorId,
+      primaryGoalId: goalId,
+      cadenceMinutes: 15,
+      intent,
+      steps: [{ intent, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } }],
+    };
+  });
+  return {
+    start: {
+      locationId: "location-c",
+      role: "A visitor on Bell Island",
+      arrivalMode: "On foot",
+      immediateSituation: "Signal keepers prepare for another route closure.",
+    },
+    scene: {
+      supportActorId: "actor-c",
+      pressureId: "pressure-b",
+      routeId: "route-c",
+    },
+    actorPlans,
+    hiddenConsequence: {
+      actorId: "actor-b",
+      goalId: "goal-b",
+      locationId: "location-a",
+      summary: "A courier changes which ledger reaches the reef.",
+      exposure: {
+        channel: "local_aftermath",
+        locationId: "location-a",
+        validUntilWorldTimeMinutes: 4,
+      },
+    },
+  };
+}
+
+function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebookFrame {
+  const states = createCampaignPlayStateRepository(handle);
+  const loaded = states.loadState()!;
+  const authority = loaded.authority;
+  const routeStates = handle.sqlite.prepare(`SELECT route_id AS routeId, state
+    FROM campaign_play_route_states WHERE campaign_id = ? ORDER BY route_id`)
+    .all(CAMPAIGN_ID) as CampaignPlayRulebookFrame["routeStates"];
+  const actorConditions = handle.sqlite.prepare(`SELECT actor_id AS actorId, condition,
+      present, summary FROM campaign_play_actor_conditions
+    WHERE campaign_id = ? ORDER BY actor_id, condition`).all(CAMPAIGN_ID)
+    .map((row) => ({
+      ...(row as Omit<CampaignPlayRulebookFrame["actorConditions"][number], "present">),
+      present: Boolean((row as { present: number }).present),
+    }));
+  const pressureStates = handle.sqlite.prepare(`SELECT pressure_id AS pressureId,
+      progress, status, last_advanced_world_time_minutes AS lastAdvancedWorldTimeMinutes
+    FROM campaign_play_pressure_states WHERE campaign_id = ? ORDER BY pressure_id`)
+    .all(CAMPAIGN_ID) as CampaignPlayRulebookFrame["pressureStates"];
+  const placements = (handle.sqlite.prepare(`SELECT id AS placementId, actor_id AS actorId,
+      location_id AS locationId, placement_kind AS placementKind
+    FROM actor_placements WHERE campaign_id = ? ORDER BY id`).all(CAMPAIGN_ID)) as
+    CampaignPlayRulebookFrame["placements"];
+  const relations = (handle.sqlite.prepare(`SELECT id AS relationId,
+      source_actor_id AS sourceActorId, target_actor_id AS targetActorId,
+      relation_type AS relationType, intensity, summary
+    FROM actor_relations WHERE campaign_id = ? ORDER BY id`).all(CAMPAIGN_ID)) as
+    CampaignPlayRulebookFrame["relations"];
+  const goals = (handle.sqlite.prepare(`SELECT id AS goalId, actor_id AS actorId,
+      status, priority, objective, motivation
+    FROM actor_goals WHERE campaign_id = ? ORDER BY id`).all(CAMPAIGN_ID)) as
+    CampaignPlayRulebookFrame["goals"];
+  return {
+    campaignId: CAMPAIGN_ID,
+    acceptedWorldVersion: authority.acceptedWorldVersion,
+    acceptedContentHash: authority.acceptedContentHash,
+    setupPhase: authority.setupPhase,
+    worldVersion: authority.worldVersion,
+    worldTimeMinutes: authority.worldTimeMinutes,
+    human: { actorId: "actor-player", recordHash: HASH_A },
+    acceptedWorld: loaded.acceptedReview,
+    routeStates,
+    actorConditions,
+    pressureStates,
+    placements,
+    relations,
+    goals,
+  };
+}
+
+function createVisibilityFixture(
+  routeTriggers: Array<"inspect" | "attempt" | "traverse"> = ["inspect"],
+) {
+  acceptPlayableWorld();
+  const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+  const states = createCampaignPlayStateRepository(handle);
+  states.createState({ eventId: "state-created", createdAt: 1_300 });
+  states.commitMechanicalAndRuntime({
+    worldVersionAdvance: 1,
+    event: {
+      eventId: "character-created",
+      turnId: null,
+      kind: "character_created",
+      workerEpoch: null,
+      protectedPayloadHash: HASH_A,
+      createdAt: 1_400,
+    },
+    mutate(context) {
+      context.sqlite.prepare(`INSERT INTO actors
+        (id, campaign_id, kind, controller, role, name, summary, traits, tags)
+        VALUES ('actor-player', ?, 'person', 'human', 'player', 'Player',
+          'A human visitor.', '[]', '[]')`).run(context.campaignId);
+      context.sqlite.prepare(`INSERT INTO campaign_play_characters
+        (actor_id, campaign_id, record_json, record_hash, source_kind, source_digest, created_at)
+        VALUES ('actor-player', ?, '{"name":"Player"}', ?, 'created', ?, 1400)`)
+        .run(context.campaignId, HASH_A, HASH_B);
+      context.sqlite.prepare(`UPDATE campaign_play_states SET setup_phase = 'opening_required'
+        WHERE campaign_id = ?`).run(context.campaignId);
+    },
+  });
+  const turns = createCampaignPlayTurnRepository(handle);
+  const beforeOpening = states.loadState()!;
+  turns.admitTurn({
+    turnId: "turn-opening",
+    supersedesTurnId: null,
+    mutationId: "turn-admitted",
+    submittedAt: 1_500,
+    document: {
+      turnKind: "opening",
+      request: {
+        idempotencyKey: "opening-one",
+        expectedWorldVersion: beforeOpening.authority.worldVersion,
+        expectedRuntimeRevision: beforeOpening.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+      frame: beforeOpening.publicState.projection as CampaignPlayProjectionRecord,
+    },
+    modelSelection: {
+      turnKind: "opening",
+      openingPlanner: { providerId: "test-provider", model: "planner", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+    },
+  });
+  const plannerToken = turns.claimStage({
+    turnId: "turn-opening",
+    expectedStage: "admitted",
+    observedEpoch: 0,
+    owner: "visibility-worker",
+    claimedAt: 1_510,
+    leaseExpiresAt: 3_000,
+    mutationId: "planner-claimed",
+  });
+  const openingCandidate = createCampaignPlayOpeningPlanner().compile({
+    campaignId: CAMPAIGN_ID,
+    turnId: "turn-opening",
+    acceptedWorldVersion: beforeOpening.authority.acceptedWorldVersion,
+    acceptedContentHash: beforeOpening.authority.acceptedContentHash,
+    baseWorldVersion: beforeOpening.authority.worldVersion,
+    player: {
+      actorId: "actor-player",
+      profileDigest: HASH_A,
+      name: "Player",
+      summary: "A human visitor.",
+      traits: [],
+      tags: [],
+    },
+    acceptedWorld: beforeOpening.acceptedReview,
+  }, { mode: "delegate" }, openingProposal());
+  turns.acceptModelArtifact({
+    token: plannerToken,
+    artifact: openingCandidate.artifact,
+    evidence: modelEvidence(),
+    mutationDomain: "runtime",
+    acceptedAt: 1_520,
+    mutationId: "planner-accepted",
+  });
+  const primaryToken = turns.claimStage({
+    turnId: "turn-opening",
+    expectedStage: "planned",
+    observedEpoch: 1,
+    owner: "visibility-worker",
+    claimedAt: 1_530,
+    leaseExpiresAt: 3_000,
+    mutationId: "primary-claimed",
+  });
+  const openingFrame = rulebookFrame(handle);
+  const bootstrapCommands = openingCandidate.artifact.bootstrapCommands;
+  const openingAccepted = preflightCampaignPlayRulebook({
+    frame: openingFrame,
+    authority: {
+      purpose: "opening",
+      turnId: "turn-opening",
+      actorId: "actor-player",
+      rootParent: { kind: "turn", turnId: "turn-opening" },
+      authorizedRefs: [
+        { kind: "actor", id: "actor-player" },
+        { kind: "location", id: "location-c" },
+        ...openingFrame.acceptedWorld.pressures.map((pressure) => ({
+          kind: "pressure" as const,
+          id: pressure.id,
+        })),
+      ],
+      witnessActorIds: [],
+      knownWorldEventIds: [],
+    },
+    batch: {
+      batchId: bootstrapCommands[0]!.batchId,
+      baseWorldVersion: openingFrame.worldVersion,
+      commands: bootstrapCommands,
+    },
+  });
+  if (!openingAccepted.accepted) {
+    throw new Error(`Opening denied: ${JSON.stringify(openingAccepted.denial)}`);
+  }
+  turns.commitDeterministic({
+    token: primaryToken,
+    transition: "primary_settled",
+    worldVersionAdvance: bootstrapCommands.length,
+    committedAt: 1_550,
+    mutationId: "primary-settled",
+    mutate(context) {
+      executeCampaignPlayRulebookBatch({
+        frame: openingFrame,
+        accepted: openingAccepted,
+        context,
+        turnId: "turn-opening",
+        createdAt: 1_550,
+      });
+    },
+  });
+  // The bootstrap rulebook batch owns the zero-time initialization. This fixture's
+  // downstream player-action evidence begins after terminal opening narration.
+  states.commitRuntime({
+    event: {
+      eventId: "opening-narration-completed",
+      turnId: null,
+      kind: "character_created",
+      workerEpoch: null,
+      protectedPayloadHash: HASH_B,
+      createdAt: 1_560,
+    },
+    mutate(context) {
+      const terminalNarration = context.sqlite.prepare(`UPDATE campaign_play_states
+        SET setup_phase = 'ready', opened_at = 1560
+        WHERE campaign_id = ? AND setup_phase = 'opening_required' AND opened_at IS NULL`)
+        .run(context.campaignId);
+      if (terminalNarration.changes !== 1) {
+        throw new Error("Visibility fixture could not complete terminal opening narration.");
+      }
+    },
+  });
+
+  const frame = rulebookFrame(handle);
+  const batchId = "visibility-evidence";
+  const firstId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 0);
+  const secondId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 1);
+  const thirdId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 2);
+  const fourthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 3);
+  const fifthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 4);
+  const sixthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 5);
+  const seventhId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 6);
+  const evidenceAccepted = preflightCampaignPlayRulebook({
+    frame,
+    authority: {
+      purpose: "player_action",
+      turnId: "turn-opening",
+      actorId: "actor-player",
+      rootParent: { kind: "turn", turnId: "turn-opening" },
+      authorizedRefs: [
+        { kind: "actor", id: "actor-player" },
+        { kind: "actor", id: "actor-a" },
+        { kind: "actor", id: "actor-c" },
+        { kind: "location", id: "location-a" },
+        { kind: "location", id: "location-c" },
+        { kind: "route", id: "route-c" },
+      ],
+      witnessActorIds: ["actor-c"],
+      knownWorldEventIds: [],
+    },
+    batch: {
+      batchId,
+      baseWorldVersion: frame.worldVersion,
+      commands: [
+        {
+          commandId: firstId,
+          batchId,
+          order: 0,
+          kind: "record_world_event",
+          causalParent: { kind: "turn", turnId: "turn-opening" },
+          source: { kind: "actor", actorId: "actor-player" },
+          expectedWorldVersion: frame.worldVersion,
+          readScope: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "route", id: "route-c" },
+          ],
+          writeScope: [],
+          exposure: {
+            mode: "projectable",
+            predicates: [
+              { channel: "direct_perception", locationId: "location-c" },
+              {
+                channel: "local_aftermath",
+                locationId: "location-a",
+                validUntilWorldTimeMinutes: 20,
+              },
+              {
+                channel: "route_state",
+                routeId: "route-c",
+                triggers: routeTriggers,
+              },
+              { channel: "witness_report", witnessActorId: "actor-c" },
+            ],
+          },
+          eventClass: "discovery",
+          summary: "Protected summary with hidden-cause-token.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "route", id: "route-c" },
+          ],
+        },
+        {
+          commandId: secondId,
+          batchId,
+          order: 1,
+          kind: "record_world_event",
+          causalParent: { kind: "command", commandId: firstId },
+          source: { kind: "actor", actorId: "actor-player" },
+          expectedWorldVersion: frame.worldVersion,
+          readScope: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-c" },
+          ],
+          writeScope: [],
+          exposure: { mode: "protected" },
+          eventClass: "dialogue",
+          summary: "The player asks the nearby witness what happened.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "actor", id: "actor-c" },
+          ],
+        },
+        {
+          commandId: thirdId,
+          batchId,
+          order: 2,
+          kind: "move_actor",
+          causalParent: { kind: "command", commandId: secondId },
+          source: { kind: "actor", actorId: "actor-player" },
+          expectedWorldVersion: frame.worldVersion,
+          readScope: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "route", id: "route-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "location", id: "location-a" },
+          ],
+          writeScope: [
+            { kind: "actor", id: "actor-player" },
+            { kind: "location", id: "location-c" },
+            { kind: "location", id: "location-a" },
+          ],
+          exposure: { mode: "protected" },
+          actorId: "actor-player",
+          routeId: "route-c",
+          fromLocationId: "location-c",
+          toLocationId: "location-a",
+        },
+        {
+          commandId: fourthId,
+          batchId,
+          order: 3,
+          kind: "record_world_event",
+          causalParent: { kind: "command", commandId: thirdId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 1,
+          readScope: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "location", id: "location-a" },
+          ],
+          writeScope: [],
+          exposure: {
+            mode: "projectable",
+            predicates: [
+              { channel: "direct_perception", locationId: "location-a" },
+            ],
+          },
+          eventClass: "scene",
+          summary: "Protected independent activity with hidden-goal-token.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "location", id: "location-a" },
+          ],
+        },
+        {
+          commandId: fifthId,
+          batchId,
+          order: 4,
+          kind: "record_world_event",
+          causalParent: { kind: "command", commandId: fourthId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 1,
+          readScope: [
+            { kind: "actor", id: "actor-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "route", id: "route-c" },
+          ],
+          writeScope: [],
+          exposure: {
+            mode: "projectable",
+            predicates: [
+              { channel: "direct_perception", locationId: "location-c" },
+              { channel: "route_state", routeId: "route-c", triggers: ["inspect"] },
+              { channel: "witness_report", witnessActorId: "actor-c" },
+            ],
+          },
+          eventClass: "scene",
+          summary: "Protected distant activity with hidden-distant-token.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-c" },
+            { kind: "location", id: "location-c" },
+            { kind: "route", id: "route-c" },
+          ],
+        },
+        {
+          commandId: sixthId,
+          batchId,
+          order: 5,
+          kind: "record_world_event",
+          causalParent: { kind: "command", commandId: fifthId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 1,
+          readScope: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "location", id: "location-a" },
+          ],
+          writeScope: [],
+          exposure: {
+            mode: "projectable",
+            predicates: [{
+              channel: "local_aftermath",
+              locationId: "location-a",
+              validUntilWorldTimeMinutes: 0,
+            }],
+          },
+          eventClass: "scene",
+          summary: "Protected expired trace with hidden-expired-token.",
+          affectedRefs: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "location", id: "location-a" },
+          ],
+        },
+        {
+          commandId: seventhId,
+          batchId,
+          order: 6,
+          kind: "advance_world_time",
+          causalParent: { kind: "command", commandId: sixthId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 1,
+          readScope: [],
+          writeScope: [],
+          exposure: { mode: "protected" },
+          elapsedMinutes: 1,
+        },
+      ],
+    },
+  });
+  if (!evidenceAccepted.accepted) {
+    throw new Error(`Visibility evidence denied: ${JSON.stringify(evidenceAccepted.denial)}`);
+  }
+  states.commitMechanical({
+    updatedAt: 1_600,
+    worldVersionAdvance: 2,
+    mutate(context) {
+      executeCampaignPlayRulebookBatch({
+        frame,
+        accepted: evidenceAccepted,
+        context,
+        turnId: "turn-opening",
+        createdAt: 1_600,
+      });
+    },
+  });
+  const sourceEvent = handle.sqlite.prepare(`SELECT event_id AS eventId
+    FROM campaign_play_events WHERE campaign_id = ? AND command_id = ?`)
+    .get(CAMPAIGN_ID, firstId) as { eventId: string };
+  const sourceExposures = handle.sqlite.prepare(`SELECT exposure_id AS exposureId, channel,
+      location_id AS locationId, witness_actor_id AS witnessActorId
+    FROM campaign_play_event_exposures
+    WHERE campaign_id = ? AND event_id = ? AND channel IN ('direct_perception', 'witness_report')
+    ORDER BY channel`).all(CAMPAIGN_ID, sourceEvent.eventId) as Array<{
+      exposureId: string;
+      channel: "direct_perception" | "witness_report";
+      locationId: string | null;
+      witnessActorId: string | null;
+    }>;
+  const directExposure = sourceExposures.find((row) => row.channel === "direct_perception")!;
+  const witnessExposure = sourceExposures.find((row) => row.channel === "witness_report")!;
+  const directSource = {
+    channel: "direct_perception",
+    locationId: directExposure.locationId!,
+    perceivedActorId: "actor-player",
+  };
+  const witnessSource = {
+    channel: "witness_report",
+    witnessActorId: witnessExposure.witnessActorId!,
+  };
+  states.commitRuntime({
+    event: {
+      eventId: "witness-knowledge-seeded",
+      turnId: null,
+      kind: "character_created",
+      workerEpoch: null,
+      protectedPayloadHash: HASH_B,
+      createdAt: 1_605,
+    },
+    mutate(context) {
+      const insert = context.sqlite.prepare(`INSERT INTO campaign_play_actor_knowledge
+        (knowledge_id, campaign_id, actor_id, event_id, exposure_id, channel,
+          source_location_id, source_route_id, source_trigger,
+          source_witness_actor_id, perceived_actor_id, source_json, source_hash,
+          learned_at_world_time_minutes, created_at)
+        VALUES (?, ?, 'actor-c', ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 0, ?)`);
+      insert.run(
+        "knowledge-witness-early",
+        context.campaignId,
+        sourceEvent.eventId,
+        directExposure.exposureId,
+        directExposure.channel,
+        directExposure.locationId,
+        null,
+        "actor-player",
+        canonicalizeCampaignPlayProjection(directSource),
+        hashCampaignPlayProjection(directSource),
+        1_590,
+      );
+      insert.run(
+        "knowledge-witness-late",
+        context.campaignId,
+        sourceEvent.eventId,
+        witnessExposure.exposureId,
+        witnessExposure.channel,
+        null,
+        witnessExposure.witnessActorId,
+        null,
+        canonicalizeCampaignPlayProjection(witnessSource),
+        hashCampaignPlayProjection(witnessSource),
+        1_700,
+      );
+    },
+  });
+  const actorsToken = turns.claimStage({
+    turnId: "turn-opening",
+    expectedStage: "primary_settled",
+    observedEpoch: 2,
+    owner: "visibility-worker",
+    claimedAt: 1_610,
+    leaseExpiresAt: 3_000,
+    mutationId: "actors-claimed",
+  });
+  turns.commitDeterministic({
+    token: actorsToken,
+    transition: "actors_settled",
+    worldVersionAdvance: 0,
+    committedAt: 1_620,
+    mutationId: "actors-settled",
+  });
+  const visibilityToken = turns.claimStage({
+    turnId: "turn-opening",
+    expectedStage: "actors_settled",
+    observedEpoch: 3,
+    owner: "visibility-worker",
+    claimedAt: 1_630,
+    leaseExpiresAt: 3_000,
+    mutationId: "visibility-claimed",
+  });
+  return { handle, states, turns, visibilityToken };
+}
+
+describe("Campaign Play visibility service", () => {
+  it("earns all four channels, freezes a strict packet atomically, and excludes protected truth", () => {
+    const fixture = createVisibilityFixture();
+    const before = fixture.states.loadState()!;
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      committedAt: 1_650,
+      mutationId: "visibility-projected",
+    });
+
+    expect(result.turn.stage).toBe("visibility_projected");
+    expect(result.turn.finalWorldVersion).toBeNull();
+    expect(result.packet.runtimeRevision).toBe(before.authority.runtimeRevision + 1);
+    expect(result.packet.newObservations.map((entry) => entry.title).sort()).toEqual([
+      "Along the route",
+      "Seen nearby",
+      "Seen nearby",
+      "Signs of change",
+      "Sel Bell's account",
+    ].sort());
+    expect(result.packet.newObservations).toHaveLength(5);
+    expect(result.packet.consequences).toHaveLength(5);
+    expect(result.packet.currentLocation.name).toBe("North Harbor");
+    expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
+    expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
+      .toHaveLength(4);
+    expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
+      .toHaveLength(1);
+    expect(result.knowledgeInserted).toBeGreaterThanOrEqual(5);
+    expect(result.observationsInserted).toBe(5);
+
+    const after = fixture.states.loadState()!;
+    expect(after.authority.worldVersion).toBe(before.authority.worldVersion);
+    expect(after.authority.runtimeRevision).toBe(before.authority.runtimeRevision + 1);
+    const packetBytes = canonicalizeCampaignPlayProjection(result.packet);
+    for (const protectedToken of [
+      "actor-player",
+      "actor-c",
+      "location-c",
+      "route-c",
+      "hidden-cause-token",
+      "hidden-goal-token",
+      "hidden-distant-token",
+      "hidden-expired-token",
+      "goal-a",
+      "goal-b",
+      "goal-c",
+      "goal-d",
+      "relation-a",
+      "providerId",
+      "requestedModel",
+      "characterDigest",
+      "recordHash",
+      "sourceHash",
+      "exposureId",
+      "eventId",
+      "commandId",
+      "receiptId",
+      "trajectory",
+    ]) expect(packetBytes).not.toContain(protectedToken);
+
+    const stored = fixture.handle.sqlite.prepare(`SELECT status, packet_hash AS packetHash,
+        packet_json AS packetJson FROM campaign_play_narrations
+      WHERE campaign_id = ? AND turn_id = 'turn-opening'`).get(CAMPAIGN_ID) as {
+        status: string;
+        packetHash: string;
+        packetJson: string;
+      };
+    expect(stored.status).toBe("pending");
+    expect(stored.packetHash).toBe(result.turn.publicPacketHash);
+    expect(stored.packetJson).toBe(packetBytes);
+    expect(after.publicState.canonicalBytes).not.toContain("actor-player");
+    expect(after.publicState.canonicalBytes).not.toContain("location-c");
+    expect(after.protectedAudit.canonicalBytes).toContain("direct_perception");
+    expect(hashCampaignPlayProjection(after.publicState.projection)).toBe(after.publicState.hash);
+
+    const countsBeforeRetry = fixture.handle.sqlite.prepare(`SELECT
+        (SELECT count(*) FROM campaign_play_actor_knowledge WHERE campaign_id = ?) AS knowledge,
+        (SELECT count(*) FROM campaign_play_observations WHERE campaign_id = ?) AS observations,
+        (SELECT count(*) FROM campaign_play_narrations WHERE campaign_id = ?) AS narrations`)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID);
+    expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      committedAt: 1_660,
+      mutationId: "visibility-projected-retry",
+    })).toThrowError(expect.objectContaining({ code: "visibility_turn_invalid" }));
+    expect(fixture.handle.sqlite.prepare(`SELECT
+        (SELECT count(*) FROM campaign_play_actor_knowledge WHERE campaign_id = ?) AS knowledge,
+        (SELECT count(*) FROM campaign_play_observations WHERE campaign_id = ?) AS observations,
+        (SELECT count(*) FROM campaign_play_narrations WHERE campaign_id = ?) AS narrations`)
+      .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID)).toEqual(countsBeforeRetry);
+  });
+
+  it("keeps route state protected when the committed interaction misses its trigger", () => {
+    const fixture = createVisibilityFixture(["attempt"]);
+    const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
+      token: fixture.visibilityToken,
+      actionContext: null,
+      committedAt: 1_650,
+      mutationId: "visibility-projected",
+    });
+
+    expect(result.packet.newObservations.map((entry) => entry.title))
+      .not.toContain("Along the route");
+    expect(result.packet.newObservations).toHaveLength(4);
+    expect(result.packet.visibleRoutes[0]?.state).toBe("open");
+    expect(fixture.states.loadState()!.protectedAudit.canonicalBytes)
+      .toContain('"routeTriggersJson":"[\\"attempt\\"]"');
+  });
+});

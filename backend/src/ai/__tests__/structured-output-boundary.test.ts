@@ -23,6 +23,12 @@ const expectedBoundaryRows: Array<{
 }> = [
   { file: "backend/src/ai/storyteller.ts", classification: "unstructured_prose" },
   { file: "backend/src/ai/structured-output-conformance.ts", classification: "text_fallback" },
+  { file: "backend/src/campaign-play/actor-replanner.ts", classification: "native_schema" },
+  { file: "backend/src/campaign-play/game-master.ts", classification: "native_schema" },
+  { file: "backend/src/campaign-play/judge.ts", classification: "native_schema" },
+  { file: "backend/src/campaign-play/narrator.ts", classification: "native_schema" },
+  { file: "backend/src/campaign-play/opening-planner.ts", classification: "native_schema" },
+  { file: "backend/src/campaign-world/world-builder.ts", classification: "native_schema" },
   { file: "backend/src/character/generator.ts", classification: "text_fallback" },
   { file: "backend/src/character/ingestion/assess-original.ts", classification: "text_fallback" },
   { file: "backend/src/character/ingestion/synthesizer.ts", classification: "text_fallback" },
@@ -74,7 +80,12 @@ function collectSourceFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...collectSourceFiles(fullPath));
-    } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+    } else if (
+      entry.isFile()
+      && !entry.name.endsWith(".test.ts")
+      && !entry.name.endsWith(".test.tsx")
+      && /\.(ts|tsx)$/.test(entry.name)
+    ) {
       files.push(fullPath);
     }
   }

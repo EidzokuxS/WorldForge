@@ -1,6 +1,367 @@
 # WorldForge Active Tasks
 
-## Current Focus: Campaign Forge Accepted Scope A6b
+## Current Focus: Campaign Play Planning (2026-07-10)
+
+Goal:
+- Produce an execution-ready Krypton plan that connects an accepted Campaign World to character setup, grounded opening, multi-turn play, autonomous actor motion, visibility, narration, persistence, and real playtests.
+- Restore the original living-world outcome instead of treating world generation as the end of playability.
+
+Planning board:
+- [x] Lock the original player promise and read the active planning, gameplay, playtest, and agent-harness guidance.
+- [x] Map the current `/game`, `/api/chat/*`, character, Campaign World, and SQLite ownership seams.
+- [x] Define the smallest genuine loop and the path from 20-turn proof to 60-turn acceptance and long-horizon soak.
+- [x] Define deterministic, live diagnostic, pristine acceptance, and long-horizon evidence lanes.
+- [x] Write `rpi/campaign-play/` research and the Krypton `PLAN.md` / `GOAL.md` package.
+- [x] Pass Droid GLM and independent Krypton PRE review before execution.
+
+Planning review:
+- The accepted Campaign World and mounted `/game` use different actor, player, clock, turn, and persistence authorities. The plan creates a mechanics-owned `campaign-play` runtime over Campaign World entities and removes the old route/API from the active path.
+- Accepted Review becomes immutable provenance. Mechanical world truth and operational runtime truth use separate version/hash contracts.
+- Opening is turn zero under the same idempotency, worker fencing, bootstrap/Rulebook, visibility, narration, and recovery boundaries as player actions.
+- The first playable gate proves one custom action, one peripheral wait/leave action, one sourced non-local consequence, and reload before longer runs.
+- Promotion counts completed player actions only: 20-action causal proof, 30-action diagnosis, two fresh plus one zero-turn clone/provenance 60-action human-chosen campaigns, and a 300-action soak. A separate 600-action run gates sustained-longplay wording.
+- Final PRE: Sol xhigh architecture aligned in round 4; Terra high gameplay aligned in round 2; Terra medium evidence aligned in round 3. Details: `rpi/campaign-play/plan/pre-review.md`.
+
+## Current Execution: Campaign Play (2026-07-10)
+
+Canonical plan: `docs/goals/campaign-play/PLAN.md`.
+
+Execution board:
+- [x] Task 0: execution preflight and blast radius.
+- [x] Task 1A: immutable accepted-world snapshot.
+- [x] Task 1B: player actor domain and handoff constraints.
+- [x] Task 2A: shared Campaign Play contract.
+- [x] Task 2B1: core play and fenced-turn storage.
+- [x] Task 2B2: Rulebook and mechanical-state storage.
+- [x] Task 2B3: actor scheduling and visibility storage.
+- [x] Task 2B4: campaign store manifest and zero-turn provenance clone.
+- [x] Task 3A: mechanical/runtime projection and state repository.
+- [x] Task 3B: turn admission, events, artifacts, and worker fencing.
+- [x] Task 4: campaign-owned character intake.
+- [x] Task 5: pure opening planner and typed actor plans.
+- [x] Task 6A: Rulebook preflight.
+- [x] Task 6B: atomic Rulebook execution.
+- [x] Task 6C: receipt-bearing player bootstrap.
+- [x] Task 7: Judge, uncertainty, and GM planner.
+- [x] Task 8A: deterministic actor due set and scoped frames.
+- [x] Task 8B: sequential actor proposals and bounded replanning.
+- [x] Task 9: visibility, actor knowledge, and public projection.
+- [x] Task 10A: fenced turn worker and recovery service.
+- [x] Task 10B: opening turn-zero runtime.
+- [x] Task 10C: player action runtime and terminal narration.
+- [ ] Task 11: Campaign Play API and resumable delivery.
+- [x] Task 12: UI and copy design gate.
+- [ ] Task 13: frontend client and durable page state.
+- [ ] Task 14A: scene and narration surface.
+- [ ] Task 14B: action, consequence, journal, and recovery surface.
+- [ ] Task 15: product handoff and hard cutover.
+- [ ] Task 16A: deterministic integration and promotion gate.
+- [ ] Task 16B: first playable slice gate.
+- [ ] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
+- [ ] Task 18: two fresh and one clone/provenance pristine 60-turn campaigns.
+- [ ] Task 19: 300-turn long-horizon soak.
+- [ ] Task 20: documentation, independent audit, and handoff.
+
+Task 0 review:
+- Branch `feat/revamp` starts Campaign Play from commit `a1e4d5c` while preserving the existing Campaign World and planning worktree.
+- GitNexus is current with 6,006 embeddings. Every named Task 1 function target reports LOW risk; the concrete `acceptWorld` UID and schema constants have documented graph-tool boundaries.
+- The active handoff is mapped end to end: Review acceptance terminates at `World accepted`, character completion redirects to old `/game`, and that page consumes old `/api/chat/*` plus old gameplay stores.
+- Campaign World baseline passed: backend 10 files and 117 tests; frontend 3 files and 21 tests.
+- Droid GLM-5.2 returned `ALIGNED`; `humanizer` and `deslop` passed after direct-contract wording edits.
+- Evidence: `rpi/campaign-play/implement/00-preflight.md`.
+
+Task 1A review:
+- Acceptance writes canonical Review bytes, accepted version, and accepted content hash in one version/hash compare-and-set transaction.
+- Migration 0025 preserves existing accepted 0024 decisions and constructs byte-identical provenance through SQLite JSON1.
+- Accepted reads validate the frozen source digest and world content hash before serving the snapshot; review reads continue through live rows.
+- Placement, relation, goal, pressure, actor, and current-source mutations preserve accepted Review bytes. The fixture retains snapshot SHA-256 `146e21381a48bd36907a219068586708949d6ed73c49f5ea7dadbf4cf9c1693c`.
+- Final verification passed: Campaign World 124 tests, Review/API 14 tests, shared build, backend typecheck, repeat schema generation, diff check, POST, code, maintainer, GLM, humanizer/deslop, and goal-backward verifier gates.
+- Evidence: `rpi/campaign-play/implement/01a-accepted-snapshot.md`.
+
+Task 1B review:
+- Stored actors now admit exactly one live player tuple: `person/human/player`; generated cast and accepted Review remain agent-controlled key/support/background actors.
+- Migration 0026 preserves the referenced actors table, enforces the tuple with INSERT/UPDATE triggers, and adds one-human-per-campaign and one-present-placement-per-actor partial indexes.
+- The 0025-to-0026 proof preserves actors, goals, relations, placements, pressure anchors, live Review rows, and the 4,277-byte accepted snapshot with SHA-256 `146e21381a48bd36907a219068586708949d6ed73c49f5ea7dadbf4cf9c1693c`.
+- Final verification passed: Campaign World 125 tests, Review actor UI 1 test, shared build, backend typecheck, repeat schema generation, diff check, POST, code, maintainer, GLM, humanizer/deslop, and goal-backward verifier gates.
+- Evidence: `rpi/campaign-play/implement/01b-player-actor.md`.
+
+Task 2A review:
+- Shared public DTOs now cover character intake, admitted opening turn zero, settled play, active turns, narrator work, reload/resume, journal, SSE, and truthful errors. Backend-owned contracts cover Judge, Rulebook, causality, exposures, actor scheduling, epistemic state, worker fencing, and model evidence.
+- `opening_active` represents in-flight opening work before a scene exists. Identified event exposures, actor knowledge, and observations preserve channel-specific provenance. Actor proposals bind job causality, actor source, exact scopes, versions, and one receipt per command.
+- Public retry semantics, turn narration ownership, strict bounds, version separation, and protected-field rejection have explicit regressions. Raw turn stages stay backend-owned.
+- Verification passed: shared build, 29 focused contract tests, backend typecheck, and diff check. Mechanical and architecture reviews returned `ALIGNED`; goal-backward verification returned `PASS`; Droid GLM-5.2 returned `ALIGNED`.
+- Smoke-suite additions: 0. Evidence: `rpi/campaign-play/implement/02a-contract.md`.
+
+Task 12 review:
+- The `/campaign/[id]/play` design contract covers character-required, chosen or delegated opening setup, opening turn zero, settled play, active and narration-pending turns, interruption, failure, Journal, narrow layout, reduced motion, focus, live regions, and replay-safe effects.
+- Every visible datum maps to a public Campaign Play owner or explicit local presentation state. The old speaker transcript becomes an observation-sourced Journal; special Continue, Oracle, factions, debug state, unsupported inventory/map data, turn ordinals, save claims, and attributed scene quotes stay outside the product surface.
+- Droid GLM-5.2 returned `ALIGNED` with zero P0/P1 blockers. Its five P2 documentation corrections are applied. Humanizer/deslop review passed, and the final evidence list contains 14 named real-route states.
+- Verification passed: shared build, 29 focused contract tests, backend typecheck, and diff check. Production Campaign Play UI changes: 0. Standalone smoke-suite additions: 0.
+- Evidence: `rpi/campaign-play/implement/12-ui-plan.md` and `rpi/campaign-play/implement/12-glm-review.md`.
+
+Task 2B1 review:
+- Migration 0027 adds seven mechanics-owned core tables, 20 indexes, and 31 migration-owned triggers for accepted provenance, play state, character, turns, runtime/SSE ledgers, model attempts, and narrator artifacts.
+- One active turn includes interruption. Opening supersession requires an explicit same-campaign failed predecessor with zero mechanical mutation and permits one successor. Mutated failed openings block the chain.
+- Admitted identities, causal ledgers, character/actor binding, accepted model evidence, terminal narration, and committed public packet hashes resist adversarial update/delete paths.
+- Fresh and accepted 0026→0027 migration fixtures preserve Campaign World provenance and actors. Campaign-bound A stays isolated while the global database switches to B.
+- Verification passed: 15 focused storage/world database tests, backend typecheck, integrity/FK checks, diff check, and empty repeat schema generation. Terra mechanical and final fresh Sol semantic reviews returned `ALIGNED`.
+- Standalone smoke additions: 0. Evidence: `rpi/campaign-play/implement/02b1-core-storage.md`.
+
+Task 2B2 review:
+- Migration 0028 adds seven Rulebook/mechanical tables, 32 indexes, and 21 migration-owned triggers for command, receipt, causal event, executable exposure, route state, actor condition, and pressure state ownership.
+- Character bootstrap now has a truthful `accepted_world` causal root bound to the immutable campaign/version/hash provenance. Turn, command, world-event, and actor-job roots retain their later-stage roles.
+- Commands, receipts, events, and exposures are append-only. Current route, condition, and pressure state moves forward only through a same-campaign matching receipt and protected target payload.
+- Exposure rows match the exact declared predicate and use channel-specific anchor uniqueness. Pressure progress is derived from the command amount and its world time is bound to the causal event.
+- Adversarial regressions cover SQLite NULL discriminator bypasses, missing accepted-root campaign identity, malformed route-trigger sets, undeclared/duplicate exposure anchors, pressure over-advance, fabricated time, and arbitrary ledger/current-state rewrites.
+- Verification passed: 47 focused contract/storage/world tests, backend typecheck, integrity/FK checks, diff check, and empty repeat schema generation. Terra mechanical review returned `PASS`; final Sol semantic review returned `ALIGNED` with zero P0/P1 findings.
+- Standalone smoke additions: 0. Evidence: `rpi/campaign-play/implement/02b2-rulebook-storage.md`.
+
+Task 2B4 review:
+- Registered all twenty Campaign Play tables in exact dependency order with clean-start purge policy and kept the runtime free of control-plane imports.
+- Clean-start clone now requires one accepted pre-character campaign, writes five-field lineage, transfers accepted/current World provenance through typed ownership changes, and leaves every Campaign Play table globally empty.
+- Independent review reproduced and closed three P1s: UUID substitution inside content, multi-campaign isolation leakage, and target-directory reservation/cleanup race. Final Sol verdict: `ALIGNED`, remaining P0/P1 `0`.
+- Droid GLM-5.2 plus humanizer/deslop review returned `COPY_GATE: PASS` for both player-visible clone errors.
+- Proof: focused suite `49 passed`; backend typecheck passed; repeat `db:generate` empty; diff check passed; standalone smoke additions `0`.
+- Evidence: `rpi/campaign-play/implement/02b4-provenance-clone.md`.
+
+Task 3A review:
+- The state repository binds runtime creation to immutable accepted-world provenance, deterministic topology eligibility, exact initial Campaign World bytes, and runtime event sequence 1 in one transaction.
+- Mechanical truth covers the accepted foundation plus live character, time, route, actor-condition, pressure, placement, relation, and goal state. Reload rejects drift in current locations, routes, non-human actor definitions, pressure definitions, anchors, hashes, revisions, and event continuity.
+- Mechanical-only, runtime-only, combined, and ledger-only callbacks enforce their declared projection domains. Full integrity validation runs before commit, so injected future events and malformed callback writes roll back with the authority update.
+- Runtime, protected-audit, and player-public projections use deterministic semantic ordering. Public route state is limited to locally perceivable and observation-earned routes, and journal sort metadata stays outside the player DTO.
+- Final proof: focused suite `24 passed`; backend typecheck passed; repeat `db:generate` empty; diff check passed. Terra mechanical review returned `PASS`; adversarial Sol review reproduced six P1 defects across two rounds, all were repaired, and the final verdict was `ALIGNED` with P0/P1 `0`.
+- Standalone smoke additions: `0`. Evidence: `rpi/campaign-play/implement/03a-state-repository.md`.
+
+Task 8A review:
+- The scheduler freezes due actors by due time, priority, and actor ID after primary settlement. Sealed decisions carry wake, defer, and skip policy; admitted jobs retain stable IDs and the durable reason each actor became due.
+- Actor frames load the latest mechanical version with actor-owned goals, relations, conditions, local routes, anchored pressures, durable knowledge, and exact authorized references. People use present placement; collectives use base and influence placement.
+- Cadence advances from settled clock. Deferred actors receive one terminal job, one debt increment, and one future due time. Exhausted plans return the typed `plan_exhausted` replan boundary.
+- Seeded action-30/action-60 fixtures, repeated 30/60 cadence sequences, defer, stale seal, scoped frame, and restart regressions passed: 1 file, 11 tests. Backend typecheck and whitespace checks passed.
+- Terra mechanical verification passed. Sol semantic review found and verified the plan-exhaustion repair, then accepted Task 8A as complete.
+- Standalone smoke additions: `0`. Evidence: `rpi/campaign-play/implement/08a-actor-scheduler.md`.
+
+## Previous Focus: Campaign World Build Execution (2026-07-09)
+
+Goal:
+- Execute `docs/goals/campaign-world-build/PLAN.md` through both live acceptance bundles.
+- Preserve SQLite ownership, strict model contracts, actor unification, durable build evidence, and the planned cutover.
+
+Execution board:
+- [x] Task 0: verify branch/worktree, refresh GitNexus with embeddings, map blast radius, and record the task board.
+- [x] Task 1: add shared Campaign World contracts and SQLite schema migration.
+- [x] Task 2A: add the campaign source mutex, source normalization, DNA persistence, and digest tests.
+- [x] Task 2B: add strict model schemas and pass prompts/copy through GLM, `humanizer`, and `deslop`.
+- [x] Task 3: add staged generation, deterministic validation, canonical hashing, and sanitized model evidence.
+- [x] Task 4: add the campaign-scoped database factory, atomic repository, durable events, and acceptance.
+- [x] Task 5A: add the background build service and interrupted-process recovery.
+- [x] Task 5B: mount the Campaign World API and resumable SSE contract.
+- [x] Task 6: complete the Droid GLM UI and copy gate.
+- [x] Task 7: cut Forge to the Campaign World client and build workspace.
+- [x] Task 8A: replace World Review with the persisted actor/connection projection.
+- [x] Task 8B: move shell status to Campaign World and remove displaced review helpers.
+- [x] Task 9: remove old world writers and mounted Campaign Kernel DNA writers.
+- [x] Task 10: run full regression, two pristine live runs, restart proof, and POST/reviewer/maintainer gates.
+  - [x] Gate repair 1: register the Campaign World structured-output boundary and SQLite stores exposed by the full regression.
+  - [x] Gate repair 1 verification: boundary, store-manifest, clone, full backend, and full frontend suites.
+  - [x] Gate repair 2: make the live Connections numeric scales explicit after GLM-5.2 returned percentage-like relation intensities.
+  - [x] Gate repair 2 verification: prompt contract, strict builder suite, GLM/humanizer/deslop review, then restart both pristine lanes with fresh campaigns.
+  - [x] Gate repair 3: keep the visible current-stage activity synchronized with newer durable SSE events.
+  - [x] Gate repair 3 verification: Droid GLM UI-plan review, stale-state event regression, Forge suite, and live ledger observation.
+  - [x] Gate repair 4: state the macro and sublocation parent-reference contract after live GLM-5.2 emitted empty strings for macro parents.
+  - [x] Gate repair 4 verification: strict reference fixture, prompt assertion, GLM/humanizer/deslop review, and a fresh premise-only campaign.
+  - [x] Gate repair 5: present structured research as readable Review source context.
+  - [x] Gate repair 5 verification: Droid GLM UI review, adjacent page contract test, frontend regression, and live Source inspection.
+  - [x] Gate repair 6: recompute frozen source digests during build-context and world reads.
+  - [x] Gate repair 6 verification: build/world tamper fixtures, stale-hash acceptance fixtures, full backend regression, and both accepted-world readbacks.
+  - [x] Gate repair 7: remove the mounted campaign WorldBook writer while preserving reusable Library intake.
+  - [x] Gate repair 7 verification: route 404 contract, fixed-string caller check, full regressions, campaign import 404, and Library 200.
+  - [x] Gate repair 8: enforce exact generated-string whitespace and explicit cast/connections reference whitelists after live strict-contract failures.
+  - [x] Gate repair 8 verification: strict prompt fixtures, fail-closed diagnostic runs with zero domain rows, and two accepted live lanes.
+  - [x] Gate repair 9: finalize readable desktop, narrow, actor, relation, placement, and pressure evidence with human scorecards and SHA-256 inventories.
+  - [x] Gate repair 9 verification: both artifact inventories report zero missing files, byte mismatches, or hash mismatches.
+  - [x] Gate repair 10: align the background collective goal limit, retain shell campaign identity across World State errors, and share research presentation between Forge and Review.
+  - [x] Gate repair 10 verification: validator 25 tests; research, Forge, shell, and Review 20 tests; full backend/frontend regression and builds.
+  - [x] Gate repair 11: present selected-worldbook research context and keep committed acceptance distinct from shell refresh failure.
+  - [x] Gate repair 11 verification: Droid GLM-5.2 plan review, humanizer/deslop copy review, 11 focused tests, 64-file frontend regression, typecheck, production build, and repeated maintainability audit.
+
+Task 0 review:
+- Branch is `feat/revamp`. Initial worktree contained only the approved planning package plus GitNexus count refreshes in `AGENTS.md` and `CLAUDE.md`.
+- GitNexus refreshed from `bd762b7` to HEAD `a1e4d5c` with embeddings preserved (5729).
+- Forge, Review, current world-build client, and DNA writer cutovers are LOW risk with explicit caller lists.
+- `safeGenerateObject` is treated as HIGH risk because context found 28 direct production callers. Task 3 may add only a read-only trace accessor and must run the full AI boundary regression.
+- GitNexus does not index the `locations` and `locationEdges` table variables. Their definitions stay unchanged; textual inventory found 129 and 16 backend files respectively.
+- Detailed impact and task ownership record: `rpi/campaign-world-build/implement/00-impact.md`.
+
+Task 1 review:
+- Added one shared Campaign World contract with unified person/collective actors and the planned world/build/state/event shapes.
+- Added 11 Campaign World tables with campaign-scoped indexes, cascade foreign keys, partial running-build uniqueness, and the planned SQLite checks.
+- Recovered the missing `0023` Drizzle snapshot from the unchanged current schema before generating `0024`; the final migration contains only the 11 intended tables.
+- Shared build, backend typecheck, diff check, repeat generation, and a fresh temporary SQLite migration all passed.
+- Evidence: `rpi/campaign-world-build/implement/01-shared-storage.md`.
+
+Task 2A review:
+- Added a keyed Campaign World source mutex and strict source adapter without editing the HIGH-impact campaign config reader.
+- Complete DNA round-trips through the existing `saveWorldSeeds` writer; malformed or partial stored DNA fails closed.
+- Stable source digests cover premise, canonical DNA, research artifact or selected-worldbook context, and hash-bearing source references.
+- Selected-worldbook context maps donor organization names to collectives and supplies build context when the premise is empty.
+- Focused mutex/source tests passed: 2 files, 20 tests. Backend typecheck passed.
+- Evidence: `rpi/campaign-world-build/implement/02a-source.md`.
+
+Task 2B review:
+- Added strict frame, cast, and connections Zod contracts with exact cross-stage references and the full product build envelope.
+- Model packets require agent-controlled actors and active goals while keeping persistent IDs code-owned.
+- Focused Campaign World contract/source tests passed: 3 files, 47 tests. Backend typecheck and shared build passed.
+- `agent-prompt`, `humanizer`, and `deslop` gates passed. Droid GLM-5.2 returned `Plan is up-to-date.`
+- Evidence: `rpi/campaign-world-build/implement/02b-contract-prompts.md`; review: `rpi/campaign-world-build/plan/prompt-review.md`.
+
+Task 3 review:
+- Added three ordered strict model stages, code-owned persistent IDs, whole-world validation, and canonical SHA-256 content hashing.
+- Sanitized evidence rejects repair, retry, text fallback, strategy mismatch, and unavailable structured output.
+- The CRITICAL shared AI helper received one additive read-only trace accessor; generation behavior remains unchanged.
+- Focused builder/validator/snapshot plus full AI-boundary tests passed: 4 files, 70 tests. Backend typecheck passed.
+- Evidence: `rpi/campaign-world-build/implement/03-builder-validation.md`.
+
+Task 4 review:
+- Added a dedicated campaign database handle that verifies migration `0024` without changing the process-global connection.
+- Added strict build acquisition and stage transitions, sequenced durable events, sanitized model evidence, frozen source snapshots, and one-transaction success/failure terminals.
+- Review reload recomputes the canonical hash from persisted rows; acceptance compares both version and hash.
+- Campaign A completes correctly after the app-wide connection switches to B, interrupted persistence rolls back every domain row, and engine compatibility columns leave the hash unchanged.
+- Focused Task 4 tests passed: 2 files, 19 tests. The complete Campaign World suite passed before the last two Task 4 proofs: 8 files, 99 tests. Backend typecheck and SQLite integrity check passed.
+- Evidence: `rpi/campaign-world-build/implement/04-atomic-repository.md`.
+
+Task 5 review:
+- Added source-locked build acquisition, synchronous coordinator registration, background model work from the frozen build-row source, terminal handle cleanup, and one-time interrupted-process recovery.
+- Added the mounted Campaign World source, DNA, build, event, state, and acceptance routes with stable errors and resumable persisted SSE sequence IDs.
+- Real SQLite route integration proves live streaming, disconnect/resume deduplication, new-client restart replay, simultaneous-start exclusion, persisted completion, stale acceptance, matching acceptance, and provider failure cleanup.
+- Campaign World service tests passed: 6 tests. Route tests passed: 4 tests. Combined Campaign World and route suite passed: 10 files, 111 tests. Backend typecheck and diff check passed.
+- Humanizer/deslop review passed. Droid GLM-5.2 returned `Plan is up-to-date.` for player-safe route copy.
+- Evidence: `rpi/campaign-world-build/implement/05-service-api.md`; copy review: `rpi/campaign-world-build/plan/prompt-review.md`.
+
+Task 6 review:
+- Added the Campaign World Forge, World Review, shell, narrow-viewport, accessibility, screenshot, and component-test design contract.
+- The design exposes only persisted stage events and atomically committed world data; model reasoning, partial packets, error codes, and debug trace remain outside the player surface.
+- People and collectives share one Actors surface. The review owns Overview, Locations, Actors, Connections, and Source, with every cross-link keyed by persistent ID.
+- The first Droid GLM-5.2 review returned `REVISE`. The plan now specifies an opacity-only stage pulse, a global reduced-motion guard, AA-safe small-text tokens, five shell status labels, complete urgency/intensity encoding, failure-ledger boundaries, and draft-only DNA edits.
+- The repeated Droid GLM-5.2 review returned `ALIGNED`. Humanizer/deslop guidance also passed for the added player-visible shell and interaction copy.
+- Evidence: `rpi/campaign-world-build/implement/06-ui-design.md`; approved plan: `rpi/campaign-world-build/plan/ui-plan.md`.
+
+Task 7 review:
+- Added a strict Campaign World frontend client for source, DNA, build creation, resumable SSE, state, and acceptance. Current nested errors and exact SSE identity are validated; malformed, mismatched, incomplete, and prematurely closed responses fail closed.
+- Replaced the Forge controller and product surface. A fresh page replays from sequence zero, a mounted reconnect resumes from the last synchronously applied sequence, duplicate events render once, and navigation waits for persisted `review` state.
+- Removed Campaign Kernel, character cast, old world generation, factions, lore, and player setup ownership from the active Forge page.
+- Forge supports premise-only source, optional draft DNA, save-before-build using the returned digest, durable stage ledger, safe terminal failure, separate build attempts, and accepted read-only deep links.
+- Focused Task 7 tests passed: 3 files, 19 tests. Frontend typecheck, diff check, active-path fixed-string check, desktop/narrow visual checks, responsive overflow check, and browser console check passed.
+- Evidence: `rpi/campaign-world-build/implement/07-forge-client.md`; screenshots: `output/playtests/campaign-world-build/task-7/forge-source-desktop.png` and `output/playtests/campaign-world-build/task-7/forge-source-narrow.png`.
+
+Task 8 review:
+- Replaced scaffold Review with the persisted Campaign World projection: Overview, Locations, Actors, Connections, and Source.
+- People and collectives share the same actor cards, goals, placements, directed relations, and pressure anchors. All navigation uses persisted actor and location IDs.
+- Acceptance submits the displayed version/hash, reloads accepted state, refreshes shell lifecycle on the same route, and handles stale conflicts by reloading current review without silently resubmitting.
+- Campaign shell now reads lifecycle exclusively from `/world/state`, uses literal path segments, renders all five approved labels, and exposes Campaign Forge plus World Review only.
+- Caller proof supported removal of the old Factions, NPCs, Lore, Premise, Regenerate, character inspector, worldbook import, and tag editor Review files and their tests. Shared character personality/string-list donors and `ReviewWorkspace` remain.
+- Focused Task 8 tests passed: 7 files, 18 tests. Frontend typecheck, diff check, active-path checks, caller-proof import checks, and live localhost shell verification passed. Review/accepted screenshots are assigned to the final persisted live acceptance bundles in Task 10.
+- Evidence: `rpi/campaign-world-build/implement/08-review-shell.md`.
+
+Task 9 review:
+- Removed the three mounted worldgen writers and the three mounted Campaign Kernel DNA writers; route contracts now prove all six return `404`.
+- Removed their frontend clients, response/write DTOs, exclusive backend dependencies, and the final scaffold Review adapter.
+- Worldgen route coverage now contains intake contracts and cutover assertions only. Campaign World source is the sole mounted post-creation `saveWorldSeeds` caller and imports no donor worldgen code.
+- Focused verification passed: worldgen 13 tests, Campaign Kernel routes 16 tests, Campaign Kernel client 5 tests, backend/frontend typechecks, fixed-string ownership checks, and diff check.
+- Evidence: `rpi/campaign-world-build/implement/09-active-cutover.md`.
+
+Task 10 review:
+- Premise-only campaign `6fa1f0f2-e35f-465a-bb09-addd610b16a1` and research/DNA campaign `cb95ab65-a792-4aff-b9a3-e9c1cdf47f1b` completed through the real Concept, Forge, Review, acceptance, backend restart, and reload path.
+- Both builds used `custom-zai-coding` / `glm-5.2`. Every frame, cast, and connections stage used one native-JSON attempt with repair, retry, and text fallback flags false.
+- Both accepted projections are byte identical before and after restart. A retains SHA-256 `912b59e4aa4e3e1f63e21479abf02d83d61c471f4b34b3e4c6ba747ac9c7316f`; B retains `1dc859d0cadcd094fff63df3c8a1df2198c29c3a4ea46b082fd87976becab308`.
+- Full final verification: backend 249 files passed, 1 skipped, 3,548 tests passed, 30 todo; frontend 64 files and 488 tests passed; shared/backend/frontend builds and both typechecks passed; diff check passed.
+- Focused repair verification passed: validator 25 tests; research, Forge, shell, and Review 22 tests. The final research/acceptance subset passed 11 tests.
+- Successful bundles: `output/playtests/campaign-world-build/acceptance-a-premise-only-2026-07-10T05-58-19-726Z/` and `output/playtests/campaign-world-build/acceptance-b-research-dna-2026-07-10T06-18-49-336Z/`.
+- Each bundle contains browser diagnostics, readable desktop/narrow Review screenshots, focused key/support/collective inspection, linked pressures, human scorecards, and a verified SHA-256 inventory.
+- Final evidence: `rpi/campaign-world-build/implement/10-regression-playtests.md`.
+- Repeated independent audits passed: Sol correctness `ALIGNED`, Terra maintainability `ALIGNED`, and Terra acceptance evidence `PASS`.
+
+## Previous Focus: Campaign World Build Planning (2026-07-09)
+
+Goal:
+- Produce an execution-ready Krypton plan for the first mechanics-owned world construction slice.
+- Make SQLite the built-world truth owner and prove the player path through live, persisted evidence.
+
+Plan:
+- [x] Map current Forge, worldgen, Review, storage, and Campaign Kernel ownership.
+- [x] Define the Campaign World outcome contract, source boundary, actor model, and cutover.
+- [x] Define exact implementation tasks, verification, live playtests, and kill criteria.
+- [x] Create the Krypton goal package and RPI research map.
+- [x] Complete Droid GLM-5.2 PRE review and apply required corrections.
+
+Review:
+- Canonical plan: `docs/goals/campaign-world-build/PLAN.md`.
+- Execution handoff: `docs/goals/campaign-world-build/GOAL.md`.
+- RPI request and architecture evidence: `rpi/campaign-world-build/`.
+- Current domain names use Campaign World, actor, goal, relation, placement, pressure, build, review, and acceptance. Current names avoid workstream, version, age, and experiment labels.
+- The plan adds no standalone smoke suite. Focused contract and transaction tests lead into two live Concept -> Forge -> Review acceptance runs.
+- PRE review: ALIGNED. Droid GLM-5.2 and an independent Krypton peer found no remaining blocker or major issue. Review record: `rpi/campaign-world-build/plan/pre-review.md`. Release log: `.codex/agent-logs/droid-campaign-world-build-pre-release-20260709-234013.out.log`.
+
+## Previous Focus: Reference and Playtest Architecture (2026-07-09)
+
+Goal:
+- Inspect TarotEngine and the five owner-supplied repositories for reusable world, actor, turn, persistence, and testing patterns.
+- Define a development loop where real player-path evidence gates each WorldForge mechanics slice.
+
+Plan:
+- [x] Inventory TarotEngine and verify its source/version.
+- [x] Review all five supplied repositories from primary GitHub sources.
+- [x] Build a comparison matrix with applicability and copying risks.
+- [x] Define playtest lanes, artifacts, failure policy, and promotion gates.
+- [x] Record the recommendation and the first executable acceptance lane.
+
+Review:
+- TarotEngine means the local sibling at `R:\Projects\SillytavernUpgrade\TarotEngine\Marinara-Engine`. The inspected branch is `feature/memory-vault-router`; the fork identifies itself as TarotEngine in its README.
+- TarotEngine contributes hard stage ownership, critical agent gates, temporary campaign isolation, live multi-turn runs, prompt regression, and saved agent/SSE/state evidence. WorldForge supplies the canonical world state, Rulebook receipts, actor scheduler, and visibility projection.
+- [NarrativeEngine-P](https://github.com/Sagesheep/NarrativeEngine-P) contributes bounded goal scheduling, goal collision, timeskip budgets, archive fixtures, and `ambient | rumor | direct` surface levels. Its Story AI narrates before post-turn bookkeeping, so its runtime remains a mechanics donor.
+- [AndreiNicu/World-Forge](https://github.com/AndreiNicu/World-Forge) contributes intake-time acceptance scenarios, collision and near-miss probes, independent audit roles, stable identifiers, and a persistent run ledger. Its SillyTavern prompt/lorebook pipeline remains a behavioural QA reference.
+- [Yozakura](https://github.com/mistval/yozakura) contributes one character shape for human and AI actors, directed relationships, perspective join/leave windows, graph movement, schedules, active-turn restoration, and inspectable memory deltas. WorldForge uses a due-actor queue in place of its full cast sweep and stores sourced knowledge beside compressed memory.
+- [Universal Immersion Engine](https://github.com/GetfroggyHoe/universal-immersion-engine) contributes staged action review, reversible regenerate/swipe UX, and useful RPG/VN surfaces. Rulebook results supply the UI projections.
+- [Yuralume](https://github.com/Yuralume/yuralume-core) contributes schedule aftermath and a heuristic -> intention judge -> decider gate for proactive delivery. The public repository currently exposes product documentation and prebuilt images, so it remains a concept reference.
+- License boundary: NarrativeEngine-P and AndreiNicu/World-Forge are MIT. Yozakura is AGPL-3.0. UIE and the published Yuralume tree provide no reusable source license. WorldForge will reimplement the selected ideas through its own contracts.
+- Existing Phase 88/94 harnesses remain diagnostic regression tools. Pristine milestone acceptance owns playable-status promotion.
+- Playtest lanes are: contract regression, seeded scenario replay, live adaptive diagnosis, pristine milestone acceptance, and long-horizon soak.
+- A pristine lane starts a fresh campaign and keeps one build, provider, model configuration, and world history. A restore, action resubmission, hidden manual mutation, provider swap, or player-facing failed turn ends the lane. The repaired build starts a new campaign.
+- A P0 finding stops promotion. P0 covers lost or duplicated input, missing terminal results, fallback ownership, partial commits, stale version acceptance, hidden fact leaks, player action seizure, narration that contradicts receipts, reload divergence, and required stage bypasses.
+- Every fixed playtest failure becomes a deterministic regression fixture before the live lane is repeated.
+- Each run bundle records commit and dirty status, run/campaign IDs, provider settings, player input, world versions, perception frame, Judge verdict, GM plan, commands, receipts, visibility projection, narration, action handles, invariant results, timings, token use, screenshots, console/network errors, transcript, and human notes.
+- First executable gate: Campaign World Build through the real UI and live provider. A fresh premise-only campaign must generate reviewable locations, actors, relationships, goals, placements, and starting pressures; review data must equal the canonical database; save/reload must preserve the accepted world; actors, relationships, and events model collective organization.
+- The following cumulative gates add Character Setup, Opening, one complete player turn, and one hidden off-screen actor action that reaches the player through a sourced information path. Milestone runs then expand through 10, 30, and two fresh 60-turn campaigns before 300/600-turn soak claims.
+- Droid GLM-5.2 reviewed the reference and playtest architecture after the `humanizer` and `deslop` passes and returned `Plan is up-to-date.` Review log: `.codex/agent-logs/droid-reference-playtest-20260709-223616.out.log`.
+
+## Previous Focus: Revamp Reanimation Audit (2026-07-09)
+
+Goal:
+- Restore the intended world-centered campaign flow from repository evidence before changing mechanics.
+- Compare `feat/revamp` with `develop`, distinguish reusable reference material from current mechanics ownership, and locate the first broken vertical boundary.
+
+Plan:
+- [x] Capture branch state and review `tasks/lessons.md`.
+- [x] Inventory revamp, RPI, planning, and architecture documents.
+- [x] Compare `feat/revamp` with `develop` at system and flow level.
+- [x] Trace campaign creation, world build, player setup, opening, and turn execution through current code.
+- [x] Assess the implementation against the world-centered simulation contract described by the owner.
+- [x] Produce a recommended reanimation sequence with explicit proof gates.
+
+Review:
+- Branch history shows `feat/revamp` is a sidecar rebuild on `develop`. It leaves the old world generator, gameplay engine, game UI, world review page, and character page unchanged.
+- After `Create world`, Forge calls the old `/api/worldgen/generate`, then routes the player through the old review, character, and game routes.
+- The accepted Campaign Kernel vertical ends at A6b. Location graph ingestion is export/test-only, production saves player cast only, and A7-A11 expose backend routes without frontend consumers.
+- The phase labels carry two meanings. `world_ready` marks accepted DNA; product gating treats `generationComplete` as a built world.
+- Current local campaign artifacts show the DNA and Forge shell: zero kernel graph nodes, zero cast members, zero turns, and `generationComplete: false`.
+- The separate faction model conflicts with the owner's actor model and spans 199 backend source files plus 35 frontend files.
+- The `gameplay-cycle-runtime` contains about 24k production lines. Its active planner compiles fixed interaction kinds; `runGmToolLoop`, `runGmActionChecklist`, and `runGmTurnDecision` have zero production callers.
+- Focused tests passed on 2026-07-09: kernel backend, 15 files and 83 tests; Forge frontend, 2 files and 18 tests. These tests cover slices in isolation; the launch-to-turn route remains unexercised.
+- Verdict: NO-GO on continuing A7-A12 or patching the old gameplay runtime. GO on a contract reset, followed by one vertical slice owned by the campaign mechanics path.
+- First slice: build and persist a faction-free world with locations, actors, relationships, goals, and placements; review it; create or import the player; create starting setup; generate an opening; run one typed, receipt-backed turn; confirm one off-screen actor action stays hidden until an in-world information path exposes it.
+- Architecture direction: one authoritative SQLite world state; an actor model shared by player-controlled and AI-controlled actors; a rulebook command/receipt boundary; a versioned turn transaction; and a visibility projection between settled outcomes and narration. `kernel.json` remains orchestration metadata only when every field has a named owner.
+- Droid GLM-5.2 reviewed this note with the `humanizer` and `deslop` gates and returned `REVISE`; the revised technical wording is applied here. Review log: `.codex/agent-logs/droid-reanimation-audit-20260709-220834.out.log`.
+
+## Previous Focus: Campaign Forge Accepted Scope A6b
 
 Goal:
 - Build and manually accept the Campaign Forge path through A6b only. A3 maps saved campaign data into `world_ready` DNA, A4 maps current location data into graph nodes and spatial edges, A5a maps cast inputs, A5b saves the player cast into `kernel.json`, A6 adds character nodes with placement edges, and A6b persists the composed graph through the Campaign Kernel API.
@@ -168,7 +529,564 @@ Review:
 - GLM copy review with `humanizer` and `deslop` reviewed `.codex/droid-prompts/forge-dna-timer-copy-humanizer-deslop.md` and `.codex/droid-prompts/forge-dna-timer-extra-copy-humanizer-deslop.md`; both returned `GO`.
 - Forge now uses `Tune the blueprint.` and `Seed cards` on the idle DNA edit surface, removes the standalone `Save DNA` action, keeps save-before-create in the `Create world` path, and shows elapsed time beside the running generation stage count.
 - Verification: focused Forge vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.
+
+## Campaign Play Task 2B3 Review (2026-07-11)
+
+- Added six actor-agency and visibility tables in exact migration `0029_campaign_play_actors_visibility.sql`; the fresh database now contains twenty Campaign Play tables.
+- Closed proposal/job lifecycle bypasses: terminal jobs require terminal proposal status, proposal identity survives terminalization, pending proposals cannot be orphaned, and expiry uses an initialized world clock with an exclusive upper bound.
+- Bound actor-job commands and accepted receipts to the proposed job's exact common causal metadata; canonical hashes for kind-specific protected payloads remain an explicit repository-layer obligation.
+- Mechanical verifier: `PASS`. Semantic verifier: `ALIGNED`, remaining P0/P1 `0`.
+- Proof: repeat `db:generate` empty; focused Campaign Play/Campaign World suite `48 passed`; backend typecheck passed; standalone smoke additions `0`.
 - Owner correction: the idle DNA screen has only one content block, so the secondary `Seed cards` heading created a false hierarchy under `Tune the blueprint.`
 - Droid GLM-5.2 reviewed `.codex/droid-prompts/forge-dna-remove-secondary-heading.md` and returned the implementation result: remove the redundant header row, keep H1/cards/actions/aria label, leave premise-only and running headings alone.
 - Forge now renders the editable seed cards directly under the H1 in the idle DNA state.
 - Verification: focused Forge vitest `app/(non-game)/campaign/[id]/forge/__tests__/page.test.tsx` -> `10 passed`; `npm --prefix frontend run typecheck`; `git diff --check`.
+
+## Campaign Play Task 3B Review (2026-07-11)
+
+- Added durable admission, idempotent replay, exact worker fencing, lease renewal, persisted model artifacts, explicit external interruption/resume, deterministic settlement, terminal failure, narrator completion, event replay, and restart recovery.
+- Every mutation runs inside an outer immediate transaction whose final state and turn reload remain part of commit authority. Final-verification failure rolls back state revisions, both event ledgers, model attempts, turn fields, narration, and domain writes.
+- Narrator packet authority uses `SHA-256(canonical({ domain: "campaign_play_narrator_packet", turnId, packet }))`; visibility and interrupted narration require pending storage, while completion changes narration and turn terminal state atomically.
+- Real child-process tests prove same-key admission convergence, distinct-key exclusion, and single-winner lease claims. Multi-stage recovery proves Judge retry followed by Game Master interruption, reopen, exact recovery, and attempt-2 resume.
+- Proof: lifecycle/recovery suite `55 passed`; contracts/migration suite `54 passed`; backend typecheck passed; repeat `db:generate` empty; diff check passed; Terra mechanical `PASS`; fresh Sol semantic `ALIGNED`, P0/P1 `0`; standalone smoke additions `0`.
+- Evidence: `rpi/campaign-play/implement/03b-turn-repository.md`.
+
+## Campaign Play Task 4 Planning Note (2026-07-11)
+
+- Architecture verdict: `GO`; migration required: no. The exact V2 parser, accepted-world adapter, generic-ingestion projection, CharacterRecord materialization, fail-closed research boundary, and source/profile digest contracts are implementation-ready.
+- GitNexus rates the reused ingestion donor LOW. The CharacterRecord adapter has HIGH blast radius, so Task 4 imports it unchanged and owns no donor edits.
+- Required Droid GLM-5.2 review was attempted: custom runs created silent sessions after an MCP reload failure, and the built-in GLM run ended with `Exec failed`. The owner explicitly authorized forward progress; the failure remains in evidence and Task 4 uses local Sol semantic review plus humanizer/deslop checks.
+- Review prompt: `.codex/droid-prompts/campaign-play-character-intake.md`. Evidence: `rpi/campaign-play/implement/04-character-intake.md`.
+
+## Campaign Play Task 4 Review (2026-07-11)
+
+- Added a pure Campaign Play service for exact Character Card V2 intake, generated and research-backed drafts, strict public profile validation, CharacterRecord materialization, and domain-separated source/profile digests.
+- The accepted-world adapter passes canonical accepted context, sorted locations, and an empty faction list. Card instructions and excluded attachments stay outside model input; research exposes a truthful empty citation list.
+- Source kind and import mode use one cross-field provenance invariant. Prepared records leave faction, placement, relationships, equipped items, goals, and starting conditions to their owning tasks.
+- Verification passed: 3 files and 53 tests; backend typecheck; diff check; Terra mechanical `PASS`; fresh Sol semantic `PASS` with zero P0, P1, or P2 findings. Standalone smoke additions: 0.
+- GLM/Droid remained unavailable after documented repair attempts. The owner authorized continuing, and the evidence retains that advisory failure.
+- Evidence: `rpi/campaign-play/implement/04-character-intake.md`.
+
+## Campaign Play Task 5 Review (2026-07-11)
+
+- Added a pure opening planner that compiles a frozen accepted world and chosen/delegated start into immutable bootstrap commands, actor plans/schedules, an earned-visibility seed, and local narrator facts.
+- Code owns IDs, hashes, scopes, preconditions, versions, schedules, and causal lineage. Every eligible key/support/collective actor receives one reachable plan covering all active goals; background actors remain outside the opening plan.
+- Hidden consequences require a non-local source and a satisfiable exposure path within five player actions. Collective reachability uses every base/influence placement, and local aftermath remains live through the shortest directed trip.
+- Verification passed: focused suite 23/23; backend typecheck; diff check; persistence-boundary scan; Terra mechanical `PASS`; fresh Sol semantic `PASS` with zero P0, P1, or P2 findings. Standalone smoke additions: 0.
+- Droid GLM remained silent after an MCP reload failure and one substantive attempt. The owner authorized forward progress; local review plus independent Sol/Terra proof closes the task.
+- Evidence: `rpi/campaign-play/implement/05-opening-planner.md`.
+
+## Campaign Play Task 6A Review (2026-07-11)
+
+- Added a pure Rulebook preflight over one frozen mechanical frame, one code-owned authority envelope, and the strict shared batch union.
+- All twelve command kinds enforce availability, exact scopes, causal source/root, current references, transition preconditions, version order, grounded exposure, and whole-batch simulation before any writer exists.
+- Character/opening bootstrap remains internal and phase-bound. Model-shaped bootstrap requests, hidden IDs, expanded scopes, scheduler impersonation, and invalid full plans return typed denials.
+- People act from `present`; collectives act from `base` and `influence`. Frozen placement/relation/goal identity and phase/version lineage prevent tampered frames from becoming authority.
+- Verification passed: focused suite 22/22; backend typecheck; all 12 kinds enumerated; purity and whitespace checks; Terra mechanical `PASS`; fresh Sol semantic `PASS` with zero P0, P1, or P2 findings. Standalone smoke additions: 0.
+- Evidence: `rpi/campaign-play/implement/06a-rulebook-preflight.md`.
+
+## Campaign Play Task 6B Review (2026-07-11)
+
+- Added integrity-sealed execution of Task 6A batches inside the existing immediate state transaction and fenced deterministic turn boundary.
+- Commands, receipts, causal events, exposures, live mutations, logical world versions, final mechanical hash, runtime revision/hash, runtime event, and opening stage transition commit together.
+- Explicit batch version advance counts mutating commands while `record_world_event` preserves mechanical version/hash. Deterministic IDs bind campaign, turn, batch, and order.
+- Verification covers all twelve persisted command kinds, first human plus CharacterRecord, opening placement/clock/pressures, ordinary mechanics, one projectable exposure, and the complete ledger row correspondence.
+- Zero-write rejection evidence covers every opening command boundary, pre-commit, stale base, duplicate batch, forged accepted result, SQLite constraint failure, and real writer contention.
+- Proof: 4 focused files and 90 tests passed; backend typecheck passed; Terra mechanical `PASS`; fresh Sol semantic `PASS`, P0/P1/P2 `0/0/0`; standalone smoke additions `0`.
+- Evidence: `rpi/campaign-play/implement/06b-rulebook-execution.md`.
+
+## Campaign Play Task 6C Review (2026-07-11)
+
+- Added the single Campaign Play handoff from a code-sealed prepared CharacterRecord to one unique `person/human/player` actor.
+- The actor, canonical profile/provenance, deterministic Rulebook command, receipt, causal event, mechanical advance, `opening_required` phase, runtime advance, and runtime event commit in one immediate transaction.
+- Real Character Card V2 and generated-prompt fixtures each prove the exact one-actor/profile/command/receipt/event shape and stable close/reopen authority plus mechanical hash.
+- Stale accepted version/hash, forged prepared profile, accepted actor-ID collision, and duplicate bootstrap preserve the full authority object and every relevant ledger count. Shared Task 6B evidence proves injected SQL constraint and writer-contention rollback.
+- Verification: 3 focused files and 54 tests passed; backend typecheck passed; Terra mechanical `PASS`; fresh Sol semantic `PASS`, P0/P1/P2 `0/0/0`; standalone smoke additions `0`.
+- Evidence: `rpi/campaign-play/implement/06c-player-bootstrap.md`.
+
+## Campaign Play Task 7 Review (2026-07-11)
+
+- Added one strict Judge call for freeform and suggested input, all four dispositions, visible-handle citations and targets, result/elapsed bounds, and typed clarification.
+- Code preserves original player input authority and owns deterministic d20 resolution. The Game Master authenticates uncertain resolution from the admitted seed/modifier before generation and compilation; forged deterministic or rolled evidence stops before a model call.
+- Game Master proposals contain ordinary effects only. Code owns canonical bindings, IDs, source, causal order, scopes, expected versions, exposure compilation, and mandatory Rulebook preflight.
+- Judge and Game Master use one strict attempt with repair and text fallback disabled. Typed evidence covers transport, model contract, duration, token, and cost failures.
+- Verification: 4 required files and 67 tests passed; backend typecheck and diff check passed; Terra mechanical `PASS`; fresh Sol semantic review found and then verified fixes for one P1 and one P2, final verdict `PASS`; standalone smoke additions `0`.
+- Droid GLM-5.2 again stopped after an MCP reload failure and a silent timebox. The owner authorized advisory tooling to stop blocking; local humanizer/deslop prompt review and independent Sol/Terra proof close the task.
+- Evidence: `rpi/campaign-play/implement/07-adjudication.md`.
+
+## Campaign Play Task 8B Review (2026-07-11)
+
+- Added serial latest-version actor proposal settlement, durable proposal lifecycle, true-stale rejection with one debt-bearing retry, and world-clock-preserving cadence updates.
+- Added one-attempt actor-scoped replanning with opaque handles, code-owned canonical plans and schedules, exact job/model epoch fencing, and atomic old-plan transition plus schedule repointing.
+- The integration campaign compiles and stores a production opening artifact, executes its exact Rulebook bootstrap commands, and carries its compiler-derived two-action `local_aftermath` exposure into actor settlement without creating observations or actor knowledge.
+- Verification: 5 focused files and 57 tests passed; backend typecheck and diff check passed; standalone smoke additions `0`; fresh Sol semantic follow-up `PASS`, remaining P0/P1 `0`.
+- Droid GLM-5.2 returned `ACCEPT WITH CHANGES`; all contract changes were applied to the production replan schema and prompt.
+- Campaign fixture depth: opening turn zero and `0` completed player actions. Task 9 owns predicate execution; Tasks 17 and 18 own real multi-action and 60-turn playtests.
+- Evidence: `rpi/campaign-play/implement/08b-actor-proposals.md`.
+
+## Campaign Play Task 9 Review (2026-07-11)
+
+- Added one fenced visibility boundary from `actors_settled` to `visibility_projected`, with executable direct-perception, local-aftermath, route-interaction, and informed-witness predicates over committed SQLite evidence.
+- Actor knowledge precedes human observations. Earliest qualifying provenance survives multiple knowledge paths, observations and public consequences bind to exact opaque handles, and retry attempts preserve row counts.
+- The pending narrator packet, its hash, knowledge, observations, turn transition, runtime revision/hash, runtime event, and sanitized turn event commit atomically while mechanical world version remains fixed.
+- Public projection now uses strict packet and journal schemas, nested field whitelists, opaque entity handles, and authoritative `runtimeRevision` ordering. Twenty-three named probes find zero protected actor/location/route IDs, goals, relations, model metadata, provenance IDs, hidden summaries, or pressure trajectory.
+- The real migrated and accepted campaign reaches opening turn zero through character bootstrap, opening planning, Rulebook execution, actor settlement, and production visibility. Fixture depth remains `0` completed player actions; Tasks 17–19 own multi-action and long-run playtests.
+- Verification: all Campaign Play tests `239/239`; final four-file semantic suite `62/62`; backend typecheck and targeted diff check passed; GLM copy gate changes applied; fresh Sol semantic verdict `PASS`, remaining P0/P1 `0`; standalone smoke additions `0`.
+- GitNexus still reports the inherited tracked dirty worktree as `CRITICAL` across 45 files and 22 indexed flows. The untracked Campaign Play tree remains outside that index, so source inspection, contract suites, and independent verification supply Task 9 evidence.
+- Evidence: `rpi/campaign-play/implement/09-visibility.md`.
+
+## Campaign Play Task 9 Execution Packet (2026-07-11)
+
+Task: visibility, actor knowledge, and player-public projection.
+
+Owner: main agent. Storage inventory and semantic review are read-only support packets.
+
+Input: an exact `actors_settled` worker lease, accepted Campaign World provenance, committed Rulebook events/exposures, current mechanical truth, committed turn input, and prior durable knowledge/observations.
+
+Files allowed:
+
+- `backend/src/campaign-play/visibility-service.ts`
+- `backend/src/campaign-play/visibility-service.test.ts`
+- `backend/src/campaign-play/campaign-play-projection.ts`
+- `backend/src/campaign-play/campaign-play-projection.test.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.test.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.test.ts`
+- `backend/src/campaign-play/index.ts`
+- `rpi/campaign-play/implement/09-visibility.md`
+- Task-local GLM review request and logs
+
+Files forbidden: Task 10 orchestration, API/UI routes, legacy engine projections, schema migrations, fallback paths, and compatibility adapters.
+
+Output: one deterministic visibility service that derives knowledge from executable predicates, inserts idempotent human observations, builds bounded consequences and one opaque narrator packet, stores the packet in the existing immutable pending narration row, and advances `visibility_projected` through the fenced turn repository transaction. The state repository replaces raw-ID public projection fields with a whitelisted opaque packet/public-entry shape and adds event exposures to protected audit truth.
+
+Evidence:
+
+- [x] Direct perception uses actor placement at the event's committed world version.
+- [x] Local aftermath requires the same actor's later entry, current placement, and an unexpired predicate.
+- [x] Route exposure requires a committed inspect, attempt, or traverse action on that route at or after exposure.
+- [x] Witness exposure requires a co-located committed contact at or after exposure and durable witness knowledge earned by that boundary.
+- [x] Knowledge precedes observation and repeated projection creates no duplicate provenance rows.
+- [x] Every public consequence and fact cites one observation handle.
+- [x] Protected and public projections stay separate; twenty-three hidden-information probes find zero protected facts.
+- [x] One player-caused and one independent consequence are explainable from public fields alone.
+- [x] Packet bytes, packet hash, knowledge, observations, turn transition, runtime revision/hash, runtime event, and sanitized turn event commit atomically under the exact lease epoch.
+- [x] Focused tests, typecheck, diff check, GLM copy review, Krypton reviews, and independent semantic verification pass.
+
+Depends on: Tasks 3A, 3B, 6B, and 8B complete.
+
+Parallel safe: read-only review only. Main implementation remains sequential.
+
+## Campaign Play Task 10A Execution Packet (2026-07-11)
+
+Task: fenced turn worker and recovery service.
+
+Owner: main agent. Repository and acceptance exploration plus final Krypton gates are read-only support packets.
+
+Input: one campaign-scoped database handle, the active turn's durable recovery state, a unique worker owner, injected monotonic time and heartbeat scheduling, and stage executors supplied later by the opening/player runtimes.
+
+Files allowed:
+
+- `backend/src/campaign-play/turn-service.ts`
+- `backend/src/campaign-play/turn-service.test.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.test.ts`
+- `backend/src/campaign-play/index.ts`
+- `rpi/campaign-play/implement/10a-turn-service.md`
+- `tasks/todo.md`
+
+Files forbidden: opening and player-action orchestration, narrator/Rulebook/actor/visibility behavior, API/UI routes, legacy gameplay, fallback/provider switching, hidden retries, compatibility adapters, and schema migration unless current storage proves insufficient for a required invariant.
+
+Output: one mechanics-owned async worker service that interprets repository recovery states, claims unowned or expired deterministic stages, starts external attempts atomically with claims, runs external work outside SQLite transactions under same-epoch heartbeat renewal, interrupts expired/orphaned attempts without a provider call, requires explicit resume for external attempts, auto-continues deterministic committed work, rejects late epochs, exposes ledger-derived queue/stage telemetry, and discovers one campaign's active turn at startup.
+
+Recovery decision:
+
+- A worker with a live lease is authoritative until expiry. A killed process becomes safely recoverable at lease expiry; pre-expiry liveness guesses would risk interrupting a genuine provider call.
+- Campaign enumeration remains an injected mechanics-owned startup concern for Task 11. Task 10A discovers the active turn inside its addressed campaign only.
+- Existing 0027–0030 tables own attempts, epochs, leases, runtime events, sanitized turn events, and active-turn locking. Queue/stage measurements derive from their durable timestamps unless implementation proves a storage gap.
+
+Evidence:
+
+- [x] Two competing services produce one claim, one started attempt, one provider call, one accepted artifact, and one stage transition.
+- [x] The provider call observes its started attempt committed and runs outside the claim transaction.
+- [x] Same-owner/epoch heartbeat renewal advances runtime and turn event sequences without creating another provider call or attempt.
+- [x] Startup discovery calls no provider for a live or expired external attempt; expiry becomes one interruption and retains the active-turn lock.
+- [x] Explicit resume creates exactly one new epoch and attempt; discovery alone never resumes external work.
+- [x] A late old-epoch completion changes zero artifacts, stages, versions, or event sequences.
+- [x] A committed deterministic stage survives close/reopen and advances once with zero provider calls.
+- [x] Queue and stage durations reconstruct identically from durable ledgers after reopen.
+- [x] Focused tests, backend typecheck, diff check, GitNexus change detection, Krypton POST/correctness/maintainability reviews, and fresh semantic verification pass.
+
+Depends on: Task 3B complete. Task 10B/10C consume this service after Task 10A closes.
+
+Parallel safe: read-only exploration and review only. Main implementation remains sequential.
+
+## Campaign Play Task 10A Review (2026-07-11)
+
+- Added the campaign-scoped `CampaignPlayTurnService` with one-stage dispatch, atomic external claim/attempt start, same-epoch heartbeat renewal, explicit external resume, deterministic restart continuation, late-epoch fencing, and startup discovery.
+- Added repository-owned accepted-artifact and durable worker-timing readers. Recovery reconstructs queue time and renewal count from the exact runtime/turn ledgers after close/reopen.
+- External operational failures require `CampaignPlayExternalStageInterruption`; unexpected handler and repository defects propagate. Completion settlement is structurally synchronous and a renew-only handler raises `turn_stage_stalled`.
+- Focused verification passed: 2 files, 42/42 tests. Backend typecheck passed. Full Campaign Play verification passed: 16 files, 250/250 tests. `git diff --check` passed with inherited CRLF warnings.
+- Krypton POST review passed. The first maintainability/correctness passes found error-classification and settlement-boundary defects; repairs passed re-review. The fresh final verifier found durable recovery telemetry and same-epoch stall defects; both repairs passed final reverification with P0/P1 `0`.
+- GitNexus still reports `CRITICAL` across 45 inherited tracked files and 22 existing flows. The untracked Campaign Play tree remains absent from its index, so source-level callers plus the full suite provide Task 10A blast-radius evidence.
+- No schema migration, UI/copy/prompt change, fallback, compatibility path, or standalone smoke suite was added. Evidence: `rpi/campaign-play/implement/10a-turn-service.md`.
+- Task 10B/10C integration must keep primary turn model artifacts separate from `actor_replanner` rows before actor settlement is wired through terminal turn reloads.
+
+## Campaign Play Task 10B Execution Packet (2026-07-11)
+
+Task: real opening turn-zero runtime and terminal narration.
+
+Owner: main agent. Architecture inventory, acceptance inventory, and final Krypton gates are read-only support packets.
+
+Input: one accepted and topology-eligible Campaign World, one bootstrapped human player in `opening_required`, one raw chosen or delegated start request, exact opening-planner and narrator model selections, the fenced turn worker, and the campaign-scoped SQLite handle.
+
+Files allowed:
+
+- `backend/src/campaign-play/opening-runtime.ts`
+- `backend/src/campaign-play/opening-runtime.test.ts`
+- `backend/src/campaign-play/narrator.ts`
+- `backend/src/campaign-play/narrator.test.ts`
+- `backend/src/campaign-play/opening-planner.ts`
+- `backend/src/campaign-play/opening-planner.test.ts`
+- `backend/src/campaign-play/contracts.ts`
+- `backend/src/campaign-play/contracts.test.ts`
+- `backend/src/campaign-play/rulebook.ts`
+- `backend/src/campaign-play/rulebook.test.ts`
+- `backend/src/campaign-play/actor-scheduler.ts`
+- `backend/src/campaign-play/actor-scheduler.test.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.test.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.test.ts`
+- `backend/src/campaign-play/visibility-service.ts`
+- `backend/src/campaign-play/visibility-service.test.ts`
+- `backend/src/campaign-play/index.ts`
+- `shared/src/campaign-play.ts`
+- `rpi/campaign-play/implement/10b-opening-runtime.md`
+- Task-local prompt/copy review notes
+
+Files forbidden: API/UI routes, player-action runtime, legacy game/chat paths, provider switching, compatibility adapters, fallback paths, schema migrations unless a proved persistence gap requires re-planning, and standalone smoke suites.
+
+Output: one restartable `turnKind=opening` orchestration over the existing durable turn ledger. It validates before admission, accepts one strict opening artifact, atomically settles the exact Rulebook bootstrap plus actor plans/schedules, records zero opening actor actions, freezes the Task 9 public packet, accepts one packet-bound narration, and atomically publishes narration with `setup_phase=ready` and terminal completion.
+
+Implementation boundaries:
+
+- Opening admission reuses the repository idempotency, active-turn, supersession, expected-version, and topology fences. Chosen conditions carry one opaque accepted-world location handle plus bounded role, arrival-mode, and immediate-situation text; delegated conditions carry no chosen values. This replaces the unsupported detail-handle catalog with the Task 10B request contract and requires no compatibility shape. User-correctable start/role/phase/topology/idempotency errors create zero turn rows.
+- External planner and narrator calls run outside SQLite transactions and use one strict structured attempt. Transport, timeout, and schema failures become durable `interrupted` stages requiring explicit resume on the same turn.
+- The accepted opening artifact is reloaded from SQLite and fully parsed before settlement. Its exact bootstrap commands execute through Rulebook inside the `planned -> primary_settled` fenced transaction together with exact actor plan/schedule rows.
+- Rulebook owns mechanical mutations and receipts. Opening runtime owns the phase boundary: mechanical bootstrap leaves `setup_phase=opening_required`; accepted terminal narration changes it to `ready` with `opened_at` in the completion transaction.
+- `primary_settled -> actors_settled` validates stored plans/schedules and creates zero actor jobs, proposals, or actions for turn zero.
+- Task 9 owns visibility derivation and immutable packet storage. For an opening turn, the packet includes a typed `openingContext` containing the already-public role, arrival mode, and immediate situation from the accepted opening artifact; those facts are covered by the same canonical bytes and `publicPacketHash`. Narrator receives only that packet and every suggested action/effect must satisfy the shared packet contract.
+- Opening planner exports one strict full-artifact parser for restart reload. Actor scheduler owns the exact plan/schedule persistence-and-validation seam so opening runtime does not duplicate actor-table SQL.
+- Terminal `failed` is available only before `primary_settled` with a zero-mutation audit. A successor opening must name that failed turn exactly once. From `primary_settled` onward, recovery continues the same ledger to completion.
+- A deterministic defect or process stop after `primary_settled` commits zero partial stage rows. The exact lease expires, the same stage becomes automatically claimable, and the same active ledger continues. Deterministic stages do not use the external model-attempt `interrupted` state and cannot enter terminal `failed` after primary settlement.
+- Narrator model output is an expressive proposal only. Code loads the pending narration row, assigns its deterministic `narrationId`, the exact `turnId`, beat IDs, action labels, display text, and worker-clock `createdAt`, then validates the shared narration schema and pending identity before acceptance.
+
+Acceptance evidence:
+
+- [x] Chosen and delegated starts complete one idempotent opening ledger each on real migrated SQLite campaigns.
+- [x] Invalid start handle, role, idempotency, phase, and topology fail before admission with zero ledger/runtime mutation.
+- [x] Planner and narrator transport, timeout, and schema failures persist `interrupted`; explicit resume completes the same ledger and late epochs change zero rows.
+- [x] A zero-mutation failed opening is superseded exactly once by a successor that records `supersedesTurnId`; mutation-bearing or unnamed successors fail closed.
+- [x] Bootstrap commands, receipts, causal events, placements, clock/pressures, actor plans/schedules, both authority hashes/versions, runtime event, and `primary_settled` commit atomically.
+- [x] Opening actor settlement records zero actor actions while validating every initialized eligible actor plan/schedule.
+- [x] Public packet canonical bytes/hash remain identical across restart and narrator retry; protected cast/goal/location truth stays absent.
+- [x] Narration gives concrete orientation and actionable hooks without a cast dump; choices bind exactly to packet intents and effects bind to emitted beats.
+- [x] Narration row, `setup_phase=ready`, `opened_at`, completed turn, lock release, terminal runtime/turn events, and runtime hash/revision commit atomically.
+- [x] Process-stop fixtures after every durable stage resume without repeated model calls, commands, receipts, actor schedules, packet rows, or terminal events.
+- [x] Injected actor-plan validation and visibility persistence failures after primary settlement leave their stage unchanged; expiry and a fresh worker complete the same ledger once.
+- [x] Narrator input canonical bytes exactly equal the persisted `packet_json` bytes after restart, including chosen opening context and excluding protected cast, goals, and non-local locations.
+- [x] Focused tests, all Campaign Play tests, backend typecheck, GitNexus change detection, GLM/humanizer/deslop prompt review, Krypton post-plan review, and fresh semantic verification pass.
+
+Playtest depth for this task: opening turn zero and `0` completed player actions. Task 10C connects player actions; Tasks 17 and 18 own real multi-action and long-run playtests.
+
+Depends on: Tasks 5, 6B, 6C, 9, and 10A complete.
+
+Parallel safe: read-only inspection and verification only. Main implementation remains sequential because Rulebook phase ownership, turn transitions, and narrator completion share one transactional boundary.
+
+## Campaign Play Task 10B Review (2026-07-11)
+
+- Implemented one durable opening runtime from pre-admission validation through strict planning, atomic Rulebook and actor initialization, zero-action actor validation, visibility packet freeze, packet-bound narration, and atomic terminal readiness.
+- Chosen and delegated starts both complete on freshly migrated SQLite campaigns built through Campaign World acceptance and production player bootstrap. Task depth is opening turn zero with `0` completed player actions.
+- Added explicit planner/narrator interruption and same-ledger resume, late completed replay with zero new rows, restart after every committed stage, post-primary deterministic rollback plus lease-expiry recovery, and audited zero-mutation failed-opening supersession.
+- Fresh Sol review found and repaired one durable timestamp identity mismatch between the pending narration row and accepted narrator artifact. Final independent Sol xhigh verification passed with P0/P1 `0`.
+- Verification passed: opening integration 9/9; focused final gate 61/61; all Campaign Play 266/266; backend typecheck; shared build; `git diff --check` with inherited line-ending warnings only.
+- GitNexus still reports global `CRITICAL` across 45 inherited tracked files and 22 indexed flows. Task 10B's untracked Campaign Play symbols remain absent from the index, so direct source trace plus executable SQLite tests provide the local proof.
+- Droid GLM-5.2 completed with exit code 0 but returned only `Plan is up-to-date.`; it supplied no substantive prompt verdict. Humanizer/deslop inspection and two Sol semantic reviews found no required rewrite. No smoke suite, fallback, provider switch, compatibility path, schema migration, API/UI route, or player-action runtime was added.
+- Durable evidence: `rpi/campaign-play/implement/10b-opening-runtime.md`.
+
+## Campaign Play Task 10C Execution Packet (2026-07-11)
+
+Goal: complete one real `player_action` ledger from a currently rendered public scene through Judge, deterministic uncertainty, GM planning or a code-owned no-effect result, primary Rulebook settlement, sequential living-world actor work, visibility, packet-bound narration, and atomic terminal completion.
+
+Intent: make the first counted gameplay action genuinely playable and restartable. Opening remains turn zero; Task 10C acceptance counts exactly `1` completed player action on a real migrated campaign.
+
+Truth owners:
+
+- Campaign SQLite owns admission, frozen protected frames, model selections and price rates, attempts, artifacts, due sets, actor jobs, receipts, public packet bytes, narration, telemetry inputs, and terminal reason.
+- Rulebook owns every mechanical mutation and receipt.
+- Judge owns bounded action interpretation; code owns uncertainty resolution and the impossible/clarification branch.
+- GM owns executable primary command planning for actionable rulings.
+- Actor scheduler, proposal service, and replanner own living-world work after the primary batch.
+- Visibility owns the public packet. Narrator receives only its exact persisted canonical bytes.
+
+Cutover: `turn-runtime.ts` is the mechanics-owned player-action orchestrator. Legacy game/chat/worldgen flows remain reference-only and stay outside its import graph.
+
+Kill criteria:
+
+- A repeated provider call, command, receipt, actor job, due-set decision, packet row, narration row, or terminal event for the same accepted attempt fails acceptance.
+- A late worker epoch or late actor replanner result that changes durable state fails acceptance.
+- Protected IDs, hidden facts, Judge reasoning, GM bindings, or actor goals reaching the narrator packet fail acceptance.
+- A completed turn lacking narration or a terminal reason fails acceptance.
+- A process stop that strands a claimed actor job or requires an automatic provider retry fails acceptance.
+
+### Task board
+
+#### 10C.1 — Contract and storage seam
+
+Owner: main agent.
+
+Input: Tasks 3B, 7, 8B, 9, 10A, and 10B contracts plus the proven due-set and actor-replanner recovery gaps.
+
+Files allowed:
+
+- `shared/src/campaign-play.ts`
+- `backend/src/campaign-play/contracts.ts`
+- `backend/src/campaign-play/contracts.test.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.test.ts`
+- `backend/src/campaign-play/campaign-play-database.ts`
+- `backend/src/campaign-play/campaign-play-database.test.ts`
+- `backend/src/campaign-play/actor-scheduler.ts`
+- `backend/src/campaign-play/actor-scheduler.test.ts`
+- `backend/src/campaign-play/actor-proposal-service.ts`
+- `backend/src/campaign-play/actor-proposal-service.test.ts`
+- `backend/src/campaign-play/actor-replanner.ts`
+- `backend/src/campaign-play/visibility-service.ts`
+- `backend/src/campaign-play/visibility-service.test.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.ts`
+- `backend/src/campaign-play/campaign-play-state-repository.test.ts`
+- `backend/src/campaign-play/opening-runtime.ts`
+- `backend/src/campaign-play/opening-runtime.test.ts`
+- `backend/src/db/schema.ts`
+- `backend/drizzle/0031_campaign_play_turn_runtime.sql`
+- `backend/drizzle/meta/0031_snapshot.json`
+- `backend/drizzle/meta/_journal.json`
+
+Files forbidden: API/UI routes, legacy gameplay, compatibility adapters, fallback/provider switching, hidden retries, and unrelated schema.
+
+Output:
+
+- A strict persisted Judge artifact containing the accepted ruling, code-owned uncertainty resolution, uncertainty authority, and public-safe action result fields.
+- Player-action model selection freezes `judge`, `gameMaster`, `actorReplanner`, and `narrator`, including the exact price rates required to reconstruct estimated cost after restart.
+- Judge artifact acceptance, disposition-specific stage advance, and creation of the code-owned zero-command plan commit in one SQLite transaction: actionable rulings advance `admitted -> judged`; `impossible` and `clarification_required` advance `admitted -> planned`. The no-effect branch creates zero `game_master` model-stage rows, attempts, usage records, artifacts, or provider evidence. Recovery routes exclusively from the persisted Judge disposition and performs zero GM provider calls.
+- `CampaignPlayNarratorPacket` gains hash-covered `actionContext`: submitted public text, normalized public intent kind, disposition, public result, and optional clarification question. Opening packets carry `actionContext: null`; player-action packets carry `openingContext: null`.
+- One immutable due-set row per player-action turn stores canonical decision bytes/hash plus base world version, runtime revision, and settled world time.
+- Actor-job fencing records the owning main-turn worker epoch and supports an explicit durable `interrupted` state. A claimed replanner tied to an expired main-turn epoch transitions atomically to interrupted with its started model stage; explicit resume claims a fresh actor and turn epoch. Late results fail both fences.
+- One terminal-result row per completed or failed turn stores an enumerated terminal reason in the same transaction as the terminal turn update. Migration backfills existing opening and terminal-failure ledgers before the invariant becomes active.
+- Direct dependent edits in Visibility, opening, scheduler, proposal, replanner, and state-projection files are limited to the strict contract/storage handshake required to keep the tree green. Task 10C.3 retains actor orchestration and recovery policy; Task 10C.4 retains final packet derivation, narration, and telemetry aggregation.
+
+Evidence:
+
+- [x] Strict schemas reject mixed opening/action contexts, unpriced model selections, malformed Judge artifacts, corrupt due-set hashes, and invalid actor-job transitions.
+- [x] Migration tests prove the exact final schema, constraints, triggers, and foreign keys on fresh migrated SQLite.
+- [x] Repository tests prove the no-effect stage shortcut, immutable due-set identity, expired actor-replanner interruption, explicit resume, and late-epoch rejection.
+
+Review (2026-07-11):
+
+- Persisted contracts now freeze priced `judge`, `gameMaster`, `actorReplanner`, and `narrator` selections, enforce the disposition-specific Judge artifact, and carry one mutually exclusive public `actionContext`/`openingContext` into the narrator packet.
+- The storage seam now persists canonical immutable due sets, fences actor work with both actor and owning-turn epochs, supports explicit durable replanner interruption/resume, and writes an enumerated terminal result atomically with terminal turn state.
+- The impossible/clarification branch commits the code-owned zero-command plan directly to `planned`; tests prove it creates zero Game Master stages, attempts, artifacts, usage, or provider evidence and recovers from the stored Judge disposition.
+- Final validation: shared build passed; backend typecheck passed; all Campaign Play tests passed (`18` files, `271` tests); Drizzle reported `No schema changes`; `git diff --check` passed. Standalone smoke additions: `0`.
+- Two delegated final reviewers stalled after a focused status request and were stopped under the recorded non-blocking review rule. The main-agent gate rechecked the packet evidence, complete Campaign Play regression suite, schema drift, and diff hygiene; no in-scope P0/P1 defect remained.
+- GitNexus `detect_changes(scope: all)` reports `CRITICAL` for the accumulated branch-wide tracked diff (`45` files, `22` affected processes). Campaign Play remains untracked/unindexed, so this result describes inherited branch scope rather than a mapped Task 10C.1 blast radius. No staging or commit was performed.
+- Playtest depth remains opening turn zero and `0` completed player actions. Task 10C.2 is the next packet that makes the first counted action executable; real migrated-campaign playtest acceptance remains owned by the later Task 10C packets.
+
+Depends on: Task 10B complete. Parallel safe: read-only review only.
+
+#### 10C.2 — Admission, Judge, GM, and primary settlement
+
+Owner: main agent.
+
+Input: one `ready` campaign, latest completed public packet/narration, one freeform text or current suggested-action handle, exact version expectations, idempotency key, and frozen model selections/rates.
+
+Files allowed:
+
+- `backend/src/campaign-play/turn-runtime.ts`
+- `backend/src/campaign-play/turn-runtime.test.ts`
+- `backend/src/campaign-play/judge.ts`
+- `backend/src/campaign-play/judge.test.ts`
+- `backend/src/campaign-play/game-master.ts`
+- `backend/src/campaign-play/game-master.test.ts`
+- `backend/src/campaign-play/rulebook.ts`
+- `backend/src/campaign-play/rulebook.test.ts`
+- `backend/src/ai/generate-object-safe.ts` and its focused boundary tests only for direct abort/deadline propagation and Campaign Play strict-boundary registration required by the Judge/GM transport contract
+- repository/contract files from 10C.1 when executable evidence requires a narrow correction
+- `backend/src/db/schema.ts`, `backend/drizzle/0027_campaign_play_core.sql`, `backend/drizzle/0030_campaign_play_turn_recovery.sql`, and the 0030/0031 snapshots only for truthful interruption outcomes and precise budget/timeout diagnoses discovered during 10C.2 verification
+- `backend/src/campaign-play/actor-scheduler.test.ts` only to replace its obsolete arbitrary GM fixture with the strict accepted GM artifact required by the 10C.2 hard cutover
+
+Files forbidden: actor settlement, visibility/narrator behavior beyond typed inputs, API/UI routes, legacy imports, fallbacks, provider switching, and automatic external retries.
+
+Output:
+
+- Admission validates the current suggested handle or bounded freeform text before mutation, freezes the exact current public packet identity plus protected opaque-handle bindings, and derives a valid Judge frame without exposing server IDs.
+- Judge executes one strict external attempt outside SQLite. Code deterministically resolves uncertainty from a frozen seed and persists the complete strict artifact.
+- Actionable rulings execute one strict GM attempt outside SQLite, reload and validate its accepted command artifact, re-run Rulebook preflight, and commit the exact primary batch inside `planned -> primary_settled`.
+- Impossible and clarification rulings execute zero GM calls, zero Rulebook commands, and commit `planned -> primary_settled` with world-version advance `0`.
+- External transport, timeout, schema, and budget failures become durable `interrupted`; explicit resume continues the same ledger and late epochs change zero rows.
+- A rendered suggested action freezes its exact intent kind and targets; Judge cannot reinterpret the selected handle. Actionable Judge results exclude `no_effect`.
+- The persisted Game Master artifact carries the exact accepted Judge artifact hash, strict command batch, and exact batch hash. Repository acceptance validates it before `judged -> planned`.
+- Interrupted model stages persist `transport_error` for transport/lease loss and `invalid` for schema/budget rejection; the error code remains the precise recovery diagnosis.
+
+Evidence:
+
+- [x] Real migrated campaigns complete freeform, current suggested, impossible, clarification, and uncertain action fixtures.
+- [x] Invalid/stale suggested handles and invalid admission inputs create zero turn/runtime rows.
+- [x] Process stops after admission, Judge acceptance, GM acceptance, and primary settlement reuse accepted artifacts and repeat zero provider calls or commands.
+- [x] Primary settlement atomically commits commands, receipts, causal events, versions, runtime event, and turn event under the exact lease.
+
+Review (2026-07-11):
+
+- Implemented the hard-cutover Campaign Play path from admission through one strict Judge attempt, one strict Game Master attempt when actionable, and atomic primary Rulebook settlement. Impossible and clarification rulings settle with zero Game Master calls, zero commands, and zero world-version advance.
+- The new runtime depends on Campaign Play contracts and storage. Its only shared seam is the model transport wrapper; the canonical wrapper now forwards abort signals directly. The path imports no legacy world-generation, chat, or gameplay flow and contains no compatibility branch, provider switching, repair attempt, text fallback, or hidden retry.
+- Persisted evidence records the provider and concrete structured-output strategy observed at the transport boundary, verifies them against the frozen selection, and normalizes accepted attempts to the durable `strict_object` contract. Judge and Game Master deadlines abort transport and persist `transport_error` with the precise `stage_timeout` diagnosis.
+- The repository validates the Game Master artifact's exact accepted Judge hash before `judged -> planned`. Primary settlement repeats Rulebook preflight and commits commands, receipts, causal/runtime/turn events, and versions in one transaction; injected mid-batch failure rolls the transaction back and resumes from the same accepted artifact.
+- Real migrated SQLite fixtures cover 13 scenarios: freeform, current suggested action, deterministic and uncertain settlement, impossible and clarification no-effect, stale/invalid zero-write admission, restart after every completed stage, Judge and Game Master timeout/resume with epoch fencing, and atomic Rulebook failure recovery.
+- Validation: Campaign Play plus structured-output boundary suite passed (`21` files, `327` tests); independent final verification passed (`8` files, `179` tests); backend typecheck passed; Drizzle reported `No schema changes`; `git diff --check` found no whitespace errors. Standalone smoke additions: `0`.
+- The full backend suite reached `3,703` passing tests and reported inherited failures outside this packet: incomplete `AppError` mocks in five legacy suites, a campaign-store manifest mismatch for tables owned by later Campaign Play packets, and one repository race timeout under full-suite parallel load. The same Campaign Play repository suite passes in focused validation, so these results do not invalidate 10C.2.
+- Fresh semantic verification verdict: PASS with `0` P0, `0` P1, and `0` P2 findings. Residual coverage opportunities are dedicated per-strategy abort assertions, a provider-mismatch regression, and a distinct narration-created/completed timestamp fixture; static and integration evidence already covers their implemented contracts.
+- Final GitNexus `detect_changes(scope: all)` reports `CRITICAL` for the accumulated branch worktree (`45` tracked files, `76` indexed symbols, `23` affected processes). The result includes inherited work across the revamp branch; the new Campaign Play tree remains outside the current index. Shared transport changes received focused boundary tests, full Campaign Play regression, typecheck, and independent semantic verification. No staging or commit was performed.
+- Playtest depth is one submitted player action per fresh migrated campaign through `primary_settled`. A fully completed player-visible action still counts as `0` because actor settlement belongs to 10C.3 and visibility/narration belong to 10C.4. No UI/manual playtest claim is made for this packet.
+
+Depends on: 10C.1. Parallel safe: read-only verification only.
+
+#### 10C.3 — Durable sequential actor settlement
+
+Owner: main agent.
+
+Input: exact `primary_settled` worker lease, committed post-primary authority, initialized actor plans/schedules, and frozen actor-replanner selection/rates.
+
+Files allowed:
+
+- `backend/src/campaign-play/turn-runtime.ts`
+- `backend/src/campaign-play/turn-runtime.test.ts`
+- `backend/src/campaign-play/actor-scheduler.ts`
+- `backend/src/campaign-play/actor-scheduler.test.ts`
+- `backend/src/campaign-play/actor-proposal-service.ts`
+- `backend/src/campaign-play/actor-proposal-service.test.ts`
+- `backend/src/campaign-play/actor-replanner.ts`
+- `backend/src/campaign-play/actor-replanner.test.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.ts`
+- `backend/src/campaign-play/campaign-play-turn-repository.test.ts`
+- `backend/src/campaign-play/contracts.ts` and its tests only when actor-owned model-attempt identity or recovery state requires a typed correction
+- `backend/src/db/schema.ts`, `backend/drizzle/0031_campaign_play_turn_runtime.sql`, and the 0031 snapshot only when the canonical actor-job transition guard requires a direct hard-cutover correction
+
+Files forbidden: parallel actor settlement, stale-version batch execution, implicit actor provider retry, actor omission as recovery, API/UI routes, and legacy imports.
+
+Output:
+
+- Freeze and persist the complete due set, admit its jobs, schedule changes, and same-stage runtime event atomically before any actor work.
+- Process jobs in deterministic due order. Each proposal preflights and settles against the latest committed world version; conflicts become explicit rejected/deferred results with agency debt.
+- Replan-required jobs use one externally visible, main-turn-epoch-fenced model attempt. Transport, timeout, schema, budget, persistence, process-death, and lease-loss failures produce a durable interrupted actor stage and pause the turn. Runtime discovery calls zero providers; its production explicit-resume seam claims a fresh main-turn epoch, then a fresh actor epoch/attempt, and rejects results fenced by either prior epoch. Provider completion is fenced by actual observed completion time and an abort deadline inside the same main lease.
+- Actor-owned replanner rows use per-job stage identity and coexist with turn-owned Judge, Game Master, opening-planner, and narrator rows. Turn reload validates each owner separately and supports multiple accepted actor-replanner artifacts without treating them as one turn-stage artifact.
+- Stops after deterministic actor claim or proposal persistence resume from the stored job/proposal without recompiling accepted bytes, duplicating commands, or losing due order. Proposal terminalization rechecks the live main-turn owner, epoch, expiry, and stage inside its commit transaction.
+- Due order is a strict serial barrier: the earliest nonterminal decision settles, rejects, defers, replans, or interrupts before any later actor starts.
+- Final `actors_settled` validates an exact wake/defer-to-job bijection plus skip-to-zero-job accounting, zero active jobs or model attempts, proposal/job/result agreement, current plan/schedule pairing, and the serial latest-version command/receipt chain.
+
+Evidence:
+
+- [x] Empty, skipped, deferred, proposed/settled, rejected, and replanned due sets survive close/reopen with identical decision bytes/hash.
+- [x] Two due actors settle serially; the second batch cites the first batch's resulting world version.
+- [x] Stop after due-set commit, job claim, replan provider return, proposal creation, and each actor receipt resumes without duplicate jobs, plans, proposals, commands, or receipts.
+- [x] Expired replanner claim becomes interrupted once; discovery performs zero provider calls; explicit resume calls once; old completion changes zero rows.
+- [x] Injected failure inside due-set admission rolls back the due set, jobs, defer schedule changes, runtime revision/event, and turn event together; successful retry commits all of them once.
+- [x] `actors_settled` rejects every unaccounted decision and every queued, claimed, interrupted, or proposed job, then commits exactly once only after the validated terminal ledger and latest-version receipt chain are complete.
+- [x] Turn reload accepts multiple job-owned actor-replanner stage IDs, validates each against its frozen actor-replanner selection and job epoch, and keeps singular turn-stage artifact loading scoped away from actor-owned attempts.
+- [x] Proposal settlement under a replaced or expired main-turn lease changes zero proposal, job, schedule, command, receipt, event, mechanical version, or runtime revision rows.
+- [x] A provider result arriving at or after the admitted main-lease deadline changes zero plan, schedule, job, model artifact, command, receipt, mechanical version, or runtime revision rows; recovery persists one interruption before any explicit resume.
+- [x] When the first due actor requires replanning, actor two remains untouched until actor one becomes deferred/replanned or the turn pauses interrupted.
+- [x] Transport, timeout, schema, budget, and persistence fixtures each produce one interrupted actor model row plus one interrupted job, pause before actor two, make zero provider calls during discovery, and create exactly one fresh attempt on explicit resume.
+
+Validation:
+
+```powershell
+npm --prefix backend test -- src/campaign-play/turn-runtime.test.ts src/campaign-play/actor-scheduler.test.ts src/campaign-play/actor-proposal-service.test.ts src/campaign-play/actor-replanner.test.ts src/campaign-play/campaign-play-turn-repository.test.ts src/campaign-play/campaign-play-database.test.ts src/campaign-play/rulebook.test.ts
+npm --prefix backend run typecheck
+```
+
+Review (2026-07-11):
+
+- The production player-action runtime now owns one strict serial actor path from atomic due-set admission through durable `actors_settled`. It loads the immutable accepted opening exposure seed, processes one due actor per main-lease boundary, and validates the complete job/proposal/plan/schedule/receipt ledger again inside the final SQLite transaction.
+- Actor proposals and replans use exact main-turn and actor epochs. Claim, proposal persistence, Rulebook settlement, rejection, replan acceptance/interruption, runtime event, and sanitized turn event changes commit atomically. Both proposal and replanner terminalization re-read the injected campaign clock immediately before the final lease fence.
+- Process-stop evidence covers due-set admission, job claim, proposal persistence, replanner provider return, and actor receipt execution. Reopen preserves accepted bytes, discovery calls zero providers, explicit resume creates one fresh epoch/attempt, and late or deadline-crossing work changes no terminal state.
+- The alternate bulk actor API was removed. `processNext` is the sole production executor; Campaign Play imports no legacy gameplay, chat, or world-generation path and enables no repair, text fallback, provider switching, implicit external retry, parallel actor settlement, or stale-version execution.
+- Validation passed: the exact Task 10C.3 matrix passed (`7` files, `114` tests); all Campaign Play tests passed (`20` files, `301` tests); backend typecheck and `git diff --check` passed. Standalone smoke additions: `0`.
+- Krypton POST, correctness, and maintainability reviews all passed with `0` P0, `0` P1, and no unsupported evidence item. The dedicated replanner contract test owns the strict accepted path; production runtime integration tests own failure, expiry, reopen, and explicit-resume policy.
+- Final GitNexus `detect_changes(scope: all)` remains `CRITICAL` for the accumulated branch worktree (`45` tracked files, `76` indexed symbols, `23` affected processes). The new Campaign Play tree remains untracked/unindexed, so the report describes inherited branch scope rather than a mapped 10C.3 blast radius. No staging or commit was performed.
+- The packet stops at durable `actors_settled`. Playtest depth remains opening turn zero and `0` completed player actions because Task 10C.4 still owns visibility, narration, terminal telemetry, and the first completed player-action claim.
+
+Stop boundary: stop exactly at durable `actors_settled`. Task 10C.4 owns visibility, public-packet projection, narrator execution, and terminal telemetry aggregation. Compatibility paths, legacy imports, repair attempts, text fallback, provider switching, hidden retries, parallel actor settlement, and stale-version execution remain forbidden.
+
+Depends on: 10C.2. Parallel safe: read-only verification only.
+
+#### 10C.4 — Visibility, narration, terminal telemetry
+
+Owner: main agent.
+
+Input: exact `actors_settled` lease, committed public/protected provenance, strict Judge artifact, durable stage/model ledgers, and frozen narrator selection/rates.
+
+Files allowed:
+
+- `backend/src/campaign-play/turn-runtime.ts`
+- `backend/src/campaign-play/turn-runtime.test.ts`
+- `backend/src/campaign-play/visibility-service.ts`
+- `backend/src/campaign-play/visibility-service.test.ts`
+- `backend/src/campaign-play/narrator.ts`
+- `backend/src/campaign-play/narrator.test.ts`
+- `backend/src/campaign-play/turn-service.ts`
+- `backend/src/campaign-play/turn-service.test.ts`
+- contract/repository files from 10C.1 for the accepted packet and telemetry seams
+- `rpi/campaign-play/implement/10c-player-turn-runtime.md`
+- `tasks/todo.md`
+- Task-local prompt/copy review notes
+
+Files forbidden: API/UI routes, evidence exporter/playtest bundle work, legacy gameplay, fallbacks, provider switching, hidden retries, and standalone smoke suites.
+
+Output:
+
+- Visibility derives `actionContext.submittedText` from the frozen admission document. It derives normalized intent kind, disposition, public result, and clarification question from an explicit public projection of the accepted Judge artifact. Judge reasoning, cited protected facts, opaque bindings, uncertainty seed material, and internal identifiers stay outside the packet. The persisted packet schema verifies `actionContext` against both durable sources before freezing canonical bytes/hash once.
+- Narrator receives exactly the persisted packet bytes and proposes expressive beats only; code owns narration/choice/effect IDs and validates all references.
+- Narrator interruption and explicit resume reuse the same packet and execute zero mechanical commands.
+- Narration, completed turn, active-lock release, terminal runtime/turn events, and terminal reason commit atomically.
+- Durable telemetry reconstructs per-stage and total latency, queue time, tokens, estimated cost, and terminal reason from frozen rates plus committed ledgers identically before and after reopen. Integer price rates persist with currency, token unit, and rounding rule. Queue and stage latency derive from named durable claim/resume/completion timestamps; terminal latency derives from submitted and terminal timestamps. Aggregation covers every committed model attempt, including interrupted actor-replanner attempts. Attempts whose provider usage is unavailable retain null usage, set `costComplete: false`, and keep estimated cost nullable. The enumerated terminal reason persists inside the atomic terminal commit.
+
+Evidence:
+
+- [x] Packet bytes/hash remain identical through restart and narrator interruption; hidden-information probes find zero protected facts.
+- [x] Actionable, no-effect, and clarification narration remain grounded in `actionContext` and current visible scene.
+- [x] Stop after visibility and after narrator provider return produces one narration and one terminal event with zero command replay.
+- [x] Reopened telemetry equals pre-close telemetry field-for-field and accounts for Judge, GM when present, actor replanner when present, narrator, queue, per-stage, total, and terminal reason.
+- [x] Focused verification from PLAN, all Campaign Play tests, backend typecheck, shared build, diff check, GitNexus change detection, humanizer/deslop prompt review, Krypton post-plan review, correctness review, maintainability review, and fresh semantic verification pass.
+
+Playtest depth: one opening plus exactly `1` completed player action on real migrated Campaign Play storage. Tasks 11–16 expose the player route/UI; Tasks 17–18 own real multi-action and long-run player playtests.
+
+Depends on: 10C.3. Parallel safe: read-only review only.
+
+## Campaign Play Task 10C Post-Plan Review (2026-07-11)
+
+- Fresh Sol review returned `REVISE` with three P1 findings and zero P0 findings.
+- The packet now makes Judge acceptance, disposition routing, and the zero-command plan one atomic transaction; the no-effect branch creates zero GM attempts or evidence.
+- `actionContext` now joins submitted text from the frozen admission document with an explicit public projection of the accepted Judge artifact.
+- Telemetry now defines durable timestamps, integer pricing units and rounding, nullable incomplete usage/cost, actor-replanner aggregation, and atomic terminal-reason persistence.
+- Focused Sol re-review returned `PASS` with remaining P0/P1 findings `0`.
+- Planning changed documentation only. No implementation, schema mutation, provider call, test suite, or smoke test ran at this boundary.
+
+## Campaign Play Task 10C Review (2026-07-12)
+
+- One real migrated Campaign Play campaign now completes opening turn zero and exactly one player action through Judge, Game Master or deterministic no-effect routing, Rulebook settlement, serial actor work, visibility, packet-bound narration, atomic terminal completion, and reopened telemetry.
+- Restart and interruption proofs preserve canonical narrator bytes, execute zero replayed mechanical commands, fence stale epochs, and produce one accepted narration, one result, and one terminal event.
+- Durable telemetry includes Judge, Game Master, actor replanner, and narrator attempts; incomplete provider usage keeps cost incomplete and nullable. Interrupted identity persists only when provider, model, and strategy are all observed.
+- Final verification passed: selected suite `119/119`, all Campaign Play tests `312/312`, backend typecheck, shared build, and diff check. Diff hygiene reports inherited line-ending warnings only.
+- Krypton POST, correctness, maintainability, and fresh Sol semantic verification all passed with remaining P0/P1 findings `0`. Prompt/copy review passed through direct Sol semantic review plus `humanizer` and `deslop`; GLM is outside the current delivery pipeline.
+- GitNexus change detection reports the inherited dirty tracked scope as `CRITICAL`; current Campaign Play files remain outside its index. Direct source tracing, integration tests, and independent Sol reviews provide the local Task 10C evidence.
+- Standalone smoke-suite additions: `0`. Evidence: `rpi/campaign-play/implement/10c-player-turn-runtime.md`.

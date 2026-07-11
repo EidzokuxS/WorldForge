@@ -226,24 +226,6 @@ export interface LoreCardItem {
   category: string;
 }
 
-export interface ScaffoldLocation {
-  name: string;
-  description: string;
-  tags: string[];
-  isStarting: boolean;
-  connectedTo: string[];
-  kind?: "macro" | "persistent_sublocation";
-  parentLocationName?: string | null;
-}
-
-export interface ScaffoldFaction {
-  name: string;
-  tags: string[];
-  goals: string[];
-  assets: string[];
-  territoryNames: string[];
-}
-
 export interface ScaffoldNpc {
   name: string;
   persona: string;
@@ -259,27 +241,6 @@ export interface ScaffoldNpc {
   /** Frontend-only stable key for React rendering. Stripped by backend Zod validation. */
   _uid?: string;
 }
-
-export interface ScaffoldLoreCard {
-  term: string;
-  definition: string;
-  category: string;
-}
-
-export interface EditableScaffold {
-  refinedPremise: string;
-  locations: ScaffoldLocation[];
-  factions: ScaffoldFaction[];
-  npcs: ScaffoldNpc[];
-  loreCards: ScaffoldLoreCard[];
-  personaTemplates?: PersonaTemplateSummary[];
-}
-
-export type RegenerateSectionRequest =
-  | { campaignId: string; section: "premise"; additionalInstruction?: string }
-  | { campaignId: string; section: "locations"; refinedPremise: string; additionalInstruction?: string }
-  | { campaignId: string; section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
-  | { campaignId: string; section: "npcs"; refinedPremise: string; locations: ScaffoldLocation[]; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
 
 export interface ParsedCharacter {
   name: string;
@@ -329,22 +290,5 @@ export type CheckpointMeta = {
   createdAt: number;
   auto: boolean;
 };
-
-// ───── WorldBook Import ─────
-
-export interface ClassifiedWorldBookEntry {
-  name: string;
-  type: "character" | "location" | "faction" | "bestiary" | "lore_general";
-  summary: string;
-}
-
-export interface WorldBookImportResult {
-  imported: {
-    characters: number;
-    locations: number;
-    factions: number;
-    loreCards: number;
-  };
-}
 
 export type WorldbookLibraryItem = CampaignWorldbookSelection;

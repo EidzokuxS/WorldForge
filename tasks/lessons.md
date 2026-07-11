@@ -2,6 +2,9 @@
 
 ## Operating Rules
 
+- A failed advisory/review tool gets one focused repair attempt, then an evidence note and forward progress when the owner explicitly authorizes skipping it; advisory infrastructure must not hold the product plan hostage.
+- Inspect configuration schemas or selected non-secret fields instead of printing whole settings files; provider settings can contain live API keys and must stay out of tool logs.
+
 - Keep active task files short. Long forensic history belongs in git history or current docs that still serve the mechanics rebuild.
 - Treat fallback and backward-compatibility paths as defects unless the user explicitly authorizes a migration window.
 - Fix root causes. Do not add guard piles, compatibility shims, or regex prose gates to hide broken ownership.
@@ -13,16 +16,28 @@
 - Never delete ignored local configuration or secret-bearing files such as `settings.json`, `settings.json.bak`, `.env`, or provider key stores during cleanup. Move them to a named local backup outside the repo first.
 - Use short, human-readable project filenames. Prefer `a5b-character.md` over long all-caps generated labels.
 - When the user says to stop stopping, treat every known next architecture item as active work. Commit and push verified blocks instead of ending with a dirty tree and a progress report.
+- In this project, a completed and verified task boundary authorizes a scoped checkpoint commit. Do not wait for a separate commit command, and do not carry finished mechanics work into the next task's diff.
 - After `npx gitnexus analyze`, inspect `AGENTS.md` before committing. The generator can refresh the GitNexus block and drop project-specific rules that must stay.
 - After `npx gitnexus analyze`, keep root `CLAUDE.md` if the generator recreates it. Do not delete it as cleanup unless the owner explicitly asks for that file to be removed.
 - For manual UI playtests, use the in-app browser when it is available; reserve external browser automation for headless regression artifacts or explicit requests.
-- For Droid GLM reviews, verify the active custom model alias from Factory settings and a real `droid exec --model ... --list-tools` call before recording any blocker.
 - In `feat/revamp`, legacy code is quarantine reference: mechanics player paths, APIs, and UI land on mechanics-owned routes with explicit adapter boundaries for legacy data shapes.
-- Workstream labels are internal bookkeeping. Player-facing routes, UI text, current files, symbols, test titles, and helpers use domain names from the AGENTS naming convention.
+- Workstream and version labels are internal bookkeeping. Player-facing routes, UI text, current files, symbols, test titles, helpers, and acceptance gates use domain outcomes from the AGENTS naming convention.
+- Treat `R:\Projects\SillytavernUpgrade\TarotEngine\Marinara-Engine` as WorldForge's sibling reference when the owner says TarotEngine. Inspect the local sibling and its git state before considering public repositories with the same name.
+- Background campaign work owns a dedicated campaign-scoped SQLite handle for its full lifetime. The global active-campaign connection can close or switch independently.
+- Commit domain state, terminal operation status, lock release, and the terminal event in one transaction so crash recovery cannot report a completed write as a failed operation.
+- When config supplies a build source and SQLite owns the build lock, linearize source mutation and build acquisition per campaign, then freeze the exact source snapshot in the build row.
+- Removing a player-flow caller does not remove a duplicate writer. Unmount every competing mutation endpoint before declaring a new owner exclusive.
+- Pair universal invariants with non-vacuous product minimums. Rules such as "every actor has a goal" still accept an empty roster unless the contract also requires actors.
 
 ## Mechanics Acceptance
 
+- When the owner authorizes a hard break, update every affected caller, fixture, migration, and invariant to the canonical contract; compatibility branches and preserved obsolete behavior are out of scope.
+- Treat auxiliary tooling defects as bounded side work: repair them when they affect acceptance evidence, otherwise record the gap and continue the feature instead of blocking its delivery.
 - A green test suite or one-turn smoke does not prove playability.
+- Treat world-build acceptance and gameplay acceptance as separate halves of the living-world outcome. Closing at World Review requires explicit user agreement that playable turns are deferred.
+- Report playtest depth in completed player actions. Opening is turn zero; build events, actor jobs, model stages, retries, and reloads do not increase the gameplay-turn count.
+- A pristine 60-turn acceptance lane requires a named human to choose each action from the visible player surface; automation may enter and capture the choice.
+- Add a smoke test only when it proves a named risk that focused contract tests and the real player path do not already prove.
 - Every mechanics slice that changes player flow needs a manual playtest note: exact path, player action tried, observed result, and whether it is pristine acceptance or diagnostic.
 - A planned playtest gate is a hard gate: execute the player path and record the evidence before moving to the next architecture item.
 - Backend-only work after the accepted scope boundary is exploratory code, not accepted product work, until the owner explicitly scopes it and manual playtests prove the player path.
@@ -37,11 +52,8 @@
 
 ## UI And Narration
 
-- Send every UX/UI task or visible interface change to GLM-5.2 Coding Plan in Droid before implementation, then carry its verdict into the active task notes.
-- If the first GLM invocation fails or appears silent, fix the GLM/Droid invocation or use the approved GLM channel; do not implement or restyle the UI by hand.
-- Give Droid GLM reviews a real work window. Treat a few minutes of silence as normal model processing and wait for an explicit completion or error signal before judging the run.
-- Send prompts, model instructions, visible copy, and substantial prose through GLM review with `humanizer` and `deslop`, then carry the verdict or rewrite note into the active task notes.
-- Treat `docs/UI Concept.html` as the mechanics UI style canon. GLM UI plans must reference it, and missing required graphics should be created or generated from that visual language before implementation.
+- GLM/Droid review belonged to the previous model workflow. Current Sol owns UI, prompt, and copy judgment directly; use `humanizer` and `deslop` where prose needs them and never add GLM as a delivery gate.
+- Treat `docs/UI Concept.html` as the mechanics UI style canon, and create missing graphics from that visual language before implementation.
 - Render accepted World DNA and similar generated world facts as structured review surfaces, with separated fields and visible hierarchy; dense raw label/value prose blocks are a UI defect.
 - Campaign setup screens must follow the approved Concept -> World DNA -> World generation -> World Review -> Player sequence from `docs/UI Concept.html`. Mechanics proof shells can prove data flow, but product routes should render the approved step surface.
 - Do not use mechanical proof screenshots as a substitute for product UI. Proof artifacts verify behavior after the product surface exists.
@@ -77,3 +89,4 @@
 - Oracle/Pro asks need actual case files: code paths, failing output, target contract, current diff, and proof artifacts.
 - If an Oracle/browser wrapper fails, distinguish tool failure from model advice.
 - Treat empty or zero-height browser message containers as extraction limits. Verify chat completeness through attachment/export/scroll evidence before describing missing content.
+- When a delegated analysis stalls past one focused status request and one bounded synthesis request, stop that worker, continue from verified local evidence, and use a fresh reviewer at the next decision gate.

@@ -501,11 +501,76 @@ function defineStoreManifestEntry(entry: StoreManifestEntryBase): StoreManifestE
   });
 }
 
-export const PHASE95_SQLITE_STORE_TABLES = [
+export const CAMPAIGN_PLAY_SQLITE_TABLES = [
+  "campaign_play_states",
+  "campaign_play_characters",
+  "campaign_play_turns",
+  "campaign_play_turn_results",
+  "campaign_play_runtime_events",
+  "campaign_play_turn_events",
+  "campaign_play_model_stages",
+  "campaign_play_narrations",
+  "campaign_play_commands",
+  "campaign_play_receipts",
+  "campaign_play_events",
+  "campaign_play_event_exposures",
+  "campaign_play_route_states",
+  "campaign_play_actor_conditions",
+  "campaign_play_pressure_states",
+  "campaign_play_actor_plans",
+  "campaign_play_actor_schedules",
+  "campaign_play_actor_due_sets",
+  "campaign_play_actor_jobs",
+  "campaign_play_actor_proposals",
+  "campaign_play_actor_knowledge",
+  "campaign_play_observations",
+] as const;
+
+const CAMPAIGN_PLAY_EVIDENCE_SQLITE_TABLES = new Set<string>([
+  "campaign_play_runtime_events",
+  "campaign_play_turn_events",
+  "campaign_play_model_stages",
+  "campaign_play_narrations",
+]);
+
+const CAMPAIGN_PLAY_DERIVED_SQLITE_TABLES = new Set<string>([
+  "campaign_play_actor_jobs",
+  "campaign_play_actor_proposals",
+]);
+
+const CAMPAIGN_PLAY_STORE_MANIFEST_BASE: readonly StoreManifestEntryBase[] =
+  CAMPAIGN_PLAY_SQLITE_TABLES.map((table) => ({
+    store: `sqlite:${table}`,
+    authorityLevel: CAMPAIGN_PLAY_EVIDENCE_SQLITE_TABLES.has(table)
+      ? "evidence"
+      : CAMPAIGN_PLAY_DERIVED_SQLITE_TABLES.has(table)
+        ? "derived"
+        : "authoritative",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "reject",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  }));
+
+export const CAMPAIGN_STATE_SQLITE_TABLES = [
   "campaigns",
+  "campaign_worlds",
+  "campaign_world_builds",
+  "campaign_world_build_events",
+  "campaign_world_build_stages",
   "locations",
   "location_edges",
   "location_recent_events",
+  "actors",
+  "actor_goals",
+  "actor_relations",
+  "actor_placements",
+  "world_pressures",
+  "world_pressure_actors",
+  "world_pressure_locations",
+  ...CAMPAIGN_PLAY_SQLITE_TABLES,
   "players",
   "npcs",
   "items",
@@ -540,8 +605,8 @@ export const PHASE95_SQLITE_STORE_TABLES = [
   "clean_gameplay_minor_pois",
 ] as const;
 
-export const PHASE95_REQUIRED_STORE_KEYS = [
-  ...PHASE95_SQLITE_STORE_TABLES.map((table) => `sqlite:${table}` as const),
+export const CAMPAIGN_STATE_REQUIRED_STORE_KEYS = [
+  ...CAMPAIGN_STATE_SQLITE_TABLES.map((table) => `sqlite:${table}` as const),
   "json:config",
   "json:chat_history",
   "vectors:episodic_events",
@@ -553,9 +618,9 @@ export const PHASE95_REQUIRED_STORE_KEYS = [
   "evidence:playtest_reports",
 ] as const;
 
-export type Phase95RequiredStoreKey = (typeof PHASE95_REQUIRED_STORE_KEYS)[number];
+export type CampaignStateRequiredStoreKey = (typeof CAMPAIGN_STATE_REQUIRED_STORE_KEYS)[number];
 
-const PHASE95_STORE_MANIFEST_BASE = [
+const CAMPAIGN_STATE_STORE_MANIFEST_BASE = [
   {
     store: "sqlite:campaigns",
     authorityLevel: "authoritative",
@@ -567,7 +632,117 @@ const PHASE95_STORE_MANIFEST_BASE = [
     requiresRowCount: true,
   },
   {
+    store: "sqlite:campaign_worlds",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:campaign_world_builds",
+    authorityLevel: "evidence",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "recorded_reuse",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:campaign_world_build_events",
+    authorityLevel: "evidence",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "recorded_reuse",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:campaign_world_build_stages",
+    authorityLevel: "evidence",
+    clonePolicy: "purge",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "recorded_reuse",
+    sourceCampaignIdPolicy: "purge",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
     store: "sqlite:locations",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:actors",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:actor_goals",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:actor_relations",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:actor_placements",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:world_pressures",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:world_pressure_actors",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:world_pressure_locations",
     authorityLevel: "authoritative",
     clonePolicy: "rewrite",
     rollbackPolicy: "rewrite",
@@ -596,6 +771,7 @@ const PHASE95_STORE_MANIFEST_BASE = [
     requiresHash: true,
     requiresRowCount: true,
   },
+  ...CAMPAIGN_PLAY_STORE_MANIFEST_BASE,
   {
     store: "sqlite:players",
     authorityLevel: "authoritative",
@@ -1008,15 +1184,15 @@ const PHASE95_STORE_MANIFEST_BASE = [
   },
 ] as const satisfies readonly StoreManifestEntryBase[];
 
-export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] =
-  PHASE95_STORE_MANIFEST_BASE.map((entry) => defineStoreManifestEntry(entry));
+export const CAMPAIGN_STATE_STORE_MANIFEST: readonly StoreManifestEntry[] =
+  CAMPAIGN_STATE_STORE_MANIFEST_BASE.map((entry) => defineStoreManifestEntry(entry));
 
 export function assertStoreManifestCoverage(
-  manifest: readonly StoreManifestEntry[] = PHASE95_STORE_MANIFEST,
+  manifest: readonly StoreManifestEntry[] = CAMPAIGN_STATE_STORE_MANIFEST,
 ): StoreManifestEntry[] {
   const parsed = z.array(STORE_MANIFEST_ENTRY_SCHEMA).parse(manifest);
   const stores = new Set<string>();
-  const requiredStores = new Set<string>(PHASE95_REQUIRED_STORE_KEYS);
+  const requiredStores = new Set<string>(CAMPAIGN_STATE_REQUIRED_STORE_KEYS);
   for (const entry of parsed) {
     if (stores.has(entry.store)) {
       throw new Error(`Duplicate store manifest entry: ${entry.store}.`);
@@ -1026,10 +1202,25 @@ export function assertStoreManifestCoverage(
     }
     stores.add(entry.store);
   }
-  for (const required of PHASE95_REQUIRED_STORE_KEYS) {
+  for (const required of CAMPAIGN_STATE_REQUIRED_STORE_KEYS) {
     if (!stores.has(required)) {
       throw new Error(`Missing store manifest entry: ${required}.`);
     }
+  }
+  const firstCampaignPlayIndex = parsed.findIndex(
+    (entry) => entry.store === `sqlite:${CAMPAIGN_PLAY_SQLITE_TABLES[0]}`,
+  );
+  const campaignPlayStores = parsed
+    .slice(firstCampaignPlayIndex, firstCampaignPlayIndex + CAMPAIGN_PLAY_SQLITE_TABLES.length)
+    .map((entry) => entry.store);
+  const expectedCampaignPlayStores = CAMPAIGN_PLAY_SQLITE_TABLES.map(
+    (table) => `sqlite:${table}`,
+  );
+  if (
+    firstCampaignPlayIndex < 0 ||
+    campaignPlayStores.some((store, index) => store !== expectedCampaignPlayStores[index])
+  ) {
+    throw new Error("Campaign Play store manifest entries are outside foreign-key order.");
   }
   return parsed;
 }
@@ -1444,7 +1635,7 @@ export interface GameplayStateServiceContract {
   owner: Exclude<GameplayStateOwner, RuntimeToolName>;
   sourceOfTruth: string;
   delegateTools: readonly RuntimeToolName[];
-  stores: readonly Phase95RequiredStoreKey[];
+  stores: readonly CampaignStateRequiredStoreKey[];
   validators: readonly string[];
   receiptKinds: readonly string[];
   projections: readonly string[];
@@ -2000,7 +2191,7 @@ function assertServiceContractBacking(input: {
     }
   }
   for (const store of contract.stores) {
-    if (!PHASE95_REQUIRED_STORE_KEYS.includes(store as typeof PHASE95_REQUIRED_STORE_KEYS[number])) {
+    if (!CAMPAIGN_STATE_REQUIRED_STORE_KEYS.includes(store as typeof CAMPAIGN_STATE_REQUIRED_STORE_KEYS[number])) {
       throw new Error(
         `Gameplay state lane ${input.entry.lane} service contract references non-manifest store ${store}.`,
       );
@@ -2109,7 +2300,7 @@ function assertDeterministicServiceContractBacking(input: {
     }
   }
   for (const store of contract.stores) {
-    if (!PHASE95_REQUIRED_STORE_KEYS.includes(store as typeof PHASE95_REQUIRED_STORE_KEYS[number])) {
+    if (!CAMPAIGN_STATE_REQUIRED_STORE_KEYS.includes(store as typeof CAMPAIGN_STATE_REQUIRED_STORE_KEYS[number])) {
       throw new Error(
         `Gameplay state lane ${input.entry.lane} deterministic service contract references non-manifest store ${store}.`,
       );

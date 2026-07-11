@@ -1,60 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ---- Track DB calls ----
-interface DbCall {
-  op: "insert";
-  table: string;
-  data: unknown;
-}
-const dbCalls: DbCall[] = [];
-
 // ---- Mocks ----
-vi.mock("node:crypto", () => ({
-  default: {
-    randomUUID: () => "mock-uuid",
-  },
-}));
-
 vi.mock("../../ai/generate-object-safe.js", () => ({
   safeGenerateObject: vi.fn(),
 }));
 
 vi.mock("../../ai/index.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
-}));
-
-vi.mock("../../db/schema.js", () => ({
-  npcs: { _name: "npcs" },
-  locations: { _name: "locations" },
-  factions: { _name: "factions" },
-}));
-
-vi.mock("../../db/index.js", () => {
-  function createChain(table: { _name: string }, calls: { op: string; table: string; data: unknown }[]) {
-    const chain = {
-      values: (data: unknown) => {
-        calls.push({ op: "insert", table: table._name, data });
-        return chain;
-      },
-      run: () => {},
-    };
-    return chain;
-  }
-
-  return {
-    getDb: vi.fn(() => ({
-      transaction: (fn: (tx: unknown) => void) => {
-        const tx = {
-          insert: (table: { _name: string }) => createChain(table, dbCalls),
-        };
-        fn(tx);
-      },
-    })),
-  };
-});
-
-vi.mock("../../vectors/lore-cards.js", () => ({
-  storeLoreCards: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -70,14 +22,10 @@ vi.mock("../../lib/index.js", () => ({
 import {
   parseWorldBook,
   classifyEntries,
-  importClassifiedEntries,
-  type ClassifiedEntry,
   type WorldBookEntry,
 } from "../worldbook-importer.js";
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
-import { storeLoreCards } from "../../vectors/lore-cards.js";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
-import type { ResolveResult } from "../../ai/index.js";
 
 const mockRole: ResolvedRole = {
   provider: {
@@ -89,14 +37,6 @@ const mockRole: ResolvedRole = {
   },
   temperature: 0.2,
   maxTokens: 4096,
-};
-
-const mockEmbedderResult: ResolveResult = {
-  resolved: {
-    provider: mockRole.provider,
-    temperature: 0,
-    maxTokens: 512,
-  },
 };
 
 describe("parseWorldBook", () => {
@@ -156,7 +96,6 @@ describe("parseWorldBook", () => {
     expect(() => parseWorldBook(null)).toThrow();
   });
 });
-
 describe("classifyEntries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -279,71 +218,5 @@ describe("classifyEntries", () => {
       { name: "Relay Warden", type: "character", summary: "A solitary caretaker of relay dishes." },
     ]);
     expect(generateObject).toHaveBeenCalledTimes(4);
-  });
-});
-
-describe("importClassifiedEntries", () => {
-  beforeEach(() => {
-    dbCalls.length = 0;
-    vi.clearAllMocks();
-  });
-
-  it("routes characters to npcs table, locations to locations table, factions to factions table", async () => {
-    const entries: ClassifiedEntry[] = [
-      { name: "Sir Galahad", type: "character", summary: "A noble knight." },
-      { name: "Dark Cave", type: "location", summary: "A deep cave." },
-      { name: "Thieves Guild", type: "faction", summary: "A shadowy organization." },
-    ];
-
-    await importClassifiedEntries("camp-1", entries, mockEmbedderResult);
-
-    const npcInserts = dbCalls.filter((c) => c.table === "npcs");
-    const locInserts = dbCalls.filter((c) => c.table === "locations");
-    const facInserts = dbCalls.filter((c) => c.table === "factions");
-
-    expect(npcInserts).toHaveLength(1);
-    expect((npcInserts[0]!.data as Record<string, unknown>).name).toBe("Sir Galahad");
-
-    expect(locInserts).toHaveLength(1);
-    expect((locInserts[0]!.data as Record<string, unknown>).name).toBe("Dark Cave");
-
-    expect(facInserts).toHaveLength(1);
-    expect((facInserts[0]!.data as Record<string, unknown>).name).toBe("Thieves Guild");
-  });
-
-  it("routes bestiary and lore_general entries to storeLoreCards", async () => {
-    const entries: ClassifiedEntry[] = [
-      { name: "Wyvern", type: "bestiary", summary: "A two-legged dragon." },
-      { name: "Magic System", type: "lore_general", summary: "How magic works." },
-    ];
-
-    await importClassifiedEntries("camp-1", entries, mockEmbedderResult);
-
-    expect(storeLoreCards).toHaveBeenCalledTimes(1);
-    const loreArgs = vi.mocked(storeLoreCards).mock.calls[0]!;
-    expect(loreArgs[0]).toEqual([
-      { term: "Wyvern", definition: "A two-legged dragon.", category: "npc" },
-      { term: "Magic System", definition: "How magic works.", category: "concept" },
-    ]);
-  });
-
-  it("returns correct counts in ImportResult", async () => {
-    const entries: ClassifiedEntry[] = [
-      { name: "Hero", type: "character", summary: "A brave hero." },
-      { name: "Villain", type: "character", summary: "An evil villain." },
-      { name: "Town", type: "location", summary: "A small town." },
-      { name: "Order", type: "faction", summary: "A holy order." },
-      { name: "Troll", type: "bestiary", summary: "A bridge troll." },
-      { name: "History", type: "lore_general", summary: "Ancient history." },
-    ];
-
-    const result = await importClassifiedEntries("camp-1", entries, mockEmbedderResult);
-
-    expect(result.imported).toEqual({
-      characters: 2,
-      locations: 1,
-      factions: 1,
-      loreCards: 2,
-    });
   });
 });

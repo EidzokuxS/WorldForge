@@ -1,0 +1,707 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { closeDb } from "../db/index.js";
+import { openCampaignWorldDatabase, type CampaignWorldDatabaseHandle } from "../campaign-world/world-database.js";
+import { createCampaignWorldRepository } from "../campaign-world/world-repository.js";
+import {
+  advanceBuildToPersistence,
+  candidateFixture,
+  createMigratedCampaign,
+  sourceFixture,
+} from "../campaign-world/world-repository.test-support.js";
+import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
+import {
+  calculateCampaignPlayActorNextDueTime,
+  createCampaignPlayActorScheduler,
+  selectCampaignPlayActorPlanStep,
+  type CampaignPlayActorDueSet,
+} from "./actor-scheduler.js";
+import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
+import { canonicalizeCampaignPlayProjection, hashCampaignPlayProjection,
+  type CampaignPlayProjectionRecord } from "./campaign-play-projection.js";
+import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
+import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
+
+const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
+const HASH_A = "a".repeat(64);
+const HASH_B = "b".repeat(64);
+const TEST_MODEL_PRICING = { currency: "USD", tokenUnit: 1_000_000,
+  inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
+let root = "";
+let previousCampaignsRoot: string | undefined;
+let handles: Array<CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle> = [];
+
+beforeEach(() => {
+  previousCampaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-actor-scheduler-"));
+  process.env.GSD_CAMPAIGNS_ROOT = root;
+  handles = [];
+});
+
+afterEach(() => {
+  for (const handle of handles) handle.close();
+  closeDb();
+  if (previousCampaignsRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;
+  else process.env.GSD_CAMPAIGNS_ROOT = previousCampaignsRoot;
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+function track<T extends CampaignWorldDatabaseHandle | CampaignPlayDatabaseHandle>(handle: T): T {
+  handles.push(handle);
+  return handle;
+}
+
+function buildAcceptedCampaign(): void {
+  createMigratedCampaign(root, CAMPAIGN_ID);
+  const handle = openCampaignWorldDatabase(CAMPAIGN_ID);
+  try {
+    const repository = createCampaignWorldRepository(handle);
+    const source = sourceFixture(CAMPAIGN_ID);
+    const buildId = "build-scheduler";
+    repository.acquireBuild({
+      buildId,
+      source,
+      expectedSourceDigest: source.sourceDigest,
+      providerId: "test-provider",
+      model: "test-model",
+      startedAt: 1_000,
+    });
+    advanceBuildToPersistence(repository, buildId);
+    const candidate = candidateFixture(source);
+    const draft = {
+      ...candidate.draft,
+      placements: candidate.draft.placements.map((placement) =>
+        placement.id === "placement-b" ? { ...placement, locationId: "location-a" } : placement),
+    };
+    const review = repository.completeBuild({
+      buildId,
+      candidate: { ...candidate, draft, contentHash: calculateCampaignWorldContentHash(source.sourceDigest, draft) },
+      completedAt: 1_100,
+    });
+    repository.acceptWorld({
+      expectedVersion: review.version,
+      expectedContentHash: review.contentHash,
+      acceptedAt: 1_200,
+    });
+  } finally {
+    handle.close();
+  }
+}
+
+function modelEvidence(actualModel: string) {
+  return {
+    actualProviderId: "test-provider",
+    actualModel,
+    actualStrategy: "strict_object" as const,
+    inputTokens: 10,
+    outputTokens: 10,
+    durationMs: 20,
+    finishReason: "stop",
+  };
+}
+
+function planJson(actorId: string, goalId: string, withLocationPrecondition: boolean) {
+  const intent = {
+    kind: "attempt" as const,
+    targets: [{ kind: "goal" as const, id: goalId }],
+    method: "Advance the active goal",
+    stakes: "The actor's current objective",
+  };
+  return {
+    intentJson: canonicalizeCampaignPlayProjection(intent),
+    preconditionsJson: canonicalizeCampaignPlayProjection(withLocationPrecondition
+      ? [{ kind: "actor_at_location", actorId, locationId: "location-a" }]
+      : []),
+    stepsJson: canonicalizeCampaignPlayProjection([
+      { stepId: `step-${actorId}-one`, order: 0, intent,
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
+      { stepId: `step-${actorId}-two`, order: 1,
+        intent: { ...intent, method: "Continue the active goal" },
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 8 } },
+    ]),
+  };
+}
+
+function createReadyFixture(completedActions: 30 | 60 = 30) {
+  buildAcceptedCampaign();
+  const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+  const states = createCampaignPlayStateRepository(handle);
+  states.createState({ eventId: "state-created", createdAt: 1_300 });
+  const settledClock = completedActions * 10;
+  states.commitMechanicalAndRuntime({
+    worldVersionAdvance: 1,
+    event: {
+      eventId: "scheduler-fixture-ready",
+      turnId: null,
+      kind: "character_created",
+      workerEpoch: null,
+      protectedPayloadHash: HASH_A,
+      createdAt: 1_400,
+    },
+    mutate(context) {
+      context.sqlite.prepare(`INSERT INTO actors (
+        id, campaign_id, kind, controller, role, name, summary, traits, tags
+      ) VALUES ('actor-player', ?, 'person', 'human', 'player', 'Player',
+        'A human visitor.', '[]', '[]')`).run(context.campaignId);
+      context.sqlite.prepare(`INSERT INTO campaign_play_characters (
+        actor_id, campaign_id, record_json, record_hash, source_kind, source_digest, created_at
+      ) VALUES ('actor-player', ?, '{"name":"Player"}', ?, 'created', ?, 1400)`)
+        .run(context.campaignId, HASH_A, HASH_B);
+      context.sqlite.prepare(`INSERT INTO actor_placements (
+        id, campaign_id, actor_id, location_id, placement_kind
+      ) VALUES ('placement-player', ?, 'actor-player', 'location-a', 'present')`)
+        .run(context.campaignId);
+
+      const schedules = [
+        { actorId: "actor-a", goalId: "goal-a", nextAt: settledClock - 10, priority: 3, debt: 0, cadence: 20 },
+        { actorId: "actor-b", goalId: "goal-b", nextAt: settledClock - 10, priority: 5, debt: 0, cadence: 30 },
+        { actorId: "actor-d", goalId: "goal-d", nextAt: settledClock - 5, priority: 4, debt: 2, cadence: 40 },
+        { actorId: "actor-c", goalId: "goal-c", nextAt: settledClock + 1, priority: 5, debt: 0, cadence: 25 },
+      ];
+      for (const schedule of schedules) {
+        const planId = `plan-${schedule.actorId}`;
+        const json = planJson(schedule.actorId, schedule.goalId, schedule.actorId === "actor-b");
+        context.sqlite.prepare(`INSERT INTO campaign_play_actor_plans (
+          plan_id, campaign_id, actor_id, goal_id, plan_version, intent_json,
+          preconditions_json, cadence_minutes, priority, steps_json, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', 1400, 1400)`).run(
+          planId, context.campaignId, schedule.actorId, schedule.goalId,
+          json.intentJson, json.preconditionsJson, schedule.cadence, schedule.priority, json.stepsJson,
+        );
+        context.sqlite.prepare(`INSERT INTO campaign_play_actor_schedules (
+          schedule_id, campaign_id, actor_id, plan_id, next_act_at_world_time_minutes,
+          last_act_at_world_time_minutes, priority, agency_debt, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 1400, 1400)`).run(
+          `schedule-${schedule.actorId}`, context.campaignId, schedule.actorId, planId,
+          schedule.nextAt, schedule.priority, schedule.debt,
+        );
+      }
+      context.sqlite.prepare(`UPDATE campaign_play_states SET
+        setup_phase = 'ready', world_time_minutes = ?, opened_at = 1400
+        WHERE campaign_id = ?`).run(settledClock, context.campaignId);
+    },
+  });
+  const turns = createCampaignPlayTurnRepository(handle);
+  const ready = states.loadState()!;
+  turns.admitTurn({
+    turnId: "turn-player",
+    supersedesTurnId: null,
+    mutationId: "turn-admitted",
+    submittedAt: 1_500,
+    document: {
+      turnKind: "player_action",
+      request: {
+        source: "freeform",
+        idempotencyKey: "player-action-one",
+        text: "I wait and watch the harbor.",
+        expectedWorldVersion: ready.authority.worldVersion,
+        expectedRuntimeRevision: ready.authority.runtimeRevision,
+      },
+      frame: ready.publicState.projection as CampaignPlayProjectionRecord,
+    },
+    modelSelection: {
+      turnKind: "player_action",
+      judge: { providerId: "test-provider", model: "judge", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      gameMaster: { providerId: "test-provider", model: "game-master", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      actorReplanner: { providerId: "test-provider", model: "actor-replanner", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+      narrator: { providerId: "test-provider", model: "narrator", strategy: "strict_object", pricing: TEST_MODEL_PRICING },
+    },
+  });
+  const judge = turns.claimStage({
+    turnId: "turn-player", expectedStage: "admitted", observedEpoch: 0,
+    owner: "scheduler-worker", claimedAt: 1_510, leaseExpiresAt: 2_000,
+    mutationId: "judge-claimed",
+  });
+  turns.acceptModelArtifact({
+    token: judge,
+    artifact: {
+      ruling: {
+        disposition: "deterministic",
+        normalizedIntent: {
+          originalText: "I wait and watch the harbor.",
+          source: "freeform",
+          choiceHandle: null,
+          kind: "wait",
+          targets: [],
+          method: null,
+          stakes: null,
+        },
+        citedVisibleFactHandles: [],
+        resultBounds: { minimum: "limited", maximum: "success" },
+        elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
+        uncertainty: { kind: "none" },
+        reason: "Waiting and watching is directly possible.",
+        clarificationQuestion: null,
+      },
+      resolution: { kind: "deterministic", result: "success" },
+      uncertaintyAuthority: null,
+      publicResult: {
+        intentKind: "wait",
+        disposition: "deterministic",
+        result: "success",
+        clarificationQuestion: null,
+      },
+      primaryPlan: { kind: "game_master_required" },
+    },
+    evidence: modelEvidence("judge"),
+    mutationDomain: "runtime", acceptedAt: 1_520, mutationId: "judge-accepted",
+  });
+  const gameMaster = turns.claimStage({
+    turnId: "turn-player", expectedStage: "judged", observedEpoch: 1,
+    owner: "scheduler-worker", claimedAt: 1_530, leaseExpiresAt: 2_000,
+    mutationId: "game-master-claimed",
+  });
+  const judgeArtifactHash = turns.loadAcceptedModelArtifact("turn-player", "judge")?.artifactHash;
+  if (!judgeArtifactHash) throw new Error("Accepted Judge fixture artifact disappeared.");
+  const gameMasterBatch = {
+    batchId: "batch-scheduler-fixture",
+    baseWorldVersion: ready.authority.worldVersion,
+    commands: [{
+      kind: "record_world_event" as const,
+      commandId: "command-scheduler-fixture",
+      batchId: "batch-scheduler-fixture",
+      order: 0,
+      causalParent: { kind: "turn" as const, turnId: "turn-player" },
+      source: { kind: "system" as const, system: "game_master" as const },
+      expectedWorldVersion: ready.authority.worldVersion,
+      eventClass: "scene" as const,
+      summary: "The player watches the harbor.",
+      affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
+      readScope: [{ kind: "actor" as const, id: "actor-player" }],
+      writeScope: [],
+      exposure: { mode: "protected" as const },
+    }],
+  };
+  turns.acceptModelArtifact({
+    token: gameMaster,
+    artifact: {
+      judgeArtifactHash,
+      batch: gameMasterBatch,
+      batchHash: hashCampaignPlayProjection(gameMasterBatch),
+    },
+    evidence: modelEvidence("game-master"),
+    mutationDomain: "runtime", acceptedAt: 1_540, mutationId: "game-master-accepted",
+  });
+  const primary = turns.claimStage({
+    turnId: "turn-player", expectedStage: "planned", observedEpoch: 2,
+    owner: "scheduler-worker", claimedAt: 1_550, leaseExpiresAt: 2_000,
+    mutationId: "primary-claimed",
+  });
+  turns.commitDeterministic({
+    token: primary,
+    transition: "primary_settled",
+    worldVersionAdvance: 0,
+    committedAt: 1_560,
+    mutationId: "primary-settled",
+  });
+  return { handle, states, turns, settledClock };
+}
+
+function freezeCurrent(handle: CampaignPlayDatabaseHandle): CampaignPlayActorDueSet {
+  const state = createCampaignPlayStateRepository(handle).loadState()!;
+  return createCampaignPlayActorScheduler(handle).freezeDueSet({
+    turnId: "turn-player",
+    expectedWorldVersion: state.authority.worldVersion,
+    expectedRuntimeRevision: state.authority.runtimeRevision,
+  });
+}
+
+function persistIncapacitatedCondition(
+  handle: CampaignPlayDatabaseHandle,
+  actorId: string,
+  createdAt: number,
+): void {
+  const states = createCampaignPlayStateRepository(handle);
+  const state = states.loadState()!;
+  const projection = state.mechanical.projection as CampaignPlayProjectionRecord;
+  const actorConditions = projection.actorConditions as CampaignPlayProjectionRecord[];
+  const resultWorldHash = hashCampaignPlayProjection({
+    ...projection,
+    actorConditions: [...actorConditions, {
+      actorId,
+      condition: "incapacitated",
+      present: true,
+      summary: "The actor cannot take an action during this cadence.",
+    }].sort((left, right) => String(left.actorId).localeCompare(String(right.actorId))),
+  });
+  states.commitMechanical({
+    updatedAt: createdAt,
+    worldVersionAdvance: 1,
+    mutate(context) {
+      const commandId = `fixture-command-incapacitate-${actorId}`;
+      const receiptId = `fixture-receipt-incapacitate-${actorId}`;
+      const eventId = `fixture-event-incapacitate-${actorId}`;
+      const payload = canonicalizeCampaignPlayProjection({
+        actorId, condition: "incapacitated", operation: "set",
+        summary: "The actor cannot take an action during this cadence.",
+      });
+      context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+        command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+        causal_parent_json, source_json, expected_world_version, read_scope_json,
+        write_scope_json, exposure_policy_json, arguments_hash,
+        protected_payload_json, protected_payload_hash, created_at
+      ) VALUES (?, ?, 'turn-player', ?, 0, 'set_actor_condition',
+        '{"kind":"turn","turnId":"turn-player"}',
+        '{"kind":"system","system":"game_master"}', ?, ?, ?,
+        '{"mode":"protected"}', ?, ?, ?, ?)`).run(
+        commandId, context.campaignId, `fixture-batch-incapacitate-${actorId}`,
+        context.priorWorldVersion,
+        canonicalizeCampaignPlayProjection([{ kind: "actor", id: actorId }]),
+        canonicalizeCampaignPlayProjection([{ kind: "actor", id: actorId }]),
+        HASH_A, payload, hashCampaignPlayProjection(payload), createdAt,
+      );
+      context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+        receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+        applied_world_mutation, prior_world_version, result_world_version,
+        prior_world_hash, result_world_hash, causal_event_ids_json,
+        protected_payload_json, protected_payload_hash, created_at
+      ) VALUES (?, ?, 'turn-player', ?, 'set_actor_condition', 'applied', 1,
+        ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        receiptId, context.campaignId, commandId, context.priorWorldVersion,
+        context.targetWorldVersion, state.authority.worldHash, resultWorldHash,
+        canonicalizeCampaignPlayProjection([eventId]), payload,
+        hashCampaignPlayProjection(payload), createdAt,
+      );
+      context.sqlite.prepare(`INSERT INTO campaign_play_events (
+        event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+        event_kind, source_json, world_time_minutes, world_version,
+        affected_refs_json, before_payload_json, after_payload_json,
+        payload_hash, created_at
+      ) VALUES (?, ?, 'turn-player', ?, ?, NULL, 'actor_condition_changed',
+        '{"kind":"system","system":"game_master"}', ?, ?, ?, '{}', ?, ?, ?)`)
+        .run(eventId, context.campaignId, commandId, receiptId,
+          state.authority.worldTimeMinutes, context.targetWorldVersion,
+          canonicalizeCampaignPlayProjection([{ kind: "actor", id: actorId }]),
+          payload, hashCampaignPlayProjection(payload), createdAt);
+      context.sqlite.prepare(`INSERT INTO campaign_play_actor_conditions (
+        actor_id, campaign_id, condition, present, summary, causal_receipt_id,
+        world_version, updated_at
+      ) VALUES (?, ?, 'incapacitated', 1,
+        'The actor cannot take an action during this cadence.', ?, ?, ?)`)
+        .run(actorId, context.campaignId, receiptId, context.targetWorldVersion, createdAt);
+    },
+  });
+}
+
+describe("Campaign Play actor scheduler", () => {
+  it.each([30, 60] as const)(
+    "freezes the seeded %s-action due set by time, priority, and actor ID without a cast sweep",
+    (completedActions) => {
+      const { handle } = createReadyFixture(completedActions);
+      const dueSet = freezeCurrent(handle);
+      expect(dueSet.decisions.map((decision) => decision.actorId)).toEqual([
+        "actor-b", "actor-a", "actor-d",
+      ]);
+      expect(dueSet.decisions.map((decision) => decision.disposition)).toEqual([
+        "wake", "wake", "wake",
+      ]);
+      expect(dueSet.decisions[2]).toMatchObject({ dueReason: "agency_debt" });
+      expect(dueSet.decisions.some((decision) => decision.actorId === "actor-c")).toBe(false);
+      expect(dueSet.decisions.some((decision) => decision.actorId === "actor-d")).toBe(true);
+    },
+  );
+
+  it("admits one queued job per due actor and reopens with identical deterministic job state", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    let admitted = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "jobs-admitted", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: hashCampaignPlayProjection(dueSet), createdAt: 1_600,
+      },
+      mutate(context) {
+        admitted = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
+      },
+    });
+    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a", "actor-d"]);
+    expect(new Set(admitted.map((job) => job.jobId)).size).toBe(3);
+    expect(admitted.every((job) => job.stage === "queued" && job.workerEpoch === 0)).toBe(true);
+    expect(scheduler.loadDueSet("turn-player")).toEqual(dueSet);
+    expect(() => handle.sqlite.prepare(`UPDATE campaign_play_actor_due_sets
+      SET created_at = created_at + 1 WHERE turn_id = 'turn-player'`).run()).toThrow();
+    expect(() => handle.sqlite.prepare(`DELETE FROM campaign_play_actor_due_sets
+      WHERE turn_id = 'turn-player'`).run()).toThrow();
+    expect(freezeCurrent(handle).decisions.every((decision) =>
+      decision.disposition === "skip" && decision.reason === "already_considered_this_turn")).toBe(true);
+
+    const before = structuredClone(admitted);
+    handle.close();
+    handles = handles.filter((candidate) => candidate !== handle);
+    const reopened = track(openCampaignPlayDatabase(CAMPAIGN_ID));
+    const reopenedScheduler = createCampaignPlayActorScheduler(reopened);
+    expect(reopenedScheduler.listTurnJobs("turn-player")).toEqual(before);
+    expect(reopenedScheduler.loadDueSet("turn-player")).toEqual(dueSet);
+  });
+
+  it("rejects a due-set decision ledger when its required actor jobs are absent", () => {
+    const { handle } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    handle.sqlite.prepare(`INSERT INTO campaign_play_actor_due_sets (
+      turn_id, campaign_id, settled_world_time_minutes,
+      base_world_version, base_runtime_revision, decisions_json,
+      due_set_hash, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)` ).run(
+      dueSet.turnId,
+      dueSet.campaignId,
+      dueSet.settledWorldTimeMinutes,
+      dueSet.baseWorldVersion,
+      dueSet.baseRuntimeRevision,
+      canonicalizeCampaignPlayProjection(dueSet.decisions),
+      hashCampaignPlayProjection({ domain: "campaign_play_actor_due_set", value: dueSet }),
+      1_600,
+    );
+
+    expect(() => scheduler.validateTurnSettlement(dueSet.turnId))
+      .toThrow("scheduler_job_invalid");
+  });
+
+  it("builds a due actor frame from the latest mechanical version and only actor-scoped truth", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "jobs-for-frame", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: hashCampaignPlayProjection(dueSet), createdAt: 1_600,
+      },
+      mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
+    });
+    const actorAJob = jobs.find((job) => job.actorId === "actor-a")!;
+    const before = scheduler.buildActorFrame(actorAJob.jobId);
+    states.commitMechanical({
+      updatedAt: 1_610,
+      worldVersionAdvance: 1,
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE actor_placements SET location_id = 'location-c'
+          WHERE campaign_id = ? AND actor_id = 'actor-a' AND placement_kind = 'present'`)
+          .run(context.campaignId);
+      },
+    });
+    const after = scheduler.buildActorFrame(actorAJob.jobId);
+    expect(after.baseWorldVersion).toBe(before.baseWorldVersion + 1);
+    expect(after.placements).toMatchObject([{ actorId: "actor-a", locationId: "location-c" }]);
+    expect(after.goals.map((goal) => goal.actorId)).toEqual(["actor-a"]);
+    expect(after.relations.every((relation) =>
+      relation.sourceActorId === "actor-a" || relation.targetActorId === "actor-a")).toBe(true);
+    expect(after.localRoutes.map((route) => route.id)).toEqual(["route-b", "route-c"]);
+    expect(after.knownPressures.map((pressure) => pressure.id)).toEqual(["pressure-a", "pressure-b"]);
+    expect(after.knownEvents).toEqual([]);
+    expect(after.authorizedRefs.some((reference) => reference.kind === "actor" && reference.id === "actor-c"))
+      .toBe(false);
+    expect(after.selection).toMatchObject({ kind: "step", step: { stepId: "step-actor-a-one" } });
+  });
+
+  it("turns a failed persisted precondition into an explicit replan boundary", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "jobs-for-precondition", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: hashCampaignPlayProjection(dueSet), createdAt: 1_600,
+      },
+      mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
+    });
+    const actorBJob = jobs.find((job) => job.actorId === "actor-b")!;
+    expect(scheduler.buildActorFrame(actorBJob.jobId).selection).toMatchObject({ kind: "step" });
+    states.commitMechanical({
+      updatedAt: 1_610,
+      worldVersionAdvance: 1,
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE actor_placements SET location_id = 'location-c'
+          WHERE campaign_id = ? AND actor_id = 'actor-b' AND placement_kind = 'present'`)
+          .run(context.campaignId);
+      },
+    });
+    expect(scheduler.buildActorFrame(actorBJob.jobId).selection).toEqual({
+      kind: "replan_required",
+      reason: "precondition_failed",
+      failedPreconditionIndexes: [0],
+    });
+  });
+
+  it("returns a replan boundary after the final persisted plan step settles", () => {
+    const plan = {
+      planId: "plan-actor-a",
+      campaignId: CAMPAIGN_ID,
+      actorId: "actor-a",
+      goalId: "goal-a",
+      planVersion: 1,
+      intent: {
+        kind: "attempt" as const,
+        targets: [{ kind: "goal" as const, id: "goal-a" }],
+        method: "Advance the active goal",
+        stakes: "The actor's current objective",
+      },
+      preconditions: [],
+      cadenceMinutes: 20,
+      priority: 3,
+      steps: [
+        { stepId: "step-a-one", order: 0, intent: {
+          kind: "attempt" as const, targets: [{ kind: "goal" as const, id: "goal-a" }],
+          method: "Begin the active goal", stakes: "The actor's current objective",
+        }, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
+        { stepId: "step-a-two", order: 1, intent: {
+          kind: "attempt" as const, targets: [{ kind: "goal" as const, id: "goal-a" }],
+          method: "Finish the active goal", stakes: "The actor's current objective",
+        }, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
+      ],
+      status: "active" as const,
+    };
+    expect(selectCampaignPlayActorPlanStep({
+      plan,
+      settledStepCount: 2,
+      failedPreconditionIndexes: [],
+    })).toEqual({
+      kind: "replan_required",
+      reason: "plan_exhausted",
+      failedPreconditionIndexes: [],
+    });
+  });
+
+  it("calculates settled and deferred cadence from the settled clock without catch-up", () => {
+    expect(calculateCampaignPlayActorNextDueTime({
+      settledWorldTimeMinutes: 600,
+      cadenceMinutes: 30,
+      lastActAtWorldTimeMinutes: 10,
+      agencyDebt: 7,
+      outcome: "settled",
+    })).toEqual({ nextActAtWorldTimeMinutes: 630, lastActAtWorldTimeMinutes: 600, agencyDebt: 0 });
+    expect(calculateCampaignPlayActorNextDueTime({
+      settledWorldTimeMinutes: 600,
+      cadenceMinutes: 30,
+      lastActAtWorldTimeMinutes: 10,
+      agencyDebt: 7,
+      outcome: "deferred",
+    })).toEqual({ nextActAtWorldTimeMinutes: 630, lastActAtWorldTimeMinutes: 10, agencyDebt: 8 });
+  });
+
+  it.each([30, 60] as const)(
+    "keeps actor cadence bounded across % consecutive settled-clock advances and a restart",
+    (completedActions) => {
+      let schedule = {
+        nextActAtWorldTimeMinutes: 0,
+        lastActAtWorldTimeMinutes: null as number | null,
+        agencyDebt: 0,
+      };
+      let opportunities = 0;
+      let deferred = 0;
+      for (let action = 1; action <= completedActions; action += 1) {
+        const settledWorldTimeMinutes = action * 10;
+        if (schedule.nextActAtWorldTimeMinutes <= settledWorldTimeMinutes) {
+          opportunities += 1;
+          const outcome = opportunities % 4 === 0 ? "deferred" as const : "settled" as const;
+          if (outcome === "deferred") deferred += 1;
+          schedule = calculateCampaignPlayActorNextDueTime({
+            settledWorldTimeMinutes,
+            cadenceMinutes: 20,
+            lastActAtWorldTimeMinutes: schedule.lastActAtWorldTimeMinutes,
+            agencyDebt: schedule.agencyDebt,
+            outcome,
+          });
+          expect(schedule.nextActAtWorldTimeMinutes).toBe(settledWorldTimeMinutes + 20);
+        }
+        if (action === Math.floor(completedActions / 2)) {
+          schedule = JSON.parse(JSON.stringify(schedule)) as typeof schedule;
+        }
+      }
+      expect(opportunities).toBe(Math.ceil(completedActions / 2));
+      expect(deferred).toBe(Math.floor(opportunities / 4));
+      expect(schedule.agencyDebt).toBe(opportunities % 4 === 0 ? 1 : 0);
+    },
+  );
+
+  it("records an incapacitated due actor as deferred and advances debt and cadence durably", () => {
+    const { handle, states, settledClock } = createReadyFixture();
+    persistIncapacitatedCondition(handle, "actor-a", 1_580);
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    expect(dueSet.decisions.find((decision) => decision.actorId === "actor-a")).toMatchObject({
+      disposition: "defer",
+      reason: "incapacitated",
+      nextDueAtWorldTimeMinutes: settledClock + 20,
+      resultAgencyDebt: 1,
+    });
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "deferred-job-admitted", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: hashCampaignPlayProjection(dueSet), createdAt: 1_600,
+      },
+      mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
+    });
+    expect(jobs.map((job) => [job.actorId, job.stage])).toEqual([
+      ["actor-b", "queued"], ["actor-a", "deferred"], ["actor-d", "queued"],
+    ]);
+    expect(jobs.find((job) => job.actorId === "actor-a")?.completedAt).toBe(1_600);
+    expect(handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextAt,
+      agency_debt AS agencyDebt FROM campaign_play_actor_schedules
+      WHERE campaign_id = ? AND actor_id = 'actor-a'`).get(handle.campaignId)).toEqual({
+      nextAt: settledClock + 20,
+      agencyDebt: 1,
+    });
+  });
+
+  it("rejects cloned and stale due sets with zero admitted jobs", () => {
+    const { handle, states } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    expect(() => states.commitRuntime({
+      event: {
+        eventId: "forged-due-set", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: HASH_A, createdAt: 1_600,
+      },
+      mutate(context) {
+        scheduler.admitDueSet({ dueSet: structuredClone(dueSet), context, createdAt: 1_600 });
+      },
+    })).toThrowError(expect.objectContaining({ code: "scheduler_due_set_invalid" }));
+    expect(scheduler.listTurnJobs("turn-player")).toEqual([]);
+
+    states.commitRuntime({
+      event: {
+        eventId: "scheduler-state-advanced", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: HASH_B, createdAt: 1_610,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE campaign_play_actor_schedules
+          SET agency_debt = agency_debt + 1, updated_at = 1610
+          WHERE campaign_id = ? AND actor_id = 'actor-c'`).run(context.campaignId);
+      },
+    });
+    expect(() => states.commitRuntime({
+      event: {
+        eventId: "stale-due-set", turnId: "turn-player", kind: "actor_job_transitioned",
+        workerEpoch: 3, protectedPayloadHash: HASH_A, createdAt: 1_620,
+      },
+      mutate(context) { scheduler.admitDueSet({ dueSet, context, createdAt: 1_620 }); },
+    })).toThrowError(expect.objectContaining({ code: "scheduler_due_set_stale" }));
+    expect(scheduler.listTurnJobs("turn-player")).toEqual([]);
+  });
+
+  it("rejects a stored due set whose durable hash disagrees with its canonical decisions", () => {
+    const { handle } = createReadyFixture();
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    handle.sqlite.prepare(`INSERT INTO campaign_play_actor_due_sets (
+      turn_id, campaign_id, settled_world_time_minutes, base_world_version,
+      base_runtime_revision, decisions_json, due_set_hash, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1600)`).run(
+      dueSet.turnId,
+      dueSet.campaignId,
+      dueSet.settledWorldTimeMinutes,
+      dueSet.baseWorldVersion,
+      dueSet.baseRuntimeRevision,
+      canonicalizeCampaignPlayProjection(dueSet.decisions),
+      HASH_A,
+    );
+    expect(() => scheduler.loadDueSet("turn-player"))
+      .toThrowError(expect.objectContaining({ code: "scheduler_due_set_invalid" }));
+  });
+});

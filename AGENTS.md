@@ -2,10 +2,10 @@
 
 - Work on the isolated `feat/revamp` branch; keep legacy systems as reference material and put mechanics player routes, APIs, and UI behind mechanics-owned paths.
 - New mechanics code uses explicit adapter boundaries for legacy data shapes; direct imports from old worldgen, chat, or player flows require a task note naming the reason and proof.
-- Build UX/UI from `docs/UI Concept.html` as the style canon and send every UI slice to Droid GLM-5.2 Coding Plan before implementation.
+- Build UX/UI from `docs/UI Concept.html` as the style canon and verify each slice against that rendered reference before landing it.
 - For missing required graphics, create or generate assets that match `docs/UI Concept.html`; store them with the feature surface and record the source/proof in task notes.
-- Route prompts, model instructions, visible copy, and substantial prose through GLM review with the `humanizer` and `deslop` skills before landing them; record the verdict or rewrite note in task notes.
-- Keep Droid/GLM review notes with the active task, not only in chat, so verification survives context compaction.
+- Route prompts, model instructions, visible copy, and substantial prose through main-agent semantic review with the `humanizer` and `deslop` skills before landing them; record the verdict or rewrite note in task notes.
+- Keep prompt, copy, and visual review notes with the active task so verification survives context compaction.
 
 ## Naming Convention
 
@@ -21,7 +21,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **WorldForge** (6868 symbols, 20349 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **WorldForge** (7379 symbols, 21070 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

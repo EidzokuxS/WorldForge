@@ -17,21 +17,14 @@ import type {
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
-  ScaffoldLocation,
-  ScaffoldFaction,
   ScaffoldNpc,
-  ScaffoldLoreCard,
-  EditableScaffold,
-  RegenerateSectionRequest,
   ParsedCharacter,
   CharacterResult,
   CheckpointMeta,
-  ClassifiedWorldBookEntry,
   LoadoutPreviewResult,
   PersonaTemplateListResult,
   PersonaTemplateRecord,
   ResolveStartConditionsResult,
-  WorldBookImportResult,
   WorldbookLibraryItem,
   WorldCurrentScene,
   WorldLocationConnectedPath,
@@ -66,22 +59,15 @@ export type {
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
-  ScaffoldLocation,
-  ScaffoldFaction,
   ScaffoldNpc,
-  ScaffoldLoreCard,
-  EditableScaffold,
-  RegenerateSectionRequest,
   ParsedCharacter,
   CharacterResult,
   ApplyPersonaTemplateResult,
   CheckpointMeta,
-  ClassifiedWorldBookEntry,
   LoadoutPreviewResult,
   PersonaTemplateListResult,
   PersonaTemplateRecord,
   ResolveStartConditionsResult,
-  WorldBookImportResult,
   WorldbookLibraryItem,
 };
 
@@ -112,7 +98,6 @@ export interface ChatLookupRequest {
   compareAgainst?: string;
   question?: string;
 }
-
 export interface LookupResultEvent {
   lookupKind: LookupKind;
   subject: string;
@@ -477,7 +462,6 @@ function parseWorldSceneAwarenessMap(value: unknown): Record<string, WorldSceneA
     }),
   );
 }
-
 function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -954,7 +938,6 @@ export function suggestSeeds(
     franchise?: string;
     research?: boolean;
     selectedWorldbooks?: CampaignWorldbookSelection[];
-    worldbookEntries?: ClassifiedWorldBookEntry[];
   }
 ): Promise<WorldSeeds & {
   _ipContext?: IpResearchContext | null;
@@ -971,7 +954,6 @@ export function suggestSeeds(
     franchise: opts?.franchise,
     research: opts?.research,
     selectedWorldbooks: opts?.selectedWorldbooks,
-    worldbookEntries: opts?.worldbookEntries,
   });
 }
 
@@ -1400,7 +1382,6 @@ export interface WorldgenDebugProgress {
   active: WorldgenDebugOperation[];
   recent: WorldgenDebugOperation[];
 }
-
 async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSEHandlers<T>): Promise<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -1453,7 +1434,6 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
 export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
   return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
-
 export async function getWorldData(
   campaignId: string,
   options: { projection?: WorldDataProjection } = {},
@@ -1526,16 +1506,6 @@ export async function loadCampaign(campaignId: string): Promise<CampaignMeta> {
   const campaign = await apiPost<CampaignMeta>(`/api/campaigns/${campaignId}/load`);
   rememberCampaignId(campaign.id);
   return campaign;
-}
-
-// ───── World Review ─────
-
-export function regenerateSection<T>(body: RegenerateSectionRequest): Promise<T> {
-  return apiPost<T>("/api/worldgen/regenerate-section", body);
-}
-
-export function saveWorldEdits(campaignId: string, scaffold: EditableScaffold): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>("/api/worldgen/save-edits", { campaignId, scaffold });
 }
 
 // ───── Character Creation ─────
@@ -1789,49 +1759,6 @@ export function deleteCheckpointApi(
   return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointHandle}`);
 }
 
-// ───── WorldBook Import ─────
-
-export function parseWorldBook(
-  campaignId: string,
-  worldbook: object,
-): Promise<{ entries: ClassifiedWorldBookEntry[] }> {
-  return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
-    "/api/worldgen/parse-worldbook",
-    { campaignId, worldbook },
-  );
-}
-
-/** Classify worldbook entries without requiring an active campaign (pre-creation). */
-export function classifyWorldBook(
-  worldbook: object,
-): Promise<{ entries: ClassifiedWorldBookEntry[] }> {
-  return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
-    "/api/worldgen/parse-worldbook",
-    { worldbook },
-  );
-}
-
-/** Convert classified worldbook entries to IpResearchContext (client-side, no LLM needed) */
-export function worldbookToIpContext(
-  entries: ClassifiedWorldBookEntry[],
-  name: string,
-): IpResearchContext {
-  return {
-    franchise: name,
-    keyFacts: entries.map((e) => `${e.name}: ${e.summary}`),
-    tonalNotes: entries
-      .filter((e) => e.type === "lore_general")
-      .slice(0, 10)
-      .map((e) => e.summary),
-    canonicalNames: {
-      locations: entries.filter((e) => e.type === "location").map((e) => e.name),
-      factions: entries.filter((e) => e.type === "faction").map((e) => e.name),
-      characters: entries.filter((e) => e.type === "character").map((e) => e.name),
-    },
-    source: "llm",
-  };
-}
-
 export function listWorldbookLibrary(): Promise<{ items: WorldbookLibraryItem[] }> {
   return apiGet<{ items: WorldbookLibraryItem[] }>("/api/worldgen/worldbook-library");
 }
@@ -1850,96 +1777,4 @@ export function importWorldbookLibrary(
     },
   );
 }
-
-export function importWorldBook(
-  campaignId: string,
-  entries: ClassifiedWorldBookEntry[],
-): Promise<WorldBookImportResult> {
-  return apiPost<WorldBookImportResult>(
-    "/api/worldgen/import-worldbook",
-    { campaignId, entries },
-  );
-}
-
-// ───── World Generation ─────
-
-export interface WorldGenerationProgress {
-  step?: number;
-  totalSteps?: number;
-  label?: string;
-  subStep?: number;
-  subTotal?: number;
-  subLabel?: string;
-}
-
-export interface WorldGenerationComplete {
-  refinedPremise: string;
-  locationCount: number;
-  npcCount: number;
-  factionCount: number;
-  loreCardCount: number;
-  loreStorageFailed: boolean;
-  startingLocation: string;
-}
-
-export async function generateWorld(
-  campaignId: string,
-  options: { onProgress?: (progress: WorldGenerationProgress) => void } = {},
-): Promise<WorldGenerationComplete> {
-  const response = await apiStreamPost("/api/worldgen/generate", {
-    campaignId,
-    ipContext: null,
-    premiseDivergence: null,
-    researchArtifact: null,
-  });
-
-  if (!response.body) {
-    throw new Error("World generation stream did not start.");
-  }
-
-  return parseSSEStream(response.body, {
-    label: "World generation",
-    onProgress: (data) => {
-      options.onProgress?.(normalizeWorldGenerationProgress(data));
-    },
-    onComplete: normalizeWorldGenerationComplete,
-    onError: (data): never => {
-      throw new Error(readSseError(data, "World generation failed."));
-    },
-  });
-}
-
-function normalizeWorldGenerationProgress(data: Record<string, unknown>): WorldGenerationProgress {
-  return {
-    step: optionalNumber(data.step),
-    totalSteps: optionalNumber(data.totalSteps),
-    label: optionalString(data.label),
-    subStep: optionalNumber(data.subStep),
-    subTotal: optionalNumber(data.subTotal),
-    subLabel: optionalString(data.subLabel),
-  };
-}
-
-function normalizeWorldGenerationComplete(data: Record<string, unknown>): WorldGenerationComplete {
-  return {
-    refinedPremise: optionalString(data.refinedPremise) ?? "",
-    locationCount: optionalNumber(data.locationCount) ?? 0,
-    npcCount: optionalNumber(data.npcCount) ?? 0,
-    factionCount: optionalNumber(data.factionCount) ?? 0,
-    loreCardCount: optionalNumber(data.loreCardCount) ?? 0,
-    loreStorageFailed: data.loreStorageFailed === true,
-    startingLocation: optionalString(data.startingLocation) ?? "Unknown",
-  };
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function readSseError(data: Record<string, unknown>, fallback: string): string {
-  return typeof data.error === "string" && data.error.trim() ? data.error : fallback;
-}
+// Campaign World source intake ends at the reusable Worldbook Library boundary.

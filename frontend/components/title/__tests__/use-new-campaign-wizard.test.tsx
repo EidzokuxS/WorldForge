@@ -8,7 +8,6 @@ const mockPush = vi.fn();
 
 const mockSuggestSeed = vi.fn();
 const mockSuggestSeeds = vi.fn();
-const mockClassifyWorldBook = vi.fn();
 const mockApiPost = vi.fn();
 const mockLoadCampaign = vi.fn();
 const mockGetWorldData = vi.fn();
@@ -36,7 +35,6 @@ vi.mock("@/lib/settings", () => ({
 vi.mock("@/lib/api", () => ({
   suggestSeed: (...args: unknown[]) => mockSuggestSeed(...args),
   suggestSeeds: (...args: unknown[]) => mockSuggestSeeds(...args),
-  classifyWorldBook: (...args: unknown[]) => mockClassifyWorldBook(...args),
   apiPost: (...args: unknown[]) => mockApiPost(...args),
   loadCampaign: (...args: unknown[]) => mockLoadCampaign(...args),
   getWorldData: (...args: unknown[]) => mockGetWorldData(...args),

@@ -1,5 +1,6 @@
 export {
   readCampaignConfig,
+  readCampaignConfigSnapshot,
   listCampaigns,
   createCampaign,
   loadCampaign,
@@ -21,7 +22,11 @@ export {
   getPersonaTemplate,
   savePersonaTemplates,
 } from "./manager.js";
-export type { CampaignMeta } from "./manager.js";
+export type {
+  CampaignConfigFile,
+  CampaignConfigSnapshot,
+  CampaignMeta,
+} from "./manager.js";
 
 export {
   getCampaignPremise,

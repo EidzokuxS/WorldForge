@@ -28,6 +28,7 @@ import settingsRoutes from "./routes/settings.js";
 import worldgenRoutes from "./routes/worldgen.js";
 import characterRoutes from "./routes/character.js";
 import campaignKernelRoutes from "./routes/campaign-kernel.js";
+import campaignWorldRoutes from "./routes/campaign-world.js";
 import imageRoutes from "./routes/images.js";
 import personaTemplateRoutes from "./routes/persona-templates.js";
 
@@ -80,6 +81,7 @@ app.get("/api/debug/prompt", async (c) => {
 
 app.route("/api/settings", settingsRoutes);
 app.route("/api/campaigns", campaignRoutes);
+app.route("/api/campaigns", campaignWorldRoutes);
 app.route("/api/campaigns", loreRoutes);
 app.route("/api/campaigns/:id/persona-templates", personaTemplateRoutes);
 app.route("/api/worldgen", worldgenRoutes);

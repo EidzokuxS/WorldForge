@@ -1,13 +1,8 @@
-import crypto from "node:crypto";
 import type { IpResearchContext } from "@worldforge/shared";
 import { z } from "zod";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import type { ResolveResult } from "../ai/index.js";
-import { getDb } from "../db/index.js";
-import { npcs, locations, factions } from "../db/schema.js";
-import { storeLoreCards } from "../vectors/lore-cards.js";
 import { clampTokens, createLogger } from "../lib/index.js";
 
 const log = createLogger("worldbook-importer");
@@ -33,15 +28,6 @@ export interface ClassifiedEntry {
   name: string;
   type: WorldBookEntryType;
   summary: string;
-}
-
-export interface ImportResult {
-  imported: {
-    characters: number;
-    locations: number;
-    factions: number;
-    loreCards: number;
-  };
 }
 
 const WORLDBOOK_ENTRY_TYPE_ORDER: Record<WorldBookEntryType, number> = {
@@ -318,92 +304,6 @@ export async function classifyEntries(
 }
 
 // ───── 3. Import Classified Entries ─────
-
-export async function importClassifiedEntries(
-  campaignId: string,
-  entries: ClassifiedEntry[],
-  embedderResult: ResolveResult,
-): Promise<ImportResult> {
-  const db = getDb();
-
-  const characters = entries.filter((e) => e.type === "character");
-  const locs = entries.filter((e) => e.type === "location");
-  const facs = entries.filter((e) => e.type === "faction");
-  const loreEntries = entries.filter(
-    (e) => e.type === "bestiary" || e.type === "lore_general",
-  );
-
-  // Insert structured entities in a transaction
-  db.transaction((tx) => {
-    for (const entry of characters) {
-      tx.insert(npcs)
-        .values({
-          id: crypto.randomUUID(),
-          campaignId,
-          name: entry.name,
-          persona: entry.summary,
-          tags: "[]",
-          tier: "key",
-          currentLocationId: null,
-          goals: JSON.stringify({ short_term: [], long_term: [] }),
-          beliefs: "{}",
-          createdAt: Date.now(),
-        })
-        .run();
-    }
-
-    for (const entry of locs) {
-      tx.insert(locations)
-        .values({
-          id: crypto.randomUUID(),
-          campaignId,
-          name: entry.name,
-          description: entry.summary,
-          tags: "[]",
-          isStarting: false,
-          connectedTo: "[]",
-        })
-        .run();
-    }
-
-    for (const entry of facs) {
-      tx.insert(factions)
-        .values({
-          id: crypto.randomUUID(),
-          campaignId,
-          name: entry.name,
-          tags: "[]",
-          goals: JSON.stringify([entry.summary]),
-          assets: "[]",
-        })
-        .run();
-    }
-  });
-
-  // Store bestiary + lore_general as lore cards in LanceDB
-  let loreCardCount = 0;
-  if (loreEntries.length > 0) {
-    const rawCards = loreEntries.map((e) => ({
-      term: e.name,
-      definition: e.summary,
-      category: e.type === "bestiary" ? "npc" : "concept",
-    }));
-    await storeLoreCards(rawCards, embedderResult);
-    loreCardCount = rawCards.length;
-  }
-
-  const result: ImportResult = {
-    imported: {
-      characters: characters.length,
-      locations: locs.length,
-      factions: facs.length,
-      loreCards: loreCardCount,
-    },
-  };
-
-  log.info("WorldBook import complete", result.imported);
-  return result;
-}
 
 // ───── 4. WorldBook → IpResearchContext ─────
 

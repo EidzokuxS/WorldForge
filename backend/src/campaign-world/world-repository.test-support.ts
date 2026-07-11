@@ -1,0 +1,333 @@
+import fs from "node:fs";
+import path from "node:path";
+import type { CampaignWorldSource } from "@worldforge/shared";
+import { closeDb, connectDb, getSqliteConnection } from "../db/index.js";
+import { runMigrations } from "../db/migrate.js";
+import type {
+  CampaignWorldBuildCandidate,
+  CampaignWorldModelStage,
+  CampaignWorldStageEvidence,
+} from "./world-builder.js";
+import { calculateCampaignWorldContentHash } from "./world-snapshot.js";
+import type { CampaignWorldDraft } from "./world-validator.js";
+import type { CampaignWorldRepository } from "./world-repository.js";
+import { calculateCampaignWorldSourceDigest } from "./world-source.js";
+
+export const CAMPAIGN_A = "11111111-1111-4111-8111-111111111111";
+export const CAMPAIGN_B = "22222222-2222-4222-8222-222222222222";
+
+export function createMigratedCampaign(
+  root: string,
+  campaignId: string,
+): string {
+  const directory = path.join(root, campaignId);
+  const databasePath = path.join(directory, "state.db");
+  fs.mkdirSync(directory, { recursive: true });
+  connectDb(databasePath);
+  try {
+    runMigrations();
+    getSqliteConnection().prepare(`
+      INSERT INTO campaigns (id, name, premise, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      campaignId,
+      `Campaign ${campaignId.slice(0, 8)}`,
+      "A stormbound archipelago faces a failing sea route.",
+      1_000,
+      1_000,
+    );
+  } finally {
+    closeDb();
+  }
+  return databasePath;
+}
+
+export function sourceFixture(
+  campaignId = CAMPAIGN_A,
+): CampaignWorldSource {
+  const source = {
+    premise: "A stormbound archipelago faces a failing sea route.",
+    dna: null,
+    researchSummary: null,
+    sourceReferences: [],
+  };
+  return {
+    campaignId,
+    ...source,
+    sourceDigest: calculateCampaignWorldSourceDigest(source),
+  };
+}
+
+export function worldDraftFixture(): CampaignWorldDraft {
+  return {
+    worldSummary: "Three stormbound harbors depend on routes that fail after each eclipse.",
+    locations: [
+      {
+        id: "location-a",
+        name: "North Harbor",
+        description: "A fortified harbor governed by signal keepers.",
+        kind: "macro",
+        parentLocationId: null,
+        tags: ["fortified"],
+        isStarting: true,
+      },
+      {
+        id: "location-b",
+        name: "Glass Reef",
+        description: "A trading harbor built around luminous shoals.",
+        kind: "macro",
+        parentLocationId: null,
+        tags: ["trade"],
+        isStarting: false,
+      },
+      {
+        id: "location-c",
+        name: "Bell Island",
+        description: "An island settlement that measures storms through bronze bells.",
+        kind: "macro",
+        parentLocationId: null,
+        tags: ["weather"],
+        isStarting: false,
+      },
+    ],
+    routes: [
+      {
+        id: "route-a",
+        fromLocationId: "location-a",
+        toLocationId: "location-b",
+        travelCost: 2,
+      },
+      {
+        id: "route-b",
+        fromLocationId: "location-b",
+        toLocationId: "location-c",
+        travelCost: 3,
+      },
+      {
+        id: "route-c",
+        fromLocationId: "location-c",
+        toLocationId: "location-a",
+        travelCost: 4,
+      },
+    ],
+    actors: [
+      {
+        id: "actor-a",
+        kind: "person",
+        controller: "agent",
+        role: "key",
+        name: "Mara Venn",
+        summary: "A signal keeper tracking the broken route pattern.",
+        traits: ["methodical"],
+        tags: ["navigator"],
+      },
+      {
+        id: "actor-b",
+        kind: "person",
+        controller: "agent",
+        role: "support",
+        name: "Oren Tide",
+        summary: "A courier who knows the reef passages.",
+        traits: ["observant"],
+        tags: ["courier"],
+      },
+      {
+        id: "actor-c",
+        kind: "person",
+        controller: "agent",
+        role: "support",
+        name: "Sel Bell",
+        summary: "A bell tender who records impossible storms.",
+        traits: ["patient"],
+        tags: ["weather"],
+      },
+      {
+        id: "actor-d",
+        kind: "collective",
+        controller: "agent",
+        role: "key",
+        name: "Lantern Council",
+        summary: "Harbor delegates who allocate safe passage windows.",
+        traits: ["procedural"],
+        tags: ["civic"],
+      },
+    ],
+    goals: [
+      {
+        id: "goal-a",
+        actorId: "actor-a",
+        objective: "Map the next route change.",
+        motivation: "Keep North Harbor supplied.",
+        horizon: "immediate",
+        priority: 5,
+        status: "active",
+      },
+      {
+        id: "goal-b",
+        actorId: "actor-b",
+        objective: "Deliver a sealed route ledger.",
+        motivation: "Clear an old family debt.",
+        horizon: "immediate",
+        priority: 4,
+        status: "active",
+      },
+      {
+        id: "goal-c",
+        actorId: "actor-c",
+        objective: "Explain the false storm signal.",
+        motivation: "Protect Bell Island from panic.",
+        horizon: "ongoing",
+        priority: 3,
+        status: "active",
+      },
+      {
+        id: "goal-d",
+        actorId: "actor-d",
+        objective: "Retain control of safe passage windows.",
+        motivation: "Preserve the harbor compact.",
+        horizon: "ongoing",
+        priority: 4,
+        status: "active",
+      },
+    ],
+    relations: [
+      {
+        id: "relation-a",
+        sourceActorId: "actor-a",
+        targetActorId: "actor-d",
+        relationType: "authority",
+        summary: "The council controls Mara's access to signal archives.",
+        intensity: 4,
+      },
+      {
+        id: "relation-b",
+        sourceActorId: "actor-b",
+        targetActorId: "actor-a",
+        relationType: "dependency",
+        summary: "Oren needs Mara to validate the sealed route ledger.",
+        intensity: 3,
+      },
+      {
+        id: "relation-c",
+        sourceActorId: "actor-c",
+        targetActorId: "actor-d",
+        relationType: "rivalry",
+        summary: "Sel disputes the council's storm forecasts.",
+        intensity: 2,
+      },
+    ],
+    placements: [
+      {
+        id: "placement-a",
+        actorId: "actor-a",
+        locationId: "location-a",
+        placementKind: "present",
+      },
+      {
+        id: "placement-b",
+        actorId: "actor-b",
+        locationId: "location-b",
+        placementKind: "present",
+      },
+      {
+        id: "placement-c",
+        actorId: "actor-c",
+        locationId: "location-c",
+        placementKind: "present",
+      },
+      {
+        id: "placement-d",
+        actorId: "actor-d",
+        locationId: "location-a",
+        placementKind: "base",
+      },
+    ],
+    pressures: [
+      {
+        id: "pressure-a",
+        name: "Failing Routes",
+        description: "Safe sea lanes close earlier after every eclipse.",
+        trajectory: "North Harbor loses supply access within two route cycles.",
+        urgency: 5,
+        actorIds: ["actor-a", "actor-d"],
+        locationIds: ["location-a"],
+      },
+      {
+        id: "pressure-b",
+        name: "False Bells",
+        description: "Bell Island signals storms that never arrive.",
+        trajectory: "Couriers stop trusting Bell Island's warnings.",
+        urgency: 3,
+        actorIds: ["actor-c"],
+        locationIds: ["location-c"],
+      },
+    ],
+  };
+}
+
+export function candidateFixture(
+  source: CampaignWorldSource,
+): CampaignWorldBuildCandidate {
+  const draft = worldDraftFixture();
+  return {
+    draft,
+    contentHash: calculateCampaignWorldContentHash(source.sourceDigest, draft),
+    stageEvidence: [],
+  };
+}
+
+export function evidenceFixture(
+  stage: CampaignWorldModelStage,
+): CampaignWorldStageEvidence {
+  return {
+    stage,
+    requestedMode: "auto",
+    primaryStrategy: "native_schema",
+    actualStrategy: "native_schema",
+    totalAttempts: 1,
+    repairUsed: false,
+    retryUsed: false,
+    textFallbackUsed: false,
+    responseModel: "test-model",
+    finishReason: "stop",
+    errorCode: null,
+    inputTokens: 100,
+    outputTokens: 50,
+    totalTokens: 150,
+  };
+}
+
+export function advanceBuildToPersistence(
+  repository: CampaignWorldRepository,
+  buildId: string,
+): void {
+  let createdAt = 1_010;
+  for (const stage of [
+    "world_frame",
+    "world_cast",
+    "world_connections",
+  ] as const) {
+    repository.recordStageStarted({ buildId, stage, createdAt: createdAt++ });
+    repository.recordStageCompleted({
+      buildId,
+      stage,
+      evidence: evidenceFixture(stage),
+      createdAt: createdAt++,
+    });
+  }
+  repository.recordStageStarted({
+    buildId,
+    stage: "validation",
+    createdAt: createdAt++,
+  });
+  repository.recordStageCompleted({
+    buildId,
+    stage: "validation",
+    createdAt: createdAt++,
+  });
+  repository.recordStageStarted({
+    buildId,
+    stage: "persistence",
+    createdAt,
+  });
+}

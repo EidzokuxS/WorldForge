@@ -41,6 +41,8 @@ rpi/*
 !rpi/
 !rpi/campaign-kernel/
 !rpi/campaign-kernel/**
+!rpi/campaign-world-build/
+!rpi/campaign-world-build/**
 .planning/
 
 # E2E test artifacts

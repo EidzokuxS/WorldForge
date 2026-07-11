@@ -9,19 +9,9 @@ import {
 } from "@worldforge/shared";
 
 const {
-  composeSelectedWorldbooksMock,
   ingestMock,
-  researchWorldgenArtifactMock,
-  saveWorldSeedsMock,
-  suggestSingleSeedMock,
-  suggestWorldSeedsMock,
 } = vi.hoisted(() => ({
-  composeSelectedWorldbooksMock: vi.fn(),
   ingestMock: vi.fn(),
-  researchWorldgenArtifactMock: vi.fn(),
-  saveWorldSeedsMock: vi.fn(),
-  suggestSingleSeedMock: vi.fn(),
-  suggestWorldSeedsMock: vi.fn(),
 }));
 
 vi.mock("../../character/ingestion/index.js", async () => {
@@ -37,11 +27,6 @@ vi.mock("../../campaign/index.js", () => ({
   loadCampaign: vi.fn(),
   loadIpContext: vi.fn(() => null),
   loadPremiseDivergence: vi.fn(() => null),
-  loadWorldgenResearchArtifact: vi.fn(() => null),
-  saveIpContext: vi.fn(),
-  savePremiseDivergence: vi.fn(),
-  saveWorldgenResearchArtifact: vi.fn(),
-  saveWorldSeeds: saveWorldSeedsMock,
 }));
 
 vi.mock("../../settings/index.js", () => ({
@@ -62,25 +47,7 @@ vi.mock("../../ai/index.js", () => ({
   })),
 }));
 
-vi.mock("../../worldgen/index.js", async () => {
-  const actual = await vi.importActual<any>("../../worldgen/index.js");
-  return {
-    ...actual,
-    suggestSingleSeed: suggestSingleSeedMock,
-    suggestWorldSeeds: suggestWorldSeedsMock,
-  };
-});
-
-vi.mock("../../worldgen/ip-researcher.js", () => ({
-  researchWorldgenArtifact: researchWorldgenArtifactMock,
-}));
-
-vi.mock("../../worldbook-library/index.js", () => ({
-  composeSelectedWorldbooks: composeSelectedWorldbooksMock,
-}));
-
 import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
-import { readCampaignConfig } from "../../campaign/manager.js";
 import { readCampaignKernel, writeCampaignKernel } from "../../campaign-kernel/dna-adapter.js";
 import campaignKernelRoutes from "../campaign-kernel.js";
 
@@ -517,37 +484,12 @@ function writeActiveKernelWithRouteHint(): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  composeSelectedWorldbooksMock.mockReset();
   ingestMock.mockReset();
-  researchWorldgenArtifactMock.mockReset();
-  saveWorldSeedsMock.mockReset();
-  suggestSingleSeedMock.mockReset();
-  suggestWorldSeedsMock.mockReset();
-  researchWorldgenArtifactMock.mockResolvedValue(null);
   originalCampaignRoot = process.env.GSD_CAMPAIGNS_ROOT;
-  campaignRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-a5b-route-"));
+  campaignRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-campaign-kernel-route-"));
   process.env.GSD_CAMPAIGNS_ROOT = campaignRoot;
   writeConfig();
   setLoadedCampaign();
-  saveWorldSeedsMock.mockImplementation((campaignId: string, seeds: typeof FULL_SEEDS) => {
-    const configPath = path.join(campaignRoot, campaignId, "config.json");
-    const config = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    const updatedAt = 2;
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ ...config, seeds, updatedAt }, null, 2),
-      "utf-8",
-    );
-    return {
-      id: campaignId,
-      name: String(config.name),
-      premise: String(config.premise ?? ""),
-      createdAt: Number(config.createdAt),
-      updatedAt,
-      seeds,
-      generationComplete: false,
-    };
-  });
 });
 
 afterEach(() => {
@@ -560,7 +502,7 @@ afterEach(() => {
 });
 
 describe("campaign kernel routes", () => {
-  it("returns a draft kernel without old worldgen generation", async () => {
+  it("returns a draft kernel through Campaign Kernel ownership", async () => {
     const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/kernel`);
 
     expect(res.status).toBe(200);
@@ -609,86 +551,18 @@ describe("campaign kernel routes", () => {
     expect(readCampaignKernel(CAMPAIGN_ID)).toBeNull();
   });
 
-  it("applies World DNA through the kernel API boundary", async () => {
-    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/world-dna/apply`, {
+  it.each([
+    "world-dna/apply",
+    "world-dna/suggest",
+    "world-dna/suggest-category",
+  ])("keeps Campaign World DNA writer route %s outside Campaign Kernel", async (route) => {
+    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/${route}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seeds: FULL_SEEDS }),
+      body: "{}",
     });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.kernel).toMatchObject({
-      campaignId: CAMPAIGN_ID,
-      phase: "world_ready",
-      worldDna: {
-        geography: "Railway wards",
-        politicalStructure: "Curfew council",
-        centralConflict: "Guilds smuggle people through closed stations",
-        culturalFlavor: "Brass timetables; Storm lanterns",
-        environment: "Coastal rail city",
-        wildcard: "Living signals",
-      },
-    });
-    expect(body.campaign.seeds).toEqual(FULL_SEEDS);
-    expect(readCampaignConfig(CAMPAIGN_ID).seeds).toEqual(FULL_SEEDS);
-    expect(readCampaignKernel(CAMPAIGN_ID)?.worldDna).toEqual(body.kernel.worldDna);
-  });
-
-  it("re-rolls all World DNA through the campaign kernel boundary", async () => {
-    const seeds = {
-      geography: "Flooded stations",
-      politicalStructure: "Signal cabinet",
-      centralConflict: "Families barter illegal platform passes",
-      culturalFlavor: ["Rail noir", "Signal liturgy"],
-      environment: "Salt rain under glass canopies",
-      wildcard: "Tickets remember every hand that held them",
-    };
-    suggestWorldSeedsMock.mockResolvedValue({
-      seeds,
-      ipContext: null,
-      premiseDivergence: null,
-    });
-
-    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/world-dna/suggest`, {
-      method: "POST",
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ seeds });
-    expect(body._ipContext).toBeUndefined();
-    expect(body._researchArtifact).toBeUndefined();
-    expect(suggestWorldSeedsMock).toHaveBeenCalledWith(expect.objectContaining({
-      premise: "A railway city under curfew.",
-      name: "A5b Route Campaign",
-      ipContext: null,
-      premiseDivergence: null,
-      researchArtifact: null,
-    }));
-  });
-
-  it("re-rolls one World DNA field through the campaign kernel boundary", async () => {
-    suggestSingleSeedMock.mockResolvedValue("Flooded stations");
-
-    const res = await app.request(`/api/kernel/campaigns/${CAMPAIGN_ID}/world-dna/suggest-category`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: "geography" }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ category: "geography", value: "Flooded stations" });
-    expect(body._ipContext).toBeUndefined();
-    expect(suggestSingleSeedMock).toHaveBeenCalledWith(expect.objectContaining({
-      premise: "A railway city under curfew.",
-      name: "A5b Route Campaign",
-      category: "geography",
-      ipContext: null,
-      premiseDivergence: null,
-      researchArtifact: null,
-    }));
+    expect(res.status).toBe(404);
   });
 
   it("returns a debug snapshot through the kernel API boundary", async () => {

@@ -19,15 +19,11 @@ import type {
 } from "@worldforge/shared";
 import {
   createCharacterRecordFromDraft,
-  fromLegacyNpcRow,
   fromLegacyPlayerRow,
-  reconcileDraftBackedScaffoldNpc,
-  toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
 import { worldgenResearchArtifactSchema } from "../worldgen/research-artifact.js";
 import { LORE_CATEGORIES } from "../worldgen/types.js";
-import { WORLDBOOK_ENTRY_TYPES } from "../worldgen/worldbook-importer.js";
 
 const SEED_CATEGORIES = [
   "geography",
@@ -263,13 +259,7 @@ export const suggestSeedsSchema = z.object({
   research: z.boolean().optional(),
   /** Selected reusable worldbooks — composed on the backend into one context. */
   selectedWorldbooks: z.array(worldbookSelectionSchema).optional(),
-  /** Pre-classified worldbook entries — used as knowledge base for world generation. */
-  worldbookEntries: z.array(z.object({
-    name: z.string(),
-    type: z.enum(["character", "location", "faction", "bestiary", "lore_general"]),
-    summary: z.string(),
-  })).optional(),
-});
+}).strict();
 
 const ipContextSchema = z.object({
   franchise: z.string(),
@@ -329,16 +319,6 @@ export const suggestSeedSchema = z.object({
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "premise is required.")),
   category: seedCategorySchema,
-  ipContext: ipContextSchema,
-  premiseDivergence: premiseDivergenceSchema,
-  researchArtifact: worldgenResearchArtifactPayloadSchema,
-});
-
-export const generateWorldSchema = z.object({
-  campaignId: z
-    .string()
-    .transform((s) => s.trim())
-    .pipe(z.string().min(1, "campaignId is required.")),
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
   researchArtifact: worldgenResearchArtifactPayloadSchema,
@@ -704,184 +684,6 @@ function legacyCharacterToDraft(
   );
 }
 
-const scaffoldNpcLegacySchema = z.object({
-  name: z.string(),
-  persona: z.string(),
-  tags: z.array(z.string()),
-  goals: z.object({
-    shortTerm: z.array(z.string()),
-    longTerm: z.array(z.string()),
-  }),
-  locationName: z.string(),
-  sceneLocationName: z.string().nullable().optional(),
-  factionName: z.string().nullable(),
-  tier: z.enum(["key", "supporting"]).optional(),
-});
-
-function legacyNpcToDraft(
-  npc: z.infer<typeof scaffoldNpcLegacySchema>,
-) {
-  const scaffoldTier = npc.tier ?? "key";
-  const draft = recordToDraft(
-    fromLegacyNpcRow(
-      {
-        id: "legacy-npc",
-        campaignId: "legacy-campaign",
-        name: npc.name,
-        persona: npc.persona,
-        tags: JSON.stringify(npc.tags),
-        tier: scaffoldTier === "key" ? "key" : "persistent",
-        currentLocationId: null,
-        goals: JSON.stringify({
-          short_term: npc.goals.shortTerm,
-          long_term: npc.goals.longTerm,
-        }),
-        beliefs: "[]",
-        unprocessedImportance: 0,
-        inactiveTicks: 0,
-        createdAt: 0,
-      },
-      {
-        currentLocationName: npc.locationName,
-        factionName: npc.factionName,
-      },
-    ),
-  );
-
-  return {
-    ...draft,
-    identity: {
-      ...draft.identity,
-      tier: scaffoldTier === "key" ? "key" : "supporting",
-    },
-  };
-}
-
-// --- World review schemas ---
-
-const scaffoldLocationSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  tags: z.array(z.string()),
-  isStarting: z.boolean(),
-  connectedTo: z.array(z.string()),
-  kind: z.enum(["macro", "persistent_sublocation"]).optional(),
-  parentLocationName: z.string().nullable().optional(),
-});
-
-const regenerateSectionBaseSchema = z.object({
-  campaignId: z.string().min(1),
-  additionalInstruction: z.string().optional(),
-});
-
-export const regenerateSectionSchema = z.discriminatedUnion("section", [
-  regenerateSectionBaseSchema.extend({
-    section: z.literal("premise"),
-  }),
-  regenerateSectionBaseSchema.extend({
-    section: z.literal("locations"),
-    refinedPremise: z.string().min(1),
-  }),
-  regenerateSectionBaseSchema.extend({
-    section: z.literal("factions"),
-    refinedPremise: z.string().min(1),
-    locationNames: z.array(z.string()),
-  }),
-  regenerateSectionBaseSchema.extend({
-    section: z.literal("npcs"),
-    refinedPremise: z.string().min(1),
-    locationNames: z.array(z.string()),
-    locations: z.array(scaffoldLocationSchema).optional(),
-    factionNames: z.array(z.string()),
-  }),
-]);
-
-const scaffoldFactionSchema = z.object({
-  name: z.string(),
-  tags: z.array(z.string()),
-  goals: z.array(z.string()),
-  assets: z.array(z.string()),
-  territoryNames: z.array(z.string()),
-});
-
-const scaffoldNpcSchema = z
-  .union([
-    scaffoldNpcLegacySchema.extend({
-      draft: characterDraftSchema,
-    }),
-    z.object({
-      draft: characterDraftSchema,
-      locationName: z.string().optional(),
-      sceneLocationName: z.string().nullable().optional(),
-      factionName: z.string().nullable().optional(),
-      tier: z.enum(["key", "supporting"]).optional(),
-    }),
-    scaffoldNpcLegacySchema,
-  ])
-  .transform((input) => {
-    if ("draft" in input) {
-      const legacyFromDraft = toLegacyNpcDraft(
-        materializeDraftRecord("draft-campaign", input.draft),
-      );
-      const editableNpc = "name" in input
-        ? {
-            ...input,
-            locationName: input.locationName ?? legacyFromDraft.locationName,
-            factionName: input.factionName ?? legacyFromDraft.factionName,
-            tier: input.tier ?? legacyFromDraft.tier,
-          }
-        : {
-            ...legacyFromDraft,
-            locationName: input.locationName ?? legacyFromDraft.locationName,
-            sceneLocationName: input.sceneLocationName ?? legacyFromDraft.sceneLocationName,
-            factionName: input.factionName ?? legacyFromDraft.factionName,
-            tier: input.tier ?? legacyFromDraft.tier,
-            draft: input.draft,
-          };
-      const reconciledDraft = reconcileDraftBackedScaffoldNpc({
-        ...editableNpc,
-        draft: input.draft,
-      });
-      const legacy = toLegacyNpcDraft(
-        materializeDraftRecord("draft-campaign", reconciledDraft),
-      );
-
-      return {
-        ...legacy,
-        locationName: editableNpc.locationName ?? legacy.locationName,
-        sceneLocationName: editableNpc.sceneLocationName,
-        factionName: editableNpc.factionName ?? legacy.factionName,
-        tier: editableNpc.tier ?? legacy.tier,
-        draft: reconciledDraft,
-      };
-    }
-
-    const tier = input.tier ?? "key";
-    return {
-      ...input,
-      tier,
-      draft: legacyNpcToDraft({
-        ...input,
-        tier,
-      }),
-    };
-  });
-
-export const saveEditsSchema = z.object({
-  campaignId: z.string().min(1),
-  scaffold: z.object({
-    refinedPremise: z.string().min(1),
-    locations: z.array(scaffoldLocationSchema).min(1),
-    factions: z.array(scaffoldFactionSchema),
-    npcs: z.array(scaffoldNpcSchema),
-    loreCards: z.array(z.object({
-      term: z.string(),
-      definition: z.string(),
-      category: z.enum(LORE_CATEGORIES),
-    })),
-  }),
-});
-
 export const loreCardUpdateSchema = z.object({
   term: z
     .string()
@@ -1025,14 +827,5 @@ export const worldbookLibraryImportSchema = z.object({
   displayName: z.string().trim().optional(),
   originalFileName: z.string().trim().optional(),
   worldbook: parseWorldBookSchema.shape.worldbook,
-});
-
-export const importWorldBookSchema = z.object({
-  campaignId: z.string().min(1),
-  entries: z.array(z.object({
-    name: z.string().min(1),
-    type: z.enum(WORLDBOOK_ENTRY_TYPES),
-    summary: z.string().min(1),
-  })),
 });
 

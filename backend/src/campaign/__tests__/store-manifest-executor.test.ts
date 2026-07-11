@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  PHASE95_REQUIRED_STORE_KEYS,
-  PHASE95_STORE_MANIFEST,
+  CAMPAIGN_PLAY_SQLITE_TABLES,
+  CAMPAIGN_STATE_REQUIRED_STORE_KEYS,
+  CAMPAIGN_STATE_STORE_MANIFEST,
   type StoreManifestEntry,
 } from "../../engine/gameplay-control-plane-contract.js";
 import {
@@ -20,7 +21,7 @@ describe("campaign store manifest executor", () => {
       const plan = planCampaignStoreManifestOperation({ mode });
 
       expect(plan.steps.map((step) => step.store).sort())
-        .toEqual([...PHASE95_REQUIRED_STORE_KEYS].sort());
+        .toEqual([...CAMPAIGN_STATE_REQUIRED_STORE_KEYS].sort());
       expect(plan.steps.every((step) => step.mode === mode)).toBe(true);
     }
   });
@@ -52,6 +53,14 @@ describe("campaign store manifest executor", () => {
       action: "reject",
       sourceCampaignIdPolicy: "reject_if_present",
     });
+    const plan = planCampaignStoreManifestOperation({ mode: "clean_start_clone" });
+    const campaignPlaySteps = plan.steps.filter((step) =>
+      step.store.startsWith("sqlite:campaign_play_")
+    );
+    expect(campaignPlaySteps.map((step) => step.store)).toEqual(
+      CAMPAIGN_PLAY_SQLITE_TABLES.map((table) => `sqlite:${table}`),
+    );
+    expect(campaignPlaySteps.every((step) => step.action === "purge")).toBe(true);
   });
 
   it("rejects replay-preserving clone while stores require regenerate or reject replay policy", () => {
@@ -71,7 +80,7 @@ describe("campaign store manifest executor", () => {
   it("uses physical snapshot restore for bundled authoritative state instead of legacy coarse rollback labels", () => {
     const steps = stepsByStore("turn_rollback_restore");
 
-    expect(PHASE95_STORE_MANIFEST.find((entry) => entry.store === "sqlite:campaigns"))
+    expect(CAMPAIGN_STATE_STORE_MANIFEST.find((entry) => entry.store === "sqlite:campaigns"))
       .toMatchObject({
         rollbackPolicy: "rewrite",
         restorePolicies: { turnRollback: "snapshot_restore" },
@@ -137,17 +146,28 @@ describe("campaign store manifest executor", () => {
         },
       ],
     })).toThrow(/unexpected/i);
+
+    const reorderedSteps = [...plan.steps];
+    const firstCampaignPlayIndex = reorderedSteps.findIndex(
+      (step) => step.store === "sqlite:campaign_play_states",
+    );
+    [reorderedSteps[firstCampaignPlayIndex], reorderedSteps[firstCampaignPlayIndex + 1]] =
+      [reorderedSteps[firstCampaignPlayIndex + 1]!, reorderedSteps[firstCampaignPlayIndex]!];
+    expect(() => assertCampaignStoreManifestOperationPlanClosed({
+      ...plan,
+      steps: reorderedSteps,
+    })).toThrow(/manifest order/i);
   });
 
-  it("rejects manifest entries outside the Phase 95 store contract", () => {
+  it("rejects manifest entries outside the campaign state contract", () => {
     const rogueEntry: StoreManifestEntry = {
-      ...PHASE95_STORE_MANIFEST[0]!,
+      ...CAMPAIGN_STATE_STORE_MANIFEST[0]!,
       store: "json:unexpected",
     };
 
     expect(() => planCampaignStoreManifestOperation({
       mode: "checkpoint_restore",
-      manifest: [...PHASE95_STORE_MANIFEST, rogueEntry],
+      manifest: [...CAMPAIGN_STATE_STORE_MANIFEST, rogueEntry],
     })).toThrow(/unexpected/i);
   });
 });

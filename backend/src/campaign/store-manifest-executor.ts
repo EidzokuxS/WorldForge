@@ -1,5 +1,5 @@
 import {
-  PHASE95_STORE_MANIFEST,
+  CAMPAIGN_STATE_STORE_MANIFEST,
   assertStoreManifestCoverage,
   type SourceCampaignIdPolicy,
   type StoreCheckpointRestorePolicy,
@@ -63,7 +63,7 @@ function assertKnownOperationMode(mode: StoreManifestOperationMode): void {
 
 export function assertCampaignStoreManifestOperationPlanClosed(
   plan: CampaignStoreManifestOperationPlan,
-  manifest: readonly StoreManifestEntry[] = PHASE95_STORE_MANIFEST,
+  manifest: readonly StoreManifestEntry[] = CAMPAIGN_STATE_STORE_MANIFEST,
 ): CampaignStoreManifestOperationPlan {
   assertKnownOperationMode(plan.mode);
   const manifestEntries = assertStoreManifestCoverage(manifest);
@@ -102,6 +102,11 @@ export function assertCampaignStoreManifestOperationPlanClosed(
       throw new Error(`Store manifest operation is missing store: ${entry.store}.`);
     }
   }
+  for (const [index, step] of plan.steps.entries()) {
+    if (step.store !== manifestEntries[index]?.store) {
+      throw new Error(`Store manifest operation is outside manifest order at ${step.store}.`);
+    }
+  }
 
   if (replayUnsupportedStores.length > 0) {
     throw new Error(
@@ -116,7 +121,7 @@ export function planCampaignStoreManifestOperation(input: {
   mode: StoreManifestOperationMode;
   manifest?: readonly StoreManifestEntry[];
 }): CampaignStoreManifestOperationPlan {
-  const manifest = assertStoreManifestCoverage(input.manifest ?? PHASE95_STORE_MANIFEST);
+  const manifest = assertStoreManifestCoverage(input.manifest ?? CAMPAIGN_STATE_STORE_MANIFEST);
   const plan: CampaignStoreManifestOperationPlan = {
     mode: input.mode,
     steps: manifest.map((entry) => ({

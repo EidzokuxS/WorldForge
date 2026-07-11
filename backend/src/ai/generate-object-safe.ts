@@ -110,6 +110,12 @@ export function getSafeGenerateObjectErrorCode(error: unknown): SafeGenerateErro
   return error instanceof SafeGenerateError ? error.code ?? null : null;
 }
 
+export function getSafeGenerateObjectTrace(
+  error: unknown,
+): Readonly<SafeGenerateTrace> | null {
+  return error instanceof SafeGenerateError ? error.trace ?? null : null;
+}
+
 export function isSafeGenerateObjectError(error: unknown): boolean {
   if (error instanceof SafeGenerateError) return true;
   if (!(error instanceof Error)) return false;
@@ -582,6 +588,7 @@ interface SafeGenerateOpts<T> {
   maxTokens?: number;
   maxOutputTokens?: number;
   timeout?: Parameters<typeof generateText>[0]["timeout"];
+  abortSignal?: AbortSignal;
   mode?: StructuredOutputRequestedMode;
   /** Override retry count (default 3). Set to 1 to disable retries. */
   retries?: number;
@@ -949,6 +956,9 @@ function buildBaseCallOpts<T>(opts: SafeGenerateOpts<T>): Record<string, unknown
   };
   if (opts.timeout !== undefined) {
     callOpts.timeout = opts.timeout;
+  }
+  if (opts.abortSignal !== undefined) {
+    callOpts.abortSignal = opts.abortSignal;
   }
   return callOpts;
 }

@@ -1,69 +1,30 @@
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
-import type { z } from "zod";
 import type {
-  CharacterDraft,
-  CharacterTier,
-  IpResearchContext,
-  PremiseDivergence,
   WorldgenResearchArtifactV2,
-  WorldSeeds,
 } from "@worldforge/shared";
-import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import type { SearchConfig } from "../lib/web-search.js";
-import {
-  readCampaignConfig,
-  markGenerationComplete,
-  saveIpContext,
-  loadIpContext,
-  savePremiseDivergence,
-  loadPremiseDivergence,
-  saveWorldgenResearchArtifact,
-  loadWorldgenResearchArtifact,
-  saveWorldgenResearchFrame,
-  loadWorldgenResearchFrame,
-} from "../campaign/index.js";
-import { reconcileDraftBackedScaffoldNpc } from "../character/record-adapters.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
   listWorldgenOperations,
   beginWorldgenOperation,
-  extractLoreCards,
-  interpretPremiseDivergence,
-  generateWorldScaffold,
-  generateRefinedPremiseStep,
-  generateLocationsStep,
-  generateFactionsStep,
-  generateNpcsStep,
   rollSeed,
   rollWorldSeeds,
-  saveScaffoldToDb,
   suggestSingleSeed,
   suggestWorldSeeds,
 } from "../worldgen/index.js";
-import type { WorldScaffold } from "../worldgen/types.js";
-import { buildWorldgenResearchFrame } from "../worldgen/research-frame.js";
-import { parseBody, requireActiveCampaign, requireLoadedCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
+import { parseBody, resolveGenerator } from "./helpers.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("worldgen-route");
-import { deleteCampaignLore, storeLoreCards } from "../vectors/lore-cards.js";
 import {
-  generateWorldSchema,
-  regenerateSectionSchema,
   rollSeedSchema,
-  saveEditsSchema,
   suggestSeedSchema,
   suggestSeedsSchema,
   parseWorldBookSchema,
-  importWorldBookSchema,
 } from "./schemas.js";
 import {
   parseWorldBook,
   classifyEntries,
-  importClassifiedEntries,
-  worldbookToIpContext,
 } from "../worldgen/worldbook-importer.js";
 import {
   composeSelectedWorldbooks,
@@ -71,140 +32,13 @@ import {
   importWorldbookToLibrary,
 } from "../worldbook-library/index.js";
 import { worldbookLibraryImportSchema } from "./schemas.js";
-import {
-  evaluateResearchArtifactSufficiency,
-  evaluateResearchSufficiency,
-  researchWorldgenArtifact,
-} from "../worldgen/ip-researcher.js";
+import { researchWorldgenArtifact } from "../worldgen/ip-researcher.js";
 
 const app = new Hono();
-
-type SaveEditsScaffold = z.infer<typeof saveEditsSchema>["scaffold"];
-
-function normalizeCharacterTier(tier: string): CharacterTier {
-  switch (tier) {
-    case "temporary":
-    case "persistent":
-    case "key":
-    case "supporting":
-      return tier;
-    default:
-      return "supporting";
-  }
-}
-
-function normalizeSavedScaffold(scaffold: SaveEditsScaffold): WorldScaffold {
-  return {
-    refinedPremise: scaffold.refinedPremise,
-    locations: scaffold.locations.map((location) => ({
-      ...location,
-      tags: [...location.tags],
-      connectedTo: [...location.connectedTo],
-    })),
-    factions: scaffold.factions.map((faction) => ({
-      ...faction,
-      tags: [...faction.tags],
-      goals: [...faction.goals],
-      assets: [...faction.assets],
-      territoryNames: [...faction.territoryNames],
-    })),
-    npcs: scaffold.npcs.map((npc): WorldScaffold["npcs"][number] => {
-      const reconciledDraft = npc.draft
-        ? reconcileDraftBackedScaffoldNpc({
-            ...npc,
-            draft: npc.draft as CharacterDraft,
-          })
-        : undefined;
-
-      return {
-        name: npc.name,
-        persona: npc.persona,
-        tags: [...npc.tags],
-        goals: {
-          shortTerm: [...npc.goals.shortTerm],
-          longTerm: [...npc.goals.longTerm],
-        },
-        locationName: npc.locationName,
-        sceneLocationName: npc.sceneLocationName,
-        factionName: npc.factionName ?? null,
-        tier: npc.tier,
-        draft: reconciledDraft
-          ? ({
-              ...reconciledDraft,
-              identity: {
-                ...reconciledDraft.identity,
-                tier: normalizeCharacterTier(reconciledDraft.identity.tier),
-              },
-            } satisfies CharacterDraft)
-          : undefined,
-      };
-    }),
-    loreCards: scaffold.loreCards.map((card) => ({
-      ...card,
-    })),
-  };
-}
 
 app.get("/debug/progress", (c) => {
   return c.json(listWorldgenOperations());
 });
-
-async function resolvePremiseDivergence(
-  campaignId: string,
-  ipContext: IpResearchContext | null,
-  premise: string,
-  role: ResolvedRole,
-  cached: PremiseDivergence | null,
-): Promise<PremiseDivergence | null> {
-  if (cached) {
-    return cached;
-  }
-
-  const premiseDivergence = await interpretPremiseDivergence(ipContext, premise, role);
-  if (premiseDivergence) {
-    savePremiseDivergence(campaignId, premiseDivergence);
-  }
-  return premiseDivergence;
-}
-
-function buildResearchSearchConfig(role: ResolvedRole): SearchConfig {
-  const settings = loadSettings();
-  return {
-    provider: settings.research.searchProvider ?? "brave",
-    braveApiKey: settings.research.braveApiKey,
-    zaiApiKey: settings.research.zaiApiKey,
-    llmProvider: role.provider,
-  };
-}
-
-function shouldSaveResearchArtifact(
-  previous: WorldgenResearchArtifactV2 | null,
-  next: WorldgenResearchArtifactV2 | null | undefined,
-): next is WorldgenResearchArtifactV2 {
-  if (!next) return false;
-  return JSON.stringify(previous) !== JSON.stringify(next);
-}
-
-function resolveWorldgenResearchFrame(
-  campaignId: string,
-  ipContext: IpResearchContext | null,
-  premise: string,
-  premiseDivergence: PremiseDivergence | null,
-  seeds?: Partial<WorldSeeds>,
-) {
-  if (!ipContext) {
-    return null;
-  }
-
-  const frame = buildWorldgenResearchFrame({
-    franchise: ipContext.franchise,
-    premise,
-    premiseDivergence,
-    seeds,
-  });
-  saveWorldgenResearchFrame(campaignId, frame);
-  return frame;
-}
 
 app.post("/roll-seeds", async (c) => {
   try {
@@ -254,10 +88,8 @@ app.post("/suggest-seeds", async (c) => {
     });
     debugOperation.startHeartbeat(10000);
 
-    // Build knowledge context: reusable worldbook selection and legacy
-    // worldbook entries still produce compatibility ipContext. Automatic
-    // known-IP research now returns a v2 artifact instead of a legacy
-    // franchise-shaped context.
+    // Reusable Library selections compose the source context before DNA generation.
+    // Automatic source research produces the saved research artifact.
     let ipContext = null;
     let researchArtifact: WorldgenResearchArtifactV2 | null = null;
     if (result.data.selectedWorldbooks?.length) {
@@ -269,9 +101,6 @@ app.post("/suggest-seeds", async (c) => {
         sourceGroupCount: ipContext.sourceGroups?.length ?? 0,
         totalKeyFacts: ipContext.keyFacts.length,
       });
-    } else if (result.data.worldbookEntries?.length) {
-      debugOperation.setLabel("Converting WorldBook into generation context...");
-      ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
     } else if (result.data.research !== false) {
       const franchiseName = result.data.franchise?.trim();
       if (franchiseName) {
@@ -352,394 +181,6 @@ app.post("/suggest-seed", async (c) => {
   }
 });
 
-app.post("/generate", async (c) => {
-  let debugOperation:
-    | ReturnType<typeof beginWorldgenOperation>
-    | null = null;
-  try {
-    const result = await parseBody(c, generateWorldSchema);
-    if ("response" in result) return result.response;
-
-    const { campaignId } = result.data;
-    const campaign = await requireLoadedCampaign(c, campaignId);
-    if (campaign instanceof Response) return campaign;
-
-    debugOperation = beginWorldgenOperation({
-      kind: "generate-world",
-      label: "Preparing world generation...",
-      campaignId,
-      franchise: result.data.ipContext?.franchise,
-      premise: campaign.premise,
-    });
-    debugOperation.startHeartbeat(15000);
-
-    const settings = loadSettings();
-    const gen = resolveGenerator(settings);
-    if ("error" in gen) {
-      return c.json({ error: gen.error }, gen.status);
-    }
-
-    return streamSSE(c, async (stream) => {
-      const keepaliveTimer = setInterval(() => {
-        void stream.writeSSE({
-          event: "keepalive",
-          data: "{}",
-        }).catch(() => {
-          // Ignore write errors here; the main generation flow will surface real failures.
-        });
-      }, 10000);
-
-      try {
-        // Load cached worldgen context: request body (fresh from wizard) or config cache.
-        const config = readCampaignConfig(campaignId);
-        let researchArtifact = result.data.researchArtifact ?? null;
-        if (researchArtifact) {
-          saveWorldgenResearchArtifact(campaignId, researchArtifact);
-        }
-        if (!researchArtifact) {
-          researchArtifact = loadWorldgenResearchArtifact(campaignId);
-        }
-
-        const bodyIpContext = researchArtifact ? null : result.data.ipContext;
-        const bodyPremiseDivergence = researchArtifact
-          ? null
-          : result.data.premiseDivergence ?? null;
-        if (bodyIpContext) {
-          saveIpContext(campaignId, bodyIpContext);
-        }
-        if (bodyPremiseDivergence) {
-          savePremiseDivergence(campaignId, bodyPremiseDivergence);
-        }
-        let ipContext = researchArtifact ? null : bodyIpContext ?? loadIpContext(campaignId);
-        let premiseDivergence = researchArtifact
-          ? null
-          : bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
-        let researchFrame = researchArtifact ? null : loadWorldgenResearchFrame(campaignId);
-
-        if (!ipContext && !researchArtifact) {
-          if (config.worldbookSelection?.length) {
-            debugOperation?.setLabel("Composing saved worldbook selection...");
-            const composed = await composeSelectedWorldbooks(config.worldbookSelection, campaign.premise);
-            ipContext = composed.ipContext;
-            log.info("generate: composed worldbooks", {
-              hasSourceGroups: !!ipContext.sourceGroups,
-              sourceGroupCount: ipContext.sourceGroups?.length ?? 0,
-              totalKeyFacts: ipContext.keyFacts.length,
-            });
-            saveIpContext(campaignId, ipContext);
-            log.info(
-              `Composed saved worldbook selection for campaign ${campaignId} (${ipContext.keyFacts.length} facts)`,
-            );
-          }
-        }
-
-        // If no cached context exists, run v2 artifact research now. This is
-        // the accepted Phase 71 behavior when the browser does not pass the
-        // suggest-seeds artifact into generate.
-        if (!ipContext && !researchArtifact && config.worldgenResearchEnabled !== false) {
-          debugOperation?.setLabel("Researching source artifact...");
-          researchArtifact = await researchWorldgenArtifact(
-            {
-              premise: campaign.premise,
-              name: campaign.name,
-              knownIP: config.worldgenSourceHint,
-              research: settings.research,
-            },
-            gen.resolved,
-            settings.research.maxSearchSteps,
-          );
-          if (researchArtifact) {
-            ipContext = null;
-            premiseDivergence = null;
-            researchFrame = null;
-            saveWorldgenResearchArtifact(campaignId, researchArtifact);
-            log.info(
-              `Ran v2 research on-demand (${researchArtifact.researchBrief.searchJobs.length} search jobs)`,
-            );
-          }
-        }
-
-        if (ipContext) {
-          log.info(`Using IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${bodyIpContext ? "request" : "cache"})`);
-        }
-        if (!researchArtifact) {
-          premiseDivergence = await resolvePremiseDivergence(
-            campaignId,
-            ipContext,
-            campaign.premise,
-            gen.resolved,
-            premiseDivergence,
-          );
-          researchFrame = resolveWorldgenResearchFrame(
-            campaignId,
-            ipContext,
-            campaign.premise,
-            premiseDivergence,
-            campaign.seeds,
-          );
-        }
-
-        const researchArtifactBeforeGeneration = researchArtifact;
-        const {
-          scaffold,
-          enrichedIpContext,
-          researchArtifact: scaffoldResearchArtifact,
-        } = await generateWorldScaffold(
-          {
-            campaignId,
-            name: campaign.name,
-            premise: campaign.premise,
-            seeds: campaign.seeds,
-            role: gen.resolved,
-            ipContext,
-            premiseDivergence,
-            researchFrame,
-            researchArtifact,
-            research: settings.research,
-          },
-          async (progress) => {
-            debugOperation?.setLabel(progress.label);
-            await stream.writeSSE({
-              event: "progress",
-              data: JSON.stringify(progress),
-            });
-          }
-        );
-
-        if (shouldSaveResearchArtifact(researchArtifactBeforeGeneration, scaffoldResearchArtifact)) {
-          saveWorldgenResearchArtifact(campaignId, scaffoldResearchArtifact);
-          researchArtifact = scaffoldResearchArtifact;
-          log.info(
-            `Saved enriched v2 research artifact (${researchArtifact.generatedContext.keyFacts.length} facts, ${researchArtifact.searchResults.length} results)`,
-          );
-        }
-
-        // Save enriched ipContext back to cache if facts were added
-        if (enrichedIpContext && ipContext && enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
-          saveIpContext(campaignId, enrichedIpContext);
-          log.info(`Saved enriched IP context: ${ipContext.keyFacts.length} → ${enrichedIpContext.keyFacts.length} facts`);
-        }
-
-        saveScaffoldToDb(campaignId, scaffold);
-        markGenerationComplete(campaignId, scaffold.refinedPremise);
-
-        // Store lore cards in LanceDB (non-fatal — world is saved regardless)
-        let loreStorageFailed = false;
-        if (scaffold.loreCards.length > 0) {
-          try {
-            await storeLoreCards(scaffold.loreCards, resolveEmbedder(settings));
-            log.info(`Stored ${scaffold.loreCards.length} lore cards in LanceDB`);
-          } catch (loreError) {
-            loreStorageFailed = true;
-            const msg = loreError instanceof Error ? loreError.message : String(loreError);
-            log.error(`Lore card storage failed: ${msg}`, loreError);
-            await stream.writeSSE({
-              event: "progress",
-              data: JSON.stringify({
-                step: -1,
-                totalSteps: -1,
-                label: `Lore storage failed: ${msg}. World saved without vector search.`,
-              }),
-            });
-          }
-        }
-
-        const startingLocation =
-          scaffold.locations.find((location) => location.isStarting)?.name ??
-          scaffold.locations[0]?.name ??
-          "Unknown";
-
-        await stream.writeSSE({
-          event: "complete",
-          data: JSON.stringify({
-            refinedPremise: scaffold.refinedPremise,
-            locationCount: scaffold.locations.length,
-            npcCount: scaffold.npcs.length,
-            factionCount: scaffold.factions.length,
-            loreCardCount: scaffold.loreCards.length,
-            loreStorageFailed,
-            startingLocation,
-          }),
-        });
-        debugOperation?.finish("completed");
-      } catch (error) {
-        log.error("World generation pipeline failed", error);
-        debugOperation?.finish("failed", error);
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({
-            error: getErrorMessage(error, "World generation failed."),
-          }),
-        });
-      } finally {
-        clearInterval(keepaliveTimer);
-      }
-    });
-  } catch (error) {
-    debugOperation?.finish("failed", error);
-    return c.json(
-      { error: getErrorMessage(error, "World generation failed.") },
-      getErrorStatus(error)
-    );
-  }
-});
-
-app.post("/regenerate-section", async (c) => {
-  try {
-    const result = await parseBody(c, regenerateSectionSchema);
-    if ("response" in result) return result.response;
-
-    const settings = loadSettings();
-    const gen = resolveGenerator(settings);
-    if ("error" in gen) {
-      return c.json({ error: gen.error }, gen.status);
-    }
-
-    const { campaignId } = result.data;
-    const campaign = await requireLoadedCampaign(c, campaignId);
-    if (campaign instanceof Response) return campaign;
-
-    let researchArtifact = loadWorldgenResearchArtifact(campaignId);
-    // Load legacy IP research only when no v2 artifact owns the route lane.
-    let ipContext: IpResearchContext | null = null;
-    let premiseDivergence: PremiseDivergence | null = null;
-    let researchFrame: ReturnType<typeof resolveWorldgenResearchFrame> = null;
-    if (!researchArtifact) {
-      ipContext = loadIpContext(campaignId);
-      premiseDivergence = await resolvePremiseDivergence(
-        campaignId,
-        ipContext,
-        campaign.premise,
-        gen.resolved,
-        loadPremiseDivergence(campaignId),
-      );
-      researchFrame = resolveWorldgenResearchFrame(
-        campaignId,
-        ipContext,
-        campaign.premise,
-        premiseDivergence,
-        campaign.seeds,
-      );
-    }
-
-    const { section } = result.data;
-    const searchConfig = buildResearchSearchConfig(gen.resolved);
-
-    if (researchArtifact && section !== "premise") {
-      const enrichedArtifact = await evaluateResearchArtifactSufficiency(
-        researchArtifact,
-        section,
-        result.data.refinedPremise,
-        gen.resolved,
-        searchConfig,
-      );
-      if (shouldSaveResearchArtifact(researchArtifact, enrichedArtifact)) {
-        saveWorldgenResearchArtifact(campaignId, enrichedArtifact);
-      }
-      researchArtifact = enrichedArtifact;
-    } else if (ipContext && section !== "premise") {
-      const refinementPremise = result.data.refinedPremise;
-      const enrichedIpContext = await evaluateResearchSufficiency(
-        ipContext,
-        section,
-        refinementPremise,
-        gen.resolved,
-        searchConfig,
-        researchFrame,
-      );
-      if (enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
-        saveIpContext(campaignId, enrichedIpContext);
-      }
-      ipContext = enrichedIpContext;
-    }
-
-    const req = {
-      campaignId: campaign.id,
-      name: campaign.name,
-      premise: campaign.premise,
-      seeds: campaign.seeds,
-      role: gen.resolved,
-      premiseDivergence,
-      researchFrame,
-      researchArtifact,
-      research: settings.research,
-    };
-
-    switch (section) {
-      case "premise": {
-        const refinedPremise = await generateRefinedPremiseStep(req, ipContext, result.data.additionalInstruction);
-        return c.json({ refinedPremise });
-      }
-      case "locations": {
-        const locations = await generateLocationsStep(req, result.data.refinedPremise, ipContext, result.data.additionalInstruction);
-        return c.json({ locations });
-      }
-      case "factions": {
-        const factions = await generateFactionsStep(req, result.data.refinedPremise, result.data.locationNames, ipContext, result.data.additionalInstruction);
-        return c.json({ factions });
-      }
-      case "npcs": {
-        const npcLocations = result.data.locations ?? result.data.locationNames;
-        const npcs = await generateNpcsStep(req, result.data.refinedPremise, npcLocations, result.data.factionNames, ipContext, result.data.additionalInstruction);
-        return c.json({ npcs });
-      }
-      default:
-        return c.json({ error: `Unknown section: ${section}` }, 400);
-    }
-  } catch (error) {
-    return c.json(
-      { error: getErrorMessage(error, "Section regeneration failed.") },
-      getErrorStatus(error)
-    );
-  }
-});
-
-app.post("/save-edits", async (c) => {
-  try {
-    const result = await parseBody(c, saveEditsSchema);
-    if ("response" in result) return result.response;
-
-    const { campaignId } = result.data;
-    const scaffold = normalizeSavedScaffold(result.data.scaffold);
-    const campaign = await requireLoadedCampaign(c, campaignId);
-    if (campaign instanceof Response) return campaign;
-
-    saveScaffoldToDb(campaignId, scaffold);
-    markGenerationComplete(campaignId, scaffold.refinedPremise);
-
-    // Clear old lore cards before re-extraction
-    await deleteCampaignLore();
-
-    // Re-extract lore cards
-    const settings = loadSettings();
-    const gen = resolveGenerator(settings);
-    if ("resolved" in gen) {
-      try {
-        const researchArtifact = loadWorldgenResearchArtifact(campaignId) ?? null;
-        const ipContext = researchArtifact ? null : loadIpContext(campaignId);
-        const premiseDivergence = researchArtifact ? null : loadPremiseDivergence(campaignId);
-        const loreCards = await extractLoreCards(scaffold, gen.resolved, {
-          ipContext,
-          premiseDivergence,
-          researchArtifact,
-        });
-
-        await storeLoreCards(loreCards, resolveEmbedder(settings));
-      } catch (loreError) {
-        log.error("Lore re-extraction failed", loreError);
-        return c.json({ ok: true, loreExtractionFailed: true });
-      }
-    }
-
-    return c.json({ ok: true });
-  } catch (error) {
-    return c.json(
-      { error: getErrorMessage(error, "Failed to save world edits.") },
-      getErrorStatus(error)
-    );
-  }
-});
-
 // ───── WorldBook Import ─────
 
 app.get("/worldbook-library", (c) => {
@@ -801,29 +242,6 @@ app.post("/parse-worldbook", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to parse WorldBook.") },
-      getErrorStatus(error),
-    );
-  }
-});
-
-app.post("/import-worldbook", async (c) => {
-  try {
-    const result = await parseBody(c, importWorldBookSchema);
-    if ("response" in result) return result.response;
-
-    const { campaignId, entries } = result.data;
-    const campaign = await requireLoadedCampaign(c, campaignId);
-    if (campaign instanceof Response) return campaign;
-
-    const settings = loadSettings();
-    const embedder = resolveEmbedder(settings);
-
-    const imported = await importClassifiedEntries(campaignId, entries, embedder);
-
-    return c.json(imported);
-  } catch (error) {
-    return c.json(
-      { error: getErrorMessage(error, "Failed to import WorldBook.") },
       getErrorStatus(error),
     );
   }

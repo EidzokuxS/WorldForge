@@ -9,8 +9,9 @@ import { closeDb, connectDb, getDb, getSqliteConnection } from "../../db/index.j
 import { runMigrations } from "../../db/migrate.js";
 import { campaigns } from "../../db/schema.js";
 import {
-  PHASE95_REQUIRED_STORE_KEYS,
-  PHASE95_SQLITE_STORE_TABLES,
+  CAMPAIGN_PLAY_SQLITE_TABLES,
+  CAMPAIGN_STATE_REQUIRED_STORE_KEYS,
+  CAMPAIGN_STATE_SQLITE_TABLES,
 } from "../../engine/gameplay-control-plane-contract.js";
 import {
   captureCampaignBundle,
@@ -176,7 +177,7 @@ describe("campaign store bundle manifest", () => {
       includeVectors: false,
     });
     expect(manifest.stores.map((entry) => entry.store).sort())
-      .toEqual([...PHASE95_REQUIRED_STORE_KEYS].sort());
+      .toEqual([...CAMPAIGN_STATE_REQUIRED_STORE_KEYS].sort());
     expect(manifest.stores.find((entry) => entry.store === "vectors:lore_cards"))
       .toMatchObject({
         captureStatus: "excluded_by_policy",
@@ -192,7 +193,7 @@ describe("campaign store bundle manifest", () => {
         captureStatus: "external",
         bundlePath: null,
       });
-    for (const table of PHASE95_SQLITE_STORE_TABLES) {
+    for (const table of CAMPAIGN_STATE_SQLITE_TABLES) {
       expect(manifest.stores.find((entry) => entry.store === `sqlite:${table}`))
         .toMatchObject({
           captureStatus: "captured",
@@ -201,6 +202,13 @@ describe("campaign store bundle manifest", () => {
           evidenceHash: expect.any(String),
         });
     }
+    expect(CAMPAIGN_PLAY_SQLITE_TABLES.map((table) => {
+      const entry = manifest.stores.find((candidate) => candidate.store === `sqlite:${table}`);
+      return { store: entry?.store, rowCount: entry?.rowCount };
+    })).toEqual(CAMPAIGN_PLAY_SQLITE_TABLES.map((table) => ({
+      store: `sqlite:${table}`,
+      rowCount: 0,
+    })));
     expect(manifest.stores.find((entry) => entry.store === "vectors:episodic_events"))
       .toMatchObject({
         captureStatus: "excluded_by_policy",
@@ -216,7 +224,7 @@ describe("campaign store bundle manifest", () => {
     })).toThrow(/vectors/i);
   });
 
-  it("covers every migrated gameplay SQLite table in the Phase 95 store manifest", () => {
+  it("covers every migrated gameplay SQLite table in the campaign state manifest", () => {
     const migratedTables = (
       getSqliteConnection()
         .prepare(`
@@ -230,12 +238,12 @@ describe("campaign store bundle manifest", () => {
         .all() as Array<{ name: string }>
     ).map((row) => row.name);
 
-    const requiredManifestTables = PHASE95_SQLITE_STORE_TABLES
+    const requiredManifestTables = CAMPAIGN_STATE_SQLITE_TABLES
       .filter((table) => !OPTIONAL_SQLITE_STORE_TABLES.has(table))
       .sort();
     expect(requiredManifestTables).toEqual(migratedTables);
     for (const table of migratedTables) {
-      expect(PHASE95_REQUIRED_STORE_KEYS).toContain(`sqlite:${table}`);
+      expect(CAMPAIGN_STATE_REQUIRED_STORE_KEYS).toContain(`sqlite:${table}`);
     }
   });
 

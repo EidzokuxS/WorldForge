@@ -6,8 +6,9 @@ import {
   ISSUED_REF_NAMESPACE_VALUES,
   ISSUED_REF_OWNER_MATRIX,
   ISSUED_REF_SCHEMA,
-  PHASE95_REQUIRED_STORE_KEYS,
-  PHASE95_STORE_MANIFEST,
+  CAMPAIGN_PLAY_SQLITE_TABLES,
+  CAMPAIGN_STATE_REQUIRED_STORE_KEYS,
+  CAMPAIGN_STATE_STORE_MANIFEST,
   RUNTIME_EFFECT_KIND_STATE_LANES,
   TURN_AUTHORITY_STAGE_CONTRACTS,
   TURN_AUTHORITY_STAGE_VALUES,
@@ -25,7 +26,7 @@ import {
 } from "../gameplay-control-plane-contract.js";
 import { RUNTIME_TOOL_DESCRIPTORS } from "../runtime-tool-descriptors.js";
 
-describe("Phase 95 gameplay control-plane contracts", () => {
+describe("gameplay control-plane contracts", () => {
   it("locks the turn authority lifecycle in the Oracle-reviewed order", () => {
     expect(assertTurnAuthorityLifecycle(TURN_AUTHORITY_STAGE_VALUES)).toEqual([
       "intent_created",
@@ -86,8 +87,8 @@ describe("Phase 95 gameplay control-plane contracts", () => {
   it("fails closed when a required store is missing from the manifest", () => {
     const manifest = assertStoreManifestCoverage();
     expect(manifest.map((entry) => entry.store).sort())
-      .toEqual([...PHASE95_REQUIRED_STORE_KEYS].sort());
-    expect(PHASE95_STORE_MANIFEST.find((entry) => entry.store === "vectors:episodic_events"))
+      .toEqual([...CAMPAIGN_STATE_REQUIRED_STORE_KEYS].sort());
+    expect(CAMPAIGN_STATE_STORE_MANIFEST.find((entry) => entry.store === "vectors:episodic_events"))
       .toMatchObject({
         authorityLevel: "derived",
         clonePolicy: "rebuild",
@@ -98,7 +99,7 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         },
         sourceCampaignIdPolicy: "reject_if_present",
       });
-    expect(PHASE95_STORE_MANIFEST.find((entry) => entry.store === "sqlite:campaigns"))
+    expect(CAMPAIGN_STATE_STORE_MANIFEST.find((entry) => entry.store === "sqlite:campaigns"))
       .toMatchObject({
         rollbackPolicy: "rewrite",
         restorePolicies: {
@@ -106,14 +107,88 @@ describe("Phase 95 gameplay control-plane contracts", () => {
           checkpointRestore: "snapshot_restore",
         },
       });
+    expect(CAMPAIGN_PLAY_SQLITE_TABLES).toEqual([
+      "campaign_play_states",
+      "campaign_play_characters",
+      "campaign_play_turns",
+      "campaign_play_turn_results",
+      "campaign_play_runtime_events",
+      "campaign_play_turn_events",
+      "campaign_play_model_stages",
+      "campaign_play_narrations",
+      "campaign_play_commands",
+      "campaign_play_receipts",
+      "campaign_play_events",
+      "campaign_play_event_exposures",
+      "campaign_play_route_states",
+      "campaign_play_actor_conditions",
+      "campaign_play_pressure_states",
+      "campaign_play_actor_plans",
+      "campaign_play_actor_schedules",
+      "campaign_play_actor_due_sets",
+      "campaign_play_actor_jobs",
+      "campaign_play_actor_proposals",
+      "campaign_play_actor_knowledge",
+      "campaign_play_observations",
+    ]);
+    const campaignPlayEntries = CAMPAIGN_PLAY_SQLITE_TABLES.map((table) =>
+      CAMPAIGN_STATE_STORE_MANIFEST.find((entry) => entry.store === `sqlite:${table}`)
+    );
+    expect(campaignPlayEntries.every(Boolean)).toBe(true);
+    for (const entry of campaignPlayEntries) {
+      expect(entry).toMatchObject({
+        clonePolicy: "purge",
+        rollbackPolicy: "rewrite",
+        replayPolicy: "reject",
+        sourceCampaignIdPolicy: "purge",
+        requiresHash: true,
+        requiresRowCount: true,
+        restorePolicies: {
+          turnRollback: "snapshot_restore",
+          checkpointRestore: "snapshot_restore",
+        },
+      });
+    }
+    expect(campaignPlayEntries.map((entry) => entry?.authorityLevel)).toEqual([
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "evidence",
+      "evidence",
+      "evidence",
+      "evidence",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "authoritative",
+      "derived",
+      "derived",
+      "authoritative",
+      "authoritative",
+    ]);
+    const firstCampaignPlayIndex = CAMPAIGN_STATE_STORE_MANIFEST.findIndex(
+      (entry) => entry.store === "sqlite:campaign_play_states",
+    );
+    const reorderedManifest = [...CAMPAIGN_STATE_STORE_MANIFEST];
+    [reorderedManifest[firstCampaignPlayIndex], reorderedManifest[firstCampaignPlayIndex + 1]] =
+      [reorderedManifest[firstCampaignPlayIndex + 1]!, reorderedManifest[firstCampaignPlayIndex]!];
+    expect(() => assertStoreManifestCoverage(reorderedManifest))
+      .toThrow(/foreign-key order/i);
 
     expect(() => assertStoreManifestCoverage(
-      PHASE95_STORE_MANIFEST.filter((entry) => entry.store !== "sqlite:quick_action_offers"),
+      CAMPAIGN_STATE_STORE_MANIFEST.filter((entry) => entry.store !== "sqlite:quick_action_offers"),
     )).toThrow(/sqlite:quick_action_offers/i);
     expect(() => assertStoreManifestCoverage([
-      ...PHASE95_STORE_MANIFEST,
+      ...CAMPAIGN_STATE_STORE_MANIFEST,
       {
-        ...PHASE95_STORE_MANIFEST[0]!,
+        ...CAMPAIGN_STATE_STORE_MANIFEST[0]!,
         store: "json:unexpected",
       },
     ])).toThrow(/unexpected/i);

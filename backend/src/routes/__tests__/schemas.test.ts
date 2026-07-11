@@ -10,7 +10,6 @@ import {
   rollSeedSchema,
   suggestSeedsSchema,
   suggestSeedSchema,
-  generateWorldSchema,
   testProviderSchema,
   testRoleSchema,
   parseCharacterSchema,
@@ -20,7 +19,6 @@ import {
   characterDraftSchema,
   characterRecordSchema,
   saveCharacterSchema,
-  saveEditsSchema,
   resolveStartingLocationSchema,
   personaTemplateSchema,
   personaTemplateSummarySchema,
@@ -512,6 +510,17 @@ describe("suggestSeedsSchema", () => {
       }
     });
 
+    it("rejects inline classified entries outside the Worldbook Library contract", () => {
+      const result = suggestSeedsSchema.safeParse({
+        premise: "A world of signal towers.",
+        worldbookEntries: [
+          { name: "Signal Tower", type: "location", summary: "A relay post." },
+        ],
+      });
+
+      expect(result.success).toBe(false);
+    });
+
   });
 });
 
@@ -617,109 +626,6 @@ describe("suggestSeedSchema", () => {
 
     it("rejects entirely empty object", () => {
       const result = suggestSeedSchema.safeParse({});
-      expect(result.success).toBe(false);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// generateWorldSchema
-// ---------------------------------------------------------------------------
-describe("generateWorldSchema", () => {
-  describe("accepts valid inputs", () => {
-    it("accepts a non-empty campaignId", () => {
-      const result = generateWorldSchema.safeParse({
-        campaignId: "abc-123-def",
-      });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.campaignId).toBe("abc-123-def");
-      }
-    });
-
-    it("trims whitespace from campaignId", () => {
-      const result = generateWorldSchema.safeParse({
-        campaignId: "  uuid-456  ",
-      });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.campaignId).toBe("uuid-456");
-      }
-    });
-
-    it("accepts optional premiseDivergence beside ipContext", () => {
-      const result = generateWorldSchema.safeParse({
-        campaignId: "abc-123-def",
-        ipContext: {
-          franchise: "Voices of the Void",
-          keyFacts: ["The signal base sits in a remote valley."],
-          tonalNotes: ["lonely"],
-          source: "mcp",
-        },
-        premiseDivergence: {
-          mode: "diverged",
-          protagonistRole: {
-            kind: "custom",
-            interpretation: "replacement",
-            canonicalCharacterName: "Dr. Kel",
-            roleSummary: "The player's custom character replaces Dr. Kel in the active role.",
-          },
-          preservedCanonFacts: ["The signal base remains active."],
-          changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
-          currentStateDirectives: ["Treat the player as the new arrival to the station."],
-          ambiguityNotes: [],
-        },
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it("accepts an explicit null research artifact without defining clear-artifact behavior", () => {
-      const result = generateWorldSchema.safeParse({
-        campaignId: "abc-123-def",
-        researchArtifact: null,
-      });
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.researchArtifact).toBeNull();
-      }
-    });
-
-    it("remains backward compatible with requests that only send ipContext", () => {
-      const result = generateWorldSchema.safeParse({
-        campaignId: "abc-123-def",
-        ipContext: {
-          franchise: "Naruto",
-          keyFacts: ["Konohagakure is a hidden village."],
-          tonalNotes: ["shonen"],
-          source: "mcp",
-        },
-      });
-      expect(result.success).toBe(true);
-    });
-  });
-
-  describe("rejects invalid inputs", () => {
-    it("rejects empty campaignId", () => {
-      const result = generateWorldSchema.safeParse({ campaignId: "" });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0]?.message).toBe("campaignId is required.");
-      }
-    });
-
-    it("rejects whitespace-only campaignId", () => {
-      const result = generateWorldSchema.safeParse({ campaignId: "   " });
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects missing campaignId field", () => {
-      const result = generateWorldSchema.safeParse({});
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects null campaignId", () => {
-      const result = generateWorldSchema.safeParse({ campaignId: null });
       expect(result.success).toBe(false);
     });
   });
@@ -1876,268 +1782,6 @@ describe("canonical character schemas", () => {
     }
   });
 
-  it("preserves supporting tier for draft-backed save-edits NPC payloads", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: true,
-            connectedTo: [],
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            draft: {
-              ...draft,
-              identity: {
-                ...draft.identity,
-                role: "npc",
-                tier: "supporting",
-                displayName: "Captain Mire",
-              },
-            },
-            locationName: "Signal Station",
-            factionName: "Wardens",
-            tier: "supporting",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.npcs[0]).toMatchObject({
-        name: "Captain Mire",
-        locationName: "Signal Station",
-        factionName: "Wardens",
-        tier: "supporting",
-      });
-      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
-    }
-  });
-
-  it("preserves explicit location hierarchy and legacy NPC scene placement in save-edits payloads", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: false,
-            connectedTo: ["Relay Roof"],
-            kind: "macro",
-            parentLocationName: null,
-          },
-          {
-            name: "Relay Roof",
-            description: "A wind-cut sublocation overlooking the valley.",
-            tags: ["Exposed"],
-            isStarting: true,
-            connectedTo: ["Signal Station"],
-            kind: "persistent_sublocation",
-            parentLocationName: "Signal Station",
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            name: "Field Runner Iven",
-            persona: "Carries sealed messages through the blizzard.",
-            tags: ["fast", "reliable"],
-            goals: {
-              shortTerm: ["Deliver the dispatch"],
-              longTerm: ["Map every pass in the range"],
-            },
-            locationName: "Signal Station",
-            sceneLocationName: "Relay Roof",
-            factionName: null,
-            tier: "supporting",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.locations[0]).toMatchObject({
-        kind: "macro",
-        parentLocationName: null,
-      });
-      expect(result.data.scaffold.locations[1]).toMatchObject({
-        kind: "persistent_sublocation",
-        parentLocationName: "Signal Station",
-      });
-      expect(result.data.scaffold.npcs[0]).toMatchObject({
-        locationName: "Signal Station",
-        sceneLocationName: "Relay Roof",
-      });
-    }
-  });
-
-  it("preserves scene placement through draft-backed save-edits NPC reconciliation", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: false,
-            connectedTo: ["Relay Roof"],
-            kind: "macro",
-            parentLocationName: null,
-          },
-          {
-            name: "Relay Roof",
-            description: "A wind-cut sublocation overlooking the valley.",
-            tags: ["Exposed"],
-            isStarting: true,
-            connectedTo: ["Signal Station"],
-            kind: "persistent_sublocation",
-            parentLocationName: "Signal Station",
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            draft: {
-              ...draft,
-              identity: {
-                ...draft.identity,
-                role: "npc",
-                tier: "supporting",
-                displayName: "Captain Mire",
-              },
-              socialContext: {
-                ...draft.socialContext,
-                currentLocationName: "Signal Station",
-              },
-            },
-            locationName: "Signal Station",
-            sceneLocationName: "Relay Roof",
-            factionName: "Wardens",
-            tier: "supporting",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.npcs[0]).toMatchObject({
-        name: "Captain Mire",
-        locationName: "Signal Station",
-        sceneLocationName: "Relay Roof",
-        factionName: "Wardens",
-        tier: "supporting",
-      });
-      expect(result.data.scaffold.npcs[0]?.draft.socialContext.currentLocationName).toBe(
-        "Signal Station",
-      );
-    }
-  });
-
-  it("keeps legacy flat save-edits scaffolds compatible when hierarchy fields are omitted", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: true,
-            connectedTo: [],
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            name: "Field Runner Iven",
-            persona: "Carries sealed messages through the blizzard.",
-            tags: ["fast", "reliable"],
-            goals: {
-              shortTerm: ["Deliver the dispatch"],
-              longTerm: ["Map every pass in the range"],
-            },
-            locationName: "Signal Station",
-            factionName: null,
-            tier: "supporting",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.locations[0]?.kind).toBeUndefined();
-      expect(result.data.scaffold.locations[0]?.parentLocationName).toBeUndefined();
-      expect(result.data.scaffold.npcs[0]?.sceneLocationName).toBeUndefined();
-    }
-  });
-
-  it("materializes a canonical supporting draft for legacy supporting scaffold NPC payloads", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: true,
-            connectedTo: [],
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            name: "Field Runner Iven",
-            persona: "Carries sealed messages through the blizzard.",
-            tags: ["fast", "reliable"],
-            goals: {
-              shortTerm: ["Deliver the dispatch"],
-              longTerm: ["Map every pass in the range"],
-            },
-            locationName: "Signal Station",
-            factionName: null,
-            tier: "supporting",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.npcs[0]).toMatchObject({
-        name: "Field Runner Iven",
-        tier: "supporting",
-      });
-      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
-      expect(result.data.scaffold.npcs[0]?.draft.profile.personaSummary).toBe(
-        "Carries sealed messages through the blizzard.",
-      );
-    }
-  });
-
   it("adds canonical persistence columns to players and npcs without removing legacy ones", () => {
     expect(players.characterRecord.name).toBe("character_record");
     expect(players.derivedTags.name).toBe("derived_tags");
@@ -2330,59 +1974,6 @@ describe("phase 48 richer identity schemas", () => {
     }
   });
 
-  it("derives save-edits compatibility persona and goals from richer identity layers when shallow draft fields are empty", () => {
-    const result = saveEditsSchema.safeParse({
-      campaignId: "camp-1",
-      scaffold: {
-        refinedPremise: "Signals whisper through the alpine dark.",
-        locations: [
-          {
-            name: "Signal Station",
-            description: "A frozen relay tower above the valley.",
-            tags: ["Cold"],
-            isStarting: true,
-            connectedTo: [],
-          },
-        ],
-        factions: [],
-        npcs: [
-          {
-            draft: {
-              ...richerDraft,
-              profile: {
-                ...richerDraft.profile,
-                personaSummary: "",
-              },
-              motivations: {
-                ...richerDraft.motivations,
-                shortTermGoals: [],
-                longTermGoals: [],
-                beliefs: [],
-                drives: [],
-                frictions: [],
-              },
-            },
-            locationName: "Signal Station",
-            factionName: "Wardens",
-            tier: "key",
-          },
-        ],
-        loreCards: [],
-      },
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.scaffold.npcs[0]?.persona).toBe("Guardian of the northern line");
-      expect(result.data.scaffold.npcs[0]?.goals).toEqual({
-        shortTerm: ["Hold the barricade"],
-        longTerm: [],
-      });
-      expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics?.beliefDrift).toEqual([
-        "The valley can still be saved",
-      ]);
-    }
-  });
 });
 
 describe("phase 57 powerStats schemas", () => {

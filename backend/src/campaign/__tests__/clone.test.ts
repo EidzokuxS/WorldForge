@@ -1,11 +1,25 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import type { CampaignWorldReview } from "@worldforge/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, connectDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
-import { PHASE95_SQLITE_STORE_TABLES } from "../../engine/gameplay-control-plane-contract.js";
+import { openCampaignWorldDatabase } from "../../campaign-world/world-database.js";
+import { createCampaignWorldRepository } from "../../campaign-world/world-repository.js";
+import { serializeAcceptedCampaignWorldReview } from "../../campaign-world/world-snapshot.js";
+import { calculateCampaignWorldSourceDigest } from "../../campaign-world/world-source.js";
+import {
+  advanceBuildToPersistence,
+  candidateFixture,
+  createMigratedCampaign,
+  sourceFixture,
+} from "../../campaign-world/world-repository.test-support.js";
+import {
+  CAMPAIGN_PLAY_SQLITE_TABLES,
+} from "../../engine/gameplay-control-plane-contract.js";
 import {
   CAMPAIGN_CLONE_MANIFEST_FILENAME,
   cloneCampaignCleanStart,
@@ -15,13 +29,56 @@ import { planCampaignStoreManifestOperation } from "../store-manifest-executor.j
 
 const SOURCE_CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
 const TARGET_CAMPAIGN_ID = "22222222-2222-4222-8222-222222222222";
+const WORLD_SOURCE_CAMPAIGN_ID = "33333333-3333-4333-8333-333333333333";
+const WORLD_TARGET_CAMPAIGN_ID = "44444444-4444-4444-8444-444444444444";
+const REVIEW_SOURCE_CAMPAIGN_ID = "66666666-6666-4666-8666-666666666666";
+const REVIEW_TARGET_CAMPAIGN_ID = "77777777-7777-4777-8777-777777777777";
 const NOW = 1_779_609_000_000;
+const CLONE_OPERATION_ID = "55555555-5555-4555-8555-555555555555";
 
 let tempRoot = "";
 let previousCampaignsRoot: string | undefined;
 
 function campaignDir(campaignId: string): string {
   return path.join(tempRoot, campaignId);
+}
+
+interface FileByteEvidence {
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+function directoryByteInventory(root: string): FileByteEvidence[] {
+  const evidence: FileByteEvidence[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(absolutePath);
+      } else if (entry.isFile()) {
+        const bytes = fs.readFileSync(absolutePath);
+        evidence.push({
+          path: path.relative(root, absolutePath).split(path.sep).join("/"),
+          size: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+      }
+    }
+  };
+  visit(root);
+  return evidence.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function expectExistingDirectoryBytesUnchanged(
+  before: readonly FileByteEvidence[],
+  after: readonly FileByteEvidence[],
+): void {
+  const existingPaths = new Set(before.map((entry) => entry.path));
+  expect(after.filter((entry) => existingPaths.has(entry.path))).toEqual(before);
+  expect(after.filter((entry) => !existingPaths.has(entry.path)).every((entry) =>
+    entry.path === "state.db-shm" || entry.path === "state.db-wal"
+  )).toBe(true);
 }
 
 function seedSourceCampaign(options: { writeConfig?: boolean } = {}): void {
@@ -60,10 +117,14 @@ function seedSourceCampaign(options: { writeConfig?: boolean } = {}): void {
 
   connectDb(path.join(dir, "state.db"));
   runMigrations();
-  const db = getSqliteConnection();
+  let db = getSqliteConnection();
   db.prepare(
     "INSERT INTO campaigns (id, name, premise, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
   ).run(SOURCE_CAMPAIGN_ID, "Source Campaign", `Premise ${SOURCE_CAMPAIGN_ID}`, NOW - 1000, NOW - 1000);
+  closeDb();
+  acceptSourceCampaignWorld(SOURCE_CAMPAIGN_ID);
+  connectDb(path.join(dir, "state.db"));
+  db = getSqliteConnection();
   db.prepare(
     "INSERT INTO locations (id, campaign_id, name, description, tags, connected_to) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(
@@ -591,27 +652,38 @@ function seedSourceCampaign(options: { writeConfig?: boolean } = {}): void {
   closeDb();
 }
 
-function textColumns(db: Database.Database, tableName: string): string[] {
-  return (db.prepare(`PRAGMA table_info("${tableName}")`).all() as Array<{ name: string; type: string }>)
-    .filter((column) => column.type.toLocaleUpperCase("en-US").includes("TEXT"))
-    .map((column) => column.name);
-}
-
-function findSourceResidue(dbPath: string): string[] {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+function acceptSourceCampaignWorld(campaignId: string): CampaignWorldReview {
+  const source = sourceFixture(campaignId);
+  const handle = openCampaignWorldDatabase(campaignId);
   try {
-    const residue: string[] = [];
-    for (const tableName of PHASE95_SQLITE_STORE_TABLES) {
-      for (const columnName of textColumns(db, tableName)) {
-        const row = db
-          .prepare(`SELECT 1 AS found FROM "${tableName}" WHERE "${columnName}" LIKE ? LIMIT 1`)
-          .get(`%${SOURCE_CAMPAIGN_ID}%`) as { found?: number } | undefined;
-        if (row?.found) residue.push(`${tableName}.${columnName}`);
-      }
+    const repository = createCampaignWorldRepository(handle);
+    const buildId = `accepted-clone-${campaignId}`;
+    repository.acquireBuild({
+      buildId,
+      source,
+      expectedSourceDigest: source.sourceDigest,
+      providerId: "test-provider",
+      model: "test-model",
+      startedAt: NOW - 500,
+    });
+    advanceBuildToPersistence(repository, buildId);
+    const review = repository.completeBuild({
+      buildId,
+      candidate: candidateFixture(source),
+      completedAt: NOW - 250,
+    });
+    repository.acceptWorld({
+      expectedVersion: review.version,
+      expectedContentHash: review.contentHash,
+      acceptedAt: NOW - 100,
+    });
+    const accepted = repository.loadWorld();
+    if (!accepted || accepted.status !== "accepted") {
+      throw new Error("Accepted clone fixture was not persisted.");
     }
-    return residue;
+    return accepted;
   } finally {
-    db.close();
+    handle.close();
   }
 }
 
@@ -639,6 +711,7 @@ describe("clean-start campaign clone", () => {
       targetCampaignId: TARGET_CAMPAIGN_ID,
       nameSuffix: "[route-a]",
       now: NOW,
+      cloneOperationId: CLONE_OPERATION_ID,
     });
 
     expect(result.plan.steps.find((step) => step.store === "vectors:episodic_events"))
@@ -654,7 +727,7 @@ describe("clean-start campaign clone", () => {
     expect(result.purgedTables).toContain("authority_traces");
     expect(result.purgedTables).toContain("gameplay_cycle_v2_packets");
     expect(result.purgedTables).toContain("simulation_jobs");
-    expect(result.scrubbedTextColumns).toContain("locations.description");
+    expect(result.scrubbedTextColumns).toEqual(["campaign_worlds.source_snapshot_json"]);
     expect(result.filesystemActions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ store: "json:chat_history", action: "purge" }),
@@ -669,13 +742,13 @@ describe("clean-start campaign clone", () => {
     expect(targetConfig).toMatchObject({
       id: TARGET_CAMPAIGN_ID,
       name: "Source Campaign [route-a]",
-      premise: `Premise names ${TARGET_CAMPAIGN_ID}`,
+      premise: `Premise names ${SOURCE_CAMPAIGN_ID}`,
       createdAt: NOW,
       updatedAt: NOW,
       currentTick: 0,
     });
-    expect(JSON.stringify(targetConfig)).not.toContain(SOURCE_CAMPAIGN_ID);
-    expect(targetConfig.keyedByCampaign).toHaveProperty(TARGET_CAMPAIGN_ID);
+    expect(targetConfig.nested).toEqual({ sourceCampaignId: SOURCE_CAMPAIGN_ID });
+    expect(targetConfig.keyedByCampaign).toHaveProperty(SOURCE_CAMPAIGN_ID);
     expect(fs.readFileSync(path.join(campaignDir(TARGET_CAMPAIGN_ID), "chat_history.json"), "utf-8").trim())
       .toBe("[]");
     expect(fs.existsSync(path.join(campaignDir(TARGET_CAMPAIGN_ID), "vectors"))).toBe(true);
@@ -700,7 +773,7 @@ describe("clean-start campaign clone", () => {
       expect(db.prepare("SELECT campaign_id, description FROM locations WHERE id = 'loc-source'").get())
         .toEqual({
           campaign_id: TARGET_CAMPAIGN_ID,
-          description: `Description contains ${TARGET_CAMPAIGN_ID}`,
+          description: `Description contains ${SOURCE_CAMPAIGN_ID}`,
         });
       expect(db.prepare("SELECT COUNT(*) AS count FROM quick_action_offers").get())
         .toEqual({ count: 0 });
@@ -722,20 +795,344 @@ describe("clean-start campaign clone", () => {
       db.close();
     }
 
-    expect(findSourceResidue(path.join(campaignDir(TARGET_CAMPAIGN_ID), "state.db"))).toEqual([]);
-    expect(JSON.stringify(targetConfig)).not.toContain(SOURCE_CAMPAIGN_ID);
     const cloneManifest = JSON.parse(
       fs.readFileSync(path.join(campaignDir(TARGET_CAMPAIGN_ID), CAMPAIGN_CLONE_MANIFEST_FILENAME), "utf-8"),
     ) as Record<string, unknown>;
     expect(cloneManifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       mode: "clean_start",
       sourceCampaignId: SOURCE_CAMPAIGN_ID,
       targetCampaignId: TARGET_CAMPAIGN_ID,
       clonedAt: NOW,
+      lineage: {
+        cloneOperationId: CLONE_OPERATION_ID,
+        parentCampaignId: SOURCE_CAMPAIGN_ID,
+        childCampaignId: TARGET_CAMPAIGN_ID,
+      },
     });
     expect(cloneManifest).toHaveProperty("plan.steps");
     expect(cloneManifest).toHaveProperty("filesystemActions");
+  });
+
+  it("clones an accepted Campaign World with stable content and target ownership", async () => {
+    createMigratedCampaign(tempRoot, WORLD_SOURCE_CAMPAIGN_ID);
+    fs.writeFileSync(
+      path.join(campaignDir(WORLD_SOURCE_CAMPAIGN_ID), "config.json"),
+      JSON.stringify({
+        id: WORLD_SOURCE_CAMPAIGN_ID,
+        name: "Accepted World Source",
+        premise: "A stormbound archipelago faces a failing sea route.",
+        createdAt: NOW - 1000,
+        updatedAt: NOW - 1000,
+      }),
+      "utf-8",
+    );
+
+    const source = {
+      ...sourceFixture(WORLD_SOURCE_CAMPAIGN_ID),
+      premise: `The archive names its parent campaign as ${WORLD_SOURCE_CAMPAIGN_ID}.`,
+    };
+    source.sourceDigest = calculateCampaignWorldSourceDigest({
+      premise: source.premise,
+      dna: source.dna,
+      researchSummary: source.researchSummary,
+      sourceReferences: source.sourceReferences,
+    });
+    const sourceHandle = openCampaignWorldDatabase(WORLD_SOURCE_CAMPAIGN_ID);
+    let acceptedSource: CampaignWorldReview | null = null;
+    try {
+      const repository = createCampaignWorldRepository(sourceHandle);
+      repository.acquireBuild({
+        buildId: "accepted-world-build",
+        source,
+        expectedSourceDigest: source.sourceDigest,
+        providerId: "test-provider",
+        model: "test-model",
+        startedAt: NOW - 500,
+      });
+      advanceBuildToPersistence(repository, "accepted-world-build");
+      const review = repository.completeBuild({
+        buildId: "accepted-world-build",
+        candidate: candidateFixture(source),
+        completedAt: NOW - 250,
+      });
+      repository.acceptWorld({
+        expectedVersion: review.version,
+        expectedContentHash: review.contentHash,
+        acceptedAt: NOW - 100,
+      });
+      acceptedSource = repository.loadWorld();
+    } finally {
+      sourceHandle.close();
+    }
+
+    expect(acceptedSource?.status).toBe("accepted");
+    const sourceDbPath = path.join(campaignDir(WORLD_SOURCE_CAMPAIGN_ID), "state.db");
+    const sourceDb = new Database(sourceDbPath);
+    let parentAcceptedSnapshotJson = "";
+    try {
+      const acceptedRow = sourceDb.prepare(`
+        SELECT accepted_snapshot_json AS acceptedSnapshotJson
+        FROM campaign_worlds WHERE campaign_id = ?
+      `).get(WORLD_SOURCE_CAMPAIGN_ID) as { acceptedSnapshotJson: string };
+      parentAcceptedSnapshotJson = acceptedRow.acceptedSnapshotJson;
+      sourceDb.prepare(`
+        INSERT INTO campaign_play_states (
+          campaign_id, accepted_world_version, accepted_content_hash,
+          world_version, world_hash, runtime_revision, runtime_hash,
+          next_runtime_event_sequence, world_time_minutes, setup_phase,
+          opened_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, 1, NULL, 'character_required', NULL, ?, ?)
+      `).run(
+        WORLD_SOURCE_CAMPAIGN_ID,
+        acceptedSource!.version,
+        acceptedSource!.contentHash,
+        acceptedSource!.version,
+        acceptedSource!.contentHash,
+        "a".repeat(64),
+        NOW - 50,
+        NOW - 50,
+      );
+    } finally {
+      sourceDb.close();
+    }
+    const parentBytesBefore = directoryByteInventory(campaignDir(WORLD_SOURCE_CAMPAIGN_ID));
+    const result = await cloneCampaignCleanStart({
+      sourceCampaignId: WORLD_SOURCE_CAMPAIGN_ID,
+      targetCampaignId: WORLD_TARGET_CAMPAIGN_ID,
+      now: NOW,
+      cloneOperationId: CLONE_OPERATION_ID,
+    });
+    expectExistingDirectoryBytesUnchanged(
+      parentBytesBefore,
+      directoryByteInventory(campaignDir(WORLD_SOURCE_CAMPAIGN_ID)),
+    );
+    expect(result.lineage).toEqual({
+      cloneOperationId: CLONE_OPERATION_ID,
+      parentCampaignId: WORLD_SOURCE_CAMPAIGN_ID,
+      childCampaignId: WORLD_TARGET_CAMPAIGN_ID,
+      parentAcceptedSnapshotHash: createHash("sha256")
+        .update(parentAcceptedSnapshotJson)
+        .digest("hex"),
+      sourceDigest: acceptedSource!.sourceDigest,
+    });
+
+    const targetHandle = openCampaignWorldDatabase(WORLD_TARGET_CAMPAIGN_ID);
+    try {
+      const repository = createCampaignWorldRepository(targetHandle);
+      const clonedWorld = repository.loadWorld();
+      expect(clonedWorld).not.toBeNull();
+      expect(clonedWorld).toMatchObject({
+        campaignId: WORLD_TARGET_CAMPAIGN_ID,
+        status: "accepted",
+        version: acceptedSource?.version,
+        contentHash: acceptedSource?.contentHash,
+        sourceDigest: acceptedSource?.sourceDigest,
+      });
+      expect(clonedWorld?.source).toEqual({
+        premise: acceptedSource?.source.premise,
+        dna: acceptedSource?.source.dna,
+        researchSummary: acceptedSource?.source.researchSummary,
+        sourceReferences: acceptedSource?.source.sourceReferences,
+      });
+      expect(clonedWorld?.locations.map((location) => location.id)).toEqual(
+        acceptedSource?.locations.map((location) => location.id),
+      );
+      expect(clonedWorld?.actors.map((actor) => actor.id)).toEqual(
+        acceptedSource?.actors.map((actor) => actor.id),
+      );
+      expect(repository.loadLatestBuild()).toBeNull();
+      const childSnapshot = targetHandle.sqlite.prepare(`
+        SELECT accepted_snapshot_json AS acceptedSnapshotJson,
+          source_snapshot_json AS sourceSnapshotJson
+        FROM campaign_worlds WHERE campaign_id = ?
+      `).get(WORLD_TARGET_CAMPAIGN_ID) as {
+        acceptedSnapshotJson: string;
+        sourceSnapshotJson: string;
+      };
+      expect(childSnapshot.acceptedSnapshotJson).toBe(
+        serializeAcceptedCampaignWorldReview({
+          ...acceptedSource!,
+          campaignId: WORLD_TARGET_CAMPAIGN_ID,
+        }),
+      );
+      expect(JSON.parse(childSnapshot.sourceSnapshotJson)).toMatchObject({
+        campaignId: WORLD_TARGET_CAMPAIGN_ID,
+        premise: `The archive names its parent campaign as ${WORLD_SOURCE_CAMPAIGN_ID}.`,
+        sourceDigest: acceptedSource?.sourceDigest,
+      });
+      for (const tableName of CAMPAIGN_PLAY_SQLITE_TABLES) {
+        expect(targetHandle.sqlite.prepare(
+          `SELECT COUNT(*) AS count FROM "${tableName}"`,
+        ).get()).toEqual({ count: 0 });
+      }
+    } finally {
+      targetHandle.close();
+    }
+    const parentAfter = new Database(sourceDbPath, { readonly: true, fileMustExist: true });
+    try {
+      expect(parentAfter.prepare(`
+        SELECT COUNT(*) AS count FROM campaign_play_states WHERE campaign_id = ?
+      `).get(WORLD_SOURCE_CAMPAIGN_ID)).toEqual({ count: 1 });
+    } finally {
+      parentAfter.close();
+    }
+  });
+
+  it("rejects provenance cloning after player character bootstrap", async () => {
+    const sourceDbPath = path.join(campaignDir(SOURCE_CAMPAIGN_ID), "state.db");
+    const sourceDb = new Database(sourceDbPath);
+    try {
+      const accepted = sourceDb.prepare(`
+        SELECT accepted_world_version AS acceptedWorldVersion,
+          accepted_content_hash AS acceptedContentHash
+        FROM campaign_worlds WHERE campaign_id = ?
+      `).get(SOURCE_CAMPAIGN_ID) as {
+        acceptedWorldVersion: number;
+        acceptedContentHash: string;
+      };
+      sourceDb.prepare(`
+        INSERT INTO campaign_play_states (
+          campaign_id, accepted_world_version, accepted_content_hash,
+          world_version, world_hash, runtime_revision, runtime_hash,
+          next_runtime_event_sequence, world_time_minutes, setup_phase,
+          opened_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, 1, NULL, 'character_required', NULL, ?, ?)
+      `).run(
+        SOURCE_CAMPAIGN_ID,
+        accepted.acceptedWorldVersion,
+        accepted.acceptedContentHash,
+        accepted.acceptedWorldVersion,
+        accepted.acceptedContentHash,
+        "b".repeat(64),
+        NOW - 20,
+        NOW - 20,
+      );
+      sourceDb.prepare(`
+        INSERT INTO actors (
+          id, campaign_id, kind, controller, role, name, summary, traits, tags
+        ) VALUES (
+          'actor-human-clone-guard', ?, 'person', 'human', 'player',
+          'Player', 'The human player.', '[]', '[]'
+        )
+      `).run(SOURCE_CAMPAIGN_ID);
+      sourceDb.prepare(`
+        INSERT INTO campaign_play_characters (
+          actor_id, campaign_id, record_json, record_hash,
+          source_kind, source_digest, created_at
+        ) VALUES (
+          'actor-human-clone-guard', ?, '{}', ?, 'created', ?, ?
+        )
+      `).run(SOURCE_CAMPAIGN_ID, "c".repeat(64), "d".repeat(64), NOW - 10);
+    } finally {
+      sourceDb.close();
+    }
+    const parentBytesBefore = directoryByteInventory(campaignDir(SOURCE_CAMPAIGN_ID));
+
+    await expect(cloneCampaignCleanStart({
+      sourceCampaignId: SOURCE_CAMPAIGN_ID,
+      targetCampaignId: TARGET_CAMPAIGN_ID,
+      now: NOW,
+    })).rejects.toMatchObject({
+      code: "campaign_play_clone_requires_zero_turn",
+      statusCode: 409,
+    });
+
+    expect(fs.existsSync(campaignDir(TARGET_CAMPAIGN_ID))).toBe(false);
+    expectExistingDirectoryBytesUnchanged(
+      parentBytesBefore,
+      directoryByteInventory(campaignDir(SOURCE_CAMPAIGN_ID)),
+    );
+  });
+
+  it("rejects a Campaign World that has not been accepted", async () => {
+    createMigratedCampaign(tempRoot, REVIEW_SOURCE_CAMPAIGN_ID);
+    fs.writeFileSync(
+      path.join(campaignDir(REVIEW_SOURCE_CAMPAIGN_ID), "config.json"),
+      JSON.stringify({
+        id: REVIEW_SOURCE_CAMPAIGN_ID,
+        name: "Review World",
+        premise: "A world still awaiting acceptance.",
+        createdAt: NOW - 100,
+        updatedAt: NOW - 100,
+      }),
+      "utf-8",
+    );
+
+    await expect(cloneCampaignCleanStart({
+      sourceCampaignId: REVIEW_SOURCE_CAMPAIGN_ID,
+      targetCampaignId: REVIEW_TARGET_CAMPAIGN_ID,
+      now: NOW,
+    })).rejects.toThrow("You can clone this campaign once your Campaign World is accepted.");
+    expect(fs.existsSync(campaignDir(REVIEW_TARGET_CAMPAIGN_ID))).toBe(false);
+  });
+
+  it("rejects a source database containing another campaign and its play state", async () => {
+    const sourceDb = new Database(path.join(campaignDir(SOURCE_CAMPAIGN_ID), "state.db"));
+    const otherCampaignId = "88888888-8888-4888-8888-888888888888";
+    try {
+      sourceDb.prepare(`
+        INSERT INTO campaigns (id, name, premise, created_at, updated_at)
+        VALUES (?, 'Other Campaign', 'Other premise', ?, ?)
+      `).run(otherCampaignId, NOW - 1000, NOW - 1000);
+      sourceDb.prepare(`
+        INSERT INTO campaign_worlds (
+          campaign_id, status, world_version, content_hash, source_digest,
+          source_snapshot_json, world_summary, built_at, accepted_at,
+          accepted_snapshot_json, accepted_world_version, accepted_content_hash
+        )
+        SELECT ?, status, world_version, content_hash, source_digest,
+          source_snapshot_json, world_summary, built_at, accepted_at,
+          accepted_snapshot_json, accepted_world_version, accepted_content_hash
+        FROM campaign_worlds WHERE campaign_id = ?
+      `).run(otherCampaignId, SOURCE_CAMPAIGN_ID);
+      const accepted = sourceDb.prepare(`
+        SELECT accepted_world_version AS version, accepted_content_hash AS contentHash
+        FROM campaign_worlds WHERE campaign_id = ?
+      `).get(otherCampaignId) as { version: number; contentHash: string };
+      sourceDb.prepare(`
+        INSERT INTO campaign_play_states (
+          campaign_id, accepted_world_version, accepted_content_hash,
+          world_version, world_hash, runtime_revision, runtime_hash,
+          next_runtime_event_sequence, world_time_minutes, setup_phase,
+          opened_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, 1, NULL, 'character_required', NULL, ?, ?)
+      `).run(
+        otherCampaignId,
+        accepted.version,
+        accepted.contentHash,
+        accepted.version,
+        accepted.contentHash,
+        "e".repeat(64),
+        NOW - 10,
+        NOW - 10,
+      );
+      expect(sourceDb.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      sourceDb.close();
+    }
+
+    await expect(cloneCampaignCleanStart({
+      sourceCampaignId: SOURCE_CAMPAIGN_ID,
+      targetCampaignId: TARGET_CAMPAIGN_ID,
+      now: NOW,
+    })).rejects.toThrow("Campaign clone requires a single-campaign source database.");
+    expect(fs.existsSync(campaignDir(TARGET_CAMPAIGN_ID))).toBe(false);
+  });
+
+  it("preserves a target directory reserved by another clone operation", async () => {
+    const targetDir = campaignDir(TARGET_CAMPAIGN_ID);
+    const sentinelPath = path.join(targetDir, "owner.txt");
+    fs.mkdirSync(targetDir);
+    fs.writeFileSync(sentinelPath, "reserved", "utf-8");
+
+    await expect(cloneCampaignCleanStart({
+      sourceCampaignId: SOURCE_CAMPAIGN_ID,
+      targetCampaignId: TARGET_CAMPAIGN_ID,
+      now: NOW,
+    })).rejects.toThrow(`Clone target already exists: ${targetDir}`);
+
+    expect(fs.readFileSync(sentinelPath, "utf-8")).toBe("reserved");
   });
 
   it("removes a partial clone directory when clone execution fails", async () => {

@@ -1,10 +1,7 @@
 import type {
   CampaignKernel,
   CharacterDraft,
-  SeedCategory,
-  WorldSeeds,
 } from "@worldforge/shared";
-import type { CampaignMeta } from "@/lib/api";
 import type { CharacterImportMode } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
@@ -53,21 +50,6 @@ export type SavePlayerCastResponse = {
   playerCharacter: PlayerCastMember;
 };
 
-export type ApplyWorldDnaResponse = {
-  campaign: CampaignMeta;
-  kernel: CampaignKernel;
-  worldDna: NonNullable<CampaignKernel["worldDna"]>;
-};
-
-export type SuggestCampaignWorldDnaResponse = {
-  seeds: WorldSeeds;
-};
-
-export type SuggestCampaignWorldDnaCategoryResponse = {
-  category: SeedCategory;
-  value: string | string[];
-};
-
 export type ComposeCampaignGraphResponse = {
   kernel: CampaignKernel;
   worldGraph: CampaignKernel["worldGraph"];
@@ -75,30 +57,6 @@ export type ComposeCampaignGraphResponse = {
 
 export function loadCampaignKernel(campaignId: string): Promise<CampaignKernelResponse> {
   return apiGet(`${KERNEL_API_BASE}/campaigns/${campaignId}/kernel`);
-}
-
-export function applyWorldDna(
-  campaignId: string,
-  body: {
-    seeds?: WorldSeeds;
-  } = {},
-): Promise<ApplyWorldDnaResponse> {
-  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/apply`, body);
-}
-
-export function suggestCampaignWorldDna(
-  campaignId: string,
-): Promise<SuggestCampaignWorldDnaResponse> {
-  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/suggest`, {});
-}
-
-export function suggestCampaignWorldDnaCategory(
-  campaignId: string,
-  category: SeedCategory,
-): Promise<SuggestCampaignWorldDnaCategoryResponse> {
-  return apiPost(`${KERNEL_API_BASE}/campaigns/${campaignId}/world-dna/suggest-category`, {
-    category,
-  });
 }
 
 export function parsePlayerCharacterDraft(

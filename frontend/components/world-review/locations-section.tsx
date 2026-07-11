@@ -1,308 +1,89 @@
 "use client";
 
-import { useCallback } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { X } from "lucide-react";
-import { TagEditor } from "@/components/world-review/tag-editor";
-import { RegenerateDialog } from "@/components/world-review/regenerate-dialog";
-import type { ScaffoldLocation } from "@/lib/api";
+import type { CampaignWorldLocation, CampaignWorldRoute } from "@worldforge/shared";
 
 interface LocationsSectionProps {
-  locations: ScaffoldLocation[];
-  onChange: (locations: ScaffoldLocation[]) => void;
-  onRegenerate: (instruction: string | undefined) => void;
-  regenerating: boolean;
+  locations: readonly CampaignWorldLocation[];
+  routes: readonly CampaignWorldRoute[];
+  selectedLocationId: string | null;
+  onSelectLocation: (locationId: string) => void;
 }
-
-const LOCATION_PARENT_NONE = "__none__";
 
 export function LocationsSection({
   locations,
-  onChange,
-  onRegenerate,
-  regenerating,
+  routes,
+  selectedLocationId,
+  onSelectLocation,
 }: LocationsSectionProps) {
-  const updateLocation = useCallback(
-    (index: number, patch: Partial<ScaffoldLocation>) => {
-      const updated = locations.map((loc, i) =>
-        i === index ? { ...loc, ...patch } : loc
-      );
-      onChange(updated);
-    },
-    [locations, onChange]
-  );
-
-  const deleteLocation = useCallback(
-    (index: number) => {
-      onChange(locations.filter((_, i) => i !== index));
-    },
-    [locations, onChange]
-  );
-
-  const addLocation = useCallback(() => {
-    const newLoc: ScaffoldLocation = {
-      name: "",
-      description: "",
-      tags: [],
-      isStarting: false,
-      connectedTo: [],
-      kind: "macro",
-      parentLocationName: null,
-    };
-    onChange([...locations, newLoc]);
-  }, [locations, onChange]);
-
-  const allNames = locations.map((l) => l.name).filter(Boolean);
-
-  const addConnection = useCallback(
-    (index: number, name: string) => {
-      const loc = locations[index];
-      if (loc.connectedTo.includes(name)) return;
-      updateLocation(index, { connectedTo: [...loc.connectedTo, name] });
-    },
-    [locations, updateLocation]
-  );
-
-  const removeConnection = useCallback(
-    (index: number, connName: string) => {
-      const loc = locations[index];
-      updateLocation(index, {
-        connectedTo: loc.connectedTo.filter((c) => c !== connName),
-      });
-    },
-    [locations, updateLocation]
-  );
+  const locationById = new Map(locations.map((location) => [location.id, location]));
+  const selectedLocation = locationById.get(selectedLocationId ?? "") ?? locations[0] ?? null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-serif text-xl font-bold text-bone">Locations</h2>
-        <div className="flex items-center gap-2">
-          <RegenerateDialog
-            sectionName="Locations"
-            onConfirm={onRegenerate}
-            regenerating={regenerating}
-          />
-          <Button variant="outline" size="sm" onClick={addLocation}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Location
-          </Button>
-        </div>
+    <div className="wf-world-locations">
+      <div className="wf-world-location-list" role="list" aria-label="Persisted world locations">
+        {locations.map((location, index) => {
+          const outgoingRoutes = routes.filter((route) => route.fromLocationId === location.id);
+          const parent = location.parentLocationId ? locationById.get(location.parentLocationId) : null;
+          if (location.parentLocationId && !parent) throw new Error(`Missing parent location ${location.parentLocationId}`);
+          return (
+            <div role="listitem" key={location.id}>
+              <button
+                type="button"
+                className="wf-world-location-row"
+                data-selected={selectedLocation?.id === location.id}
+                onClick={() => onSelectLocation(location.id)}
+              >
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <span>
+                  <small>{location.kind === "macro" ? "major location" : "persistent sublocation"}</small>
+                  <strong>{location.name}</strong>
+                  <p>{location.description}</p>
+                </span>
+                <span>
+                  {location.isStarting ? <b>Starting</b> : null}
+                  <small>{parent ? `under ${parent.name}` : `${outgoingRoutes.length} outgoing routes`}</small>
+                </span>
+              </button>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {locations.map((loc, index) => (
-          <Card key={`loc-${index}`} className="relative border-border/50 bg-card">
-            <button
-              type="button"
-              onClick={() => deleteLocation(index)}
-              className="absolute right-3 top-3 rounded p-1 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
+      {selectedLocation ? (
+        <aside className="wf-world-location-details" aria-label={`${selectedLocation.name} routes`}>
+          <span>{selectedLocation.kind === "macro" ? "Major location" : "Persistent sublocation"}</span>
+          <h2>{selectedLocation.name}</h2>
+          <p>{selectedLocation.description}</p>
+          {selectedLocation.parentLocationId ? (
+            <button type="button" onClick={() => onSelectLocation(selectedLocation.parentLocationId!)}>
+              Parent · {locationById.get(selectedLocation.parentLocationId)?.name}
             </button>
-            <CardHeader className="pb-2 pr-10">
-              <Input
-                value={loc.name}
-                onChange={(e) => updateLocation(index, { name: e.target.value })}
-                placeholder="Location name"
-                className="font-serif text-lg font-bold"
-              />
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">
-                  Description
-                </Label>
-                <Textarea
-                  value={loc.description}
-                  onChange={(e) =>
-                    updateLocation(index, { description: e.target.value })
-                  }
-                  rows={3}
-                  className="mt-1 resize-none text-sm"
-                  placeholder="Describe this location..."
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground">Tags</Label>
-                <div className="mt-1">
-                  <TagEditor
-                    tags={loc.tags}
-                    onChange={(tags) => updateLocation(index, { tags })}
-                  />
-                </div>
-              </div>
-
-              {(() => {
-                const kind = loc.kind ?? "macro";
-                const locationLabel = loc.name.trim() || `location ${index + 1}`;
-                const parentOptions = locations
-                  .filter((candidate, candidateIndex) =>
-                    candidateIndex !== index &&
-                    (candidate.kind ?? "macro") === "macro" &&
-                    candidate.name.trim().length > 0
-                  )
-                  .map((candidate) => candidate.name);
-                const validParent =
-                  loc.parentLocationName != null &&
-                  parentOptions.includes(loc.parentLocationName);
-
+          ) : null}
+          <h3>Directed routes</h3>
+          <ul>
+            {routes
+              .filter((route) => route.fromLocationId === selectedLocation.id)
+              .map((route) => {
+                const destination = locationById.get(route.toLocationId);
+                if (!destination) throw new Error(`Missing route destination ${route.toLocationId}`);
                 return (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Kind</Label>
-                      <Select
-                        value={kind}
-                        onValueChange={(value: string) => {
-                          const nextKind: ScaffoldLocation["kind"] =
-                            value === "persistent_sublocation"
-                              ? "persistent_sublocation"
-                              : "macro";
-                          updateLocation(index, {
-                            kind: nextKind,
-                            parentLocationName:
-                              nextKind === "persistent_sublocation"
-                                ? validParent
-                                  ? loc.parentLocationName
-                                  : parentOptions[0] ?? null
-                                : null,
-                          });
-                        }}
-                      >
-                        <SelectTrigger
-                          aria-label={`Kind for ${locationLabel}`}
-                          className="mt-1 h-8 w-full text-xs"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="macro">Macro</SelectItem>
-                          {parentOptions.length > 0 ? (
-                            <SelectItem value="persistent_sublocation">
-                              Persistent sublocation
-                            </SelectItem>
-                          ) : null}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Parent</Label>
-                      <Select
-                        value={validParent ? loc.parentLocationName! : LOCATION_PARENT_NONE}
-                        onValueChange={(value: string) =>
-                          updateLocation(index, {
-                            kind:
-                              value === LOCATION_PARENT_NONE
-                                ? "macro"
-                                : "persistent_sublocation",
-                            parentLocationName:
-                              value === LOCATION_PARENT_NONE ? null : value,
-                          })
-                        }
-                        disabled={parentOptions.length === 0 && kind === "persistent_sublocation"}
-                      >
-                        <SelectTrigger
-                          aria-label={`Parent for ${locationLabel}`}
-                          className="mt-1 h-8 w-full text-xs"
-                        >
-                          <SelectValue placeholder="None" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={LOCATION_PARENT_NONE}>None</SelectItem>
-                          {parentOptions.map((name) => (
-                            <SelectItem key={name} value={name}>
-                              {name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div className="flex items-center gap-2">
-                <Switch
-                  id={`starting-${index}`}
-                  checked={loc.isStarting}
-                  onCheckedChange={(checked: boolean) =>
-                    updateLocation(index, { isStarting: checked })
-                  }
-                />
-                <Label
-                  htmlFor={`starting-${index}`}
-                  className="text-sm text-muted-foreground"
-                >
-                  Starting location
-                </Label>
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground">
-                  Connected To
-                </Label>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  {loc.connectedTo.map((conn) => (
-                    <Badge
-                      key={conn}
-                      variant="secondary"
-                      className="gap-1 pr-1 text-xs"
+                  <li key={route.id}>
+                    <button
+                      type="button"
+                      aria-label={`Route to ${destination.name}, travel cost ${route.travelCost}`}
+                      onClick={() => onSelectLocation(destination.id)}
                     >
-                      {conn}
-                      <button
-                        type="button"
-                        onClick={() => removeConnection(index, conn)}
-                        className="ml-0.5 rounded-sm hover:bg-muted-foreground/20"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                  {(() => {
-                    const available = allNames.filter(
-                      (n) => n !== loc.name && !loc.connectedTo.includes(n)
-                    );
-                    if (available.length === 0) return null;
-                    return (
-                      <Select
-                        value=""
-                        onValueChange={(v: string) => addConnection(index, v)}
-                      >
-                        <SelectTrigger className="h-7 w-32 text-xs">
-                          <SelectValue placeholder="Add..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[...new Set(available)].map((n, i) => (
-                            <SelectItem key={`${n}-${i}`} value={n}>
-                              {n}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    );
-                  })()}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                      <span>→ {destination.name}</span>
+                      <small>travel cost {route.travelCost}</small>
+                    </button>
+                  </li>
+                );
+              })}
+          </ul>
+        </aside>
+      ) : (
+        <p className="wf-review-empty">This world contains no locations.</p>
+      )}
     </div>
   );
 }

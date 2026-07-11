@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 
 import { AppSidebar } from "@/components/non-game-shell/app-sidebar";
 import { useCampaignStatus } from "@/components/non-game-shell/campaign-status-provider";
@@ -17,8 +16,8 @@ function titleForRoute(pathname: string): string {
   if (pathname === "/") return "Home";
   if (pathname === "/campaign/new") return "Forge / New Campaign";
   if (pathname.startsWith("/campaign/new/dna")) return "Forge / World DNA";
-  if (pathname.startsWith("/campaign/") && pathname.endsWith("/review")) return "World / Review";
-  if (pathname.startsWith("/campaign/") && pathname.endsWith("/character")) return "Forge / Player Character";
+  if (pathname.startsWith("/campaign/") && pathname.endsWith("/forge")) return "Campaign / Forge";
+  if (pathname.startsWith("/campaign/") && pathname.endsWith("/review")) return "Campaign / World Review";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/library")) return "Worldbook";
   return "Workspace";
@@ -33,12 +32,13 @@ export function AppShell({
   const { campaign } = useCampaignStatus();
   const resolvedTitle = title ?? titleForRoute(pathname);
   const showTopbar = pathname !== "/";
+  const isForgeRoute = pathname.startsWith("/campaign/") && pathname.endsWith("/forge");
   const isReviewRoute = pathname.startsWith("/campaign/") && pathname.endsWith("/review");
-  const crumb = isReviewRoute && campaign ? (
+  const crumb = (isForgeRoute || isReviewRoute) && campaign ? (
     <>
       <b>{campaign.name}</b>
       <span className="sep">/</span>
-      <span>Walk the world</span>
+      <span>{isReviewRoute ? "World Review" : "Campaign Forge"}</span>
     </>
   ) : (
     resolvedTitle
@@ -58,11 +58,6 @@ export function AppShell({
             <div className="wf-v4-crumb">{crumb}</div>
             <div className="ml-auto flex items-center gap-2">
               {headerActions}
-              {isReviewRoute && campaign ? (
-                <Link className="wf-v4-topbar-action wf-v4-topbar-action-ember" href="/game">
-                  ▸ Begin session
-                </Link>
-              ) : null}
             </div>
           </header>
         ) : null}

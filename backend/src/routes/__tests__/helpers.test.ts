@@ -10,9 +10,14 @@ vi.mock("../../settings/index.js", () => ({
   loadSettings: vi.fn(),
 }));
 
-vi.mock("../../lib/errors.js", () => ({
-  getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
-}));
+vi.mock("../../lib/errors.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/errors.js")>();
+
+  return {
+    ...actual,
+    getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  };
+});
 
 import { requiresApiKey } from "../helpers.js";
 

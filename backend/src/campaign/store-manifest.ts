@@ -5,11 +5,13 @@ import Database from "better-sqlite3";
 import * as lancedb from "@lancedb/lancedb";
 import { getSqliteConnection } from "../db/index.js";
 import {
-  PHASE95_SQLITE_STORE_TABLES,
-  PHASE95_STORE_MANIFEST,
+  CAMPAIGN_STATE_SQLITE_TABLES,
+  CAMPAIGN_STATE_STORE_MANIFEST,
   assertStoreManifestCoverage,
   type StoreManifestEntry,
 } from "../engine/gameplay-control-plane-contract.js";
+
+export { CAMPAIGN_PLAY_SQLITE_TABLES } from "../engine/gameplay-control-plane-contract.js";
 
 export const STORE_BUNDLE_MANIFEST_FILENAME = "store-manifest.json";
 const STORE_BUNDLE_MANIFEST_SCHEMA_VERSION = 1;
@@ -34,8 +36,9 @@ export interface CampaignStoreBundleManifest {
   stores: CampaignStoreBundleEntry[];
 }
 
-const SQLITE_TABLES = new Set<string>(PHASE95_SQLITE_STORE_TABLES);
-const OPTIONAL_SQLITE_TABLES = new Set<string>(["gameplay_cycle_v2_packets"]);
+const SQLITE_TABLES = new Set<string>(CAMPAIGN_STATE_SQLITE_TABLES);
+export const CAMPAIGN_OPTIONAL_SQLITE_TABLES = ["gameplay_cycle_v2_packets"] as const;
+const OPTIONAL_SQLITE_TABLES = new Set<string>(CAMPAIGN_OPTIONAL_SQLITE_TABLES);
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -271,7 +274,7 @@ export async function createCampaignStoreBundleManifest(input: {
   purpose: CampaignStoreBundlePurpose;
   capturedAt?: number;
 }): Promise<CampaignStoreBundleManifest> {
-  const contractEntries = assertStoreManifestCoverage(PHASE95_STORE_MANIFEST);
+  const contractEntries = assertStoreManifestCoverage(CAMPAIGN_STATE_STORE_MANIFEST);
   const manifest: CampaignStoreBundleManifest = {
     schemaVersion: STORE_BUNDLE_MANIFEST_SCHEMA_VERSION,
     campaignId: input.campaignId,

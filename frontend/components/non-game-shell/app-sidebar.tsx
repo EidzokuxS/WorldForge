@@ -37,11 +37,6 @@ interface NavItem {
   match: (pathname: string) => boolean;
 }
 
-function getCampaignId(pathname: string): string | null {
-  const match = pathname.match(/^\/campaign\/(?!new(?:\/|$))([^/]+)/);
-  return match?.[1] ?? null;
-}
-
 function getDraftHref(session: CampaignNewFlowSession | null): string | null {
   if (!session || isCampaignNewFlowSessionEmpty(session)) {
     return null;
@@ -71,29 +66,43 @@ function useForgeDraft(pathname: string) {
 
 export function AppSidebar({ pathname }: AppSidebarProps) {
   const router = useRouter();
-  const { campaign, generationReady } = useCampaignStatus();
+  const { campaignId, campaign, loading, worldState } = useCampaignStatus();
   const draft = useForgeDraft(pathname);
   const draftHref = getDraftHref(draft);
   const [confirmFreshStart, setConfirmFreshStart] = React.useState(false);
-  const routeCampaignId = getCampaignId(pathname);
-  const activeCampaignId = routeCampaignId ?? campaign?.id ?? null;
-  const reviewHref = activeCampaignId ? `/campaign/${activeCampaignId}/review` : "/";
+  const canOpenReview = worldState?.status === "review" || worldState?.status === "accepted";
+  const worldStatusLabel = loading
+    ? "Loading campaign"
+    : worldState?.status === "unbuilt"
+      ? "World awaits creation"
+      : worldState?.status === "building"
+        ? "World is taking shape"
+        : worldState?.status === "review"
+          ? "World ready for review"
+          : worldState?.status === "failed"
+            ? "World build needs attention"
+            : worldState?.status === "accepted"
+              ? "World accepted"
+              : "World state unavailable";
 
-  const sessionItems: NavItem[] = [
+  const campaignItems: NavItem[] = [
     {
-      href: "/game",
-      label: "Play",
-      glyph: "▸",
-      disabled: !campaign,
-      match: (value) => value === "/game",
+      href: campaignId ? `/campaign/${campaignId}/forge` : "#",
+      label: "Campaign Forge",
+      glyph: "◇",
+      disabled: !campaignId,
+      match: (value) => value.startsWith("/campaign/") && value.endsWith("/forge"),
     },
     {
-      href: reviewHref,
-      label: "World",
-      glyph: "◇",
-      disabled: !generationReady,
+      href: campaignId ? `/campaign/${campaignId}/review` : "#",
+      label: "World Review",
+      glyph: "◎",
+      disabled: !campaignId || !canOpenReview,
       match: (value) => value.startsWith("/campaign/") && value.endsWith("/review"),
     },
+  ];
+
+  const workspaceItems: NavItem[] = [
     {
       href: "/",
       label: "Home",
@@ -132,13 +141,6 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
           match: (value: string) => value === draftHref,
         }]
       : []),
-    {
-      href: activeCampaignId ? `/campaign/${activeCampaignId}/character` : "#",
-      label: "Player character",
-      glyph: "⇣",
-      disabled: !activeCampaignId,
-      match: (value) => value.startsWith("/campaign/") && value.endsWith("/character"),
-    },
   ];
 
   const libraryItems: NavItem[] = [
@@ -174,7 +176,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
             </p>
             <p className="wf-sidebar-campaign-meta">
               <span className="wf-sidebar-dot" aria-hidden="true" />
-              <span>{campaign.generationComplete ? "Generated world" : "Campaign draft"}</span>
+              <span>{worldStatusLabel}</span>
             </p>
           </>
         ) : (
@@ -183,7 +185,8 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
       </div>
 
       <div className="wf-sidebar-nav">
-        <SidebarGroup title="Session" items={sessionItems} pathname={pathname} />
+        <SidebarGroup title="Campaign" items={campaignItems} pathname={pathname} />
+        <SidebarGroup title="Workspace" items={workspaceItems} pathname={pathname} />
         <SidebarGroup title="Forge" items={forgeItems} pathname={pathname} />
         <SidebarGroup title="Library" items={libraryItems} pathname={pathname} />
       </div>

@@ -1,8 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { AppError } from "../lib/index.js";
+import type { CampaignWorldReview } from "@worldforge/shared";
+import {
+  calculateCampaignWorldContentHash,
+  parseAcceptedCampaignWorldReview,
+  serializeAcceptedCampaignWorldReview,
+} from "../campaign-world/world-snapshot.js";
+import { calculateCampaignWorldSourceDigest } from "../campaign-world/world-source.js";
+import { AppError } from "../lib/errors.js";
 import { assertSafeId, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { hasAnyActiveTurn } from "./runtime-state.js";
 import {
@@ -10,6 +17,10 @@ import {
   type CampaignStoreManifestOperationPlan,
   type CampaignStoreManifestOperationStep,
 } from "./store-manifest-executor.js";
+import {
+  CAMPAIGN_OPTIONAL_SQLITE_TABLES,
+  CAMPAIGN_PLAY_SQLITE_TABLES,
+} from "./store-manifest.js";
 
 export const CAMPAIGN_CLONE_MANIFEST_FILENAME = "clone-manifest.json";
 
@@ -19,7 +30,16 @@ export interface CleanStartCampaignCloneOptions {
   name?: string;
   nameSuffix?: string;
   now?: number;
+  cloneOperationId?: string;
   mode?: "clean_start" | "replay_preserving";
+}
+
+export interface CampaignCloneLineage {
+  cloneOperationId: string;
+  parentCampaignId: string;
+  parentAcceptedSnapshotHash: string;
+  sourceDigest: string;
+  childCampaignId: string;
 }
 
 export interface CleanStartCampaignCloneResult {
@@ -29,6 +49,7 @@ export interface CleanStartCampaignCloneResult {
   sourceDir: string;
   targetDir: string;
   cloneManifestPath: string;
+  lineage: CampaignCloneLineage;
   plan: CampaignStoreManifestOperationPlan;
   rewrittenTables: string[];
   purgedTables: string[];
@@ -44,8 +65,26 @@ export interface CampaignFilesystemCloneAction {
 }
 
 export interface CleanStartCampaignCloneManifest extends CleanStartCampaignCloneResult {
-  schemaVersion: 1;
+  schemaVersion: 2;
   clonedAt: number;
+}
+
+export class CampaignCloneError extends AppError {
+  constructor(
+    readonly code: "campaign_play_clone_requires_zero_turn",
+    message: string,
+  ) {
+    super(message, 409);
+    this.name = "CampaignCloneError";
+  }
+}
+
+interface AcceptedCloneSource {
+  acceptedSnapshotJson: string;
+  review: CampaignWorldReview;
+  acceptedWorldVersion: number;
+  acceptedContentHash: string;
+  acceptedAt: number;
 }
 
 interface TableColumn {
@@ -71,16 +110,152 @@ function tableExists(db: Database.Database, tableName: string): boolean {
   return row?.name === tableName;
 }
 
+function sha256(value: string | Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function readAcceptedCloneSource(
+  db: Database.Database,
+  campaignId: string,
+): AcceptedCloneSource {
+  const row = db.prepare(`
+    SELECT status,
+      accepted_at AS acceptedAt,
+      accepted_snapshot_json AS acceptedSnapshotJson,
+      accepted_world_version AS acceptedWorldVersion,
+      accepted_content_hash AS acceptedContentHash
+    FROM campaign_worlds
+    WHERE campaign_id = ?
+  `).get(campaignId) as {
+    status: string;
+    acceptedAt: number | null;
+    acceptedSnapshotJson: string | null;
+    acceptedWorldVersion: number | null;
+    acceptedContentHash: string | null;
+  } | undefined;
+  if (
+    !row || row.status !== "accepted" || row.acceptedAt === null ||
+    row.acceptedSnapshotJson === null || row.acceptedWorldVersion === null ||
+    row.acceptedContentHash === null
+  ) {
+    throw new AppError("You can clone this campaign once your Campaign World is accepted.", 409);
+  }
+  const review = parseAcceptedCampaignWorldReview(row.acceptedSnapshotJson, {
+    campaignId,
+    acceptedWorldVersion: row.acceptedWorldVersion,
+    acceptedContentHash: row.acceptedContentHash,
+    acceptedAt: row.acceptedAt,
+  });
+  return {
+    acceptedSnapshotJson: row.acceptedSnapshotJson,
+    review,
+    acceptedWorldVersion: row.acceptedWorldVersion,
+    acceptedContentHash: row.acceptedContentHash,
+    acceptedAt: row.acceptedAt,
+  };
+}
+
+function hasCampaignRow(
+  db: Database.Database,
+  tableName: string,
+  campaignId: string,
+): boolean {
+  const table = quoteSqlIdentifier(tableName);
+  return Boolean(db.prepare(`SELECT 1 FROM ${table} WHERE campaign_id = ? LIMIT 1`).get(campaignId));
+}
+
+function assertCloneBeforeCharacterBootstrap(
+  db: Database.Database,
+  campaignId: string,
+): void {
+  const state = db.prepare(`
+    SELECT setup_phase AS setupPhase
+    FROM campaign_play_states
+    WHERE campaign_id = ?
+  `).get(campaignId) as { setupPhase: string } | undefined;
+  const playerActor = db.prepare(`
+    SELECT 1
+    FROM actors
+    WHERE campaign_id = ? AND kind = 'person'
+      AND controller = 'human' AND role = 'player'
+    LIMIT 1
+  `).get(campaignId);
+  const playerCommand = db.prepare(`
+    SELECT 1
+    FROM campaign_play_commands
+    WHERE campaign_id = ? AND command_kind = 'create_player_actor'
+    LIMIT 1
+  `).get(campaignId);
+  const hasBootstrapEvidence =
+    hasCampaignRow(db, "campaign_play_characters", campaignId) ||
+    hasCampaignRow(db, "campaign_play_turns", campaignId) ||
+    Boolean(playerActor) || Boolean(playerCommand) ||
+    (state !== undefined && state.setupPhase !== "character_required");
+  if (hasBootstrapEvidence) {
+    throw new CampaignCloneError(
+      "campaign_play_clone_requires_zero_turn",
+      "You can only clone a fresh campaign before adding a character or starting play.",
+    );
+  }
+}
+
+function assertSingleCampaignDatabase(
+  db: Database.Database,
+  expectedCampaignId: string,
+): void {
+  const campaigns = db.prepare("SELECT id FROM campaigns ORDER BY id").all() as Array<{ id: string }>;
+  if (campaigns.length !== 1 || campaigns[0]?.id !== expectedCampaignId) {
+    throw new Error("Campaign clone requires a single-campaign source database.");
+  }
+  const violations = db.pragma("foreign_key_check") as unknown[];
+  if (violations.length > 0) {
+    throw new Error(`Campaign clone source has ${violations.length} foreign-key violation(s).`);
+  }
+}
+
+function readCampaignPlayTriggerDefinitions(db: Database.Database): string[] {
+  const tableNames = new Set<string>([
+    ...CAMPAIGN_PLAY_SQLITE_TABLES,
+    "campaign_worlds",
+  ]);
+  return (db.prepare(`
+    SELECT tbl_name AS tableName, sql
+    FROM sqlite_master
+    WHERE type = 'trigger' AND sql IS NOT NULL
+    ORDER BY name
+  `).all() as Array<{ tableName: string; sql: string }>)
+    .filter((entry) => tableNames.has(entry.tableName))
+    .map((entry) => entry.sql);
+}
+
+function dropCampaignPlayTriggers(
+  db: Database.Database,
+  triggerDefinitions: readonly string[],
+): void {
+  const triggerNames = db.prepare(`
+    SELECT name, tbl_name AS tableName
+    FROM sqlite_master
+    WHERE type = 'trigger'
+    ORDER BY name
+  `).all() as Array<{ name: string; tableName: string }>;
+  const tableNames = new Set<string>([
+    ...CAMPAIGN_PLAY_SQLITE_TABLES,
+    "campaign_worlds",
+  ]);
+  for (const trigger of triggerNames) {
+    if (tableNames.has(trigger.tableName)) {
+      db.exec(`DROP TRIGGER ${quoteSqlIdentifier(trigger.name)}`);
+    }
+  }
+  if (triggerDefinitions.length === 0) {
+    throw new Error("Campaign Play clone purge requires registered database triggers.");
+  }
+}
+
 function requireCampaignIdColumn(columns: readonly TableColumn[], tableName: string): void {
   if (!columns.some((column) => column.name === "campaign_id")) {
     throw new Error(`Manifest clone table is missing campaign_id: ${tableName}`);
   }
-}
-
-function textColumns(columns: readonly TableColumn[]): string[] {
-  return columns
-    .filter((column) => column.type.toLocaleUpperCase("en-US").includes("TEXT"))
-    .map((column) => column.name);
 }
 
 async function backupSqliteDatabase(sourceDbPath: string, targetDbPath: string): Promise<void> {
@@ -90,26 +265,6 @@ async function backupSqliteDatabase(sourceDbPath: string, targetDbPath: string):
   } finally {
     sourceDb.close();
   }
-}
-
-function rewriteCampaignIdInValue(value: unknown, sourceCampaignId: string, targetCampaignId: string): unknown {
-  if (typeof value === "string") {
-    return value.includes(sourceCampaignId)
-      ? value.replaceAll(sourceCampaignId, targetCampaignId)
-      : value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => rewriteCampaignIdInValue(entry, sourceCampaignId, targetCampaignId));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        key.includes(sourceCampaignId) ? key.replaceAll(sourceCampaignId, targetCampaignId) : key,
-        rewriteCampaignIdInValue(entry, sourceCampaignId, targetCampaignId),
-      ]),
-    );
-  }
-  return value;
 }
 
 function cloneCampaignConfig(input: {
@@ -122,11 +277,10 @@ function cloneCampaignConfig(input: {
   now: number;
 }): string {
   const sourceConfig = JSON.parse(fs.readFileSync(input.sourceConfigPath, "utf-8")) as Record<string, unknown>;
-  const rewritten = rewriteCampaignIdInValue(
-    sourceConfig,
-    input.sourceCampaignId,
-    input.targetCampaignId,
-  ) as Record<string, unknown>;
+  const rewritten = { ...sourceConfig };
+  if (rewritten.id === input.sourceCampaignId) {
+    rewritten.id = input.targetCampaignId;
+  }
   const baseName = String(rewritten.name ?? "Campaign");
   rewritten.name = input.name?.trim() || (
     input.nameSuffix ? `${baseName} ${input.nameSuffix}` : `${baseName} [clean clone]`
@@ -264,6 +418,7 @@ function applySqliteClonePlan(input: {
   targetCampaignId: string;
   cloneName: string;
   now: number;
+  acceptedCloneSource: AcceptedCloneSource;
 }): Pick<CleanStartCampaignCloneResult, "rewrittenTables" | "purgedTables" | "scrubbedTextColumns"> {
   const db = new Database(input.dbPath);
   const rewrittenTables: string[] = [];
@@ -274,6 +429,8 @@ function applySqliteClonePlan(input: {
     .filter((entry): entry is { step: CampaignStoreManifestOperationStep; tableName: string } =>
       entry.tableName !== null,
     );
+  const optionalTables = new Set<string>(CAMPAIGN_OPTIONAL_SQLITE_TABLES);
+  const campaignPlayTriggerDefinitions = readCampaignPlayTriggerDefinitions(db);
 
   try {
     db.pragma("foreign_keys = OFF");
@@ -282,16 +439,17 @@ function applySqliteClonePlan(input: {
     ensureCleanGameplayActorConditionsCloneTable(db);
     ensureCleanGameplayMinorPoisCloneTable(db);
     const applyPlan = db.transaction(() => {
+      dropCampaignPlayTriggers(db, campaignPlayTriggerDefinitions);
       for (const { step, tableName } of sqliteSteps) {
         if (!tableExists(db, tableName)) {
+          if (optionalTables.has(tableName)) continue;
           throw new Error(`Manifest clone source database is missing table: ${tableName}`);
         }
         const table = quoteSqlIdentifier(tableName);
         const columns = readTableColumns(db, tableName);
 
         if (step.action === "purge") {
-          requireCampaignIdColumn(columns, tableName);
-          const result = db.prepare(`DELETE FROM ${table} WHERE campaign_id = ?`).run(input.sourceCampaignId);
+          const result = db.prepare(`DELETE FROM ${table}`).run();
           if (result.changes > 0) purgedTables.push(tableName);
           continue;
         }
@@ -328,24 +486,33 @@ function applySqliteClonePlan(input: {
           if (result.changes > 0) rewrittenTables.push(tableName);
         }
 
-        for (const columnName of textColumns(columns)) {
-          const column = quoteSqlIdentifier(columnName);
-          const result = db
-            .prepare(`UPDATE ${table} SET ${column} = replace(${column}, ?, ?) WHERE ${column} LIKE ?`)
-            .run(input.sourceCampaignId, input.targetCampaignId, `%${input.sourceCampaignId}%`);
-          if (result.changes > 0) {
-            scrubbedTextColumns.push(`${tableName}.${columnName}`);
-          }
-        }
+      }
+      const childSourceSnapshotJson = JSON.stringify({
+        campaignId: input.targetCampaignId,
+        ...input.acceptedCloneSource.review.source,
+        sourceDigest: input.acceptedCloneSource.review.sourceDigest,
+      });
+      const childAcceptedSnapshotJson = serializeAcceptedCampaignWorldReview({
+        ...input.acceptedCloneSource.review,
+        campaignId: input.targetCampaignId,
+      });
+      const acceptedSnapshotUpdate = db.prepare(`
+        UPDATE campaign_worlds
+        SET source_snapshot_json = ?, accepted_snapshot_json = ?
+        WHERE campaign_id = ?
+      `).run(childSourceSnapshotJson, childAcceptedSnapshotJson, input.targetCampaignId);
+      if (acceptedSnapshotUpdate.changes !== 1) {
+        throw new Error("Clean-start clone could not rewrite accepted Campaign World provenance.");
+      }
+      scrubbedTextColumns.push("campaign_worlds.source_snapshot_json");
+      for (const triggerDefinition of campaignPlayTriggerDefinitions) {
+        db.exec(triggerDefinition);
       }
     });
 
     applyPlan();
 
-    const sourceResidue = findSourceCampaignIdResidue(db, sqliteSteps, input.sourceCampaignId);
-    if (sourceResidue) {
-      throw new Error(`Clean-start clone left source campaign id in ${sourceResidue}.`);
-    }
+    assertSingleCampaignDatabase(db, input.targetCampaignId);
 
     const violations = db.pragma("foreign_key_check") as unknown[];
     if (violations.length > 0) {
@@ -357,26 +524,6 @@ function applySqliteClonePlan(input: {
     db.pragma("foreign_keys = ON");
     db.close();
   }
-}
-
-function findSourceCampaignIdResidue(
-  db: Database.Database,
-  sqliteSteps: readonly { step: CampaignStoreManifestOperationStep; tableName: string }[],
-  sourceCampaignId: string,
-): string | null {
-  for (const { tableName } of sqliteSteps) {
-    const table = quoteSqlIdentifier(tableName);
-    for (const columnName of textColumns(readTableColumns(db, tableName))) {
-      const column = quoteSqlIdentifier(columnName);
-      const row = db
-        .prepare(`SELECT 1 AS found FROM ${table} WHERE ${column} LIKE ? LIMIT 1`)
-        .get(`%${sourceCampaignId}%`) as { found?: number } | undefined;
-      if (row?.found) {
-        return `${tableName}.${columnName}`;
-      }
-    }
-  }
-  return null;
 }
 
 function requireCloneStepAction(
@@ -424,7 +571,7 @@ export function executeCampaignFilesystemClonePlan(input: {
         store: step.store,
         action: step.action,
         targetPath: path.join(input.targetDir, "config.json"),
-        note: "Config JSON was recursively rewritten before filesystem plan execution.",
+        note: "Config ownership and clean-start fields were rewritten before filesystem plan execution.",
       });
       continue;
     }
@@ -524,7 +671,7 @@ export async function cloneCampaignCleanStart(
 
   if (mode === "replay_preserving") {
     planCampaignStoreManifestOperation({ mode: "replay_preserving_clone" });
-    throw new Error("Replay-preserving clone is not implemented for Phase 95 clean-start clone.");
+    throw new Error("Replay-preserving campaign clone is unavailable.");
   }
 
   if (hasAnyActiveTurn()) {
@@ -548,13 +695,57 @@ export async function cloneCampaignCleanStart(
   if (!fs.existsSync(sourceConfigPath)) {
     throw new Error(`Source campaign config is missing: ${sourceConfigPath}`);
   }
-  if (fs.existsSync(targetDir)) {
-    throw new Error(`Clone target already exists: ${targetDir}`);
+  let acceptedCloneSource: AcceptedCloneSource;
+  const sourceDb = new Database(sourceDbPath, { readonly: true, fileMustExist: true });
+  try {
+    assertSingleCampaignDatabase(sourceDb, options.sourceCampaignId);
+    acceptedCloneSource = readAcceptedCloneSource(sourceDb, options.sourceCampaignId);
+    assertCloneBeforeCharacterBootstrap(sourceDb, options.sourceCampaignId);
+  } finally {
+    sourceDb.close();
   }
+  const cloneOperationId = options.cloneOperationId ?? randomUUID();
+  assertSafeId(cloneOperationId);
+  const lineage: CampaignCloneLineage = {
+    cloneOperationId,
+    parentCampaignId: options.sourceCampaignId,
+    parentAcceptedSnapshotHash: sha256(acceptedCloneSource.acceptedSnapshotJson),
+    sourceDigest: acceptedCloneSource.review.sourceDigest,
+    childCampaignId: targetCampaignId,
+  };
 
-  fs.mkdirSync(targetDir, { recursive: true });
+  let ownsTargetDirectory = false;
+  try {
+    fs.mkdirSync(targetDir);
+    ownsTargetDirectory = true;
+  } catch (error) {
+    if (
+      typeof error === "object" && error !== null && "code" in error &&
+      (error as NodeJS.ErrnoException).code === "EEXIST"
+    ) {
+      throw new Error(`Clone target already exists: ${targetDir}`);
+    }
+    throw error;
+  }
   try {
     await backupSqliteDatabase(sourceDbPath, targetDbPath);
+    const targetBackupDb = new Database(targetDbPath, { readonly: true, fileMustExist: true });
+    try {
+      assertSingleCampaignDatabase(targetBackupDb, options.sourceCampaignId);
+      const targetBackupSource = readAcceptedCloneSource(
+        targetBackupDb,
+        options.sourceCampaignId,
+      );
+      assertCloneBeforeCharacterBootstrap(targetBackupDb, options.sourceCampaignId);
+      if (
+        targetBackupSource.acceptedSnapshotJson !== acceptedCloneSource.acceptedSnapshotJson ||
+        targetBackupSource.review.sourceDigest !== acceptedCloneSource.review.sourceDigest
+      ) {
+        throw new Error("Campaign clone backup provenance changed during capture.");
+      }
+    } finally {
+      targetBackupDb.close();
+    }
     const now = options.now ?? Date.now();
     const cloneName = cloneCampaignConfig({
       sourceCampaignId: options.sourceCampaignId,
@@ -577,7 +768,57 @@ export async function cloneCampaignCleanStart(
       targetCampaignId,
       cloneName,
       now,
+      acceptedCloneSource,
     });
+
+    const childDb = new Database(targetDbPath, { readonly: true, fileMustExist: true });
+    try {
+      assertSingleCampaignDatabase(childDb, targetCampaignId);
+      const childAccepted = readAcceptedCloneSource(childDb, targetCampaignId);
+      if (
+        childAccepted.review.sourceDigest !== acceptedCloneSource.review.sourceDigest ||
+        childAccepted.acceptedWorldVersion !== acceptedCloneSource.acceptedWorldVersion ||
+        childAccepted.acceptedContentHash !== acceptedCloneSource.acceptedContentHash
+      ) {
+        throw new Error("Campaign clone child accepted provenance does not match its parent.");
+      }
+      const currentWorld = childDb.prepare(`
+        SELECT source_digest AS sourceDigest, source_snapshot_json AS sourceSnapshotJson,
+          content_hash AS contentHash
+        FROM campaign_worlds
+        WHERE campaign_id = ?
+      `).get(targetCampaignId) as {
+        sourceDigest: string;
+        sourceSnapshotJson: string;
+        contentHash: string;
+      };
+      const expectedSourceSnapshotJson = JSON.stringify({
+        campaignId: targetCampaignId,
+        ...childAccepted.review.source,
+        sourceDigest: childAccepted.review.sourceDigest,
+      });
+      const calculatedSourceDigest = calculateCampaignWorldSourceDigest(childAccepted.review.source);
+      const calculatedContentHash = calculateCampaignWorldContentHash(
+        calculatedSourceDigest,
+        childAccepted.review,
+      );
+      if (
+        currentWorld.sourceSnapshotJson !== expectedSourceSnapshotJson ||
+        currentWorld.sourceDigest !== calculatedSourceDigest ||
+        currentWorld.contentHash !== calculatedContentHash
+      ) {
+        throw new Error("Campaign clone child current World provenance does not match its accepted snapshot.");
+      }
+      for (const tableName of CAMPAIGN_PLAY_SQLITE_TABLES) {
+        const table = quoteSqlIdentifier(tableName);
+        const row = childDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
+        if (row.count !== 0) {
+          throw new Error(`Campaign clone child retained Campaign Play rows in ${tableName}.`);
+        }
+      }
+    } finally {
+      childDb.close();
+    }
 
     const result: CleanStartCampaignCloneResult = {
       mode: "clean_start",
@@ -586,18 +827,21 @@ export async function cloneCampaignCleanStart(
       sourceDir,
       targetDir,
       cloneManifestPath: path.join(targetDir, CAMPAIGN_CLONE_MANIFEST_FILENAME),
+      lineage,
       plan,
       ...sqliteResult,
       filesystemActions,
     };
     writeCleanStartCloneManifest(targetDir, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       clonedAt: now,
       ...result,
     });
     return result;
   } catch (error) {
-    fs.rmSync(targetDir, { recursive: true, force: true });
+    if (ownsTargetDirectory) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
     throw error;
   }
 }

@@ -27,7 +27,7 @@ const log = createLogger("campaign-manager");
 
 export type { CampaignMeta } from "@worldforge/shared";
 
-type CampaignConfigFile = {
+export type CampaignConfigFile = {
   name: string;
   premise: string;
   seeds?: WorldSeeds;
@@ -45,6 +45,11 @@ type CampaignConfigFile = {
   updatedAt?: number;
 };
 
+export interface CampaignConfigSnapshot {
+  config: CampaignConfigFile;
+  raw: Record<string, unknown>;
+}
+
 let activeCampaign: CampaignMeta | null = null;
 
 function ensureCampaignsDir() {
@@ -54,53 +59,73 @@ function ensureCampaignsDir() {
   }
 }
 
-export function readCampaignConfig(campaignId: string): CampaignConfigFile {
-  const configPath = getCampaignConfigPath(campaignId);
-  if (!fs.existsSync(configPath)) {
-    throw new AppError("Campaign config.json not found.", 404);
-  }
-
-  const rawConfig = fs.readFileSync(configPath, "utf-8");
-  let parsed: Partial<CampaignConfigFile>;
+function parseCampaignConfigSnapshot(rawConfig: string): CampaignConfigSnapshot {
+  let parsedValue: unknown;
   try {
-    parsed = JSON.parse(rawConfig) as Partial<CampaignConfigFile>;
+    parsedValue = JSON.parse(rawConfig);
   } catch {
     throw new AppError("Campaign config.json contains invalid JSON.", 500);
   }
+  if (
+    typeof parsedValue !== "object"
+    || parsedValue === null
+    || Array.isArray(parsedValue)
+  ) {
+    throw new AppError("Campaign config.json is invalid.", 500);
+  }
+  const raw = parsedValue as Record<string, unknown>;
+  const parsed = raw as Partial<CampaignConfigFile>;
   if (!parsed.name || typeof parsed.createdAt !== "number") {
     throw new AppError("Campaign config.json is invalid.", 500);
   }
 
   return {
-    name: parsed.name,
-    premise: parsed.premise ?? "",
-    seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
-    ipContext: parsed.ipContext ?? undefined,
-    premiseDivergence: parsed.premiseDivergence ?? undefined,
-    worldgenResearchFrame: parsed.worldgenResearchFrame ?? undefined,
-    worldgenResearchArtifact: parsed.worldgenResearchArtifact
-      ? parseWorldgenResearchArtifact(parsed.worldgenResearchArtifact)
-      : undefined,
-    worldgenSourceHint:
-      typeof parsed.worldgenSourceHint === "string" && parsed.worldgenSourceHint.trim()
-        ? parsed.worldgenSourceHint.trim()
+    raw,
+    config: {
+      name: parsed.name,
+      premise: parsed.premise ?? "",
+      seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
+      ipContext: parsed.ipContext ?? undefined,
+      premiseDivergence: parsed.premiseDivergence ?? undefined,
+      worldgenResearchFrame: parsed.worldgenResearchFrame ?? undefined,
+      worldgenResearchArtifact: parsed.worldgenResearchArtifact
+        ? parseWorldgenResearchArtifact(parsed.worldgenResearchArtifact)
         : undefined,
-    worldgenResearchEnabled:
-      typeof parsed.worldgenResearchEnabled === "boolean"
-        ? parsed.worldgenResearchEnabled
+      worldgenSourceHint:
+        typeof parsed.worldgenSourceHint === "string" && parsed.worldgenSourceHint.trim()
+          ? parsed.worldgenSourceHint.trim()
+          : undefined,
+      worldgenResearchEnabled:
+        typeof parsed.worldgenResearchEnabled === "boolean"
+          ? parsed.worldgenResearchEnabled
+          : undefined,
+      worldbookSelection: Array.isArray(parsed.worldbookSelection)
+        ? parsed.worldbookSelection
         : undefined,
-    worldbookSelection: Array.isArray(parsed.worldbookSelection)
-      ? parsed.worldbookSelection
-      : undefined,
-    personaTemplates: Array.isArray(parsed.personaTemplates)
-      ? parsed.personaTemplates
-      : [],
-    generationComplete: Boolean(parsed.generationComplete),
-    currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
-    createdAt: parsed.createdAt,
-    updatedAt:
-      typeof parsed.updatedAt === "number" ? parsed.updatedAt : parsed.createdAt,
+      personaTemplates: Array.isArray(parsed.personaTemplates)
+        ? parsed.personaTemplates
+        : [],
+      generationComplete: Boolean(parsed.generationComplete),
+      currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
+      createdAt: parsed.createdAt,
+      updatedAt:
+        typeof parsed.updatedAt === "number" ? parsed.updatedAt : parsed.createdAt,
+    },
   };
+}
+
+export function readCampaignConfigSnapshot(
+  campaignId: string,
+): CampaignConfigSnapshot {
+  const configPath = getCampaignConfigPath(campaignId);
+  if (!fs.existsSync(configPath)) {
+    throw new AppError("Campaign config.json not found.", 404);
+  }
+  return parseCampaignConfigSnapshot(fs.readFileSync(configPath, "utf-8"));
+}
+
+export function readCampaignConfig(campaignId: string): CampaignConfigFile {
+  return readCampaignConfigSnapshot(campaignId).config;
 }
 
 function writeCampaignConfig(campaignDir: string, config: CampaignConfigFile) {

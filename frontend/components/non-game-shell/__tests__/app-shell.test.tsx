@@ -1,35 +1,34 @@
+import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 
-const navigationMock = vi.hoisted(() => ({
+import { AppShell } from "@/components/non-game-shell/app-shell";
+
+const navigation = vi.hoisted(() => ({
+  pathname: "/settings",
   push: vi.fn(),
 }));
 
+const campaignStatus = vi.hoisted(() => ({
+  current: {
+    campaignId: null as string | null,
+    campaign: null as { id: string; name: string } | null,
+    worldState: null as { status: string } | null,
+    loading: false,
+    refreshCampaignWorldState: vi.fn(),
+  },
+}));
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/settings",
-  useRouter: () => navigationMock,
+  usePathname: () => navigation.pathname,
+  useRouter: () => navigation,
 }));
 
 vi.mock("@/components/non-game-shell/campaign-status-provider", () => ({
-  CampaignStatusProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useCampaignStatus: () => ({
-    loading: false,
-    generationReady: false,
-    campaignId: null,
-    campaign: null,
-    reviewAvailable: false,
-    characterAvailable: false,
-  }),
+  useCampaignStatus: () => campaignStatus.current,
 }));
-
-vi.mock("@/lib/api", () => ({
-  getActiveCampaign: vi.fn().mockResolvedValue(null),
-  loadCampaign: vi.fn(),
-}));
-
-import React from "react";
-import { AppShell } from "@/components/non-game-shell/app-shell";
 
 const FLOW_KEY = "worldforge.campaign-new-flow";
 
@@ -48,74 +47,108 @@ function writeDraftSession() {
   }));
 }
 
+function setCampaignStatus(status: string) {
+  campaignStatus.current = {
+    campaignId: "campaign-1",
+    campaign: { id: "campaign-1", name: "Bell Coast" },
+    worldState: { status },
+    loading: false,
+    refreshCampaignWorldState: vi.fn(),
+  };
+}
+
 describe("AppShell", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
-    navigationMock.push.mockClear();
+    navigation.pathname = "/settings";
+    navigation.push.mockClear();
+    campaignStatus.current = {
+      campaignId: null,
+      campaign: null,
+      worldState: null,
+      loading: false,
+      refreshCampaignWorldState: vi.fn(),
+    };
   });
 
-  it("renders the V4 rail, route topbar, and main stage", () => {
-    render(
-      <AppShell>
-        <div>Settings body</div>
-      </AppShell>,
-    );
+  it("renders the route topbar and main stage", () => {
+    render(<AppShell><div>Settings body</div></AppShell>);
 
     expect(document.querySelector(".wf-v4-crumb")).toHaveTextContent("Settings");
     expect(screen.getByRole("main")).toHaveTextContent("Settings body");
-
-    const main = screen.getByRole("main");
-    expect(main.closest(".wf-v4-stage")).not.toBeNull();
-
-    const navRail = document.querySelector(".wf-v4-rail");
-    expect(navRail).not.toBeNull();
-
-    expect(document.querySelector("[data-shell-region='action-tray']")).toBeNull();
+    expect(screen.getByRole("main").closest(".wf-v4-stage")).not.toBeNull();
+    expect(document.querySelector(".wf-v4-rail")).not.toBeNull();
   });
 
-  it("exposes route context via title and headerActions without baking page-specific forms into the foundation", () => {
+  it("keeps route title and header actions as explicit shell inputs", () => {
     render(
-      <AppShell
-        title="Provider Settings"
-        headerActions={<button type="button">Reconnect</button>}
-      >
+      <AppShell title="Provider Settings" headerActions={<button type="button">Reconnect</button>}>
         <div>Child slot</div>
       </AppShell>,
     );
 
     expect(screen.getByText("Provider Settings")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
-
-    const main = screen.getByRole("main");
-    expect(within(main).getByText("Child slot")).toBeInTheDocument();
-    expect(within(main).queryByLabelText(/campaign name/i)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("main")).getByText("Child slot")).toBeInTheDocument();
   });
 
-  it("keeps draft resume separate from destructive new campaign start", async () => {
+  it("keeps draft resume separate from destructive campaign creation", async () => {
     writeDraftSession();
     const user = userEvent.setup();
-
-    render(
-      <AppShell>
-        <div>Settings body</div>
-      </AppShell>,
-    );
+    render(<AppShell><div>Settings body</div></AppShell>);
 
     expect(screen.getByRole("link", { name: "Resume draft" })).toHaveAttribute("href", "/campaign/new");
-
     await user.click(screen.getByRole("link", { name: "New campaign" }));
     expect(await screen.findByText("Start a new campaign?")).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: "Keep draft" }));
     expect(window.sessionStorage.getItem(FLOW_KEY)).toContain("Draft Mercy");
-    expect(navigationMock.push).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("link", { name: "New campaign" }));
     await user.click(await screen.findByRole("button", { name: "Start over" }));
+    await waitFor(() => expect(window.sessionStorage.getItem(FLOW_KEY)).toBeNull());
+    expect(navigation.push).toHaveBeenCalledWith("/campaign/new");
+  });
 
-    await waitFor(() => {
-      expect(window.sessionStorage.getItem(FLOW_KEY)).toBeNull();
-    });
-    expect(navigationMock.push).toHaveBeenCalledWith("/campaign/new");
+  it("renders all Campaign World lifecycle labels and gates World Review", () => {
+    navigation.pathname = "/campaign/campaign-1/forge";
+    const labels = [
+      ["unbuilt", "World awaits creation"],
+      ["building", "World is taking shape"],
+      ["review", "World ready for review"],
+      ["failed", "World build needs attention"],
+      ["accepted", "World accepted"],
+    ];
+    setCampaignStatus(labels[0]![0]);
+    const view = render(<AppShell><div>Campaign body</div></AppShell>);
+
+    for (const [status, label] of labels) {
+      setCampaignStatus(status);
+      view.rerender(<AppShell><div>Campaign body</div></AppShell>);
+      expect(screen.getByText(label)).toBeInTheDocument();
+      const reviewLink = screen.getByRole("link", { name: "World Review" });
+      expect(reviewLink).toHaveAttribute(
+        "href",
+        status === "review" || status === "accepted" ? "/campaign/campaign-1/review" : "#",
+      );
+    }
+
+    expect(screen.getByRole("link", { name: "Campaign Forge" })).toHaveAttribute(
+      "href",
+      "/campaign/campaign-1/forge",
+    );
+    expect(screen.queryByRole("link", { name: "Play" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Player character" })).not.toBeInTheDocument();
+  });
+
+  it("uses Campaign Forge and World Review crumbs without a session action", () => {
+    setCampaignStatus("review");
+    navigation.pathname = "/campaign/campaign-1/forge";
+    const view = render(<AppShell><div>Forge body</div></AppShell>);
+    expect(document.querySelector(".wf-v4-crumb")).toHaveTextContent("Bell Coast/Campaign Forge");
+
+    navigation.pathname = "/campaign/campaign-1/review";
+    view.rerender(<AppShell><div>Review body</div></AppShell>);
+    expect(document.querySelector(".wf-v4-crumb")).toHaveTextContent("Bell Coast/World Review");
+    expect(screen.queryByRole("link", { name: "Begin session" })).not.toBeInTheDocument();
   });
 });

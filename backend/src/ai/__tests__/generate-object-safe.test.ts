@@ -50,6 +50,7 @@ vi.mock("../../lib/index.js", () => ({
 
 const {
   getSafeGenerateObjectErrorCode,
+  getSafeGenerateObjectTrace,
   isSafeGenerateObjectError,
   safeGenerateObject,
 } = await import("../generate-object-safe.js");
@@ -898,6 +899,47 @@ describe("safeGenerateObject", () => {
       getSafeGenerateObjectErrorCode(error) === "missing_structured_tool_call"
       && isSafeGenerateObjectError(error)
     );
+  });
+
+  it("exposes the read-only trace from a structured generation error", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [],
+    });
+
+    let captured: unknown;
+    try {
+      await safeGenerateObject({
+        model: model as never,
+        schema: z.object({ hp: z.number() }),
+        prompt: "test",
+        mode: "tool",
+        retries: 1,
+        allowTextFallback: false,
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(getSafeGenerateObjectTrace(captured)).toMatchObject({
+      strategy: "full_retry",
+      primaryStrategy: "tool_mode",
+      finishReason: "tool-calls",
+    });
+    expect(getSafeGenerateObjectTrace(new Error("other"))).toBeNull();
   });
 
   it("surfaces a typed invalid-tool error when explicit tool mode returns invalid structured output arguments", async () => {
