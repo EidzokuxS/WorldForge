@@ -490,12 +490,6 @@ export function projectAcceptedTopologyEligibility(
 
   let openingValid = openingLocationId !== null;
   if (openingLocationId) {
-    const supportIds = new Set(supportPeople.map((actor) => actor.id));
-    const supportPresent = review.placements.some((placement) =>
-      supportIds.has(placement.actorId) &&
-      placement.placementKind === "present" &&
-      placement.locationId === openingLocationId
-    );
     const pressurePresent = review.pressures.some((pressure) =>
       pressure.locationIds.includes(openingLocationId)
     );
@@ -504,7 +498,7 @@ export function projectAcceptedTopologyEligibility(
       route.toLocationId !== openingLocationId &&
       reachable.has(route.toLocationId)
     );
-    openingValid = supportPresent && pressurePresent && routeAffordance;
+    openingValid = pressurePresent && routeAffordance;
   }
   if (!openingValid) unmet.add("opening_location_invalid");
 

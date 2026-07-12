@@ -214,6 +214,24 @@ describe("accepted topology eligibility", () => {
     expect(review).toEqual(before);
   });
 
+  it("allows the player to enter a pressured starting location without a support actor beside them", () => {
+    const review = acceptedReviewFixture();
+    const result = projectAcceptedTopologyEligibility({
+      ...review,
+      placements: review.placements.map((placement) =>
+        placement.actorId === "actor:support-a"
+          ? { ...placement, locationId: "location:ridge" }
+          : placement
+      ),
+    });
+
+    expect(result.projection).toMatchObject({
+      eligible: true,
+      unmetRequirements: [],
+      openingLocationId: "location:harbor",
+    });
+  });
+
   it("returns stable unmet requirement codes for each first-gate family", () => {
     const review = acceptedReviewFixture();
     const result = projectAcceptedTopologyEligibility({

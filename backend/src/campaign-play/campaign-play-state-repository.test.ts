@@ -100,6 +100,13 @@ function buildCampaign(
             : placement
         )
         : candidate.draft.placements,
+      pressures: input.eligible
+        ? candidate.draft.pressures
+        : candidate.draft.pressures.map((pressure) =>
+          pressure.id === "pressure-a"
+            ? { ...pressure, locationIds: ["location-b"] }
+            : pressure
+        ),
       routes: input.extraDistantRoute
         ? [
           ...candidate.draft.routes,
