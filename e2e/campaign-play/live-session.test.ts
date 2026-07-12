@@ -201,7 +201,7 @@ describe("Campaign Play live evidence session", () => {
       data: {
         level: "pro",
         limits: [
-          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 1, nextResetTime: 10_000 },
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 1 },
           { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 9, nextResetTime: 20_000 },
           { type: "TIME_LIMIT", unit: 5, number: 1, usage: 1_000, currentValue: 0, remaining: 1_000, percentage: 0, nextResetTime: 30_000 },
         ],
@@ -237,7 +237,10 @@ describe("Campaign Play live evidence session", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(JSON.parse(fs.readFileSync(
       path.join(sessionRoot, "probes", "subscription-quota-before.json"), "utf8",
-    ))).toMatchObject({ planId: "pro", tokensFiveHours: { percentage: 1 } });
+    ))).toMatchObject({
+      planId: "pro",
+      tokensFiveHours: { percentage: 1, nextResetAt: null },
+    });
     expect(fs.existsSync(path.join(
       sessionRoot,
       "probes",

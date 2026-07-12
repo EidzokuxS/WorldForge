@@ -185,7 +185,10 @@ async function requestSubscriptionQuota(
   return campaignPlaySubscriptionQuotaSnapshotSchema.parse({
     capturedAt: Date.now(),
     planId: payload.data.level,
-    tokensFiveHours: { percentage: fiveHours.percentage, nextResetAt: fiveHours.nextResetTime },
+    tokensFiveHours: {
+      percentage: fiveHours.percentage,
+      nextResetAt: fiveHours.nextResetTime ?? null,
+    },
     tokensWeekly: { percentage: weekly.percentage, nextResetAt: weekly.nextResetTime },
     toolsMonthly: {
       limit: monthlyTools.usage,

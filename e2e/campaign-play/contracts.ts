@@ -284,7 +284,7 @@ export const campaignPlaySubscriptionQuotaSnapshotSchema = z.object({
   planId: identifierSchema,
   tokensFiveHours: z.object({
     percentage: nonnegativeIntegerSchema.max(100),
-    nextResetAt: timestampSchema,
+    nextResetAt: timestampSchema.nullable(),
   }).strict(),
   tokensWeekly: z.object({
     percentage: nonnegativeIntegerSchema.max(100),
