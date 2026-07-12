@@ -278,6 +278,11 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
     expect(prompt).toContain("Do not summarize the world");
+    expect(prompt).toContain('"name":"Mara Venn"');
+    expect(prompt).toContain('"descriptor":"A bell keeper gripping a wet signal ledger."');
+    expect(prompt).not.toContain('"accent"');
+    expect(prompt).not.toContain('"monogram"');
+    expect(prompt).not.toContain("amber-7");
   });
 
   it("budgets visible narration separately from provider reasoning tokens", async () => {
