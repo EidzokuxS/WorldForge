@@ -102,7 +102,7 @@ END_ALLOWED_LOCATION_REFS
 
 ${campaignWorldStringContract}
 
-Return one object matching the supplied world-cast schema. Create actorRef values such as actor:harbor-warden using lowercase letters, digits, and single hyphens. ALLOWED_LOCATION_REFS is the only valid source for every placements[].locationRef; copy one value character-for-character for each placement. Reuse each actors[].actorRef character-for-character in the matching goals[].actorRef and placements[].actorRef fields. Use actor and location names only in prose fields. Set every controller to agent and every goal status to active. Code assigns persistent IDs after validation.
+Return one object matching the supplied world-cast schema. Create actorRef values such as actor:harbor-warden using lowercase letters, digits, and single hyphens. ALLOWED_LOCATION_REFS is the only valid source for every placements[].locationRef; copy one value character-for-character for each placement. Reuse each actors[].actorRef character-for-character in the matching goals[].actorRef and placements[].actorRef fields. Use actor and location names only in prose fields. Set every controller to agent and every goal status to active. Set every goal priority to an integer from 1 (lowest) through 5 (highest). Code assigns persistent IDs after validation.
 
 Create 4 to 16 actors, including at least one key person, two support people, and one collective. Give every key person, support person, and collective one to three active goals. A background actor may have one goal. Give each person exactly one present placement and at most one home placement. Give each collective a base or influence placement. Place key and support people across at least two locations.`;
 }

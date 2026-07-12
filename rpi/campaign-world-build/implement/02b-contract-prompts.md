@@ -36,3 +36,10 @@
 - `git diff --check`: passed.
 - Fixed-string searches found no scaffold field, separate organization collection, regex parser, em dash, or en dash in the model contracts and prompts.
 - No standalone smoke suite was added.
+
+## Manual playtest correction, 2026-07-12
+
+- A fresh GLM-5.2 build completed the location stage, then failed the cast contract because several generated goals used priority `0` while the schema accepts integers from `1` to `5`.
+- The cast prompt now states the same priority bounds and direction as the schema. Validation remains strict; no coercion, repair pass, fallback parser, or compatibility path was added.
+- `humanizer` and `deslop` review verdict: the new instruction is direct technical prose with a meaningful numeric range, no filler, no persuasive framing, and no AI-writing pattern that needs rewriting.
+- Targeted prompt and builder tests passed: 2 files, 10 tests. Backend typecheck passed.
