@@ -4,6 +4,7 @@
 
 - A failed advisory/review tool gets one focused repair attempt, then an evidence note and forward progress when the owner explicitly authorizes skipping it; advisory infrastructure must not hold the product plan hostage.
 - Inspect configuration schemas or selected non-secret fields instead of printing whole settings files; provider settings can contain live API keys and must stay out of tool logs.
+- Keep secret-bearing configuration reads side-effect free. Only an explicit save may rewrite `settings.json`, and every rewrite must preserve rotating recovery generations.
 
 - Keep active task files short. Long forensic history belongs in git history or current docs that still serve the mechanics rebuild.
 - Treat fallback and backward-compatibility paths as defects unless the user explicitly authorizes a migration window.

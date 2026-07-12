@@ -14,6 +14,8 @@ vi.mock("node:fs", () => ({
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
     writeFileSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    renameSync: vi.fn(),
   },
 }));
 
@@ -482,32 +484,16 @@ describe("loadSettings", () => {
     vi.resetAllMocks();
   });
 
-  it("creates default settings when file does not exist", () => {
+  it("returns default settings without creating a file when none exists", () => {
     mockedFs.existsSync.mockReturnValue(false);
-    mockedFs.writeFileSync.mockImplementation(() => {});
 
     const result = loadSettings();
     expect(result.providers.length).toBeGreaterThanOrEqual(
       BUILTIN_PROVIDER_PRESETS.length
     );
     expect(result.judge.providerId).toBe(FIRST_BUILTIN_ID);
-    expect(mockedFs.writeFileSync).toHaveBeenCalledOnce();
-  });
-
-  it("writes default settings to disk when file does not exist", () => {
-    mockedFs.existsSync.mockReturnValue(false);
-    mockedFs.writeFileSync.mockImplementation(() => {});
-
-    loadSettings();
-
-    const [, content] = mockedFs.writeFileSync.mock.calls[0] as [
-      string,
-      string,
-      string,
-    ];
-    const written = JSON.parse(content) as Settings;
-    expect(written.judge).toBeDefined();
-    expect(written.providers).toBeDefined();
+    expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
+    expect(mockedFs.renameSync).not.toHaveBeenCalled();
   });
 
   it("reads and normalizes existing file", () => {
@@ -522,39 +508,24 @@ describe("loadSettings", () => {
     expect(result.judge.temperature).toBe(0.5);
   });
 
-  it("re-writes normalized settings after reading", () => {
+  it("normalizes existing settings without rewriting the source file", () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(defaults()));
-    mockedFs.writeFileSync.mockImplementation(() => {});
 
     loadSettings();
-    expect(mockedFs.writeFileSync).toHaveBeenCalledTimes(2);
-    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
-      1,
-      expect.stringMatching(/settings\.json\.bak$/),
-      expect.any(String),
-      "utf-8",
-    );
-    expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
-      2,
-      expect.stringMatching(/settings\.json$/),
-      expect.any(String),
-      "utf-8",
-    );
+    expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
+    expect(mockedFs.copyFileSync).not.toHaveBeenCalled();
+    expect(mockedFs.renameSync).not.toHaveBeenCalled();
   });
 
-  it("throws and preserves a backup when file contains invalid JSON", () => {
+  it("throws and leaves an invalid source file unchanged", () => {
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue("not valid json {{{");
-    mockedFs.writeFileSync.mockImplementation(() => {});
 
     expect(() => loadSettings()).toThrow(/invalid json/i);
-    expect(mockedFs.writeFileSync).toHaveBeenCalledOnce();
-    expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
-      expect.stringMatching(/settings\.json\.bak$/),
-      "not valid json {{{",
-      "utf-8",
-    );
+    expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
+    expect(mockedFs.copyFileSync).not.toHaveBeenCalled();
+    expect(mockedFs.renameSync).not.toHaveBeenCalled();
   });
 
   it("throws when readFileSync fails for an existing file", () => {
@@ -585,6 +556,15 @@ describe("saveSettings", () => {
     saveSettings(input);
 
     expect(mockedFs.writeFileSync).toHaveBeenCalledOnce();
+    expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/settings\.json\.tmp$/),
+      expect.any(String),
+      "utf-8",
+    );
+    expect(mockedFs.renameSync).toHaveBeenCalledWith(
+      expect.stringMatching(/settings\.json\.tmp$/),
+      expect.stringMatching(/settings\.json$/),
+    );
   });
 
   it("returns the normalized settings", () => {
@@ -649,7 +629,9 @@ describe("saveSettings", () => {
   });
 
   it("backs up the current settings file before overwriting it", () => {
-    mockedFs.existsSync.mockReturnValue(true);
+    mockedFs.existsSync.mockImplementation((candidate) =>
+      String(candidate).endsWith("settings.json")
+    );
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(defaults()));
     mockedFs.writeFileSync.mockImplementation(() => {});
 
@@ -668,9 +650,30 @@ describe("saveSettings", () => {
     );
     expect(mockedFs.writeFileSync).toHaveBeenNthCalledWith(
       2,
-      expect.stringMatching(/settings\.json$/),
+      expect.stringMatching(/settings\.json\.tmp$/),
       expect.any(String),
       "utf-8",
+    );
+    expect(mockedFs.renameSync).toHaveBeenCalledWith(
+      expect.stringMatching(/settings\.json\.tmp$/),
+      expect.stringMatching(/settings\.json$/),
+    );
+  });
+
+  it("rotates existing recovery generations before replacing the latest backup", () => {
+    mockedFs.existsSync.mockImplementation((candidate) => {
+      const file = String(candidate);
+      return file.endsWith("settings.json") || file.endsWith("settings.json.bak");
+    });
+    mockedFs.readFileSync.mockReturnValue(JSON.stringify(defaults()));
+
+    saveSettings(makeMinimalValidSettings({
+      providers: [...defaults().providers, makeCustomProvider()],
+    }));
+
+    expect(mockedFs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/settings\.json\.bak$/),
+      expect.stringMatching(/settings\.json\.bak\.1$/),
     );
   });
 });

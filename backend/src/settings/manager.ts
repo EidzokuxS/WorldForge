@@ -26,6 +26,8 @@ import { observabilityConfigSchema } from "../routes/schemas.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_PATH = path.resolve(__dirname, "../../../settings.json");
 const SETTINGS_BACKUP_PATH = path.resolve(__dirname, "../../../settings.json.bak");
+const SETTINGS_TEMP_PATH = path.resolve(__dirname, "../../../settings.json.tmp");
+const SETTINGS_BACKUP_GENERATIONS = 5;
 
 class SettingsFileError extends Error {
   constructor(message: string) {
@@ -316,6 +318,17 @@ function backupSettingsText(rawText: string): void {
     return;
   }
 
+  for (let generation = SETTINGS_BACKUP_GENERATIONS; generation >= 1; generation -= 1) {
+    const source = generation === 1
+      ? SETTINGS_BACKUP_PATH
+      : `${SETTINGS_BACKUP_PATH}.${generation - 1}`;
+    if (!fs.existsSync(source)) {
+      continue;
+    }
+
+    fs.copyFileSync(source, `${SETTINGS_BACKUP_PATH}.${generation}`);
+  }
+
   fs.writeFileSync(SETTINGS_BACKUP_PATH, rawText, "utf-8");
 }
 
@@ -332,13 +345,13 @@ function writeSettingsFile(
     }
   }
 
-  fs.writeFileSync(SETTINGS_PATH, serialized, "utf-8");
+  fs.writeFileSync(SETTINGS_TEMP_PATH, serialized, "utf-8");
+  fs.renameSync(SETTINGS_TEMP_PATH, SETTINGS_PATH);
 }
 
 export function loadSettings(): Settings {
   if (!fs.existsSync(SETTINGS_PATH)) {
     const defaults = createDefaultSettings();
-    writeSettingsFile(defaults);
     applyObservabilityRuntime(defaults);
     return defaults;
   }
@@ -352,17 +365,12 @@ export function loadSettings(): Settings {
   try {
     raw = JSON.parse(rawText) as unknown;
   } catch {
-    backupSettingsText(rawText);
     throw new SettingsFileError(
-      `Settings file at ${SETTINGS_PATH} contains invalid JSON. The original content was preserved at ${SETTINGS_BACKUP_PATH}.`
+      `Settings file at ${SETTINGS_PATH} contains invalid JSON. The original file was left unchanged.`
     );
   }
 
   const normalized = normalizeSettings(raw);
-  const normalizedText = JSON.stringify(normalized, null, 2);
-  if (normalizedText !== rawText) {
-    writeSettingsFile(normalized, { backupCurrent: true });
-  }
   applyObservabilityRuntime(normalized);
   return normalized;
 }

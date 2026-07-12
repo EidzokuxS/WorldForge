@@ -80,4 +80,6 @@ output/
 .tmp-lancedb-test*/
 tmp/
 settings.json.bak
+settings.json.bak.*
+settings.json.tmp
 *.lnk
