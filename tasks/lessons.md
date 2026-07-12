@@ -34,6 +34,7 @@
 - When the owner authorizes a hard break, update every affected caller, fixture, migration, and invariant to the canonical contract; compatibility branches and preserved obsolete behavior are out of scope.
 - Treat auxiliary tooling defects as bounded side work: repair them when they affect acceptance evidence, otherwise record the gap and continue the feature instead of blocking its delivery.
 - A green test suite or one-turn smoke does not prove playability.
+- Deterministic and automated long runs prove runtime integrity only. Prose quality, causal sense, reader interest, and living-world motion require adaptive manual play through the rendered UI with every action chosen from the current player-visible scene.
 - Treat world-build acceptance and gameplay acceptance as separate halves of the living-world outcome. Closing at World Review requires explicit user agreement that playable turns are deferred.
 - Report playtest depth in completed player actions. Opening is turn zero; build events, actor jobs, model stages, retries, and reloads do not increase the gameplay-turn count.
 - A pristine 60-turn acceptance lane requires a named human to choose each action from the visible player surface; automation may enter and capture the choice.

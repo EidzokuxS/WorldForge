@@ -1,6 +1,6 @@
 # Task 16A: deterministic integration and promotion gate
 
-Status: packets 16A.1 and 16A.2 complete; restart and provenance integration in progress.
+Status: complete.
 
 ## Evidence contract
 
@@ -68,3 +68,45 @@ Verification after the fix:
 - Direct 10, 30, and 60-action runner gates passed.
 - `git diff --check` passed.
 - Standalone smoke additions: 0.
+
+## Restart and provenance integration
+
+The clean-start provenance lane begins from an accepted parent with zero Campaign Play rows. `cloneCampaignCleanStart` creates a child with rewritten campaign ownership, the same accepted content hash, recorded parent snapshot lineage, and zero child play rows before bootstrap.
+
+The child then creates its own human actor, completes opening turn zero, completes one player action, reloads through a fresh application instance, and completes the next action. The public projection is byte-identical across restart. The child finishes with three completed turns, its own world/runtime versions, observations, receipts, and event ledgers.
+
+After child play mutations:
+
+- the child accepted Review bytes and content hash match its pre-play values;
+- the parent accepted Review bytes and content hash remain unchanged;
+- the parent `state.db` and `config.json` SHA-256 hashes remain unchanged;
+- every parent Campaign Play table remains empty;
+- child SQLite integrity is `ok` with zero foreign-key violations.
+
+The promotion proof matrix is covered by the passing 322-test Campaign Play suite:
+
+| Risk | Direct proof owner |
+|---|---|
+| transaction rollback and partial commit | `rulebook.test.ts`, `campaign-play-state-repository.test.ts`, `turn-runtime.test.ts` |
+| concurrent idempotency and one active turn | `campaign-play-turn-repository.test.ts`, `campaign-play-application.test.ts` |
+| restart after durable stages and fenced late results | `opening-runtime.test.ts`, `turn-runtime.test.ts`, `turn-service.test.ts` |
+| narration interruption and explicit resume | `opening-runtime.test.ts`, `turn-runtime.test.ts` |
+| scheduler order, fairness, debt, and stale work | `actor-scheduler.test.ts`, `actor-proposal-service.test.ts` |
+| route direction, impossible actions, hidden references, and stale versions | `rulebook.test.ts`, `judge.test.ts`, `game-master.test.ts` |
+| visibility channels and protected truth | `visibility-service.test.ts`, `campaign-play-projection.test.ts` |
+
+The new provenance replay is an integration test, not a smoke suite. It covers clone, restart, second action, and immutable accepted provenance in one campaign-owned path.
+
+Manual play remains the promotion owner for prose and experience quality. Tasks 16B and 17 require the main agent to read the rendered scene and choose adaptive actions from visible information. Automation may capture and enter those choices; deterministic scripts do not count as prose or living-world evidence.
+
+## Runner and evidence bundle
+
+`playtest-runner.ts` accepts a strict run-config file for deterministic 10-, 30-, and 60-action lanes. Each lane runs twice, compares canonical bytes and replay hash, checks terminal and SQLite invariants, writes a bundle, and validates that bundle before reporting success. Existing bundle paths fail closed instead of being overwritten.
+
+The bundle contains the run manifest and config, eligibility snapshot, turns and inputs, model stages, runtime events, Rulebook receipts, actor jobs, visibility records, checkpoint, protected probes, transcript, scorecard, browser/network logs, screenshots directory, and a SHA-256 inventory. A one-action writer regression proves a valid promotion result and then proves that a post-write transcript change invalidates the bundle.
+
+The checked 10-action runner bundle completed two identical replays with one application restart. It recorded 26 receipts, 168 runtime events, 166 turn events, SQLite `ok`, zero foreign-key violations, and full promotion coverage. Direct 30- and 60-action double replays remain the long deterministic evidence; the 60-action hash is `7e5bcb90ea8513bbf68e47cc1964b1db049ad754612c44bec0222c02dc3e8af2`.
+
+`capture-campaign-play-state.mjs` is deliberately read-only with respect to play. It attaches to an already open exact URL over CDP, captures visible text and a screenshot, reads browser console errors and resource timing entries, and refreshes the bundle inventory. It has no action-selection or submission path.
+
+Final verification passed: evidence and replay tests `20/20`, focused Campaign Play/clone/routes `331/331`, frontend `491/491`, the complete backend suite, both typechecks, production build, capture-script syntax, bundle validation, and `git diff --check`. GitNexus impact remained unavailable through the existing Ladybug WAL `UNREACHABLE_CODE`; exact caller inventories bounded the existing-symbol edits to the E2E replay and runner.

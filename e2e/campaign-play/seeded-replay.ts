@@ -60,6 +60,7 @@ const PRICING = {
 export interface SeededCampaignPlayReplayOptions {
   playerActions: number;
   policy: "intervene" | "peripheral";
+  restartAfterPlayerActions?: readonly number[];
 }
 
 export interface SeededCampaignPlayReplayResult {
@@ -82,12 +83,14 @@ export interface SeededCampaignPlayReplayResult {
   observationCount: number;
   observationChannels: string[];
   unboundObservationHandles: string[];
+  restartProjectionMatches: boolean;
+  report: SeededCampaignPlayCanonicalReport;
 }
 
-function createAcceptedCampaign(root: string): void {
-  createMigratedCampaign(root, CAMPAIGN_ID);
+export function createSeededAcceptedCampaign(root: string, campaignId: string): void {
+  createMigratedCampaign(root, campaignId);
   fs.writeFileSync(
-    path.join(root, CAMPAIGN_ID, "config.json"),
+    path.join(root, campaignId, "config.json"),
     JSON.stringify({
       name: "Bell Island Deterministic Replay",
       premise: "A stormbound archipelago faces a failing sea route.",
@@ -96,10 +99,10 @@ function createAcceptedCampaign(root: string): void {
     }),
     "utf8",
   );
-  const handle = openCampaignWorldDatabase(CAMPAIGN_ID);
+  const handle = openCampaignWorldDatabase(campaignId);
   try {
     const repository = createCampaignWorldRepository(handle);
-    const source = sourceFixture(CAMPAIGN_ID);
+    const source = sourceFixture(campaignId);
     repository.acquireBuild({
       buildId: "deterministic-replay-build",
       source,
@@ -533,7 +536,7 @@ function tableRows(
   if (!allowed.has(tableName)) throw new Error(`Unsupported replay table: ${tableName}.`);
   return handle.sqlite.prepare(
     `SELECT * FROM "${tableName}" WHERE campaign_id = ? ORDER BY rowid`,
-  ).all(CAMPAIGN_ID) as Array<Record<string, unknown>>;
+  ).all(handle.campaignId) as Array<Record<string, unknown>>;
 }
 
 function captureReplay(handle: CampaignPlayDatabaseHandle) {
@@ -543,7 +546,7 @@ function captureReplay(handle: CampaignPlayDatabaseHandle) {
     SELECT accepted_snapshot_json AS acceptedSnapshotJson,
       accepted_content_hash AS acceptedContentHash
     FROM campaign_worlds WHERE campaign_id = ?
-  `).get(CAMPAIGN_ID) as {
+  `).get(handle.campaignId) as {
     acceptedSnapshotJson: string;
     acceptedContentHash: string;
   };
@@ -573,7 +576,7 @@ function captureReplay(handle: CampaignPlayDatabaseHandle) {
     observations: tableRows(handle, "campaign_play_observations"),
   };
   const report = {
-    campaignId: CAMPAIGN_ID,
+    campaignId: handle.campaignId,
     acceptedSnapshotJson: accepted.acceptedSnapshotJson,
     acceptedSnapshotHash: crypto.createHash("sha256").update(accepted.acceptedSnapshotJson).digest("hex"),
     acceptedContentHash: accepted.acceptedContentHash,
@@ -595,10 +598,12 @@ function captureReplay(handle: CampaignPlayDatabaseHandle) {
   };
 }
 
+export type SeededCampaignPlayCanonicalReport = ReturnType<typeof captureReplay>["report"];
+
 function unboundPublicHandles(handle: CampaignPlayDatabaseHandle): string[] {
   const narration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
     FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
-    ORDER BY created_at DESC, narration_id DESC LIMIT 1`).get(CAMPAIGN_ID) as {
+    ORDER BY created_at DESC, narration_id DESC LIMIT 1`).get(handle.campaignId) as {
     packetJson: string;
   };
   const packet = JSON.parse(narration.packetJson) as CampaignPlayNarratorPacket;
@@ -606,9 +611,9 @@ function unboundPublicHandles(handle: CampaignPlayDatabaseHandle): string[] {
   const addRows = (tableName: string, idColumn: string, publicKind: string) => {
     const rows = handle.sqlite.prepare(
       `SELECT "${idColumn}" AS id FROM "${tableName}" WHERE campaign_id = ? ORDER BY "${idColumn}"`,
-    ).all(CAMPAIGN_ID) as Array<{ id: string }>;
+    ).all(handle.campaignId) as Array<{ id: string }>;
     rows.forEach((row) => candidates.add(
-      deriveCampaignPlayPublicHandle(publicKind, CAMPAIGN_ID, row.id),
+      deriveCampaignPlayPublicHandle(publicKind, handle.campaignId, row.id),
     ));
   };
   addRows("actors", "id", "actor");
@@ -617,7 +622,7 @@ function unboundPublicHandles(handle: CampaignPlayDatabaseHandle): string[] {
   addRows("world_pressures", "id", "pressure");
   const observations = handle.sqlite.prepare(`SELECT public_entry_json AS publicEntryJson
     FROM campaign_play_observations WHERE campaign_id = ? ORDER BY observation_id`).all(
-      CAMPAIGN_ID,
+      handle.campaignId,
     ) as Array<{ publicEntryJson: string }>;
   observations.forEach((row) => {
     const publicEntry = JSON.parse(row.publicEntryJson) as { observationHandle: string };
@@ -634,115 +639,143 @@ function unboundPublicHandles(handle: CampaignPlayDatabaseHandle): string[] {
   return [...new Set(handles.filter((handleValue) => !candidates.has(handleValue)))];
 }
 
-export async function runSeededCampaignPlayReplay(
+export async function runAcceptedCampaignPlayReplay(
+  campaignId: string,
   options: SeededCampaignPlayReplayOptions,
 ): Promise<SeededCampaignPlayReplayResult> {
   if (!Number.isSafeInteger(options.playerActions) || options.playerActions < 1) {
     throw new Error("Deterministic replay requires a positive player action count.");
   }
+  const restartAfter = new Set(options.restartAfterPlayerActions ?? []);
+  if ([...restartAfter].some((action) =>
+    !Number.isSafeInteger(action) || action < 1 || action >= options.playerActions)) {
+    throw new Error("Restart checkpoints must fall between completed player actions.");
+  }
+  const time = advancingClock(1_300);
+  const runtimeFactory = {
+    createOpening: (handle: CampaignPlayDatabaseHandle) => openingRuntime(handle, time.clock),
+    createTurn: (handle: CampaignPlayDatabaseHandle) => turnRuntime(handle, time.clock, options.policy),
+  };
+  const createApplication = (owner: string) => createCampaignPlayApplication({
+      now: time.now,
+      owner,
+      uncertaintySeedKey: () => "deterministic-replay-seed-key-with-32-bytes",
+      runtimeFactory,
+    });
+  let application = createApplication("deterministic-replay-application");
+  let restartProjectionMatches = true;
+
+  const initial = application.loadState(campaignId);
+  application.putPlayer(campaignId, {
+    acceptedWorldVersion: initial.acceptedWorldVersion,
+    expectedWorldVersion: initial.worldVersion,
+    expectedRuntimeRevision: initial.runtimeRevision,
+    source: "created",
+    character: playerDraft(),
+  });
+  const beforeOpening = application.loadState(campaignId);
+  const opening = application.admitOpening(campaignId, {
+    idempotencyKey: "deterministic-opening",
+    expectedWorldVersion: beforeOpening.worldVersion,
+    expectedRuntimeRevision: beforeOpening.runtimeRevision,
+    startingConditions: { mode: "delegate" },
+  });
+  await application.waitForIdle(campaignId);
+  const openingTurn = application.loadTurn(campaignId, opening.turnId);
+  if (openingTurn.turn.status !== "completed") {
+    throw new Error(`Opening ended in ${openingTurn.turn.status}.`);
+  }
+  const openingProjectionHash = application.loadState(campaignId).projectionHash;
+
+  for (let actionNumber = 1; actionNumber <= options.playerActions; actionNumber += 1) {
+    const state = application.loadState(campaignId);
+    if (state.phase !== "ready") {
+      throw new Error(`Action ${actionNumber} began in ${state.phase}.`);
+    }
+    let admission;
+    try {
+      admission = application.admitTurn(campaignId, {
+        idempotencyKey: `deterministic-action-${actionNumber}`,
+        expectedWorldVersion: state.worldVersion,
+        expectedRuntimeRevision: state.runtimeRevision,
+        source: "freeform",
+        text: options.policy === "intervene"
+          ? `I intervene at the signal gate and stabilize the visible pressure ${actionNumber}.`
+          : `I remain at the visible edge of the signal gate and watch change ${actionNumber}.`,
+      });
+    } catch (error) {
+      const diagnosticHandle = openCampaignPlayDatabase(campaignId);
+      try {
+        throw new Error(
+          `Action ${actionNumber} admission has unbound public handles: ${unboundPublicHandles(diagnosticHandle).join(", ") || "none"}.`,
+          { cause: error },
+        );
+      } finally {
+        diagnosticHandle.close();
+      }
+    }
+    await application.waitForIdle(campaignId);
+    const turn = application.loadTurn(campaignId, admission.turnId);
+    if (turn.turn.status !== "completed") {
+      throw new Error(`Player action ${actionNumber} ended in ${turn.turn.status}.`);
+    }
+    if (restartAfter.has(actionNumber)) {
+      const beforeRestart = application.loadState(campaignId);
+      application = createApplication(`deterministic-replay-restart-${actionNumber}`);
+      await application.recoverCampaign(campaignId);
+      const afterRestart = application.loadState(campaignId);
+      if (
+        canonicalizeCampaignPlayProjection(beforeRestart)
+        !== canonicalizeCampaignPlayProjection(afterRestart)
+      ) {
+        restartProjectionMatches = false;
+      }
+    }
+  }
+
+  const handle = openCampaignPlayDatabase(campaignId);
+  try {
+    const captured = captureReplay(handle);
+    const turns = captured.report.tables.turns as Array<{ turn_kind: string; stage: string }>;
+    const openingTurns = turns.filter((turn) => turn.turn_kind === "opening").length;
+    const playerTurns = turns.filter((turn) => turn.turn_kind === "player_action");
+    return {
+      campaignId,
+      openingTurns,
+      completedPlayerActions: playerTurns.filter((turn) => turn.stage === "completed").length,
+      canonicalBytes: captured.canonicalBytes,
+      replayHash: captured.replayHash,
+      integrity: captured.report.integrity,
+      foreignKeyViolations: captured.report.foreignKeyViolations,
+      terminalStages: turns.map((turn) => turn.stage),
+      receiptCount: captured.report.tables.receipts.length,
+      runtimeEventCount: captured.report.tables.runtimeEvents.length,
+      turnEventCount: captured.report.tables.turnEvents.length,
+      acceptedSnapshotHash: captured.report.acceptedSnapshotHash,
+      openingProjectionHash,
+      mechanicalHash: captured.report.mechanical.hash,
+      publicStateHash: captured.report.publicState.hash,
+      pressureStateBytes: canonicalizeCampaignPlayProjection(captured.report.tables.pressureStates),
+      observationCount: captured.report.tables.observations.length,
+      observationChannels: captured.report.tables.observations.map((row) => String(row.channel)),
+      unboundObservationHandles: unboundPublicHandles(handle),
+      restartProjectionMatches,
+      report: captured.report,
+    };
+  } finally {
+    handle.close();
+  }
+}
+
+export async function runSeededCampaignPlayReplay(
+  options: SeededCampaignPlayReplayOptions,
+): Promise<SeededCampaignPlayReplayResult> {
   const previousRoot = process.env.GSD_CAMPAIGNS_ROOT;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-seeded-replay-"));
   process.env.GSD_CAMPAIGNS_ROOT = root;
   try {
-    createAcceptedCampaign(root);
-    const time = advancingClock(1_300);
-    const runtimeFactory = {
-      createOpening: (handle: CampaignPlayDatabaseHandle) => openingRuntime(handle, time.clock),
-      createTurn: (handle: CampaignPlayDatabaseHandle) => turnRuntime(handle, time.clock, options.policy),
-    };
-    const application = createCampaignPlayApplication({
-      now: time.now,
-      owner: "deterministic-replay-application",
-      uncertaintySeedKey: () => "deterministic-replay-seed-key-with-32-bytes",
-      runtimeFactory,
-    });
-
-    const initial = application.loadState(CAMPAIGN_ID);
-    application.putPlayer(CAMPAIGN_ID, {
-      acceptedWorldVersion: initial.acceptedWorldVersion,
-      expectedWorldVersion: initial.worldVersion,
-      expectedRuntimeRevision: initial.runtimeRevision,
-      source: "created",
-      character: playerDraft(),
-    });
-    const beforeOpening = application.loadState(CAMPAIGN_ID);
-    const opening = application.admitOpening(CAMPAIGN_ID, {
-      idempotencyKey: "deterministic-opening",
-      expectedWorldVersion: beforeOpening.worldVersion,
-      expectedRuntimeRevision: beforeOpening.runtimeRevision,
-      startingConditions: { mode: "delegate" },
-    });
-    await application.waitForIdle(CAMPAIGN_ID);
-    const openingTurn = application.loadTurn(CAMPAIGN_ID, opening.turnId);
-    if (openingTurn.turn.status !== "completed") {
-      throw new Error(`Opening ended in ${openingTurn.turn.status}.`);
-    }
-    const openingProjectionHash = application.loadState(CAMPAIGN_ID).projectionHash;
-
-    for (let actionNumber = 1; actionNumber <= options.playerActions; actionNumber += 1) {
-      const state = application.loadState(CAMPAIGN_ID);
-      if (state.phase !== "ready") {
-        throw new Error(`Action ${actionNumber} began in ${state.phase}.`);
-      }
-      let admission;
-      try {
-        admission = application.admitTurn(CAMPAIGN_ID, {
-          idempotencyKey: `deterministic-action-${actionNumber}`,
-          expectedWorldVersion: state.worldVersion,
-          expectedRuntimeRevision: state.runtimeRevision,
-          source: "freeform",
-        text: options.policy === "intervene"
-          ? `I intervene at the signal gate and stabilize the visible pressure ${actionNumber}.`
-          : `I remain at the visible edge of the signal gate and watch change ${actionNumber}.`,
-        });
-      } catch (error) {
-        const diagnosticHandle = openCampaignPlayDatabase(CAMPAIGN_ID);
-        try {
-          throw new Error(
-            `Action ${actionNumber} admission has unbound public handles: ${unboundPublicHandles(diagnosticHandle).join(", ") || "none"}.`,
-            { cause: error },
-          );
-        } finally {
-          diagnosticHandle.close();
-        }
-      }
-      await application.waitForIdle(CAMPAIGN_ID);
-      const turn = application.loadTurn(CAMPAIGN_ID, admission.turnId);
-      if (turn.turn.status !== "completed") {
-        throw new Error(`Player action ${actionNumber} ended in ${turn.turn.status}.`);
-      }
-    }
-
-    const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
-    try {
-      const captured = captureReplay(handle);
-      const turns = captured.report.tables.turns as Array<{ turn_kind: string; stage: string }>;
-      const openingTurns = turns.filter((turn) => turn.turn_kind === "opening").length;
-      const playerTurns = turns.filter((turn) => turn.turn_kind === "player_action");
-      return {
-        campaignId: CAMPAIGN_ID,
-        openingTurns,
-        completedPlayerActions: playerTurns.filter((turn) => turn.stage === "completed").length,
-        canonicalBytes: captured.canonicalBytes,
-        replayHash: captured.replayHash,
-        integrity: captured.report.integrity,
-        foreignKeyViolations: captured.report.foreignKeyViolations,
-        terminalStages: turns.map((turn) => turn.stage),
-        receiptCount: captured.report.tables.receipts.length,
-        runtimeEventCount: captured.report.tables.runtimeEvents.length,
-        turnEventCount: captured.report.tables.turnEvents.length,
-        acceptedSnapshotHash: captured.report.acceptedSnapshotHash,
-        openingProjectionHash,
-        mechanicalHash: captured.report.mechanical.hash,
-        publicStateHash: captured.report.publicState.hash,
-        pressureStateBytes: canonicalizeCampaignPlayProjection(captured.report.tables.pressureStates),
-        observationCount: captured.report.tables.observations.length,
-        observationChannels: captured.report.tables.observations.map((row) => String(row.channel)),
-        unboundObservationHandles: unboundPublicHandles(handle),
-      };
-    } finally {
-      handle.close();
-    }
+    createSeededAcceptedCampaign(root, CAMPAIGN_ID);
+    return await runAcceptedCampaignPlayReplay(CAMPAIGN_ID, options);
   } finally {
     closeDb();
     if (previousRoot === undefined) delete process.env.GSD_CAMPAIGNS_ROOT;

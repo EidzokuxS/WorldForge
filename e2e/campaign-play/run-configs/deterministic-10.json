@@ -1,0 +1,19 @@
+{
+  "evidenceVersion": 1,
+  "runId": "task16a-deterministic-10",
+  "lane": "deterministic-10",
+  "campaignId": null,
+  "expectedPlayerActions": 10,
+  "outputRoot": "output/playtests/campaign-play",
+  "execution": {
+    "kind": "deterministic",
+    "fixtureId": "bell-island",
+    "seed": "campaign-play-v1"
+  },
+  "restartAfterPlayerActions": [5],
+  "operators": {
+    "runner": "campaign-play-runner",
+    "player": null,
+    "auditor": "campaign-play-validator"
+  }
+}

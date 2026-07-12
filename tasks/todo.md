@@ -55,7 +55,7 @@ Execution board:
 - [x] Task 14A: scene and narration surface.
 - [x] Task 14B: action, consequence, journal, and recovery surface.
 - [x] Task 15: product handoff and hard cutover.
-- [ ] Task 16A: deterministic integration and promotion gate.
+- [x] Task 16A: deterministic integration and promotion gate.
 - [ ] Task 16B: first playable slice gate.
 - [ ] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
 - [ ] Task 18: two fresh and one clone/provenance pristine 60-turn campaigns.
@@ -1391,17 +1391,17 @@ Packet 16A.2, deterministic replay:
 
 Packet 16A.3, restart and provenance integration:
 
-- [ ] Aggregate the existing transaction fault, concurrent idempotency, stage restart, narration resume, scheduler fairness, route direction, impossible action, hidden knowledge, and stale proposal proofs into one promotion report.
-- [ ] Extend the mounted full path through reload, application restart, and a second completed player action.
-- [ ] Clone an accepted zero-turn parent, bootstrap the child independently, and compare parent and child provenance plus Campaign Play tables.
-- [ ] Repeat accepted Review byte and hash comparison after real child mechanical and runtime mutations.
+- [x] Aggregate the existing transaction fault, concurrent idempotency, stage restart, narration resume, scheduler fairness, route direction, impossible action, hidden knowledge, and stale proposal proofs into one promotion report.
+- [x] Extend the mounted full path through reload, application restart, and a second completed player action.
+- [x] Clone an accepted zero-turn parent, bootstrap the child independently, and compare parent and child provenance plus Campaign Play tables.
+- [x] Repeat accepted Review byte and hash comparison after real child mechanical and runtime mutations.
 
 Packet 16A.4, runner and promotion gate:
 
-- [ ] Implement `e2e/campaign-play/playtest-runner.ts` for deterministic lanes, bundle validation, and later live-lane capture.
-- [ ] Implement `scripts/capture-campaign-play-state.mjs` as a read-only browser and network evidence collector.
-- [ ] Emit and validate the required manifest, eligibility, ledgers, checkpoints, probes, transcript, scorecard, screenshots, logs, and inventory.
-- [ ] Run the complete Task 16A verification matrix, fresh semantic review, GitNexus change detection, checkpoint commit, and push.
+- [x] Implement `e2e/campaign-play/playtest-runner.ts` for deterministic lanes, bundle validation, and later live-lane capture.
+- [x] Implement `scripts/capture-campaign-play-state.mjs` as a read-only browser and network evidence collector.
+- [x] Emit and validate the required manifest, eligibility, ledgers, checkpoints, probes, transcript, scorecard, screenshots, logs, and inventory.
+- [x] Run the complete Task 16A verification matrix, fresh semantic review, GitNexus change detection, checkpoint commit, and push.
 
 Dependencies: 16A.1 fixes the format consumed by 16A.2 through Task 20. Packet 16A.2 supplies replay snapshots to 16A.3. Packet 16A.4 integrates only after deterministic and provenance proofs pass.
 
@@ -1419,3 +1419,16 @@ Validation:
 Stop condition: the deterministic report contains zero divergence, partial commit, missing terminal, hidden leak, duplicate input, stale execution, or active donor call, and every accepted live defect has a focused regression before Task 16B begins.
 
 Prose review: main Sol applied the humanizer and deslop checks. The packet uses direct technical language, names concrete owners and failures, and contains no promotional or filler copy.
+
+Manual playtest rule for Tasks 16B through 19: the main agent reads the rendered scene and chooses each action from current player-visible information. Automation may enter the chosen action and capture evidence. Deterministic scripts and generated batches do not count as evidence for prose quality, causal sense, reader interest, or living-world motion.
+
+## Campaign Play Task 16A Review (2026-07-12)
+
+- Fixed the consecutive-action authority seam: choices now bind through the persisted public observation handle to its exact world event. Two real consecutive actions pass through the same campaign authority.
+- Seeded 10-, 30-, and 60-action replays completed twice with identical canonical bytes. The 60-action replay recorded 126 receipts, 918 runtime events, 916 turn events, SQLite `ok`, and zero foreign-key violations.
+- The restart lane reopens the application between actions without changing the public projection. The clean-start child completes opening and two actions while the accepted parent database, config, Review bytes, and empty Campaign Play tables remain unchanged.
+- The run-config runner writes a strict evidence bundle and immediately validates it. The checked 10-action bundle is promotion-eligible with full receipt, runtime-event, and turn-event coverage; deliberate transcript tampering is rejected by the SHA-256 inventory.
+- `scripts/capture-campaign-play-state.mjs` attaches to an already open browser page and only reads public DOM, screenshot, console, and resource timing data. It never selects or submits an action.
+- Verification passed: evidence and replay tests `20/20`, focused Campaign Play/clone/routes `331/331`, frontend `491/491`, the complete backend suite, both typechecks, production build, script syntax, bundle validation, and diff check.
+- GitNexus impact remained unavailable because its Ladybug WAL query returned `UNREACHABLE_CODE`. Exact caller inventories limit the touched existing symbols to the Campaign Play E2E replay tests and runner. No production symbol changed in this packet.
+- Humanizer/deslop review kept the note factual and direct. Deterministic narration is explicitly excluded from prose and playability evidence. Standalone smoke additions: `0`.
