@@ -632,6 +632,30 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
+  it("rejects a hidden consequence bound to a different goal than its actor plan", () => {
+    const world = worldFixture();
+    world.goals.push({
+      id: "goal-bells-maintain",
+      actorId: "actor-bell-tender",
+      objective: "Maintain the storm bell through winter.",
+      motivation: "The island needs a reliable warning signal.",
+      horizon: "ongoing",
+      priority: 2,
+      status: "active",
+    });
+    const proposal = proposalFixture();
+    proposal.actorPlans[2] = actorPlan(
+      "actor-bell-tender",
+      "goal-bells-maintain",
+      ["goal-bells-maintain"],
+      [{ kind: "location", id: "location-bells" }],
+    );
+
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(world), chosenConditions, proposal,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+  });
+
   it("uses every collective base and influence placement for reachability", () => {
     const world = worldFixture();
     world.placements.push({
@@ -776,6 +800,7 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("Set routeId to scene.routeId");
     expect(prompt).toContain("Set witnessActorId to scene.supportActorId");
     expect(prompt).toContain("Set locationId to hiddenConsequence.locationId");
+    expect(prompt).toContain("Set hiddenConsequence.goalId to the primaryGoalId");
     expect(prompt).toContain("route_state, exposure contains exactly channel, routeId, and triggers");
     expect(prompt).toContain("witness_report, exposure contains exactly channel and witnessActorId");
     expect(prompt).toContain("local_aftermath, exposure contains exactly channel, locationId, and validUntilWorldTimeMinutes");

@@ -823,6 +823,7 @@ function compileExposureSeed(
     !actor
     || !goal
     || !plan
+    || plan.goalId !== goal.id
     || !locationIds.includes(locationId)
     || locationId === narratorFacts.location.id
   ) {

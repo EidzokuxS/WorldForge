@@ -20,7 +20,11 @@ describe("Campaign Play evidence bundle writer", () => {
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-play-bundle-"));
     roots.push(outputRoot);
     const bundleRoot = path.join(outputRoot, "deterministic-one");
-    const replay = await runSeededCampaignPlayReplay({ playerActions: 1, policy: "peripheral" });
+    const replay = await runSeededCampaignPlayReplay({
+      playerActions: 1,
+      policy: "peripheral",
+      inputControl: "choice",
+    });
     const runConfig: CampaignPlayRunConfig = {
       evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
       runId: "deterministic-one",
@@ -48,6 +52,9 @@ describe("Campaign Play evidence bundle writer", () => {
     expect(validation.issues).toEqual([]);
     expect(validation.valid).toBe(true);
     expect(validation.promotionEligible).toBe(true);
+    const input = fs.readFileSync(path.join(bundleRoot, "inputs.jsonl"), "utf8")
+      .split("\n").filter(Boolean).map((line) => JSON.parse(line) as { source: string })[0];
+    expect(input?.source).toBe("choice");
     const budget = JSON.parse(fs.readFileSync(path.join(bundleRoot, "budget.json"), "utf8")) as {
       actualCostMicros: number;
     };

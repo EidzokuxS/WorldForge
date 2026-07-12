@@ -98,6 +98,7 @@
 - Keep player-visible narration in second person even when projected receipts name the player actor. Journal and consequence records may remain third-person factual summaries.
 - Size living-world playtests from the required peripheral actions plus the longest accepted exposure path; a short fixed turn count can make a valid consequence unreachable and produce a false failure.
 - A successful social roll improves the answer only within the stated request and established relationship. It cannot create trust or make an unfamiliar NPC volunteer protected assets, unrelated motives, or risky admissions.
+- Bind an opening exposure seed to the exact actor plan and primary goal that will execute it. Actor-only matching can accept an unreachable consequence when one actor has multiple active goals.
 
 ## Evidence Handling
 

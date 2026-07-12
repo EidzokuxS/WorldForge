@@ -277,19 +277,20 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     const document = JSON.parse(value<string>(row, "input_json")) as {
       request: {
         idempotencyKey: string;
-        source: "choice" | "freeform";
+        source: "suggested" | "freeform";
         choiceHandle?: string;
         text?: string;
       };
     };
     const request = document.request;
+    const evidenceSource = request.source === "suggested" ? "choice" : request.source;
     return [campaignPlayInputEvidenceSchema.parse({
       runId: config.runId,
       campaignId: input.replay.campaignId,
       inputId: `input:${turnId}`,
       idempotencyKey: request.idempotencyKey,
       playerActionNumber: actionNumbers.get(turnId),
-      source: request.source,
+      source: evidenceSource,
       choiceHandle: request.choiceHandle ?? null,
       text: request.text ?? null,
       visibleStateHash: value<string>(row, "frame_hash"),
