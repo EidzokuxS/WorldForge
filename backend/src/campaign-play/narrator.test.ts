@@ -275,6 +275,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
     expect(prompt).toContain("wait uses a base-form verb phrase");
+    expect(prompt).toContain('Address the player as "you"');
+    expect(prompt).toContain("never switch to the player character's name");
     expect(prompt).toContain("Do not summarize the world");
   });
 
