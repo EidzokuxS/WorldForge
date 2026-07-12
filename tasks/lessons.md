@@ -87,6 +87,8 @@
 - Narration must receive concrete projected receipts for the accepted player action and every same-turn NPC action the player could perceive. A post-turn scene snapshot alone cannot preserve event order or causal continuity.
 - Model-authored action copy may supply only a short grammatical detail under a code-owned intent and target prefix. Persist the rendered label for Judge while freezing kind and targets independently.
 - Keep player-visible narration in second person even when projected receipts name the player actor. Journal and consequence records may remain third-person factual summaries.
+- Size living-world playtests from the required peripheral actions plus the longest accepted exposure path; a short fixed turn count can make a valid consequence unreachable and produce a false failure.
+- A successful social roll improves the answer only within the stated request and established relationship. It cannot create trust or make an unfamiliar NPC volunteer protected assets, unrelated motives, or risky admissions.
 
 ## Evidence Handling
 

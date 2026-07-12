@@ -201,6 +201,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("every exposure predicate anchorHandle");
     expect(String(options.prompt)).toContain("route_state anchorHandle requires route");
     expect(String(options.prompt)).toContain("witness_report anchorHandle requires actor");
+    expect(String(options.prompt)).toContain("Resolve only the exact PLAYER_INTENT");
+    expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
     expect(String(options.prompt)).toContain("eventClass discovery");
     expect(String(options.prompt)).not.toContain("actor-player");
