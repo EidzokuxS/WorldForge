@@ -439,6 +439,39 @@ describe("Campaign Play opening planner", () => {
     expect(narratorJson).not.toContain("Lantern Council");
   });
 
+  it("routes an actor intent from a persistent sublocation through its parent macro", () => {
+    const world = worldFixture();
+    world.locations.push({
+      id: "location-signal-tower",
+      name: "Signal Tower",
+      description: "A staffed tower above North Harbor.",
+      kind: "persistent_sublocation",
+      parentLocationId: "location-harbor",
+      tags: ["signals"],
+      isStarting: false,
+    });
+    world.placements = world.placements.map((placement) =>
+      placement.actorId === "actor-courier"
+        ? { ...placement, locationId: "location-signal-tower" }
+        : placement
+    );
+    const proposal = proposalFixture();
+    const courierPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-courier")!;
+    courierPlan.intent.targets.push({ kind: "route", id: "route-harbor-reef" });
+
+    const result = createCampaignPlayOpeningPlanner().compile(
+      frameFixture(world),
+      chosenConditions,
+      proposal,
+    );
+
+    expect(result.artifact.actorPlans.find((plan) =>
+      plan.actorId === "actor-courier")?.intent.targets).toContainEqual({
+      kind: "route",
+      id: "route-harbor-reef",
+    });
+  });
+
   it("freezes copied artifact data without mutating the proposal fixture", () => {
     const proposal = proposalFixture();
     const result = createCampaignPlayOpeningPlanner().compile(
@@ -728,6 +761,10 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
     expect(prompt).toContain('"actorLocationIds":["location-bells"]');
     expect(prompt).toContain("The hidden location must differ from start.locationId");
+    expect(prompt).toContain("set exposure.routeId to scene.routeId");
+    expect(prompt).toContain("set exposure.witnessActorId to scene.supportActorId");
+    expect(prompt).toContain("set exposure.locationId to hiddenConsequence.locationId");
+    expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
   });
 
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {

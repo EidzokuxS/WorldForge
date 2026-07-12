@@ -61,7 +61,11 @@ Choose a grounded opening location, one visibly present support person, one pres
 
 Create exactly one actor plan proposal for every key person, support person, and collective. A background person receives no plan. Each actor proposal selects one active goal as primary. Write a concise strategic intent and one to three concrete steps that advance it. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
 
-Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId, one activeGoalId from the same entry, and one actorLocationId from that entry. The hidden location must differ from start.locationId. Its first step must support the selected exposure predicate. The exposure must become earnable within five player actions through an opening route, the visible support witness, or travel to a reachable non-local location.
+Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId, one activeGoalId from the same entry, and one actorLocationId from that entry. The hidden location must differ from start.locationId. Bind the hidden actor's first step to the exposure with one exact target:
+- For route_state, set exposure.routeId to scene.routeId and include {"kind":"route","id":scene.routeId} in the first step targets.
+- For witness_report, set exposure.witnessActorId to scene.supportActorId and include {"kind":"actor","id":scene.supportActorId} in the first step targets.
+- For local_aftermath, set exposure.locationId to hiddenConsequence.locationId and include {"kind":"location","id":hiddenConsequence.locationId} in the first step targets.
+The exposure must become earnable within five player actions through that route, witness, or reachable non-local location.
 
 Keep the hidden actor, its identity, and its goal out of the scene fields. Describe only the player's immediate role, arrival, and situation in start. Code owns identifiers, command scopes, preconditions, scheduling, bootstrap commands, hashes, visibility, and narration.`;
 }

@@ -507,6 +507,8 @@ function shortestDirectedDistance(
   fromLocationId: string,
   toLocationId: string,
 ): number | null {
+  fromLocationId = routingLocationId(world, fromLocationId);
+  toLocationId = routingLocationId(world, toLocationId);
   if (fromLocationId === toLocationId) return 0;
   const queue: Array<{ locationId: string; distance: number }> = [
     { locationId: fromLocationId, distance: 0 },
@@ -529,11 +531,26 @@ function shortestDirectedDistance(
   return null;
 }
 
+function routingLocationId(world: CampaignWorldReview, locationId: string): string {
+  const locations = new Map(world.locations.map((location) => [location.id, location]));
+  const visited = new Set<string>();
+  let currentId = locationId;
+  while (!visited.has(currentId)) {
+    visited.add(currentId);
+    const current = locations.get(currentId);
+    if (!current?.parentLocationId) return currentId;
+    currentId = current.parentLocationId;
+  }
+  return locationId;
+}
+
 function shortestDirectedTravelMinutes(
   world: CampaignWorldReview,
   fromLocationId: string,
   toLocationId: string,
 ): number | null {
+  fromLocationId = routingLocationId(world, fromLocationId);
+  toLocationId = routingLocationId(world, toLocationId);
   if (fromLocationId === toLocationId) return 0;
   const remaining = new Set(world.locations.map((location) => location.id));
   const distances = new Map<string, number>([[fromLocationId, 0]]);
