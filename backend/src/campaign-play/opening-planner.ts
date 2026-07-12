@@ -589,6 +589,10 @@ function compilePlans(
     proposal.actorPlans.length !== actors.length
     || !unique(proposal.actorPlans.map((plan) => plan.actorId))
   ) {
+    log.warn("Opening proposal actor-plan roster mismatch.", {
+      expectedActorIds: actors.map((actor) => actor.id),
+      proposedActorIds: proposal.actorPlans.map((plan) => plan.actorId),
+    });
     fail("opening_proposal_invalid");
   }
   const hiddenActorId = proposal.hiddenConsequence.actorId;

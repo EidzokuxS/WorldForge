@@ -770,6 +770,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"actorId":"actor-bell-tender"');
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
     expect(prompt).toContain('"actorLocationIds":["location-bells"]');
+    expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
+    expect(prompt).toContain("A collective remains required even when its actorRole is background");
     expect(prompt).toContain("The hidden location must differ from start.locationId");
     expect(prompt).toContain("set exposure.routeId to scene.routeId");
     expect(prompt).toContain("set exposure.witnessActorId to scene.supportActorId");
