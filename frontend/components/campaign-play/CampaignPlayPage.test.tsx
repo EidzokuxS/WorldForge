@@ -478,9 +478,18 @@ describe("CampaignPlayPage durable state", () => {
   });
 
   it("offers durable Resume only for an eligible interrupted turn", async () => {
-    api.loadState.mockResolvedValue(state("turn_active", publicTurn("interrupted", null, 2)));
-    api.loadTurn.mockResolvedValue(turnRead("interrupted", 2));
+    api.loadState
+      .mockResolvedValueOnce(state("turn_active", publicTurn("interrupted", null, 2)))
+      .mockResolvedValueOnce(state("ready"));
+    api.loadTurn
+      .mockResolvedValueOnce(turnRead("interrupted", 2))
+      .mockResolvedValueOnce(turnRead("completed", 4));
     api.resumeTurn.mockResolvedValue({ turnId: "turn-1", sequence: 3 });
+    api.streamEvents.mockImplementationOnce(async (_campaignId, _turnId, options) => {
+      options.onEvent(progressed(3, "revealing"));
+      options.onEvent(completed(4));
+      return { lastSequence: 4, terminalEvent: completed(4) };
+    });
     render(<CampaignPlayPage campaignId="campaign-1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
@@ -494,7 +503,9 @@ describe("CampaignPlayPage durable state", () => {
       "turn-1",
       expect.objectContaining({ afterSequence: 2 }),
     ));
-    expect(screen.getByLabelText("Your action")).toBeDisabled();
+    await waitFor(() => expect(screen.getByLabelText("Your action")).toBeEnabled());
+    expect(api.loadState).toHaveBeenCalledTimes(2);
+    expect(api.loadTurn).toHaveBeenCalledTimes(2);
   });
 
   it("rejects late authority from the previous campaign after navigation", async () => {
