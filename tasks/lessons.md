@@ -99,6 +99,7 @@
 - Size living-world playtests from the required peripheral actions plus the longest accepted exposure path; a short fixed turn count can make a valid consequence unreachable and produce a false failure.
 - A successful social roll improves the answer only within the stated request and established relationship. It cannot create trust or make an unfamiliar NPC volunteer protected assets, unrelated motives, or risky admissions.
 - Bind an opening exposure seed to the exact actor plan and primary goal that will execute it. Actor-only matching can accept an unreachable consequence when one actor has multiple active goals.
+- For strict model objects, list the exact top-level keys in the prompt and forbid any observed near-synonym. A supplied JSON schema alone may not prevent semantic key renaming.
 
 ## Evidence Handling
 

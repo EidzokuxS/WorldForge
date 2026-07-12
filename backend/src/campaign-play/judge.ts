@@ -233,6 +233,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
     "For suggested input, copy FROZEN_CHOICE kind and targets exactly. Judge feasibility and outcome without reinterpreting the selected action.",
     "Outcome tiers never create trust, permission, leverage, knowledge, or access absent from VISIBLE_FRAME. Absence of visible trust or leverage means none is established. For contact about private information, protected access, or a risky admission, cap resultBounds.maximum at limited unless visible facts already justify fuller cooperation.",
+    "Return exactly these top-level keys: kind, targets, method, stakes, disposition, citedVisibleFactHandles, resultBounds, elapsedBounds, uncertainty, reason, clarificationQuestion. Spell citedVisibleFactHandles exactly; never use citedVisibleFacts or another key.",
     "Return one strict schema object and no prose.",
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
     `INPUT_SOURCE=${input.source}`,

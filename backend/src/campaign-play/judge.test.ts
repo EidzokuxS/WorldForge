@@ -195,6 +195,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("uncertainty.kind must be check");
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
+    expect(sentPrompt).toContain("Return exactly these top-level keys");
+    expect(sentPrompt).toContain("Spell citedVisibleFactHandles exactly");
+    expect(sentPrompt).toContain("never use citedVisibleFacts");
     expect(sentPrompt).toContain(JSON.stringify(injection));
     expect(sentPrompt).not.toContain("campaign-one");
     expect(sentPrompt).not.toContain("turn-one");
