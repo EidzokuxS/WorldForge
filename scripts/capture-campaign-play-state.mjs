@@ -110,8 +110,16 @@ const bundleRoot = path.resolve(required(values, "bundle"));
 const label = required(values, "label");
 const browserUrl = values.get("browser-url") ?? "http://127.0.0.1:9222";
 const targetUrl = required(values, "target-url");
+const watchActions = Number(values.get("watch-actions") ?? "0");
+const timeoutMs = Number(values.get("timeout-ms") ?? "600000");
 if (!/^[a-z0-9][a-z0-9-]{0,79}$/u.test(label)) {
   throw new Error("--label must be lowercase kebab-case.");
+}
+if (!Number.isSafeInteger(watchActions) || watchActions < 0) {
+  throw new Error("--watch-actions must be a nonnegative integer.");
+}
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) {
+  throw new Error("--timeout-ms must be an integer of at least 1000.");
 }
 
 const manifest = JSON.parse(fs.readFileSync(path.join(bundleRoot, "manifest.json"), "utf8"));
@@ -124,6 +132,15 @@ if (!target?.webSocketDebuggerUrl) {
 }
 
 const consoleErrors = [];
+const requests = new Map();
+const responses = [];
+const failedRequests = [];
+let completedActionRequests = 0;
+let observedActionRequests = 0;
+let resolveWatchedActions;
+const watchedActions = new Promise((resolve) => {
+  resolveWatchedActions = resolve;
+});
 const session = new CdpSession(target.webSocketDebuggerUrl);
 await session.open();
 try {
@@ -133,12 +150,63 @@ try {
   session.on("Log.entryAdded", ({ entry }) => {
     if (entry?.level === "error") consoleErrors.push(entry);
   });
+  session.on("Network.requestWillBeSent", ({ requestId, request }) => {
+    const requestUrl = /^https?:/u.test(request.url) ? new URL(request.url) : null;
+    const playerActionNumber = request.method === "POST"
+      && requestUrl?.pathname.endsWith("/play/turns")
+      ? ++observedActionRequests
+      : null;
+    requests.set(requestId, {
+      method: request.method,
+      url: request.url,
+      requestBodyHash: request.postData ? sha256(request.postData) : null,
+      playerActionNumber,
+    });
+  });
+  session.on("Network.responseReceived", ({ requestId, response }) => {
+    const request = requests.get(requestId);
+    if (!request || !/^https?:/u.test(request.url)) return;
+    const record = { requestId, ...request, status: Math.trunc(response.status) };
+    responses.push(record);
+    const requestUrl = new URL(request.url);
+    if (request.method === "POST" && requestUrl.pathname.endsWith("/play/turns")) {
+      completedActionRequests += 1;
+    }
+    if (
+      watchActions > 0
+      && completedActionRequests >= watchActions
+      && request.method === "GET"
+      && requestUrl.pathname.endsWith("/play/state")
+    ) {
+      resolveWatchedActions();
+    }
+  });
+  session.on("Network.loadingFailed", ({ requestId, errorText, canceled }) => {
+    const request = requests.get(requestId);
+    failedRequests.push({
+      method: request?.method ?? "UNKNOWN",
+      url: request?.url ?? "unknown",
+      errorText,
+      canceled: Boolean(canceled),
+    });
+  });
   await Promise.all([
     session.call("Page.enable"),
     session.call("Runtime.enable"),
     session.call("Log.enable"),
+    session.call("Network.enable"),
   ]);
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (watchActions > 0) {
+    await Promise.race([
+      watchedActions,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error(`Timed out before ${watchActions} player action requests completed.`)),
+        timeoutMs,
+      )),
+    ]);
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 
   const evaluated = await session.call("Runtime.evaluate", {
     expression: `(() => ({
@@ -180,26 +248,27 @@ try {
 
   const networkPath = path.join(bundleRoot, "network-trace.jsonl");
   const existingNetwork = readJsonLines(networkPath);
-  const known = new Set(existingNetwork.map((entry) => `${entry.method} ${entry.path} ${entry.status}`));
+  const known = new Set(existingNetwork.map((entry) =>
+    `${entry.method} ${entry.path} ${entry.status} ${entry.requestBodyHash ?? ""}`));
   const additions = [];
-  for (const resource of state.resources) {
-    const status = Number(resource.responseStatus);
+  for (const response of responses) {
+    const status = Number(response.status);
     if (!Number.isInteger(status) || status < 100 || status > 599) continue;
-    const resourceUrl = new URL(resource.name);
+    const resourceUrl = new URL(response.url);
     const requestPath = `${resourceUrl.pathname}${resourceUrl.search}`;
-    const key = `GET ${requestPath} ${status}`;
+    const key = `${response.method} ${requestPath} ${status} ${response.requestBodyHash ?? ""}`;
     if (known.has(key)) continue;
     known.add(key);
     additions.push({
       runId: manifest.runId,
       campaignId: manifest.campaignId,
       sequence: existingNetwork.length + additions.length + 1,
-      method: "GET",
+      method: response.method,
       path: requestPath,
       status,
-      requestBodyHash: null,
+      requestBodyHash: response.requestBodyHash,
       responseBodyHash: null,
-      playerActionNumber: null,
+      playerActionNumber: response.playerActionNumber,
     });
   }
   writeJsonLines(networkPath, [...existingNetwork, ...additions]);
@@ -212,6 +281,7 @@ try {
   writeJson(networkErrorsPath, [
     ...priorNetworkErrors,
     ...additions.filter((entry) => entry.status >= 400),
+    ...failedRequests,
   ]);
   writeJson(path.join(bundleRoot, "inventory.json"), collectInventory(bundleRoot, manifest.runId));
 
@@ -222,6 +292,8 @@ try {
     screenshotHash: publicState.screenshotHash,
     networkEntriesAdded: additions.length,
     consoleErrors: consoleErrors.length,
+    failedRequests: failedRequests.length,
+    completedActionRequests,
   })}\n`);
 } finally {
   session.close();

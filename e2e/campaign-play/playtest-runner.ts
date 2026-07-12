@@ -3,11 +3,20 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { writeCampaignPlayBundle } from "./bundle-writer.js";
+import { openCampaignPlayDatabase } from "../../backend/src/campaign-play/campaign-play-database.js";
 import {
   campaignPlayRunConfigSchema,
   type CampaignPlayRunConfig,
 } from "./contracts.js";
 import { assertCampaignPlayBundle } from "./probes.js";
+import {
+  bindCampaignPlayManualDecision,
+  captureCampaignPlayReloadBoundary,
+  loadCampaignPlayLiveSession,
+  prepareCampaignPlayLiveSession,
+  stageCampaignPlayManualDecision,
+} from "./live-session.js";
+import { captureCampaignPlayReplay } from "./replay-report.js";
 import { runSeededCampaignPlayReplay } from "./seeded-replay.js";
 
 type DeterministicLane = "deterministic-10" | "deterministic-30" | "deterministic-60";
@@ -101,9 +110,111 @@ async function runDeterministicLane(config: CampaignPlayRunConfig): Promise<void
   })}\n`);
 }
 
+async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promise<void> {
+  if (config.execution.kind !== "live" || config.campaignId === null) {
+    throw new Error("A live runner phase requires live execution and a campaign ID.");
+  }
+  switch (phase) {
+    case "prepare": {
+      const root = prepareCampaignPlayLiveSession({
+        runConfig: config,
+        commit: gitText("rev-parse", "HEAD"),
+        dirty: gitText("status", "--porcelain").length > 0,
+        startedAt: Date.now(),
+      });
+      process.stdout.write(`${JSON.stringify({ phase, root, campaignId: config.campaignId })}\n`);
+      return;
+    }
+    case "decide": {
+      const control = argumentValue("--control");
+      if (control !== "choice" && control !== "freeform") {
+        throw new Error("--control must be choice or freeform.");
+      }
+      const pending = await stageCampaignPlayManualDecision({
+        runConfig: config,
+        control,
+        chosenText: argumentValue("--chosen-text") ?? "",
+        choiceHandle: argumentValue("--choice-handle"),
+        decisionNote: argumentValue("--decision-note") ?? "",
+        signedAt: Date.now(),
+      });
+      process.stdout.write(`${JSON.stringify({ phase, pending })}\n`);
+      return;
+    }
+    case "bind": {
+      const evidence = bindCampaignPlayManualDecision(config);
+      process.stdout.write(`${JSON.stringify({ phase, evidence })}\n`);
+      return;
+    }
+    case "reload-before":
+    case "reload-after": {
+      const boundary = phase === "reload-before" ? "before" : "after";
+      const result = await captureCampaignPlayReloadBoundary(config, boundary);
+      process.stdout.write(`${JSON.stringify({ phase, ...result })}\n`);
+      return;
+    }
+    case "finalize": {
+      const session = loadCampaignPlayLiveSession(config);
+      if (!session.reloadMatches) throw new Error("The live UI reload did not preserve public state bytes.");
+      if (session.browserActions.length !== config.expectedPlayerActions) {
+        throw new Error("The live session does not contain one signed browser action per completed action.");
+      }
+      const handle = openCampaignPlayDatabase(config.campaignId);
+      try {
+        const captured = captureCampaignPlayReplay(handle);
+        const completedPlayerActions = captured.report.tables.turns.filter((row) =>
+          row.turn_kind === "player_action" && row.stage === "completed").length;
+        if (completedPlayerActions !== config.expectedPlayerActions) {
+          throw new Error("The live campaign did not reach its configured completed-action target.");
+        }
+        if (
+          captured.report.acceptedSnapshotHash !== session.manifest.acceptedSnapshotHash
+          || captured.report.acceptedContentHash !== session.manifest.acceptedContentHash
+          || captured.report.eligibility.hash !== session.manifest.eligibilityHash
+        ) {
+          throw new Error("Accepted Campaign World provenance or eligibility drifted during live play.");
+        }
+        const bundleRoot = path.resolve(config.outputRoot, config.runId);
+        writeCampaignPlayBundle({
+          bundleRoot,
+          runConfig: config,
+          replay: {
+            campaignId: config.campaignId,
+            completedPlayerActions,
+            canonicalBytes: captured.canonicalBytes,
+            replayHash: captured.replayHash,
+            restartProjectionMatches: true,
+            unboundObservationHandles: captured.unboundObservationHandles,
+            report: captured.report,
+          },
+          commit: session.manifest.commit,
+          dirty: session.manifest.dirty,
+          startedAt: session.manifest.startedAt,
+          completedAt: Date.now(),
+          evidenceRoot: session.root,
+        });
+        const validation = assertCampaignPlayBundle(bundleRoot);
+        process.stdout.write(`${JSON.stringify({
+          phase,
+          bundleRoot,
+          completedPlayerActions,
+          replayHash: captured.replayHash,
+          promotionEligible: validation.promotionEligible,
+        })}\n`);
+      } finally {
+        handle.close();
+      }
+      return;
+    }
+    default:
+      throw new Error("--live-phase must be prepare, decide, bind, reload-before, reload-after, or finalize.");
+  }
+}
+
 export async function runCampaignPlayCommand(): Promise<void> {
   const bundlePath = argumentValue("--validate");
   const runConfigPath = argumentValue("--run-config");
+  const declaredLane = argumentValue("--lane");
   if ((bundlePath === null) === (runConfigPath === null)) {
     throw new Error("Choose exactly one command: --validate <bundle> or --run-config <json>.");
   }
@@ -112,7 +223,15 @@ export async function runCampaignPlayCommand(): Promise<void> {
     process.stdout.write(`${JSON.stringify(validation)}\n`);
     return;
   }
-  await runDeterministicLane(loadRunConfig(runConfigPath!));
+  const config = loadRunConfig(runConfigPath!);
+  if (declaredLane !== null && declaredLane !== config.lane) {
+    throw new Error("--lane does not match the run config.");
+  }
+  if (config.execution.kind === "deterministic") {
+    await runDeterministicLane(config);
+    return;
+  }
+  await runLiveLane(config, argumentValue("--live-phase") ?? "finalize");
 }
 
 runCampaignPlayCommand().catch((error: unknown) => {

@@ -21,19 +21,30 @@ import {
   type CampaignPlayRunConfig,
 } from "./contracts.js";
 import { createCampaignPlayInventory } from "./probes.js";
+import type { CampaignPlayCanonicalReport } from "./replay-report.js";
 import { createCampaignPlayScorecard } from "./scorecard.js";
-import type { SeededCampaignPlayReplayResult } from "./seeded-replay.js";
 
 type RawRow = Record<string, unknown>;
+
+export interface CampaignPlayBundleReplay {
+  campaignId: string;
+  completedPlayerActions: number;
+  canonicalBytes: string;
+  replayHash: string;
+  restartProjectionMatches: boolean;
+  unboundObservationHandles: string[];
+  report: CampaignPlayCanonicalReport;
+}
 
 export interface WriteCampaignPlayBundleInput {
   bundleRoot: string;
   runConfig: CampaignPlayRunConfig;
-  replay: SeededCampaignPlayReplayResult;
+  replay: CampaignPlayBundleReplay;
   commit: string;
   dirty: boolean;
   startedAt: number;
   completedAt: number;
+  evidenceRoot?: string;
 }
 
 function hash(value: string | Buffer): string {
@@ -57,6 +68,16 @@ function writeJsonLines(filePath: string, records: unknown[]): void {
   );
 }
 
+function readJsonLines(filePath: string): unknown[] {
+  const text = fs.readFileSync(filePath, "utf8");
+  return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as unknown);
+}
+
+function copyEvidenceDirectory(source: string, target: string): void {
+  if (!fs.existsSync(source)) return;
+  fs.cpSync(source, target, { recursive: true });
+}
+
 function actionNumberByTurn(turnRows: RawRow[]): Map<string, number> {
   const result = new Map<string, number>();
   let actionNumber = 0;
@@ -76,7 +97,7 @@ function terminalRuntimeRevision(runtimeRows: RawRow[], turnId: string): number 
   return Math.max(...revisions);
 }
 
-function playerActorId(report: SeededCampaignPlayReplayResult["report"]): string {
+function playerActorId(report: CampaignPlayCanonicalReport): string {
   const record = report.mechanical.projection as { human?: { actorId?: unknown } };
   const actorId = record.human?.actorId;
   if (typeof actorId !== "string" || actorId.length === 0) {
@@ -93,6 +114,47 @@ function actorSource(command: RawRow, humanActorId: string): string {
   };
   if (source.kind === "actor" && source.actorId) return source.actorId;
   return source.system ? `system:${source.system}` : humanActorId;
+}
+
+interface FrozenModelPricing {
+  known: boolean;
+  tokenUnit: number;
+  inputCostMicros: number;
+  outputCostMicros: number;
+}
+
+interface FrozenRequestedModel {
+  pricing: FrozenModelPricing;
+}
+
+function requestedModelForStage(turn: RawRow, kind: string): FrozenRequestedModel {
+  const selection = JSON.parse(value<string>(turn, "model_selection_json")) as {
+    turnKind: "opening" | "player_action";
+    openingPlanner?: FrozenRequestedModel;
+    judge?: FrozenRequestedModel;
+    gameMaster?: FrozenRequestedModel;
+    actorReplanner?: FrozenRequestedModel;
+    narrator: FrozenRequestedModel;
+  };
+  const requested = kind === "opening_planner"
+    ? selection.openingPlanner
+    : kind === "judge"
+      ? selection.judge
+      : kind === "game_master"
+        ? selection.gameMaster
+        : kind === "actor_replanner"
+          ? selection.actorReplanner
+          : kind === "narrator"
+            ? selection.narrator
+            : undefined;
+  if (!requested) throw new Error(`Campaign Play model selection is missing ${kind}.`);
+  return requested;
+}
+
+function modelCostMicros(inputTokens: number, outputTokens: number, pricing: FrozenModelPricing): number {
+  if (!pricing.known) throw new Error("Campaign Play live evidence requires known frozen model pricing.");
+  return Math.ceil(inputTokens * pricing.inputCostMicros / pricing.tokenUnit)
+    + Math.ceil(outputTokens * pricing.outputCostMicros / pricing.tokenUnit);
 }
 
 export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): void {
@@ -223,29 +285,47 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     })];
   });
   writeJsonLines(path.join(input.bundleRoot, "inputs.jsonl"), inputs);
-  writeJsonLines(path.join(input.bundleRoot, "browser-actions.jsonl"), [] satisfies Array<ReturnType<typeof campaignPlayBrowserActionEvidenceSchema.parse>>);
-  writeJsonLines(path.join(input.bundleRoot, "network-trace.jsonl"), [] satisfies Array<ReturnType<typeof campaignPlayNetworkEvidenceSchema.parse>>);
+  const browserActions = input.evidenceRoot
+    ? readJsonLines(path.join(input.evidenceRoot, "browser-actions.jsonl"))
+      .map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record))
+    : [];
+  const networkTrace = input.evidenceRoot
+    ? readJsonLines(path.join(input.evidenceRoot, "network-trace.jsonl"))
+      .map((record) => campaignPlayNetworkEvidenceSchema.parse(record))
+    : [];
+  writeJsonLines(path.join(input.bundleRoot, "browser-actions.jsonl"), browserActions);
+  writeJsonLines(path.join(input.bundleRoot, "network-trace.jsonl"), networkTrace);
 
+  const turnById = new Map(turnRows.map((row) => [value<string>(row, "id"), row]));
   const modelStages = report.tables.modelStages
     .filter((row) => value<string>(row, "status") === "accepted")
-    .map((row) => campaignPlayModelStageEvidenceSchema.parse({
-      runId: config.runId,
-      campaignId: input.replay.campaignId,
-      turnId: value<string>(row, "turn_id"),
-      stage: value<string>(row, "kind"),
-      workerEpoch: value<number>(row, "worker_epoch"),
-      providerId: value<string>(row, "actual_provider_id"),
-      model: value<string>(row, "actual_model"),
-      strategy: value<string>(row, "actual_strategy"),
-      attempts: 1,
-      retryUsed: false,
-      textFallbackUsed: false,
-      inputTokens: value<number>(row, "input_tokens"),
-      outputTokens: value<number>(row, "output_tokens"),
-      costMicros: 0,
-      durationMs: value<number>(row, "duration_ms"),
-      artifactHash: value<string>(row, "artifact_hash"),
-    }));
+    .map((row) => {
+      const turnId = value<string>(row, "turn_id");
+      const turn = turnById.get(turnId);
+      if (!turn) throw new Error(`Campaign Play model stage belongs to missing turn ${turnId}.`);
+      const stage = value<string>(row, "kind");
+      const inputTokens = value<number>(row, "input_tokens");
+      const outputTokens = value<number>(row, "output_tokens");
+      const requested = requestedModelForStage(turn, stage);
+      return campaignPlayModelStageEvidenceSchema.parse({
+        runId: config.runId,
+        campaignId: input.replay.campaignId,
+        turnId,
+        stage,
+        workerEpoch: value<number>(row, "worker_epoch"),
+        providerId: value<string>(row, "actual_provider_id"),
+        model: value<string>(row, "actual_model"),
+        strategy: value<string>(row, "actual_strategy"),
+        attempts: value<number>(row, "attempt"),
+        retryUsed: false,
+        textFallbackUsed: false,
+        inputTokens,
+        outputTokens,
+        costMicros: modelCostMicros(inputTokens, outputTokens, requested.pricing),
+        durationMs: value<number>(row, "duration_ms"),
+        artifactHash: value<string>(row, "artifact_hash"),
+      });
+    });
   writeJsonLines(path.join(input.bundleRoot, "model-stages.jsonl"), modelStages);
 
   const actualInputTokens = modelStages.reduce((total, stage) => total + stage.inputTokens, 0);
@@ -253,15 +333,25 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
   const durations = turns.map((turn) => (turn.completedAt ?? turn.submittedAt) - turn.submittedAt)
     .sort((left, right) => left - right);
   const percentile = (fraction: number) => durations[Math.max(0, Math.ceil(durations.length * fraction) - 1)] ?? 0;
+  const maximumInputTokens = config.execution.kind === "live"
+    ? config.execution.maximumInputTokens
+    : Math.max(actualInputTokens, 1);
+  const maximumOutputTokens = config.execution.kind === "live"
+    ? config.execution.maximumOutputTokens
+    : Math.max(actualOutputTokens, 1);
+  const maximumCostMicros = config.execution.kind === "live"
+    ? config.execution.maximumCostMicros
+    : Math.max(modelStages.reduce((total, stage) => total + stage.costMicros, 0), 1);
+  const actualCostMicros = modelStages.reduce((total, stage) => total + stage.costMicros, 0);
   writeJson(path.join(input.bundleRoot, "budget.json"), campaignPlayBudgetSchema.parse({
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: config.runId,
-    maximumInputTokens: Math.max(actualInputTokens, 1),
-    maximumOutputTokens: Math.max(actualOutputTokens, 1),
-    maximumCostMicros: 1,
+    maximumInputTokens,
+    maximumOutputTokens,
+    maximumCostMicros,
     actualInputTokens,
     actualOutputTokens,
-    actualCostMicros: 0,
+    actualCostMicros,
     p95TurnDurationMs: percentile(0.95),
     p99TurnDurationMs: percentile(0.99),
   }));
@@ -373,13 +463,36 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     .map((row, index) => `## ${index === 0 ? "Opening" : `Player action ${index}`}\n\n${value<string>(row, "display_text")}`)
     .join("\n\n");
   fs.writeFileSync(path.join(input.bundleRoot, "transcript.md"), `# Deterministic Campaign Play transcript\n\n${transcript}\n`, "utf8");
-  fs.writeFileSync(
-    path.join(input.bundleRoot, "human-notes.md"),
-    "This deterministic lane proves runtime integrity. It is not manual prose or playability evidence.\n",
-    "utf8",
-  );
-  writeJson(path.join(input.bundleRoot, "browser-console.json"), []);
-  writeJson(path.join(input.bundleRoot, "network-errors.json"), []);
+  if (input.evidenceRoot) {
+    copyEvidenceDirectory(
+      path.join(input.evidenceRoot, "screenshots"),
+      path.join(input.bundleRoot, "screenshots"),
+    );
+    copyEvidenceDirectory(
+      path.join(input.evidenceRoot, "probes"),
+      path.join(input.bundleRoot, "probes"),
+    );
+    fs.copyFileSync(
+      path.join(input.evidenceRoot, "human-notes.md"),
+      path.join(input.bundleRoot, "human-notes.md"),
+    );
+    fs.copyFileSync(
+      path.join(input.evidenceRoot, "browser-console.json"),
+      path.join(input.bundleRoot, "browser-console.json"),
+    );
+    fs.copyFileSync(
+      path.join(input.evidenceRoot, "network-errors.json"),
+      path.join(input.bundleRoot, "network-errors.json"),
+    );
+  } else {
+    fs.writeFileSync(
+      path.join(input.bundleRoot, "human-notes.md"),
+      "This deterministic lane proves runtime integrity. It is not manual prose or playability evidence.\n",
+      "utf8",
+    );
+    writeJson(path.join(input.bundleRoot, "browser-console.json"), []);
+    writeJson(path.join(input.bundleRoot, "network-errors.json"), []);
+  }
 
   const scorecard = createCampaignPlayScorecard({
     runId: config.runId,

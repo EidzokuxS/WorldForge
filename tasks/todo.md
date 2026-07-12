@@ -1422,6 +1422,25 @@ Prose review: main Sol applied the humanizer and deslop checks. The packet uses 
 
 Manual playtest rule for Tasks 16B through 19: the main agent reads the rendered scene and chooses each action from current player-visible information. Automation may enter the chosen action and capture evidence. Deterministic scripts and generated batches do not count as evidence for prose quality, causal sense, reader interest, or living-world motion.
 
+## Campaign Play Task 16B Execution Packet (2026-07-12)
+
+Goal: prove the first genuinely playable real-provider slice through the rendered UI, including prose quality and one visible player-independent consequence.
+
+- [x] Extract one read-only Campaign Play report owner shared by deterministic and live evidence.
+- [x] Freeze accepted provenance and eligibility before character creation in a live session.
+- [x] Sign each human decision before UI submission and bind it to the exact next durable turn afterward.
+- [x] Capture exact CDP network methods, paths, statuses, and request hashes without choosing or submitting actions.
+- [x] Merge live browser actions, network evidence, screenshots, reload probes, errors, and human notes into the standard bundle.
+- [x] Prove the live session and bundle overlay through adjacent regressions; add no smoke suite.
+- [ ] Configure and verify one real provider/model set plus known frozen pricing for Generator, Judge, and Storyteller.
+- [ ] Build and accept one fresh eligible Campaign World through normal UI navigation.
+- [ ] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.
+- [ ] Reach and identify one sourced non-local actor consequence through the player-visible UI.
+- [ ] Reload with identical public scene/version/time/observation state and answer the five player-review questions.
+- [ ] Validate the complete first-playable bundle, repair accepted defects with focused regressions, then commit and push Task 16B.
+
+Stop condition: Task 16B remains open until a real-provider bundle and manual prose/living-world review pass. Deterministic or scripted narration cannot close it.
+
 ## Campaign Play Task 16A Review (2026-07-12)
 
 - Fixed the consecutive-action authority seam: choices now bind through the persisted public observation handle to its exact world event. Two real consecutive actions pass through the same campaign authority.

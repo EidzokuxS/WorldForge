@@ -47,6 +47,10 @@ describe("Campaign Play evidence bundle writer", () => {
     expect(validation.issues).toEqual([]);
     expect(validation.valid).toBe(true);
     expect(validation.promotionEligible).toBe(true);
+    const budget = JSON.parse(fs.readFileSync(path.join(bundleRoot, "budget.json"), "utf8")) as {
+      actualCostMicros: number;
+    };
+    expect(budget.actualCostMicros).toBeGreaterThan(0);
 
     fs.appendFileSync(path.join(bundleRoot, "transcript.md"), "tampered\n", "utf8");
     const tampered = validateCampaignPlayBundle(bundleRoot);
@@ -54,5 +58,73 @@ describe("Campaign Play evidence bundle writer", () => {
     expect(tampered.issues).toContain(
       "inventory.json does not match the bundle files, byte counts, or SHA-256 hashes.",
     );
+  });
+
+  it("merges signed browser evidence into a valid first-playable bundle", async () => {
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-bundle-"));
+    roots.push(outputRoot);
+    const bundleRoot = path.join(outputRoot, "first-playable-one");
+    const evidenceRoot = path.join(outputRoot, "first-playable-one.session");
+    fs.mkdirSync(path.join(evidenceRoot, "screenshots"), { recursive: true });
+    fs.mkdirSync(path.join(evidenceRoot, "probes"), { recursive: true });
+    const replay = await runSeededCampaignPlayReplay({ playerActions: 1, policy: "peripheral" });
+    const playerTurn = replay.report.tables.turns.find((row) => row.turn_kind === "player_action")!;
+    fs.writeFileSync(path.join(evidenceRoot, "browser-actions.jsonl"), `${JSON.stringify({
+      runId: "first-playable-one",
+      campaignId: replay.campaignId,
+      playerActionNumber: 1,
+      control: "freeform",
+      visibleStateHash: "a".repeat(64),
+      chosenText: "I remain at the gate and listen.",
+      choiceHandle: null,
+      turnId: playerTurn.id,
+      chooser: "manual-player",
+      signedAt: Number(playerTurn.submitted_at) - 1,
+      decisionNote: "The visible pressure makes waiting an informed peripheral action.",
+    })}\n`, "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "network-trace.jsonl"), "", "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "human-notes.md"), "# Review\n\nThe scene remained legible.\n", "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "browser-console.json"), "[]\n", "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "network-errors.json"), "[]\n", "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "screenshots", "ready.png"), "image", "utf8");
+    fs.writeFileSync(path.join(evidenceRoot, "probes", "reload-proof.json"), "{\"matches\":true}\n", "utf8");
+    const runConfig: CampaignPlayRunConfig = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-one",
+      lane: "first-playable",
+      campaignId: replay.campaignId,
+      expectedPlayerActions: 1,
+      outputRoot,
+      execution: {
+        kind: "live",
+        providerId: "provider",
+        models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
+        maximumInputTokens: 10_000,
+        maximumOutputTokens: 10_000,
+        maximumCostMicros: 1_000_000,
+        maximumTurnDurationMs: 120_000,
+      },
+      restartAfterPlayerActions: [],
+      operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+    };
+
+    writeCampaignPlayBundle({
+      bundleRoot,
+      runConfig,
+      replay,
+      commit: "0000000",
+      dirty: true,
+      startedAt: 1_000,
+      completedAt: 2_000,
+      evidenceRoot,
+    });
+
+    const validation = validateCampaignPlayBundle(bundleRoot);
+    expect(validation.issues).toEqual([]);
+    expect(validation.valid).toBe(true);
+    expect(validation.promotionEligible).toBe(true);
+    expect(fs.readFileSync(path.join(bundleRoot, "human-notes.md"), "utf8"))
+      .toContain("scene remained legible");
+    expect(fs.existsSync(path.join(bundleRoot, "screenshots", "ready.png"))).toBe(true);
   });
 });

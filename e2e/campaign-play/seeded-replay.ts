@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,12 +39,15 @@ import {
 import { createCampaignPlayOpeningRuntime } from "../../backend/src/campaign-play/opening-runtime.js";
 import {
   canonicalizeCampaignPlayProjection,
-  deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
 } from "../../backend/src/campaign-play/campaign-play-projection.js";
-import { createCampaignPlayStateRepository } from "../../backend/src/campaign-play/campaign-play-state-repository.js";
 import type { CampaignPlayTurnServiceClock } from "../../backend/src/campaign-play/turn-service.js";
 import { createCampaignPlayTurnRuntime } from "../../backend/src/campaign-play/turn-runtime.js";
+import {
+  captureCampaignPlayReplay,
+  findUnboundCampaignPlayPublicHandles,
+  type CampaignPlayCanonicalReport,
+} from "./replay-report.js";
 
 const CAMPAIGN_ID = "d16a0000-0000-4000-8000-000000000001";
 const PRICING = {
@@ -507,137 +509,7 @@ function turnRuntime(
   });
 }
 
-function tableRows(
-  handle: CampaignPlayDatabaseHandle,
-  tableName: string,
-): Array<Record<string, unknown>> {
-  const allowed = new Set([
-    "campaign_play_runtime_events",
-    "campaign_play_turns",
-    "campaign_play_turn_results",
-    "campaign_play_turn_events",
-    "campaign_play_model_stages",
-    "campaign_play_narrations",
-    "campaign_play_commands",
-    "campaign_play_receipts",
-    "campaign_play_events",
-    "campaign_play_event_exposures",
-    "campaign_play_route_states",
-    "campaign_play_actor_conditions",
-    "campaign_play_pressure_states",
-    "campaign_play_actor_plans",
-    "campaign_play_actor_schedules",
-    "campaign_play_actor_due_sets",
-    "campaign_play_actor_jobs",
-    "campaign_play_actor_proposals",
-    "campaign_play_actor_knowledge",
-    "campaign_play_observations",
-  ]);
-  if (!allowed.has(tableName)) throw new Error(`Unsupported replay table: ${tableName}.`);
-  return handle.sqlite.prepare(
-    `SELECT * FROM "${tableName}" WHERE campaign_id = ? ORDER BY rowid`,
-  ).all(handle.campaignId) as Array<Record<string, unknown>>;
-}
-
-function captureReplay(handle: CampaignPlayDatabaseHandle) {
-  const state = createCampaignPlayStateRepository(handle).loadState();
-  if (!state) throw new Error("Deterministic replay ended without Campaign Play state.");
-  const accepted = handle.sqlite.prepare(`
-    SELECT accepted_snapshot_json AS acceptedSnapshotJson,
-      accepted_content_hash AS acceptedContentHash
-    FROM campaign_worlds WHERE campaign_id = ?
-  `).get(handle.campaignId) as {
-    acceptedSnapshotJson: string;
-    acceptedContentHash: string;
-  };
-  const integrityRow = handle.sqlite.prepare("PRAGMA integrity_check").get() as Record<string, string>;
-  const integrity = Object.values(integrityRow)[0] ?? "missing";
-  const foreignKeys = handle.sqlite.prepare("PRAGMA foreign_key_check").all();
-  const tables = {
-    runtimeEvents: tableRows(handle, "campaign_play_runtime_events"),
-    turns: tableRows(handle, "campaign_play_turns"),
-    turnResults: tableRows(handle, "campaign_play_turn_results"),
-    turnEvents: tableRows(handle, "campaign_play_turn_events"),
-    modelStages: tableRows(handle, "campaign_play_model_stages"),
-    narrations: tableRows(handle, "campaign_play_narrations"),
-    commands: tableRows(handle, "campaign_play_commands"),
-    receipts: tableRows(handle, "campaign_play_receipts"),
-    worldEvents: tableRows(handle, "campaign_play_events"),
-    exposures: tableRows(handle, "campaign_play_event_exposures"),
-    routeStates: tableRows(handle, "campaign_play_route_states"),
-    actorConditions: tableRows(handle, "campaign_play_actor_conditions"),
-    pressureStates: tableRows(handle, "campaign_play_pressure_states"),
-    plans: tableRows(handle, "campaign_play_actor_plans"),
-    schedules: tableRows(handle, "campaign_play_actor_schedules"),
-    dueSets: tableRows(handle, "campaign_play_actor_due_sets"),
-    jobs: tableRows(handle, "campaign_play_actor_jobs"),
-    proposals: tableRows(handle, "campaign_play_actor_proposals"),
-    knowledge: tableRows(handle, "campaign_play_actor_knowledge"),
-    observations: tableRows(handle, "campaign_play_observations"),
-  };
-  const report = {
-    campaignId: handle.campaignId,
-    acceptedSnapshotJson: accepted.acceptedSnapshotJson,
-    acceptedSnapshotHash: crypto.createHash("sha256").update(accepted.acceptedSnapshotJson).digest("hex"),
-    acceptedContentHash: accepted.acceptedContentHash,
-    authority: state.authority,
-    eligibility: state.eligibility,
-    mechanical: state.mechanical,
-    runtime: state.runtime,
-    protectedAudit: state.protectedAudit,
-    publicState: state.publicState,
-    tables,
-    integrity,
-    foreignKeyViolations: foreignKeys.length,
-    donorCalls: 0,
-  };
-  return {
-    report,
-    canonicalBytes: canonicalizeCampaignPlayProjection(report),
-    replayHash: hashCampaignPlayProjection(report),
-  };
-}
-
-export type SeededCampaignPlayCanonicalReport = ReturnType<typeof captureReplay>["report"];
-
-function unboundPublicHandles(handle: CampaignPlayDatabaseHandle): string[] {
-  const narration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
-    FROM campaign_play_narrations WHERE campaign_id = ? AND status = 'complete'
-    ORDER BY created_at DESC, narration_id DESC LIMIT 1`).get(handle.campaignId) as {
-    packetJson: string;
-  };
-  const packet = JSON.parse(narration.packetJson) as CampaignPlayNarratorPacket;
-  const candidates = new Set<string>();
-  const addRows = (tableName: string, idColumn: string, publicKind: string) => {
-    const rows = handle.sqlite.prepare(
-      `SELECT "${idColumn}" AS id FROM "${tableName}" WHERE campaign_id = ? ORDER BY "${idColumn}"`,
-    ).all(handle.campaignId) as Array<{ id: string }>;
-    rows.forEach((row) => candidates.add(
-      deriveCampaignPlayPublicHandle(publicKind, handle.campaignId, row.id),
-    ));
-  };
-  addRows("actors", "id", "actor");
-  addRows("locations", "id", "location");
-  addRows("location_edges", "id", "route");
-  addRows("world_pressures", "id", "pressure");
-  const observations = handle.sqlite.prepare(`SELECT public_entry_json AS publicEntryJson
-    FROM campaign_play_observations WHERE campaign_id = ? ORDER BY observation_id`).all(
-      handle.campaignId,
-    ) as Array<{ publicEntryJson: string }>;
-  observations.forEach((row) => {
-    const publicEntry = JSON.parse(row.publicEntryJson) as { observationHandle: string };
-    candidates.add(publicEntry.observationHandle);
-  });
-  const handles = [
-    packet.currentLocation.handle,
-    ...packet.visibleActors.map((actor) => actor.handle),
-    ...packet.visibleRoutes.flatMap((route) => [route.handle, route.destinationHandle]),
-    ...packet.visiblePressures.map((pressure) => pressure.handle),
-    ...packet.newObservations.map((observation) => observation.observationHandle),
-    ...packet.continuity.map((observation) => observation.observationHandle),
-  ];
-  return [...new Set(handles.filter((handleValue) => !candidates.has(handleValue)))];
-}
+export type SeededCampaignPlayCanonicalReport = CampaignPlayCanonicalReport;
 
 export async function runAcceptedCampaignPlayReplay(
   campaignId: string,
@@ -707,7 +579,7 @@ export async function runAcceptedCampaignPlayReplay(
       const diagnosticHandle = openCampaignPlayDatabase(campaignId);
       try {
         throw new Error(
-          `Action ${actionNumber} admission has unbound public handles: ${unboundPublicHandles(diagnosticHandle).join(", ") || "none"}.`,
+          `Action ${actionNumber} admission has unbound public handles: ${findUnboundCampaignPlayPublicHandles(diagnosticHandle).join(", ") || "none"}.`,
           { cause: error },
         );
       } finally {
@@ -735,7 +607,7 @@ export async function runAcceptedCampaignPlayReplay(
 
   const handle = openCampaignPlayDatabase(campaignId);
   try {
-    const captured = captureReplay(handle);
+    const captured = captureCampaignPlayReplay(handle);
     const turns = captured.report.tables.turns as Array<{ turn_kind: string; stage: string }>;
     const openingTurns = turns.filter((turn) => turn.turn_kind === "opening").length;
     const playerTurns = turns.filter((turn) => turn.turn_kind === "player_action");
@@ -758,7 +630,7 @@ export async function runAcceptedCampaignPlayReplay(
       pressureStateBytes: canonicalizeCampaignPlayProjection(captured.report.tables.pressureStates),
       observationCount: captured.report.tables.observations.length,
       observationChannels: captured.report.tables.observations.map((row) => String(row.channel)),
-      unboundObservationHandles: unboundPublicHandles(handle),
+      unboundObservationHandles: captured.unboundObservationHandles,
       restartProjectionMatches,
       report: captured.report,
     };
