@@ -49,7 +49,7 @@ Execution board:
 - [x] Task 10A: fenced turn worker and recovery service.
 - [x] Task 10B: opening turn-zero runtime.
 - [x] Task 10C: player action runtime and terminal narration.
-- [ ] Task 11: Campaign Play API and resumable delivery.
+- [x] Task 11: Campaign Play API and resumable delivery.
 - [x] Task 12: UI and copy design gate.
 - [x] Task 13: frontend client and durable page state.
 - [ ] Task 14A: scene and narration surface.
@@ -61,6 +61,18 @@ Execution board:
 - [ ] Task 18: two fresh and one clone/provenance pristine 60-turn campaigns.
 - [ ] Task 19: 300-turn long-horizon soak.
 - [ ] Task 20: documentation, independent audit, and handoff.
+
+Task 14A execution packet:
+- [x] Add the real `/campaign/[id]/play` route and compose the authoritative controller into the full-screen play layout.
+- [x] Render opening choice, current location, visible presence, routes, pressures, narration beats, and public stage effects from `CampaignPlayState` only.
+- [x] Preserve semantic order, 390px narrow behavior, 44px targets, contrast, and static reduced-motion effect meaning.
+- [x] Cover the route, stage, scene, and narration surfaces with focused component regressions using a rich schema-valid public fixture.
+- [x] Capture real-route opening, ready, narration, desktop, narrow, and reduced-motion evidence with zero console/network errors.
+- [x] Pass focused/full frontend tests, scoped lint, typecheck, build, Krypton POST, correctness, maintainability, and fresh Sol scene review. Repository-wide lint retains the unrelated Forge baseline recorded in the evidence note.
+- [ ] Record Task 14A evidence, GitNexus change scope, checkpoint commit, refreshed index, and push.
+
+Task 14A ownership amendment:
+- `CampaignPlayPage.tsx` joins Task 14A as the existing authoritative state/admission integration seam required to render the planned scene components. Task 14B retains action, consequence, Journal, and recovery interaction ownership.
 
 Task 0 review:
 - Branch `feat/revamp` starts Campaign Play from commit `a1e4d5c` while preserving the existing Campaign World and planning worktree.

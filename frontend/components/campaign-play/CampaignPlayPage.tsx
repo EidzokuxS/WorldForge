@@ -3,12 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  CampaignPlayOpeningLocationOption,
   CampaignPlayPublicErrorCode,
   CampaignPlayPublicProgress,
   CampaignPlaySseEvent,
+  CampaignPlayStartingConditions,
   CampaignPlayState,
   CampaignPlayTurnReadResponse,
 } from "@worldforge/shared";
+
+import { CampaignPlayStage } from "./CampaignPlayStage";
 
 import {
   CampaignPlayApiError,
@@ -37,6 +41,13 @@ interface PendingOperation {
   campaignId: string;
   kind: "admission" | "resume";
   token: symbol;
+}
+
+interface OpeningSelection {
+  locationHandle: string;
+  roleHandle: string;
+  arrivalModeHandle: string;
+  immediateSituationHandle: string;
 }
 
 export interface CampaignPlayPageProps {
@@ -150,6 +161,15 @@ function waitForReconnect(milliseconds: number, signal: AbortSignal): Promise<vo
   });
 }
 
+function initialOpeningSelection(option: CampaignPlayOpeningLocationOption): OpeningSelection {
+  return {
+    locationHandle: option.locationHandle,
+    roleHandle: option.roles[0]!.handle,
+    arrivalModeHandle: option.arrivalModes[0]!.handle,
+    immediateSituationHandle: option.immediateSituations[0]!.handle,
+  };
+}
+
 export function CampaignPlayPage({
   campaignId,
   reconnectDelayMilliseconds = 500,
@@ -159,7 +179,6 @@ export function CampaignPlayPage({
   const [followedTurn, setFollowedTurn] = useState<FollowedTurn | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [eventProgress, setEventProgress] = useState<CampaignPlayPublicProgress | null>(null);
-  const [lastSeenSequence, setLastSeenSequence] = useState(0);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [requestError, setRequestError] = useState<{
     campaignId: string;
@@ -167,6 +186,7 @@ export function CampaignPlayPage({
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingOperation, setPendingOperation] = useState<PendingOperation | null>(null);
+  const [openingSelection, setOpeningSelection] = useState<OpeningSelection | null>(null);
   const operationRef = useRef<PendingOperation | null>(null);
   const mountedRef = useRef(true);
   const campaignIdRef = useRef(campaignId);
@@ -189,7 +209,6 @@ export function CampaignPlayPage({
   const recordSequence = useCallback((targetCampaignId: string, sequence: number) => {
     if (!mountedRef.current || campaignIdRef.current !== targetCampaignId) return;
     lastSequenceRef.current = { campaignId: targetCampaignId, sequence };
-    setLastSeenSequence(sequence);
     writeNavigationState(targetCampaignId, sequence);
   }, []);
 
@@ -372,7 +391,7 @@ export function CampaignPlayPage({
     }
   }, [beginFollowing, campaignId, campaignState, draft, reconcileRequestFailure, setDraft]);
 
-  const delegateOpening = useCallback(async () => {
+  const submitOpening = useCallback(async (startingConditions: CampaignPlayStartingConditions) => {
     if (
       operationRef.current?.campaignId === campaignId ||
       campaignState?.phase !== "opening_required"
@@ -384,7 +403,7 @@ export function CampaignPlayPage({
     try {
       const admission = await admitCampaignPlayOpening(campaignId, {
         idempotencyKey: crypto.randomUUID(),
-        startingConditions: { mode: "delegate" },
+        startingConditions,
         expectedWorldVersion: campaignState.worldVersion,
         expectedRuntimeRevision: campaignState.runtimeRevision,
       });
@@ -462,61 +481,148 @@ export function CampaignPlayPage({
       ? OPENING_PROGRESS_COPY[progress]
       : PROGRESS_COPY[progress];
 
+  const selectedOpeningOption = openingSelection === null
+    ? null
+    : campaignState.openingOptions.find(
+        (option) => option.locationHandle === openingSelection.locationHandle,
+      ) ?? null;
+  const validOpeningSelection = selectedOpeningOption !== null && openingSelection !== null &&
+    selectedOpeningOption.roles.some((option) => option.handle === openingSelection.roleHandle) &&
+    selectedOpeningOption.arrivalModes.some(
+      (option) => option.handle === openingSelection.arrivalModeHandle,
+    ) &&
+    selectedOpeningOption.immediateSituations.some(
+      (option) => option.handle === openingSelection.immediateSituationHandle,
+    );
+
+  if (campaignState.phase === "character_required") {
+    return (
+      <section className="campaign-play-guard">
+        <p className="campaign-play-kicker">Player character</p>
+        <h1>Create a player character before entering the world.</h1>
+        <Link href={`/campaign/${campaignId}/character`}>Create character</Link>
+      </section>
+    );
+  }
+
   return (
     <section
-      className="flex min-h-dvh flex-col bg-[#09090b] text-[#f2eee8]"
+      className="campaign-play-page"
       data-connection={connection}
-      data-last-sequence={lastSeenSequence}
-      data-phase={campaignState.phase}
     >
-      <header className="flex min-h-11 items-center justify-between border-b border-white/10 px-4">
-        <span>WorldForge</span>
-        <span aria-live="polite">
-          {connection === "disconnected" ? "Connection lost. The turn may still be running." : ""}
-        </span>
-      </header>
-
       {campaignError || failedCode ? (
-        <p className="m-4" role="alert">{ERROR_COPY[campaignError ?? failedCode ?? "service_unavailable"]}</p>
+        <p className="campaign-play-alert" role="alert">{ERROR_COPY[campaignError ?? failedCode ?? "service_unavailable"]}</p>
       ) : null}
 
-      <div className="grid flex-1 place-items-center p-6">
-        {campaignState.phase === "character_required" ? (
-          <div className="max-w-md text-center">
-            <p>Create a player character before entering the world.</p>
-            <Link className="mt-4 inline-flex min-h-11 items-center" href={`/campaign/${campaignId}/character`}>
-              Create character
-            </Link>
-          </div>
-        ) : null}
-
+      <CampaignPlayStage
+        connectionMessage={connection === "disconnected"
+          ? "Connection lost. The turn may still be running."
+          : ""}
+        state={campaignState}
+      >
         {campaignState.phase === "opening_required" && !followsCurrentCampaign ? (
-          <div className="max-w-lg text-center">
-            <h1 className="text-2xl">Choose your arrival</h1>
-            <p className="mt-2">Pick a starting point and role, or let the world place you.</p>
-            <button
-              className="mt-6 min-h-11 rounded border border-white/20 px-5"
-              disabled={campaignPendingOperation?.kind === "admission"}
-              onClick={() => void delegateOpening()}
-              type="button"
-            >
-              Let the world decide
-            </button>
-          </div>
+          <section className="campaign-play-arrival" aria-labelledby="campaign-play-arrival-heading">
+            <p className="campaign-play-kicker">Enter the world</p>
+            <h1 id="campaign-play-arrival-heading">Choose your arrival</h1>
+            <p>Pick a starting point and role, or let the world place you.</p>
+            <div className="campaign-play-arrival-locations" role="group" aria-label="Starting places">
+              {campaignState.openingOptions.map((option) => {
+                const selected = option.locationHandle === openingSelection?.locationHandle;
+                return (
+                  <button
+                    aria-label={option.name}
+                    aria-pressed={selected}
+                    key={option.locationHandle}
+                    onClick={() => setOpeningSelection(initialOpeningSelection(option))}
+                    type="button"
+                  >
+                    <strong>{option.name}</strong>
+                    <span>{option.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedOpeningOption && openingSelection ? (
+              <div className="campaign-play-arrival-details">
+                <label>
+                  Your place here
+                  <select
+                    onChange={(event) => setOpeningSelection({
+                      ...openingSelection,
+                      roleHandle: event.target.value,
+                    })}
+                    value={openingSelection.roleHandle}
+                  >
+                    {selectedOpeningOption.roles.map((option) => (
+                      <option key={option.handle} value={option.handle}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  How you arrive
+                  <select
+                    onChange={(event) => setOpeningSelection({
+                      ...openingSelection,
+                      arrivalModeHandle: event.target.value,
+                    })}
+                    value={openingSelection.arrivalModeHandle}
+                  >
+                    {selectedOpeningOption.arrivalModes.map((option) => (
+                      <option key={option.handle} value={option.handle}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  What is happening
+                  <select
+                    onChange={(event) => setOpeningSelection({
+                      ...openingSelection,
+                      immediateSituationHandle: event.target.value,
+                    })}
+                    value={openingSelection.immediateSituationHandle}
+                  >
+                    {selectedOpeningOption.immediateSituations.map((option) => (
+                      <option key={option.handle} value={option.handle}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+            <div className="campaign-play-arrival-actions">
+              <button
+                disabled={campaignPendingOperation?.kind === "admission"}
+                onClick={() => void submitOpening({ mode: "delegate" })}
+                type="button"
+              >
+                Let the world decide
+              </button>
+              <button
+                className="campaign-play-primary-action"
+                disabled={!validOpeningSelection || campaignPendingOperation?.kind === "admission"}
+                onClick={() => openingSelection && void submitOpening({
+                  mode: "chosen",
+                  ...openingSelection,
+                })}
+                type="button"
+              >
+                Begin
+              </button>
+            </div>
+          </section>
         ) : null}
 
         {(followsCurrentCampaign || campaignState.phase === "opening_active" || campaignState.phase === "turn_active" || campaignState.phase === "narration_pending") ? (
-          <div aria-live="polite" role="status" tabIndex={-1}>
-            {progressCopy}
+          <div className="campaign-play-progress" aria-live="polite" role="status" tabIndex={-1}>
+            <span aria-hidden="true" />
+            <p>{progressCopy}</p>
           </div>
         ) : null}
 
         {interrupted ? (
-          <div className="max-w-md text-center">
+          <div className="campaign-play-interruption">
             <p>{activeTurn?.turnKind === "opening" ? "The opening stopped before it finished." : "The turn stopped before it finished."}</p>
             {activeTurn?.retryEligible ? (
               <button
-                className="mt-4 min-h-11 rounded border border-white/20 px-5"
                 disabled={campaignPendingOperation?.kind === "resume"}
                 onClick={() => void resumeTurn()}
                 type="button"
@@ -526,14 +632,13 @@ export function CampaignPlayPage({
             ) : null}
           </div>
         ) : null}
-      </div>
+      </CampaignPlayStage>
 
       {(campaignState.phase === "ready" || campaignState.phase === "turn_active" || campaignState.phase === "narration_pending") ? (
-        <div className="border-t border-white/10 p-4">
-          <label className="block" htmlFor="campaign-play-action">Your action</label>
-          <div className="mt-2 flex gap-3">
+        <div className="campaign-play-action-shell">
+          <label htmlFor="campaign-play-action">Your action</label>
+          <div>
             <textarea
-              className="min-h-24 flex-1 rounded border border-white/20 bg-black/30 p-3"
               disabled={inputLocked}
               id="campaign-play-action"
               onChange={(event) => setDraft(event.target.value)}
@@ -541,7 +646,6 @@ export function CampaignPlayPage({
               value={draft}
             />
             <button
-              className="min-h-11 min-w-20 rounded border border-white/20 px-4"
               disabled={inputLocked || draft.trim().length === 0}
               onClick={() => void submitAction()}
               type="button"

@@ -198,6 +198,31 @@ describe("CampaignPlayPage durable state", () => {
     }
   });
 
+  it("admits only a complete chosen opening tuple from one location option", async () => {
+    api.loadState.mockResolvedValue(state("opening_required"));
+    api.admitOpening.mockResolvedValue({ turnId: "opening-1", sequence: 1 });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    const begin = await screen.findByRole("button", { name: "Begin" });
+    expect(begin).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Signal Yard" }));
+    expect(begin).toBeEnabled();
+    fireEvent.click(begin);
+
+    await waitFor(() => expect(api.admitOpening).toHaveBeenCalledWith("campaign-1", {
+      idempotencyKey: "request-1",
+      startingConditions: {
+        mode: "chosen",
+        locationHandle: "location-1",
+        roleHandle: "role-1",
+        arrivalModeHandle: "arrival-1",
+        immediateSituationHandle: "situation-1",
+      },
+      expectedWorldVersion: 3,
+      expectedRuntimeRevision: 4,
+    }));
+  });
+
   it("prevents concurrent admission and clears the durable draft only after 202", async () => {
     api.loadState.mockResolvedValue(state("ready"));
     let acceptAdmission!: (value: { turnId: string; sequence: number }) => void;
