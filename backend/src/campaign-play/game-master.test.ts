@@ -342,7 +342,7 @@ describe("Campaign Play Game Master", () => {
     const effectRuling = effect.kind === "move_actor" ? ruling({
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
-        kind: "move", targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
+        kind: "move", targets: [{ handle: "passage", kind: "route" }],
         method: "Cross the open passage", stakes: "Reach South Harbor",
       },
     }) : ruling();

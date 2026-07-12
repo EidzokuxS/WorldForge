@@ -333,14 +333,22 @@ function canonicalMovement(
   const fromLocationHandle = frame.handleBindings.find((binding) =>
     binding.reference.kind === "location" && binding.reference.id === placement?.locationId)?.handle;
   const routeHandle = ruling.normalizedIntent.targets.find((target) => target.kind === "route")?.handle;
-  const toLocationHandle = ruling.normalizedIntent.targets.find((target) => target.kind === "location")?.handle;
-  if (!actorHandle || !fromLocationHandle || !routeHandle || !toLocationHandle) {
+  if (!actorHandle || !fromLocationHandle || !routeHandle || !placement) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
+  const route = requireRef(map, routeHandle, "route");
+  const routeRecord = frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
+    candidate.id === route.id);
+  if (!routeRecord || routeRecord.fromLocationId !== placement.locationId) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  const toLocationHandle = frame.handleBindings.find((binding) =>
+    binding.reference.kind === "location" && binding.reference.id === routeRecord.toLocationId)?.handle;
+  if (!toLocationHandle) throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   return {
     handles: { actorHandle, routeHandle, fromLocationHandle, toLocationHandle },
     actor: requireRef(map, actorHandle, "actor"),
-    route: requireRef(map, routeHandle, "route"),
+    route,
     from: requireRef(map, fromLocationHandle, "location"),
     to: requireRef(map, toLocationHandle, "location"),
   };
@@ -549,12 +557,13 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
       const executionSignal = request.signal
         ? AbortSignal.any([request.signal, timeoutSignal])
         : timeoutSignal;
+      const promptText = prompt(request.frame, request.ruling, request.resolution);
       let generated;
       try {
         generated = await dependencies.generateObject({
           model: request.model,
           schema: campaignPlayGameMasterProposalSchema,
-          prompt: prompt(request.frame, request.ruling, request.resolution),
+          prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
           timeout: request.budget.maximumDurationMs,
