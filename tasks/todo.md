@@ -51,7 +51,7 @@ Execution board:
 - [x] Task 10C: player action runtime and terminal narration.
 - [ ] Task 11: Campaign Play API and resumable delivery.
 - [x] Task 12: UI and copy design gate.
-- [ ] Task 13: frontend client and durable page state.
+- [x] Task 13: frontend client and durable page state.
 - [ ] Task 14A: scene and narration surface.
 - [ ] Task 14B: action, consequence, journal, and recovery surface.
 - [ ] Task 15: product handoff and hard cutover.
@@ -1224,3 +1224,41 @@ Plan prose review: main Sol reviewed the packet for direct technical language. `
 - A first unconstrained backend run hit the five-second limit in one existing SQLite race test. The isolated race test passed, and the complete bounded-worker run passed all 3,886 tests.
 - Fresh Sol semantic verification returned `PASS` with remaining P0/P1 findings `0`. Humanizer/deslop review found the Task 11 note and public copy direct and evidence-bound. GLM remains outside the delivery pipeline. Standalone smoke additions: `0`.
 - Evidence: `rpi/campaign-play/implement/11-api.md`.
+
+## Campaign Play Task 13 Execution Packet (2026-07-12)
+
+Goal: connect the mounted Campaign Play API to one campaign-scoped client state machine that survives replay, reconnect, reload, interruption, and terminal completion without inventing local world state.
+
+Truth owner: `CampaignPlayState`, exact durable turn reads, Campaign Play SSE, public errors, and journal pages.
+
+Files:
+
+- `frontend/lib/campaign-play-api.ts`
+- `frontend/lib/campaign-play-api.test.ts`
+- `frontend/app/(play)/layout.tsx`
+- `frontend/components/campaign-play/CampaignPlayPage.tsx`
+- `frontend/components/campaign-play/CampaignPlayPage.test.tsx`
+- `rpi/campaign-play/implement/13-frontend-state.md`
+- `tasks/todo.md`
+
+Acceptance evidence:
+
+- [x] Typed state, player, opening, turn, resume, event, and journal calls validate the public wire contract.
+- [x] SSE parsing proves chunked LF/CRLF input, exact duplicate suppression, consecutive ordering, terminal delivery, and empty beyond-tail replay.
+- [x] Reload renders every server phase from durable authority.
+- [x] Admission locks input synchronously, preserves the draft before accepted `202`, and clears it only after accepted admission.
+- [x] Disconnect refetches authority and reconnects from the last accepted sequence; durable interruption remains a separate Resume state.
+- [x] Duplicate and out-of-order events never create a local scene, narration, consequence, or terminal claim.
+- [x] Terminal completion refetches the exact turn and `/state`, then unlocks from refreshed authority.
+- [x] Focused client and component tests, frontend typecheck, production build, diff check, GitNexus change detection, semantic review, correctness review, and maintainability review pass.
+
+Stop boundary: stop at transport, durable page state, semantic status surfaces, and input control. Task 14 owns the final scene, narration, effects, suggestions, consequence, and journal presentation. Task 15 owns product handoff and removal of the old player route.
+
+## Campaign Play Task 13 Review (2026-07-12)
+
+- The new campaign-scoped client covers state, player intake, opening, turns, resume, events, and journal without importing the old player or chat path.
+- The page controller keeps world and narration state on the server. It owns only transport, draft, admission, focus-ready status, and the accepted event cursor.
+- Campaign navigation, unmount, late GET, late POST, external admission, stream disconnect, duplicate event, sequence gap, resume, terminal completion, and failed-turn paths have direct regression coverage.
+- Verification passed: focused `26/26`, complete frontend `514/514`, frontend typecheck, warning-free targeted lint, monorepo production build, and diff check. Standalone smoke additions: `0`.
+- Fresh Sol semantic verification returned `PASS` with remaining P0/P1 findings `0`. Humanizer/deslop review kept approved public copy intact and found the evidence direct and specific.
+- Evidence: `rpi/campaign-play/implement/13-frontend-state.md`.
