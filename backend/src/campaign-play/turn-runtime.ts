@@ -559,15 +559,15 @@ function buildPublicAuthority(input: {
   }));
   const choiceBindings = narration.suggestedActions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>
-      intent.handle === suggestion.choiceHandle && intent.label === suggestion.label);
+      intent.handle === suggestion.choiceHandle);
     if (!available) {
       throw new CampaignPlayTurnRuntimeError(
         "turn_public_context_invalid",
         "Campaign Play rendered suggestion lacks its exact public intent binding.",
       );
     }
-    addFact({ handle: available.handle, kind: "choice", summary: available.label });
-    return choiceBindingSchema.parse(available);
+    addFact({ handle: available.handle, kind: "choice", summary: suggestion.label });
+    return choiceBindingSchema.parse({ ...available, label: suggestion.label });
   });
   const observations = [...packet.newObservations, ...packet.continuity];
   for (const observation of observations) {
@@ -638,7 +638,7 @@ function resolveJudgeInput(
   const suggestion = narration.suggestedActions.find((action) =>
     action.choiceHandle === request.choiceHandle);
   const available = packet.availableIntents.find((intent) =>
-    intent.handle === request.choiceHandle && intent.label === suggestion?.label);
+    intent.handle === request.choiceHandle);
   if (!suggestion || !available) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_request_invalid",

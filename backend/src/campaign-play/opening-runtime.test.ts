@@ -322,6 +322,7 @@ function narratorFixture(modelEvidence: CampaignPlayNarratorModelEvidence = narr
         narrationId: request.narrationId,
         packet,
         proposal: {
+          actionDetails: packet.availableIntents.map(() => "the immediate situation"),
           beats: [
             { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", text: "Ahead, signal keepers brace the route gate while warning bells gather pace." },

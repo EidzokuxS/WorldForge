@@ -199,7 +199,7 @@ function narrationFixture(): CampaignPlayNarration {
     displayText: "Rain threads across the bridge as the new guards take position.",
     suggestedActions: [{
       choiceHandle: "choice_watch_bridge",
-      label: "Watch from shelter",
+      label: "Examine the guarded route from shelter",
     }],
     effects: [{ kind: "flash", beatId: "beat_1" }],
     createdAt: 1_000,

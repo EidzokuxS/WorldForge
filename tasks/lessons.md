@@ -85,6 +85,7 @@
 - Exact hard micro-results with no prose latitude should be typed renderables, not model paraphrase traps.
 - Budget model stages against visible answer tokens separately from provider reasoning tokens, and set timeouts from measured thinking-model latency; a healthy 55–65 second GLM response must not be classified as unavailable.
 - Narration must receive concrete projected receipts for the accepted player action and every same-turn NPC action the player could perceive. A post-turn scene snapshot alone cannot preserve event order or causal continuity.
+- Model-authored action copy may supply only a short grammatical detail under a code-owned intent and target prefix. Persist the rendered label for Judge while freezing kind and targets independently.
 
 ## Evidence Handling
 

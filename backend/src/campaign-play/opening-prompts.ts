@@ -7,9 +7,27 @@ function promptData(
   frame: CampaignPlayOpeningFrame,
   startingConditions: CampaignPlayResolvedStartingConditions,
 ): string {
+  const plannedActors = frame.acceptedWorld.actors
+    .filter((actor) =>
+      actor.kind === "collective" || actor.role === "key" || actor.role === "support"
+    )
+    .map((actor) => ({
+      actorId: actor.id,
+      actorKind: actor.kind,
+      actorRole: actor.role,
+      activeGoalIds: frame.acceptedWorld.goals
+        .filter((goal) => goal.actorId === actor.id && goal.status === "active")
+        .map((goal) => goal.id),
+      actorLocationIds: frame.acceptedWorld.placements
+        .filter((placement) => placement.actorId === actor.id)
+        .map((placement) => placement.locationId),
+    }));
   return JSON.stringify({
     startingConditions,
     player: frame.player,
+    openingConstraints: {
+      plannedActors,
+    },
     world: {
       campaignId: frame.acceptedWorld.campaignId,
       version: frame.acceptedWorld.version,
@@ -43,7 +61,7 @@ Choose a grounded opening location, one visibly present support person, one pres
 
 Create exactly one actor plan proposal for every key person, support person, and collective. A background person receives no plan. Each actor proposal selects one active goal as primary. Write a concise strategic intent and one to three concrete steps that advance it. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
 
-Choose one planned person or collective outside the opening location as the hidden consequence source. Its first step must support the selected exposure predicate. The exposure must become earnable within five player actions through an opening route, the visible support witness, or travel to a reachable non-local location.
+Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId, one activeGoalId from the same entry, and one actorLocationId from that entry. The hidden location must differ from start.locationId. Its first step must support the selected exposure predicate. The exposure must become earnable within five player actions through an opening route, the visible support witness, or travel to a reachable non-local location.
 
 Keep the hidden actor, its identity, and its goal out of the scene fields. Describe only the player's immediate role, arrival, and situation in start. Code owns identifiers, command scopes, preconditions, scheduling, bootstrap commands, hashes, visibility, and narration.`;
 }

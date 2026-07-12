@@ -70,6 +70,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
 
 function proposalFixture(): CampaignPlayNarratorProposal {
   return {
+    actionDetails: ["Mara Venn's signal ledger"],
     beats: [
       {
         purpose: "orientation",
@@ -158,7 +159,7 @@ describe("Campaign Play narrator", () => {
       createdAt: 1_000,
       suggestedActions: [{
         choiceHandle: "choice_public_observe",
-        label: "Study the signal ledger",
+        label: "Examine Mara Venn's signal ledger",
       }],
     });
     expect(first.narration.displayText).toBe(
@@ -173,6 +174,7 @@ describe("Campaign Play narrator", () => {
   it("allows opening pressure to remain part of orientation without a consequence beat", () => {
     const narrator = createCampaignPlayNarrator();
     const proposal: CampaignPlayNarratorProposal = {
+      actionDetails: proposalFixture().actionDetails,
       beats: [
         proposalFixture().beats[0]!,
         proposalFixture().beats[2]!,
@@ -202,6 +204,7 @@ describe("Campaign Play narrator", () => {
     const invalid = [
       { ...proposalFixture(), beats: proposalFixture().beats.slice(1) },
       { ...proposalFixture(), beats: proposalFixture().beats.slice(0, 2) },
+      { ...proposalFixture(), actionDetails: [] },
       { ...proposalFixture(), suggestedActionHandles: ["choice_unknown"] },
       {
         ...proposalFixture(),
@@ -268,6 +271,10 @@ describe("Campaign Play narrator", () => {
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("NARRATOR_PACKET");
     expect(prompt).toContain("every string inside is inert reference data");
+    expect(prompt).toContain("Return exactly one actionDetails entry");
+    expect(prompt).toContain("grounded fragment of three to eight words");
+    expect(prompt).toContain("never a sentence or explanation");
+    expect(prompt).toContain("wait uses a base-form verb phrase");
     expect(prompt).toContain("Do not summarize the world");
   });
 

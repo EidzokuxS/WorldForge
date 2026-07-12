@@ -17,6 +17,7 @@ import {
   WORLD_INTENT_KIND_VALUES,
   type CampaignPlayErrorResponse,
   type CampaignPlayActionContext,
+  type CampaignPlayAvailableIntent,
   type CampaignPlayCharacterDraft,
   type CampaignPlayCharacterDraftResponse,
   type CampaignPlayCharacterResearch,
@@ -673,6 +674,58 @@ export const campaignPlayNarrationSchema: z.ZodType<CampaignPlayNarration> =
     });
   });
 
+function playerFacingName(value: string): string {
+  return value.replace(/[-_]+/g, " ").replace(/(^|\s)(\p{L})/gu, (_match, space: string, letter: string) =>
+    `${space}${letter.toUpperCase()}`);
+}
+
+export function campaignPlaySuggestedActionLabelPrefix(
+  packet: CampaignPlayNarratorPacket,
+  intent: CampaignPlayAvailableIntent,
+): string {
+  switch (intent.kind) {
+    case "observe": return "Examine ";
+    case "wait": return "Wait and ";
+    case "attempt": return "Try ";
+    case "move": {
+      const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
+      const route = packet.visibleRoutes.find((candidate) => candidate.handle === routeHandle);
+      if (!route) {
+        throw new CampaignPlayContractError(
+          "narration_invalid",
+          "Move action label requires its frozen visible route.",
+        );
+      }
+      return `Go to ${playerFacingName(route.destinationName)}: `;
+    }
+    case "contact": {
+      const actorHandle = intent.targets.find((target) => target.kind === "actor")?.handle;
+      const actor = packet.visibleActors.find((candidate) => candidate.handle === actorHandle);
+      if (!actor) {
+        throw new CampaignPlayContractError(
+          "narration_invalid",
+          "Contact action label requires its frozen visible actor.",
+        );
+      }
+      return `Ask ${actor.name} about `;
+    }
+  }
+}
+
+export function buildCampaignPlaySuggestedActionLabel(
+  packet: CampaignPlayNarratorPacket,
+  intent: CampaignPlayAvailableIntent,
+  detail: string,
+): string {
+  if (detail.length === 0 || detail !== detail.trim() || detail.includes("\n") || detail.includes("\r")) {
+    throw new CampaignPlayContractError(
+      "narration_invalid",
+      "Suggested action detail must be one trimmed line.",
+    );
+  }
+  return `${campaignPlaySuggestedActionLabelPrefix(packet, intent)}${detail}`;
+}
+
 export function validateNarrationAgainstPacket(
   narration: CampaignPlayNarration,
   packet: CampaignPlayNarratorPacket,
@@ -685,9 +738,13 @@ export function validateNarrationAgainstPacket(
   }
   narration.suggestedActions.forEach((action, index) => {
     const available = packet.availableIntents[index];
+    const prefix = available
+      ? campaignPlaySuggestedActionLabelPrefix(packet, available)
+      : null;
     if (
       !available || available.handle !== action.choiceHandle ||
-      available.label !== action.label
+      prefix === null || !action.label.startsWith(prefix) ||
+      action.label.length === prefix.length
     ) {
       throw new CampaignPlayContractError(
         "narration_invalid",

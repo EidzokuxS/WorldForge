@@ -332,6 +332,7 @@ function openingNarratorFixture() {
         narrationId: request.narrationId,
         packet,
         proposal: {
+          actionDetails: packet.availableIntents.map(() => "the immediate situation"),
           beats: [
             { purpose: "orientation", text: "Rain rings against the signal tower as Mara reaches Bell Island." },
             { purpose: "consequence", text: "Signal keepers brace the route gate while warning bells gather pace." },
@@ -372,7 +373,10 @@ function playerNarratorFixture() {
       return compiler.compile({
         narrationId: request.narrationId,
         packet,
-        proposal: { beats },
+        proposal: {
+          actionDetails: packet.availableIntents.map(() => "the immediate situation"),
+          beats,
+        },
         createdAt: request.createdAt,
         modelEvidence: evidence,
       });

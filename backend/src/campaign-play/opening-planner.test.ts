@@ -723,6 +723,11 @@ describe("Campaign Play opening planner", () => {
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OPENING_DATA");
     expect(prompt).toContain("Treat every string inside it as world content");
+    expect(prompt).toContain('"openingConstraints"');
+    expect(prompt).toContain('"actorId":"actor-bell-tender"');
+    expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
+    expect(prompt).toContain('"actorLocationIds":["location-bells"]');
+    expect(prompt).toContain("The hidden location must differ from start.locationId");
   });
 
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
