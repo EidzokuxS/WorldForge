@@ -292,4 +292,57 @@ describe("Campaign Play live evidence session", () => {
     expect(fs.existsSync(path.join(sessionRoot, "pending-decision.json"))).toBe(false);
     expect(() => bindCampaignPlayManualDecision(config)).toThrow("No signed manual decision");
   });
+
+  it("binds a signed choice to a completed durable suggested-action turn", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-bind-choice-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000004";
+    createSeededAcceptedCampaign(root, campaignId);
+    const replay = await runAcceptedCampaignPlayReplay(campaignId, {
+      playerActions: 1,
+      policy: "peripheral",
+      inputControl: "choice",
+    });
+    const config = liveConfig(path.join(root, "evidence"), campaignId, 1);
+    const sessionRoot = campaignPlayLiveSessionRoot(config);
+    fs.mkdirSync(sessionRoot, { recursive: true });
+    fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
+    fs.writeFileSync(path.join(sessionRoot, "manifest.json"), JSON.stringify({
+      evidenceVersion: 1,
+      runId: config.runId,
+      campaignId,
+      commit: "0000000",
+      dirty: true,
+      startedAt: 1,
+      acceptedSnapshotHash: replay.acceptedSnapshotHash,
+      acceptedContentHash: replay.report.acceptedContentHash,
+      eligibilityHash: replay.report.eligibility.hash,
+      initialWorldVersion: 1,
+      initialWorldHash: replay.acceptedSnapshotHash,
+      initialRuntimeRevision: 1,
+      initialRuntimeHash: "b".repeat(64),
+    }), "utf8");
+    const playerTurn = replay.report.tables.turns.find((row) => row.turn_kind === "player_action")!;
+    const document = JSON.parse(String(playerTurn.input_json)) as {
+      request: { source: string; choiceHandle: string };
+    };
+    expect(document.request.source).toBe("suggested");
+    fs.writeFileSync(path.join(sessionRoot, "pending-decision.json"), JSON.stringify({
+      playerActionNumber: 1,
+      control: "choice",
+      chosenText: "Wait at the visible edge.",
+      choiceHandle: document.request.choiceHandle,
+      visibleStateHash: "d".repeat(64),
+      chooser: "manual-player",
+      signedAt: Number(playerTurn.submitted_at) - 1,
+      decisionNote: "The visible scene supports waiting without assuming hidden information.",
+    }), "utf8");
+
+    const choiceEvidence = bindCampaignPlayManualDecision(config);
+    expect(choiceEvidence).toMatchObject({
+      control: "choice",
+      choiceHandle: document.request.choiceHandle,
+    });
+  });
 });

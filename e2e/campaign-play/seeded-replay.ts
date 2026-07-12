@@ -62,6 +62,7 @@ const PRICING = {
 export interface SeededCampaignPlayReplayOptions {
   playerActions: number;
   policy: "intervene" | "peripheral";
+  inputControl?: "choice" | "freeform";
   restartAfterPlayerActions?: readonly number[];
 }
 
@@ -381,9 +382,10 @@ function judgeFixture() {
   const compiler = createCampaignPlayJudge();
   return {
     async judge(request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) {
+      const frozenChoice = request.input.frozenChoice;
       const ruling = compiler.compile(request.frame, request.input, {
-        kind: "wait",
-        targets: [],
+        kind: frozenChoice?.kind ?? "wait",
+        targets: frozenChoice?.targets ?? [],
         method: "Wait and watch the visible situation",
         stakes: "Learn what changes at the signal gate",
         disposition: "deterministic",
@@ -584,15 +586,27 @@ export async function runAcceptedCampaignPlayReplay(
     }
     let admission;
     try {
-      admission = application.admitTurn(campaignId, {
-        idempotencyKey: `deterministic-action-${actionNumber}`,
-        expectedWorldVersion: state.worldVersion,
-        expectedRuntimeRevision: state.runtimeRevision,
-        source: "freeform",
-        text: options.policy === "intervene"
-          ? `I intervene at the signal gate and stabilize the visible pressure ${actionNumber}.`
-          : `I remain at the visible edge of the signal gate and watch change ${actionNumber}.`,
-      });
+      if (options.inputControl === "choice") {
+        const choiceHandle = state.narration?.suggestedActions[0]?.choiceHandle;
+        if (!choiceHandle) throw new Error("Deterministic replay has no suggested choice to admit.");
+        admission = application.admitTurn(campaignId, {
+          idempotencyKey: `deterministic-action-${actionNumber}`,
+          expectedWorldVersion: state.worldVersion,
+          expectedRuntimeRevision: state.runtimeRevision,
+          source: "suggested",
+          choiceHandle,
+        });
+      } else {
+        admission = application.admitTurn(campaignId, {
+          idempotencyKey: `deterministic-action-${actionNumber}`,
+          expectedWorldVersion: state.worldVersion,
+          expectedRuntimeRevision: state.runtimeRevision,
+          source: "freeform",
+          text: options.policy === "intervene"
+            ? `I intervene at the signal gate and stabilize the visible pressure ${actionNumber}.`
+            : `I remain at the visible edge of the signal gate and watch change ${actionNumber}.`,
+        });
+      }
     } catch (error) {
       const diagnosticHandle = openCampaignPlayDatabase(campaignId);
       try {

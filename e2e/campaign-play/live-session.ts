@@ -348,9 +348,10 @@ export function bindCampaignPlayManualDecision(
       throw new Error("The manual decision was signed after its durable turn was submitted.");
     }
     const document = JSON.parse(String(turn.input_json)) as {
-      request: { source: "choice" | "freeform"; choiceHandle?: string; text?: string };
+      request: { source: "suggested" | "freeform"; choiceHandle?: string; text?: string };
     };
-    if (document.request.source !== pending.control) {
+    const expectedSource = pending.control === "choice" ? "suggested" : "freeform";
+    if (document.request.source !== expectedSource) {
       throw new Error("The durable turn used a different input control than the signed decision.");
     }
     if (
