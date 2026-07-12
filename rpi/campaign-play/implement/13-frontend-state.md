@@ -32,6 +32,6 @@ This task renders a restrained semantic shell for loading, campaign eligibility,
 - Fresh Sol semantic verification returned `PASS` with `0` P0 and `0` P1 findings after the campaign race, resume cursor, authority reconciliation, fixture, resource identity, and UTF-8 byte-limit corrections.
 - Direct source audit found zero imports from `/game`, `/api/chat`, the old game component tree, or the old player draft hook.
 - Humanizer and deslop review kept the approved public copy unchanged and found no filler, promotional phrasing, fake contrast, or unsupported claim in this note.
-- `git diff --check` and final GitNexus change detection run at the commit boundary.
+- `git diff --check` passes. Post-commit GitNexus indexing records `9,215` nodes and `25,666` edges. Compare-scope reports `MEDIUM` risk for `112` new symbols and five new Campaign Play client flows, with no dependency on an existing product flow.
 
 Standalone smoke-suite additions: `0`.
