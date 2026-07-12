@@ -150,7 +150,7 @@ function replanProposalFromPrompt(prompt: string) {
   };
 }
 
-function acceptedTrace(): SafeGenerateTrace {
+function acceptedTrace(outputTokens = 25, reasoningTokens = 0): SafeGenerateTrace {
   return {
     text: "private actor plan",
     cleanedText: "private actor plan",
@@ -166,7 +166,7 @@ function acceptedTrace(): SafeGenerateTrace {
       providerId: "test-provider",
       model: "actor-replanner",
     },
-    usage: { inputTokens: 40, outputTokens: 25, totalTokens: 65 },
+    usage: { inputTokens: 40, outputTokens, reasoningTokens, totalTokens: 40 + outputTokens },
     response: { modelId: "actor-replanner" },
     finishReason: "stop",
   };
@@ -382,7 +382,7 @@ describe("Campaign Play actor replanner", () => {
     let now = 1_600;
     const generateObject = vi.fn(async (request: { prompt: string }) => ({
       object: replanProposalFromPrompt(request.prompt),
-      trace: acceptedTrace(),
+      trace: acceptedTrace(1_025, 1_000),
     }));
     const replanner = createCampaignPlayActorReplanner(handle, {
       now: () => now,
@@ -394,9 +394,9 @@ describe("Campaign Play actor replanner", () => {
       token,
       model: {} as LanguageModel,
       temperature: 0.2,
-      maxOutputTokens: 1_000,
+      maxOutputTokens: 100,
       maximumInputTokens: 1_000,
-      maximumOutputTokens: 1_000,
+      maximumOutputTokens: 100,
       maximumTotalTokens: 2_000,
       maximumCostMicros: 10_000,
       maximumDurationMs: 1_000,

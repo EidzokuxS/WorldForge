@@ -355,6 +355,7 @@ function acceptedTrace(trace: Readonly<SafeGenerateTrace>, providerId: string, m
   actualModel: string;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens: number;
   finishReason: string;
 } {
   const primary = trace.primaryStrategy ?? trace.capability?.primaryStrategy;
@@ -375,6 +376,10 @@ function acceptedTrace(trace: Readonly<SafeGenerateTrace>, providerId: string, m
     actualModel: model,
     inputTokens: trace.usage.inputTokens,
     outputTokens: trace.usage.outputTokens,
+    reasoningTokens: Number.isSafeInteger(trace.usage.reasoningTokens)
+      && (trace.usage.reasoningTokens ?? 0) > 0
+      ? trace.usage.reasoningTokens!
+      : 0,
     finishReason: trace.finishReason,
   };
 }
@@ -611,10 +616,11 @@ export function createCampaignPlayActorReplanner(
           requestedModel.providerId,
           requestedModel.model,
         );
+        const contentOutputTokens = Math.max(0, evidence.outputTokens - evidence.reasoningTokens);
         if (
           evidence.inputTokens > request.maximumInputTokens ||
-          evidence.outputTokens > request.maximumOutputTokens ||
-          evidence.inputTokens + evidence.outputTokens > request.maximumTotalTokens ||
+          contentOutputTokens > request.maximumOutputTokens ||
+          evidence.inputTokens + contentOutputTokens > request.maximumTotalTokens ||
           estimatedCostMicros(evidence.inputTokens, evidence.outputTokens, requestedModel) >
             request.maximumCostMicros
         ) {

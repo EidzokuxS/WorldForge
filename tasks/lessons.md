@@ -6,6 +6,9 @@
 - Inspect configuration schemas or selected non-secret fields instead of printing whole settings files; provider settings can contain live API keys and must stay out of tool logs.
 - Keep secret-bearing configuration reads side-effect free. Only an explicit save may rewrite `settings.json`, and every rewrite must preserve rotating recovery generations.
 - Treat long reasoning-model latency as normal until a configured timeout, transport error, or terminal event proves failure; elapsed time alone is not a hang diagnosis.
+- Give every thinking-model gameplay stage at least a 32k provider output window. Apply visible-content limits after subtracting reported reasoning tokens, while retaining full provider usage for billing and evidence.
+- Once Judge normalizes a movement route and destination, code owns the player actor, origin, route, and destination handles; the model must not reconstruct mechanical movement authority.
+- Record isolated mixed-language tail tokens as cosmetic prose findings when the response remains coherent; reject a playtest for overall meaning, causality, continuity, or readability failures instead.
 
 - Keep active task files short. Long forensic history belongs in git history or current docs that still serve the mechanics rebuild.
 - Treat fallback and backward-compatibility paths as defects unless the user explicitly authorizes a migration window.

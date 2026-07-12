@@ -83,6 +83,7 @@ const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const MAXIMUM_STAGE_DURATION_MS = 120_000;
 const MAXIMUM_INPUT_TOKENS = 64_000;
+export const CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS = 32_768;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
 
 const UNKNOWN_MODEL_PRICING: CampaignPlayModelPricing = Object.freeze({
@@ -238,6 +239,10 @@ function requestedModel(role: ResolvedRole): CampaignPlayRequestedModel {
   return resolveCampaignPlayRequestedModel(role);
 }
 
+export function campaignPlayMaximumOutputTokens(configuredTokens: number): number {
+  return Math.max(CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS, configuredTokens);
+}
+
 export function resolveCampaignPlayRequestedModel(
   role: ResolvedRole,
 ): CampaignPlayRequestedModel {
@@ -264,14 +269,15 @@ function stageModel(
   requested: CampaignPlayRequestedModel,
   languageModel: LanguageModel,
 ): CampaignPlayTurnRuntimeStageModel {
+  const maximumOutputTokens = campaignPlayMaximumOutputTokens(role.maxTokens);
   return {
     languageModel,
     requested,
     temperature: role.temperature,
     maximumDurationMs: MAXIMUM_STAGE_DURATION_MS,
     maximumInputTokens: MAXIMUM_INPUT_TOKENS,
-    maximumOutputTokens: role.maxTokens,
-    maximumTotalTokens: MAXIMUM_INPUT_TOKENS + role.maxTokens,
+    maximumOutputTokens,
+    maximumTotalTokens: MAXIMUM_INPUT_TOKENS + maximumOutputTokens,
     maximumCostMicros: MAXIMUM_COST_MICROS,
   };
 }
@@ -422,6 +428,8 @@ export function createCampaignPlayApplication(
       : currentRole(settings, "Storyteller", settings.storyteller);
     const openingRequested = openingSelection?.openingPlanner ?? requestedModel(generator);
     const narratorRequested = openingSelection?.narrator ?? requestedModel(storyteller);
+    const openingMaximumOutputTokens = campaignPlayMaximumOutputTokens(generator.maxTokens);
+    const narratorMaximumOutputTokens = campaignPlayMaximumOutputTokens(storyteller.maxTokens);
     return createCampaignPlayOpeningRuntime({
       handle,
       owner: dependencies.owner,
@@ -431,7 +439,7 @@ export function createCampaignPlayApplication(
         languageModel: dependencies.createModel(generator.provider, { role: "generator" }),
         requested: openingRequested,
         temperature: generator.temperature,
-        maxOutputTokens: generator.maxTokens,
+        maxOutputTokens: openingMaximumOutputTokens,
       },
       narratorModel: {
         languageModel: dependencies.createModel(storyteller.provider, { role: "storyteller" }),
@@ -439,8 +447,8 @@ export function createCampaignPlayApplication(
         temperature: storyteller.temperature,
         maximumDurationMs: MAXIMUM_STAGE_DURATION_MS,
         maximumInputTokens: MAXIMUM_INPUT_TOKENS,
-        maximumOutputTokens: storyteller.maxTokens,
-        maximumTotalTokens: MAXIMUM_INPUT_TOKENS + storyteller.maxTokens,
+        maximumOutputTokens: narratorMaximumOutputTokens,
+        maximumTotalTokens: MAXIMUM_INPUT_TOKENS + narratorMaximumOutputTokens,
         maximumCostMicros: MAXIMUM_COST_MICROS,
       },
     });

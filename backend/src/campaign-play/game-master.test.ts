@@ -147,14 +147,17 @@ function model(): LanguageModel {
   return value;
 }
 
-function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeGenerateTrace {
+function trace(
+  strategy: SafeGenerateTrace["strategy"] = "native_schema",
+  usage: SafeGenerateTrace["usage"] = { inputTokens: 100, outputTokens: 80, totalTokens: 180 },
+): SafeGenerateTrace {
   return {
     text: "private", cleanedText: "private", requestedMode: "auto", strategy,
     primaryStrategy: "native_schema", fallbackStrategy: "text_fallback",
     capability: { requestedMode: "auto", primaryStrategy: "native_schema", fallbackStrategy: "text_fallback",
       actualMode: "native_schema", reason: "test", providerId: "test-provider",
       providerName: "Test Provider", model: "test-model" },
-    usage: { inputTokens: 100, outputTokens: 80, totalTokens: 180 },
+    usage,
     response: { modelId: "test-model" }, finishReason: "stop",
   };
 }
@@ -198,11 +201,14 @@ describe("Campaign Play Game Master", () => {
       'HANDLES_BY_KIND={"actor":["you","guard"],"location":["here","south"],"route":["passage"],"pressure":["delay"],"relation":["trust"],"goal":["guard-goal"]}',
     );
     expect(String(options.prompt)).toContain("This includes affectedHandles");
+    expect(String(options.prompt)).toContain("affectedHandles must not repeat a handle");
     expect(String(options.prompt)).toContain("every exposure predicate anchorHandle");
     expect(String(options.prompt)).toContain("route_state anchorHandle requires route");
     expect(String(options.prompt)).toContain("witness_report anchorHandle requires actor");
     expect(String(options.prompt)).toContain("Resolve only the exact PLAYER_INTENT");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
+    expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
+    expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
     expect(String(options.prompt)).toContain("eventClass discovery");
     expect(String(options.prompt)).not.toContain("actor-player");
@@ -320,7 +326,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it.each([
-    { kind: "move_actor", actorHandle: "you", routeHandle: "passage", fromLocationHandle: "here", toLocationHandle: "south",
+    { kind: "move_actor",
       exposure: { mode: "projectable", predicates: [{ channel: "direct_perception", anchorHandle: "here" }] } },
     { kind: "set_route_state", routeHandle: "passage", state: "restricted", reason: "The guard delays passage.",
       exposure: { mode: "projectable", predicates: [{ channel: "route_state", anchorHandle: "passage", triggers: ["inspect"] }] } },
@@ -333,11 +339,49 @@ describe("Campaign Play Game Master", () => {
     { kind: "advance_pressure", pressureHandle: "delay", amount: 5, resultStatus: "active",
       exposure: { mode: "projectable", predicates: [{ channel: "local_aftermath", anchorHandle: "here", visibleForMinutes: 15 }] } },
   ])("compiles the supported $kind effect through Rulebook", (effect) => {
-    const result = createCampaignPlayGameMaster().compile(frame(), ruling(), resolution, null, {
+    const effectRuling = effect.kind === "move_actor" ? ruling({
+      normalizedIntent: {
+        originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
+        kind: "move", targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
+        method: "Cross the open passage", stakes: "Reach South Harbor",
+      },
+    }) : ruling();
+    const result = createCampaignPlayGameMaster().compile(frame(), effectRuling, resolution, null, {
       elapsedMinutes: 1, effects: [effect],
     });
     expect(result.preflight.accepted).toBe(true);
     expect(result.batch.commands[1]!.kind).toBe(effect.kind);
+  });
+
+  it("binds movement mechanics from Judge targets and current placement instead of model-authored handles", async () => {
+    const moveRuling = ruling({
+      normalizedIntent: {
+        originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
+        kind: "move", targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
+        method: "Cross the open passage", stakes: "Reach South Harbor",
+      },
+    });
+    const moveProposal = {
+      elapsedMinutes: 1,
+      effects: [{ kind: "move_actor" as const, exposure: { mode: "protected" as const } }],
+    };
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) =>
+      ({ object: moveProposal, trace: trace() }));
+    const result = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({ frame: frame(), ruling: moveRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget });
+
+    expect(result.batch.commands[1]).toMatchObject({
+      kind: "move_actor",
+      actorId: PLAYER_ID,
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
+    );
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)("rejects %s output strategy", async (strategy) => {
@@ -360,5 +404,36 @@ describe("Campaign Play Game Master", () => {
       frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null, model: model(), temperature: 0.2, budget,
     })).rejects.toMatchObject({ code: "transport_interrupted" });
     expect(interrupted).toHaveBeenCalledOnce();
+  });
+
+  it("does not count thinking tokens against the visible output budget", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: proposal,
+      trace: trace("native_schema", {
+        inputTokens: 100,
+        outputTokens: 32_100,
+        reasoningTokens: 32_000,
+        totalTokens: 32_200,
+      }),
+    }));
+    await expect(createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({
+      frame: frame(),
+      ruling: ruling(),
+      resolution,
+      uncertaintyAuthority: null,
+      model: model(),
+      temperature: 0.2,
+      budget: {
+        ...budget,
+        maximumOutputTokens: 100,
+        maximumTotalTokens: 1_000,
+        maximumCostMicros: 100_000,
+      },
+    })).resolves.toMatchObject({
+      modelEvidence: { outputTokens: 32_100, errorCode: null },
+      preflight: { accepted: true },
+    });
   });
 });

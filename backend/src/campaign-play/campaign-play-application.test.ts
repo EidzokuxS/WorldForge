@@ -18,7 +18,9 @@ import {
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
+  CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS,
   CampaignPlayApplicationError,
+  campaignPlayMaximumOutputTokens,
   createCampaignPlayApplication,
   resolveCampaignPlayRequestedModel,
 } from "./campaign-play-application.js";
@@ -289,6 +291,11 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
+  it("gives every Campaign Play model at least a 32k output window", () => {
+    expect(campaignPlayMaximumOutputTokens(512)).toBe(CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS);
+    expect(campaignPlayMaximumOutputTokens(65_536)).toBe(65_536);
+  });
+
   it("freezes exact known role pricing into Campaign Play model authority", () => {
     expect(resolveCampaignPlayRequestedModel({
       provider: {
