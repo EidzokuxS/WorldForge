@@ -328,6 +328,14 @@ function compileEffect(
     }
     case "record_world_event": {
       const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
+      const playerActorId = frame.authority.actorId;
+      if (playerActorId === null) {
+        throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+      }
+      if (!affectedRefs.some((reference) =>
+        reference.kind === "actor" && reference.id === playerActorId)) {
+        affectedRefs.push({ kind: "actor", id: playerActorId });
+      }
       return { kind: effect.kind, eventClass: effect.eventClass, summary: effect.summary,
         affectedRefs, readScope: affectedRefs, writeScope: [], exposure: exposurePolicy };
     }

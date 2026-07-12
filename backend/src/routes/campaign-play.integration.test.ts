@@ -691,7 +691,8 @@ describe("Campaign Play mounted route", () => {
     const journal = campaignPlayJournalPageSchema.parse(await journalResponse.json());
     expect(journal.entries).toHaveLength(1);
     expect(journal.entries[0]).toMatchObject({
-      title: "Seen nearby",
+      title: "Your action",
+      text: "Mara tests the signal keepers' account against the ringing tower.",
       whereOrRoute: "Bell Island",
     });
 

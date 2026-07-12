@@ -152,7 +152,7 @@ function planJson(actorId: string, goalId: string) {
   };
 }
 
-function createReadyFixture() {
+function createReadyFixture(playerLocationId = "location-c") {
   buildAcceptedCampaign();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
   const states = createCampaignPlayStateRepository(handle);
@@ -179,8 +179,8 @@ function createReadyFixture() {
         .run(context.campaignId, HASH_A, HASH_B);
       context.sqlite.prepare(`INSERT INTO actor_placements (
         id, campaign_id, actor_id, location_id, placement_kind
-      ) VALUES ('live-player', ?, 'actor-player', 'location-c', 'present')`)
-        .run(context.campaignId);
+      ) VALUES ('live-player', ?, 'actor-player', ?, 'present')`)
+        .run(context.campaignId, playerLocationId);
       const schedules = [
         { actorId: "actor-a", goalId: "goal-a", nextAt: 0, priority: 3, cadence: 20 },
         { actorId: "actor-b", goalId: "goal-b", nextAt: 0, priority: 5, cadence: 30 },
@@ -345,6 +345,30 @@ function processDueActors(
 }
 
 describe("Campaign Play actor proposal service", () => {
+  it("projects a co-located actor action through direct perception", () => {
+    const { handle, token } = createReadyFixture("location-a");
+    let actorMoveExposure: unknown = null;
+
+    processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+      beforeSettlement(proposal) {
+        if (proposal.actorId === "actor-b") {
+          actorMoveExposure = proposal.commands[0]?.exposure;
+        }
+      },
+    });
+
+    expect(actorMoveExposure).toEqual({
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+    });
+  });
+
   it("rejects detached stale work with zero proposal mutation and one debt-bearing retry", () => {
     const { handle, states, token, settledClock, baseWorldVersion } = createReadyFixture();
     let injected = false;

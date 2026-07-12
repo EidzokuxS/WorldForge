@@ -1295,11 +1295,18 @@ describe("Campaign Play player-action turn runtime", () => {
         AND json_extract(command.causal_parent_json, '$.kind') = 'actor_job'`).all(
           CAMPAIGN_ID,
           admission.turnId,
-        )).toEqual([{
-          channel: "local_aftermath",
-          locationId: "location-a",
-          validUntilWorldTimeMinutes: 4,
-        }]);
+        )).toEqual([
+          {
+            channel: "direct_perception",
+            locationId: "location-c",
+            validUntilWorldTimeMinutes: null,
+          },
+          {
+            channel: "local_aftermath",
+            locationId: "location-a",
+            validUntilWorldTimeMinutes: 4,
+          },
+        ]);
   });
 
   it("admits a consecutive real action through grounded observation authority", async () => {

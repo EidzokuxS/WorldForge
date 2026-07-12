@@ -197,6 +197,34 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).not.toContain("actor-guard");
   });
 
+  it("binds every recorded player-action event to the player actor", () => {
+    const withoutPlayer = {
+      ...proposal,
+      effects: [{
+        ...proposal.effects[0],
+        affectedHandles: ["guard"],
+      }],
+    };
+    const result = createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling(),
+      resolution,
+      null,
+      withoutPlayer,
+    );
+    expect(result.batch.commands[1]).toMatchObject({
+      kind: "record_world_event",
+      affectedRefs: [
+        { kind: "actor", id: "actor-guard" },
+        { kind: "actor", id: PLAYER_ID },
+      ],
+      readScope: [
+        { kind: "actor", id: "actor-guard" },
+        { kind: "actor", id: PLAYER_ID },
+      ],
+    });
+  });
+
   it("aborts one provider attempt at the admitted Game Master deadline", async () => {
     const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
       new Promise((_resolve, reject) => {

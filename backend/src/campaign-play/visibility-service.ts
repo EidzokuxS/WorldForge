@@ -69,10 +69,13 @@ interface ExposureRow {
   eventTurnId: string | null;
   eventKind: string;
   eventSourceJson: string;
+  eventAffectedRefsJson: string;
   eventWorldTimeMinutes: number;
   eventWorldVersion: number;
   eventAfterPayloadJson: string | null;
   eventOrder: number;
+  commandKind: string;
+  commandPayloadJson: string;
 }
 
 interface EpistemicCandidate {
@@ -494,6 +497,7 @@ function publicEntry(
   handle: CampaignPlayDatabaseHandle,
   candidate: EpistemicCandidate,
   humanActorId: string,
+  currentTurnId: string,
 ): CampaignPlayJournalEntry {
   const exposure = candidate.exposure;
   const location = exposure.locationId
@@ -522,11 +526,44 @@ function publicEntry(
     `${candidate.actorId}:${exposure.exposureId}:${candidate.sourceHash}`,
   );
   const label = location?.name ?? route?.destinationName ?? witness?.name ?? "Nearby";
-  const playerCaused = eventSourceActorId(exposure) === humanActorId;
+  const affectedRefs = parseRecordArray(exposure.eventAffectedRefsJson, "Event affected references");
+  const playerParticipated = exposure.eventTurnId === currentTurnId && affectedRefs.some((reference) =>
+    reference.kind === "actor" && reference.id === humanActorId
+  );
+  const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
+  const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const playerCaused = eventSourceActorId(exposure) === humanActorId || (
+    playerParticipated && eventSource.kind === "system" && eventSource.system === "game_master"
+  );
   let title = "Seen nearby";
   let text = "You witnessed a change nearby.";
   let cue: CampaignPlayConsequence["causalCue"] = "direct_perception";
-  if (exposure.channel === "local_aftermath") {
+  if (
+    exposure.channel === "direct_perception" && playerParticipated &&
+    eventSource.kind === "system" && eventSource.system === "game_master" &&
+    exposure.commandKind === "record_world_event" && typeof commandPayload.summary === "string"
+  ) {
+    title = "Your action";
+    text = commandPayload.summary;
+  } else if (
+    exposure.channel === "direct_perception" && exposure.eventKind === "actor_moved" &&
+    typeof commandPayload.actorId === "string" && typeof commandPayload.toLocationId === "string"
+  ) {
+    const movingActor = handle.sqlite.prepare(`SELECT name FROM actors
+      WHERE id = ? AND campaign_id = ?`).get(
+        commandPayload.actorId,
+        handle.campaignId,
+      ) as { name: string } | undefined;
+    const destination = handle.sqlite.prepare(`SELECT name FROM locations
+      WHERE id = ? AND campaign_id = ?`).get(
+        commandPayload.toLocationId,
+        handle.campaignId,
+      ) as { name: string } | undefined;
+    if (movingActor && destination) {
+      title = `${movingActor.name} moved`;
+      text = `${movingActor.name} left for ${destination.name}.`;
+    }
+  } else if (exposure.channel === "local_aftermath") {
     title = "Signs of change";
     text = "Something changed here before you arrived.";
     cue = "visible_aftermath";
@@ -801,12 +838,17 @@ export function createCampaignPlayVisibilityService(
           exposure.route_triggers_json AS routeTriggersJson,
           event.turn_id AS eventTurnId, event.event_kind AS eventKind,
           event.source_json AS eventSourceJson,
+          event.affected_refs_json AS eventAffectedRefsJson,
           event.world_time_minutes AS eventWorldTimeMinutes,
           event.world_version AS eventWorldVersion,
-          event.after_payload_json AS eventAfterPayloadJson
+          event.after_payload_json AS eventAfterPayloadJson,
+          command.command_kind AS commandKind,
+          command.protected_payload_json AS commandPayloadJson
           , event.rowid AS eventOrder
         FROM campaign_play_event_exposures exposure
         JOIN campaign_play_events event ON event.event_id = exposure.event_id
+        JOIN campaign_play_commands command ON command.command_id = event.command_id
+          AND command.campaign_id = event.campaign_id
         WHERE exposure.campaign_id = ? ORDER BY exposure.exposure_id`).all(
           handle.campaignId,
         ) as ExposureRow[];
@@ -848,7 +890,11 @@ export function createCampaignPlayVisibilityService(
             exposureId: candidate.exposure.exposureId,
             sourceHash: candidate.sourceHash,
           });
-          return { candidate, observationId, entry: publicEntry(handle, candidate, human.id) };
+          return {
+            candidate,
+            observationId,
+            entry: publicEntry(handle, candidate, human.id, turn.turnId),
+          };
         });
       const scene = visibleScene(handle, human.id);
       const actionContext = actionContextForTurn(turn, turnRepository);

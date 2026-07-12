@@ -393,6 +393,7 @@ function createVisibilityFixture(
   const fifthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 4);
   const sixthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 5);
   const seventhId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 6);
+  const eighthId = deriveCampaignPlayCommandId(CAMPAIGN_ID, "turn-opening", batchId, 7);
   const evidenceAccepted = preflightCampaignPlayRulebook({
     frame,
     authority: {
@@ -405,7 +406,9 @@ function createVisibilityFixture(
         { kind: "actor", id: "actor-a" },
         { kind: "actor", id: "actor-c" },
         { kind: "location", id: "location-a" },
+        { kind: "location", id: "location-b" },
         { kind: "location", id: "location-c" },
+        { kind: "route", id: "route-a" },
         { kind: "route", id: "route-c" },
       ],
       witnessActorIds: ["actor-c"],
@@ -471,7 +474,7 @@ function createVisibilityFixture(
           writeScope: [],
           exposure: { mode: "protected" },
           eventClass: "dialogue",
-          summary: "The player asks the nearby witness what happened.",
+          summary: "The player asks the nearby witness about hidden-cause-token and hidden-goal-token.",
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-c" },
@@ -511,6 +514,7 @@ function createVisibilityFixture(
           source: { kind: "system", system: "game_master" },
           expectedWorldVersion: frame.worldVersion + 1,
           readScope: [
+            { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
             { kind: "location", id: "location-a" },
           ],
@@ -522,8 +526,9 @@ function createVisibilityFixture(
             ],
           },
           eventClass: "scene",
-          summary: "Protected independent activity with hidden-goal-token.",
+          summary: "A harbor worker tells the player that the signal lantern has failed.",
           affectedRefs: [
+            { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
             { kind: "location", id: "location-a" },
           ],
@@ -599,6 +604,34 @@ function createVisibilityFixture(
           exposure: { mode: "protected" },
           elapsedMinutes: 1,
         },
+        {
+          commandId: eighthId,
+          batchId,
+          order: 7,
+          kind: "move_actor",
+          causalParent: { kind: "command", commandId: seventhId },
+          source: { kind: "system", system: "game_master" },
+          expectedWorldVersion: frame.worldVersion + 2,
+          readScope: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "route", id: "route-a" },
+            { kind: "location", id: "location-a" },
+            { kind: "location", id: "location-b" },
+          ],
+          writeScope: [
+            { kind: "actor", id: "actor-a" },
+            { kind: "location", id: "location-a" },
+            { kind: "location", id: "location-b" },
+          ],
+          exposure: {
+            mode: "projectable",
+            predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+          },
+          actorId: "actor-a",
+          routeId: "route-a",
+          fromLocationId: "location-a",
+          toLocationId: "location-b",
+        },
       ],
     },
   });
@@ -607,7 +640,7 @@ function createVisibilityFixture(
   }
   states.commitMechanical({
     updatedAt: 1_600,
-    worldVersionAdvance: 2,
+    worldVersionAdvance: 3,
     mutate(context) {
       executeCampaignPlayRulebookBatch({
         frame,
@@ -731,20 +764,27 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations.map((entry) => entry.title).sort()).toEqual([
       "Along the route",
       "Seen nearby",
-      "Seen nearby",
+      "Mara Venn moved",
       "Signs of change",
       "Sel Bell's account",
+      "Your action",
     ].sort());
-    expect(result.packet.newObservations).toHaveLength(5);
-    expect(result.packet.consequences).toHaveLength(5);
+    expect(result.packet.newObservations).toHaveLength(6);
+    expect(result.packet.consequences).toHaveLength(6);
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "A harbor worker tells the player that the signal lantern has failed.",
+    );
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Mara Venn left for Glass Reef.",
+    );
     expect(result.packet.currentLocation.name).toBe("North Harbor");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
-      .toHaveLength(4);
+      .toHaveLength(5);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
       .toHaveLength(1);
-    expect(result.knowledgeInserted).toBeGreaterThanOrEqual(5);
-    expect(result.observationsInserted).toBe(5);
+    expect(result.knowledgeInserted).toBeGreaterThanOrEqual(6);
+    expect(result.observationsInserted).toBe(6);
 
     const after = fixture.states.loadState()!;
     expect(after.authority.worldVersion).toBe(before.authority.worldVersion);
@@ -820,7 +860,7 @@ describe("Campaign Play visibility service", () => {
 
     expect(result.packet.newObservations.map((entry) => entry.title))
       .not.toContain("Along the route");
-    expect(result.packet.newObservations).toHaveLength(4);
+    expect(result.packet.newObservations).toHaveLength(5);
     expect(result.packet.visibleRoutes[0]?.state).toBe("open");
     expect(fixture.states.loadState()!.protectedAudit.canonicalBytes)
       .toContain('"routeTriggersJson":"[\\"attempt\\"]"');

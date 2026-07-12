@@ -84,6 +84,7 @@
 - Player sensory follow-ups that ask about danger, source, proximity, mechanism, route truth, or current property route to bounded observation.
 - Exact hard micro-results with no prose latitude should be typed renderables, not model paraphrase traps.
 - Budget model stages against visible answer tokens separately from provider reasoning tokens, and set timeouts from measured thinking-model latency; a healthy 55–65 second GLM response must not be classified as unavailable.
+- Narration must receive concrete projected receipts for the accepted player action and every same-turn NPC action the player could perceive. A post-turn scene snapshot alone cannot preserve event order or causal continuity.
 
 ## Evidence Handling
 

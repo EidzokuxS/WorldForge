@@ -171,7 +171,14 @@ function exposureRefs(exposure: CampaignPlayExposurePolicy): CampaignPlayEntityR
 function projectableExposure(
   frame: CampaignPlayActorFrame,
   seed: CampaignPlayOpeningExposureSeed,
+  coLocatedHumanLocationId: string | null,
 ): CampaignPlayExposurePolicy {
+  if (coLocatedHumanLocationId !== null) {
+    return {
+      mode: "projectable",
+      predicates: [{ channel: "direct_perception", locationId: coLocatedHumanLocationId }],
+    };
+  }
   if (seed.sourceActorId !== frame.actorId || seed.sourceGoalId !== frame.plan.goalId
     || frame.selection.kind !== "step" || frame.selection.settledStepCount !== 0) {
     return { mode: "protected" };
@@ -192,6 +199,7 @@ function eventClass(intent: CampaignPlayActorFrame["plan"]["intent"]): "dialogue
 function compileProposal(
   frame: CampaignPlayActorFrame,
   seed: CampaignPlayOpeningExposureSeed,
+  coLocatedHumanLocationId: string | null,
 ): CampaignPlayActorProposal {
   if (frame.selection.kind !== "step") {
     throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
@@ -204,7 +212,7 @@ function compileProposal(
   const proposalId = stableId("actor-proposal", { batchId, actorId: frame.actorId });
   const source = { kind: "actor" as const, actorId: frame.actorId };
   const causalParent = { kind: "actor_job" as const, jobId: frame.jobId };
-  const exposure = projectableExposure(frame, seed);
+  const exposure = projectableExposure(frame, seed, coLocatedHumanLocationId);
   const intent = frame.selection.step.intent;
   const present = frame.placements.find((placement) => placement.placementKind === "present");
   const targetLocation = intent.targets.find((target) => target.kind === "location");
@@ -279,6 +287,24 @@ function compileProposal(
     result: { status: "pending" as const },
   };
   return campaignPlayActorProposalSchema.parse(proposal);
+}
+
+function coLocatedHumanLocation(
+  handle: CampaignPlayDatabaseHandle,
+  actorId: string,
+): string | null {
+  const row = handle.sqlite.prepare(`SELECT human_placement.location_id AS locationId
+    FROM actors human_actor
+    JOIN actor_placements human_placement ON human_placement.actor_id = human_actor.id
+      AND human_placement.campaign_id = human_actor.campaign_id
+      AND human_placement.placement_kind = 'present'
+    JOIN actor_placements actor_placement ON actor_placement.campaign_id = human_actor.campaign_id
+      AND actor_placement.actor_id = ? AND actor_placement.placement_kind = 'present'
+      AND actor_placement.location_id = human_placement.location_id
+    WHERE human_actor.campaign_id = ? AND human_actor.controller = 'human'
+      AND human_actor.kind = 'person'
+    LIMIT 1`).get(actorId, handle.campaignId) as { locationId: string } | undefined;
+  return row?.locationId ?? null;
 }
 
 function loadRulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebookFrame {
@@ -607,7 +633,11 @@ export function createCampaignPlayActorProposalService(
         if (job.stage !== "claimed" || latestFrame.selection.kind !== "step") {
           throw new CampaignPlayActorProposalServiceError("proposal_state_invalid");
         }
-        proposal = compileProposal(latestFrame, input.openingExposureSeed);
+        proposal = compileProposal(
+          latestFrame,
+          input.openingExposureSeed,
+          coLocatedHumanLocation(handle, latestFrame.actorId),
+        );
         turnRepository.commitActorTransition({
           token: input.token,
           leaseMode: "live",
