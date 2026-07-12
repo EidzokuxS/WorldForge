@@ -773,9 +773,13 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
     expect(prompt).toContain("A collective remains required even when its actorRole is background");
     expect(prompt).toContain("The hidden location must differ from start.locationId");
-    expect(prompt).toContain("set exposure.routeId to scene.routeId");
-    expect(prompt).toContain("set exposure.witnessActorId to scene.supportActorId");
-    expect(prompt).toContain("set exposure.locationId to hiddenConsequence.locationId");
+    expect(prompt).toContain("Set routeId to scene.routeId");
+    expect(prompt).toContain("Set witnessActorId to scene.supportActorId");
+    expect(prompt).toContain("Set locationId to hiddenConsequence.locationId");
+    expect(prompt).toContain("route_state, exposure contains exactly channel, routeId, and triggers");
+    expect(prompt).toContain("witness_report, exposure contains exactly channel and witnessActorId");
+    expect(prompt).toContain("local_aftermath, exposure contains exactly channel, locationId, and validUntilWorldTimeMinutes");
+    expect(prompt).toContain("Do not add validUntilWorldTimeMinutes to route_state or witness_report");
     expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
     expect(prompt).toContain("hiddenConsequence.observableTrace");
     expect(prompt).toContain("Do not name the hidden actor");

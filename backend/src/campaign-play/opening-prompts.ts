@@ -62,9 +62,10 @@ Choose a grounded opening location, one visibly present support person, one pres
 Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. A collective remains required even when its actorRole is background; only a background person is absent from plannedActors. Each actor proposal selects one active goal as primary. Write a concise strategic intent and one to three concrete steps that advance it. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
 
 Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId, one activeGoalId from the same entry, and one actorLocationId from that entry. The hidden location must differ from start.locationId. Bind the hidden actor's first step to the exposure with one exact target:
-- For route_state, set exposure.routeId to scene.routeId and include {"kind":"route","id":scene.routeId} in the first step targets.
-- For witness_report, set exposure.witnessActorId to scene.supportActorId and include {"kind":"actor","id":scene.supportActorId} in the first step targets.
-- For local_aftermath, set exposure.locationId to hiddenConsequence.locationId and include {"kind":"location","id":hiddenConsequence.locationId} in the first step targets.
+- For route_state, exposure contains exactly channel, routeId, and triggers. Set routeId to scene.routeId and include {"kind":"route","id":scene.routeId} in the first step targets.
+- For witness_report, exposure contains exactly channel and witnessActorId. Set witnessActorId to scene.supportActorId and include {"kind":"actor","id":scene.supportActorId} in the first step targets.
+- For local_aftermath, exposure contains exactly channel, locationId, and validUntilWorldTimeMinutes. Set locationId to hiddenConsequence.locationId and include {"kind":"location","id":hiddenConsequence.locationId} in the first step targets. Set validUntilWorldTimeMinutes late enough for the player to reach that location.
+Do not add validUntilWorldTimeMinutes to route_state or witness_report.
 The exposure must become earnable within five player actions through that route, witness, or reachable non-local location.
 
 Write hiddenConsequence.summary as protected causal truth for the simulation. Write hiddenConsequence.observableTrace as concrete evidence available only after the exposure is earned. Describe only what a person could perceive at the exposure point or learn from the named witness. Do not name the hidden actor, state the actor's private goal or motivation, claim an unseen cause, or address the player.
