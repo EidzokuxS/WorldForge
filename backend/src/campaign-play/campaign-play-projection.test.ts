@@ -232,6 +232,35 @@ describe("accepted topology eligibility", () => {
     });
   });
 
+  it("accepts an active actor placed in a persistent sublocation of a reachable macro", () => {
+    const review = acceptedReviewFixture();
+    const result = projectAcceptedTopologyEligibility({
+      ...review,
+      locations: [
+        ...review.locations,
+        {
+          id: "location:signal-tower",
+          name: "Signal Tower",
+          description: "A staffed tower above the harbor.",
+          kind: "persistent_sublocation",
+          parentLocationId: "location:harbor",
+          tags: ["signals"],
+          isStarting: false,
+        },
+      ],
+      placements: review.placements.map((placement) =>
+        placement.actorId === "actor:support-a"
+          ? { ...placement, locationId: "location:signal-tower" }
+          : placement
+      ),
+    });
+
+    expect(result.projection).toMatchObject({
+      eligible: true,
+      unmetRequirements: [],
+    });
+  });
+
   it("returns stable unmet requirement codes for each first-gate family", () => {
     const review = acceptedReviewFixture();
     const result = projectAcceptedTopologyEligibility({

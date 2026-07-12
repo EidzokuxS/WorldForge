@@ -1433,9 +1433,9 @@ Goal: prove the first genuinely playable real-provider slice through the rendere
 - [x] Merge live browser actions, network evidence, screenshots, reload probes, errors, and human notes into the standard bundle.
 - [x] Prove the live session and bundle overlay through adjacent regressions; add no smoke suite.
 - [x] Keep `service_unavailable` schema-valid when Campaign Play state itself cannot be loaded, without inventing version context.
-- [x] Add strict optional role/model pricing authority and require the live run config to match resolved provider, model, credentials, and pricing before character creation.
-- [ ] Configure and verify one real provider/model set plus known frozen pricing for Generator, Judge, and Storyteller.
-- [ ] Build and accept one fresh eligible Campaign World through normal UI navigation.
+- [x] Add strict metered or subscription billing authority and require the live run config to match resolved provider, model, credentials, and billing before character creation.
+- [x] Configure and verify Z.AI Coding Plan Pro with `glm-5.2` for Generator, Judge, and Storyteller; freeze provider quota and subscription evidence before character creation.
+- [x] Build and accept one fresh eligible Campaign World through normal UI navigation.
 - [ ] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.
 - [ ] Reach and identify one sourced non-local actor consequence through the player-visible UI.
 - [ ] Reload with identical public scene/version/time/observation state and answer the five player-review questions.

@@ -469,6 +469,14 @@ export function projectAcceptedTopologyEligibility(
 
   const activeActors = activeAcceptedActors(review);
   const locationIds = new Set(review.locations.map((location) => location.id));
+  const playablePlacementLocationIds = new Set(
+    review.locations
+      .filter((location) =>
+        reachable.has(location.id)
+        || location.parentLocationId !== null && reachable.has(location.parentLocationId)
+      )
+      .map((location) => location.id),
+  );
   for (const actor of activeActors) {
     if (!review.goals.some((goal) => goal.actorId === actor.id && goal.status === "active")) {
       unmet.add("active_actor_goal_missing");
@@ -478,12 +486,12 @@ export function projectAcceptedTopologyEligibility(
       ? placements.filter((placement) =>
         placement.placementKind === "present" &&
         locationIds.has(placement.locationId) &&
-        reachable.has(placement.locationId)
+        playablePlacementLocationIds.has(placement.locationId)
       ).length === 1
       : placements.some((placement) =>
         (placement.placementKind === "base" || placement.placementKind === "influence") &&
         locationIds.has(placement.locationId) &&
-        reachable.has(placement.locationId)
+        playablePlacementLocationIds.has(placement.locationId)
       );
     if (!valid) unmet.add("active_actor_placement_invalid");
   }

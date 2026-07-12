@@ -213,6 +213,11 @@ export async function prepareCampaignPlayLiveSession(input: {
     if (captured.report.integrity !== "ok" || captured.report.foreignKeyViolations !== 0) {
       throw new Error("Live evidence cannot begin from an invalid campaign database.");
     }
+    if (!captured.report.eligibility.projection.eligible) {
+      throw new Error(
+        `Live evidence requires playable accepted topology: ${captured.report.eligibility.projection.unmetRequirements.join(", ")}.`,
+      );
+    }
     const quotaBefore = config.execution.billing.kind === "subscription"
       ? await requestSubscriptionQuota(config, authority)
       : null;
