@@ -117,7 +117,7 @@ function publicError(code: CampaignPlayErrorResponse["code"]): CampaignPlayError
   const retryEligible = code === "turn_interrupted" || code === "service_unavailable";
   const status = code === "campaign_not_found" || code === "turn_not_found"
     ? 404
-    : code === "turn_interrupted" || code === "service_unavailable"
+    : code === "turn_interrupted" || code === "turn_failed" || code === "service_unavailable"
       ? 503
       : ["character_already_exists", "opening_already_completed", "idempotency_conflict", "stale_world_version", "stale_runtime_revision", "turn_in_progress", "turn_not_resumable"].includes(code)
         ? 409

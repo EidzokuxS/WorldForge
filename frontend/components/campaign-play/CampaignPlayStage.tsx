@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode, type RefObject } from "react";
 import type { CampaignPlayStageEffect, CampaignPlayState } from "@worldforge/shared";
 
 import { NarrationDock } from "./NarrationDock";
@@ -10,6 +10,7 @@ export interface CampaignPlayStageProps {
   state: CampaignPlayState;
   connectionMessage?: string;
   children?: ReactNode;
+  narrationFocusRef?: RefObject<HTMLElement | null>;
 }
 
 interface StageEffectState {
@@ -25,7 +26,12 @@ function sameEffects(left: CampaignPlayStageEffect[], right: CampaignPlayStageEf
   );
 }
 
-export function CampaignPlayStage({ state, connectionMessage = "", children }: CampaignPlayStageProps) {
+export function CampaignPlayStage({
+  state,
+  connectionMessage = "",
+  children,
+  narrationFocusRef,
+}: CampaignPlayStageProps) {
   const narrationId = state.narration?.narrationId ?? null;
   const [effectState, setEffectState] = useState<StageEffectState>(() => ({
     narrationId,
@@ -104,6 +110,7 @@ export function CampaignPlayStage({ state, connectionMessage = "", children }: C
           <>
             <SceneCard
               actors={state.visibleActors}
+              consequences={state.consequences}
               location={state.currentLocation}
               pressures={state.visiblePressures}
               routes={state.visibleRoutes}
@@ -113,6 +120,7 @@ export function CampaignPlayStage({ state, connectionMessage = "", children }: C
                 key={state.narration.narrationId}
                 narration={state.narration}
                 onBeatPresented={presentBeatEffects}
+                ref={narrationFocusRef}
               />
             ) : null}
           </>

@@ -1,4 +1,5 @@
 import type {
+  CampaignPlayConsequence,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
   CampaignPlayVisiblePressure,
@@ -6,11 +7,14 @@ import type {
 } from "@worldforge/shared";
 import type { CSSProperties } from "react";
 
+import { ConsequenceCard } from "./ConsequenceCard";
+
 export interface SceneCardProps {
   location: CampaignPlayVisibleLocation;
   actors: CampaignPlayVisibleActor[];
   routes: CampaignPlayVisibleRoute[];
   pressures: CampaignPlayVisiblePressure[];
+  consequences?: CampaignPlayConsequence[];
 }
 
 const ROUTE_STATE_LABELS: Record<CampaignPlayVisibleRoute["state"], string> = {
@@ -34,7 +38,7 @@ function actorAccentStyle(accent: string): CSSProperties {
   return { "--campaign-play-actor-accent": color } as CSSProperties;
 }
 
-export function SceneCard({ location, actors, routes, pressures }: SceneCardProps) {
+export function SceneCard({ location, actors, routes, pressures, consequences = [] }: SceneCardProps) {
   return (
     <section className="campaign-play-scene" aria-labelledby="campaign-play-location">
       <div className="campaign-play-scene-copy">
@@ -89,6 +93,17 @@ export function SceneCard({ location, actors, routes, pressures }: SceneCardProp
           </section>
         ) : null}
       </div>
+
+      {consequences.length > 0 ? (
+        <section className="campaign-play-consequences" aria-labelledby="campaign-play-consequences-heading">
+          <h2 id="campaign-play-consequences-heading">What changed</h2>
+          <div>
+            {consequences.map((consequence) => (
+              <ConsequenceCard consequence={consequence} key={consequence.observationHandle} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

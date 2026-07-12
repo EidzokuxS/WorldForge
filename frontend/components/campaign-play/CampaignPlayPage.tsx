@@ -6,25 +6,28 @@ import type {
   CampaignPlayOpeningLocationOption,
   CampaignPlayPublicErrorCode,
   CampaignPlayPublicProgress,
-  CampaignPlaySseEvent,
   CampaignPlayStartingConditions,
+  CampaignPlaySseEvent,
   CampaignPlayState,
+  CampaignPlayTurnAdmissionRequest,
   CampaignPlayTurnReadResponse,
 } from "@worldforge/shared";
 
+import { ActionDock } from "./ActionDock";
 import { CampaignPlayStage } from "./CampaignPlayStage";
+import { JournalDrawer } from "./JournalDrawer";
+import { TurnProgress, type CampaignPlayConnectionState } from "./TurnProgress";
 
 import {
   CampaignPlayApiError,
   admitCampaignPlayOpening,
   admitCampaignPlayTurn,
+  loadCampaignPlayJournal,
   loadCampaignPlayState,
   loadCampaignPlayTurn,
   resumeCampaignPlayTurn,
   streamCampaignPlayTurnEvents,
 } from "@/lib/campaign-play-api";
-
-type ConnectionState = "idle" | "connecting" | "connected" | "disconnected";
 
 interface FollowedTurn {
   campaignId: string;
@@ -75,24 +78,36 @@ const ERROR_COPY: Record<CampaignPlayPublicErrorCode, string> = {
   turn_not_found: "That turn is unavailable.",
   turn_not_resumable: "This turn cannot resume.",
   turn_interrupted: "The turn stopped before it finished.",
+  turn_failed: "The turn could not be completed.",
   service_unavailable: "The game service is temporarily unavailable.",
 };
 
-const PROGRESS_COPY: Record<CampaignPlayPublicProgress, string> = {
-  interpreting: "Reading your action",
-  settling: "Applying the result",
-  world_acting: "The world is moving",
-  revealing: "Finding what reaches you",
-  narrating: "Writing the moment",
-};
-
-const OPENING_PROGRESS_COPY: Record<CampaignPlayPublicProgress, string> = {
-  interpreting: "Preparing your arrival",
-  settling: "Placing you in the world",
-  world_acting: "The world is moving",
-  revealing: "Finding what reaches you",
-  narrating: "Writing the opening",
-};
+const ERROR_ACTIONS = {
+  campaign_not_found: { label: "Return to campaigns", kind: "campaigns" },
+  world_not_accepted: { label: "Open world review", kind: "review" },
+  world_not_playable: { label: "Open world review", kind: "review" },
+  character_required: { label: "Create character", kind: "character" },
+  character_already_exists: { label: "Reload character", kind: "character" },
+  opening_required: { label: "Choose arrival", kind: "opening" },
+  opening_already_completed: { label: "Reload scene", kind: "refresh" },
+  invalid_character: { label: "Review character", kind: "character" },
+  invalid_starting_conditions: { label: "Choose again", kind: "opening" },
+  invalid_intent: { label: "Edit action", kind: "edit" },
+  invalid_choice: { label: "Reload scene", kind: "refresh" },
+  invalid_event_cursor: { label: "Reload scene", kind: "refresh" },
+  idempotency_conflict: { label: "Reload scene", kind: "refresh" },
+  stale_world_version: { label: "Reload scene", kind: "refresh" },
+  stale_runtime_revision: { label: "Reload scene", kind: "refresh" },
+  turn_in_progress: { label: "View progress", kind: "progress" },
+  turn_not_found: { label: "Reload scene", kind: "refresh" },
+  turn_not_resumable: { label: "Reload scene", kind: "refresh" },
+  turn_interrupted: { label: "Resume", kind: "resume" },
+  turn_failed: { label: "Return to scene", kind: "refresh" },
+  service_unavailable: { label: "Try again", kind: "refresh" },
+} as const satisfies Record<CampaignPlayPublicErrorCode, {
+  label: string;
+  kind: "campaigns" | "review" | "character" | "opening" | "edit" | "refresh" | "progress" | "resume";
+}>;
 
 function draftStorageKey(campaignId: string): string {
   return `worldforge:campaign-play:draft:${campaignId}`;
@@ -170,6 +185,113 @@ function initialOpeningSelection(option: CampaignPlayOpeningLocationOption): Ope
   };
 }
 
+interface CampaignOpeningSetupProps {
+  openingOptions: CampaignPlayOpeningLocationOption[];
+  pending: boolean;
+  selection: OpeningSelection | null;
+  onSelectionChange: (selection: OpeningSelection) => void;
+  onSubmit: (startingConditions: CampaignPlayStartingConditions) => void;
+}
+
+function CampaignOpeningSetup({
+  openingOptions,
+  pending,
+  selection,
+  onSelectionChange,
+  onSubmit,
+}: CampaignOpeningSetupProps) {
+  const selectedOption = selection === null
+    ? null
+    : openingOptions.find((option) => option.locationHandle === selection.locationHandle) ?? null;
+  const validSelection = selectedOption !== null && selection !== null &&
+    selectedOption.roles.some((option) => option.handle === selection.roleHandle) &&
+    selectedOption.arrivalModes.some((option) => option.handle === selection.arrivalModeHandle) &&
+    selectedOption.immediateSituations.some(
+      (option) => option.handle === selection.immediateSituationHandle,
+    );
+
+  return (
+    <section className="campaign-play-arrival" aria-labelledby="campaign-play-arrival-heading">
+      <p className="campaign-play-kicker">Enter the world</p>
+      <h1 id="campaign-play-arrival-heading" tabIndex={-1}>Choose your arrival</h1>
+      <p>Pick a starting point and role, or let the world place you.</p>
+      <div className="campaign-play-arrival-locations" role="group" aria-label="Starting places">
+        {openingOptions.map((option) => {
+          const selected = option.locationHandle === selection?.locationHandle;
+          return (
+            <button
+              aria-label={option.name}
+              aria-pressed={selected}
+              key={option.locationHandle}
+              onClick={() => onSelectionChange(initialOpeningSelection(option))}
+              type="button"
+            >
+              <strong>{option.name}</strong>
+              <span>{option.description}</span>
+            </button>
+          );
+        })}
+      </div>
+      {selectedOption && selection ? (
+        <div className="campaign-play-arrival-details">
+          <label>
+            Your place here
+            <select
+              onChange={(event) => onSelectionChange({ ...selection, roleHandle: event.target.value })}
+              value={selection.roleHandle}
+            >
+              {selectedOption.roles.map((option) => (
+                <option key={option.handle} value={option.handle}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            How you arrive
+            <select
+              onChange={(event) => onSelectionChange({
+                ...selection,
+                arrivalModeHandle: event.target.value,
+              })}
+              value={selection.arrivalModeHandle}
+            >
+              {selectedOption.arrivalModes.map((option) => (
+                <option key={option.handle} value={option.handle}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            What is happening
+            <select
+              onChange={(event) => onSelectionChange({
+                ...selection,
+                immediateSituationHandle: event.target.value,
+              })}
+              value={selection.immediateSituationHandle}
+            >
+              {selectedOption.immediateSituations.map((option) => (
+                <option key={option.handle} value={option.handle}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+      <div className="campaign-play-arrival-actions">
+        <button disabled={pending} onClick={() => onSubmit({ mode: "delegate" })} type="button">
+          Let the world decide
+        </button>
+        <button
+          className="campaign-play-primary-action"
+          disabled={!validSelection || pending}
+          onClick={() => selection && onSubmit({ mode: "chosen", ...selection })}
+          type="button"
+        >
+          Begin
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function CampaignPlayPage({
   campaignId,
   reconnectDelayMilliseconds = 500,
@@ -177,7 +299,7 @@ export function CampaignPlayPage({
   const [state, setState] = useState<CampaignPlayState | null>(null);
   const [turnRead, setTurnRead] = useState<CampaignPlayTurnReadResponse | null>(null);
   const [followedTurn, setFollowedTurn] = useState<FollowedTurn | null>(null);
-  const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [connection, setConnection] = useState<CampaignPlayConnectionState>("idle");
   const [eventProgress, setEventProgress] = useState<CampaignPlayPublicProgress | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [requestError, setRequestError] = useState<{
@@ -187,7 +309,14 @@ export function CampaignPlayPage({
   const [loading, setLoading] = useState(true);
   const [pendingOperation, setPendingOperation] = useState<PendingOperation | null>(null);
   const [openingSelection, setOpeningSelection] = useState<OpeningSelection | null>(null);
+  const [journalOpenCampaignId, setJournalOpenCampaignId] = useState<string | null>(null);
   const operationRef = useRef<PendingOperation | null>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const narrationFocusRef = useRef<HTMLElement>(null);
+  const suggestionsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const journalTriggerRef = useRef<HTMLButtonElement>(null);
+  const actionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const errorActionRef = useRef<HTMLButtonElement>(null);
   const mountedRef = useRef(true);
   const campaignIdRef = useRef(campaignId);
   const lastSequenceRef = useRef({ campaignId, sequence: 0 });
@@ -200,11 +329,17 @@ export function CampaignPlayPage({
   const campaignPendingOperation = pendingOperation?.campaignId === campaignId
     ? pendingOperation
     : null;
+  const journalOpen = journalOpenCampaignId === campaignId;
 
   const setDraft = useCallback((value: string) => {
     setDrafts((current) => ({ ...current, [campaignId]: value }));
     writeStoredDraft(campaignId, value);
   }, [campaignId]);
+
+  const loadJournalPage = useCallback(
+    (cursor: number) => loadCampaignPlayJournal(campaignId, { cursor, limit: 20 }),
+    [campaignId],
+  );
 
   const recordSequence = useCallback((targetCampaignId: string, sequence: number) => {
     if (!mountedRef.current || campaignIdRef.current !== targetCampaignId) return;
@@ -252,6 +387,14 @@ export function CampaignPlayPage({
     }
     return { state: nextState, turn: nextTurn };
   }, [campaignId, recordSequence]);
+
+  const retryAuthority = useCallback(() => {
+    void refreshAuthority().catch((error) => {
+      if (mountedRef.current && campaignIdRef.current === campaignId) {
+        setRequestError({ campaignId, code: errorCode(error) });
+      }
+    });
+  }, [campaignId, refreshAuthority]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -318,8 +461,22 @@ export function CampaignPlayPage({
         }
 
         if (controller.signal.aborted || campaignIdRef.current !== campaignId) return;
-        if (authority.turn?.turn.status !== "processing") return;
-        cursor = authority.turn.turn.lastEventSequence;
+        const authorityTurn = authority.turn;
+        const terminalStatus = authorityTurn?.turn.status;
+        if (authorityTurn === null || terminalStatus !== "processing") {
+          window.setTimeout(() => {
+            if (campaignIdRef.current !== campaignId) return;
+            if (terminalStatus === "interrupted") {
+              progressRef.current?.focus();
+            } else if (terminalStatus === "failed") {
+              errorActionRef.current?.focus();
+            } else if (terminalStatus === "completed") {
+              (suggestionsHeadingRef.current ?? narrationFocusRef.current)?.focus();
+            }
+          }, 0);
+          return;
+        }
+        cursor = authorityTurn.turn.lastEventSequence;
         recordSequence(campaignId, cursor);
         setConnection("disconnected");
         await waitForReconnect(reconnectDelayMilliseconds, controller.signal);
@@ -334,6 +491,7 @@ export function CampaignPlayPage({
     setEventProgress(null);
     setFollowedTurn({ campaignId, turnId, sequence });
     recordSequence(campaignId, sequence);
+    window.setTimeout(() => progressRef.current?.focus(), 0);
   }, [campaignId, recordSequence]);
 
   const reconcileRequestFailure = useCallback(async (
@@ -358,10 +516,19 @@ export function CampaignPlayPage({
     ) setRequestError({ campaignId, code: errorCode(error) });
   }, [campaignId, refreshAuthority]);
 
-  const submitAction = useCallback(async () => {
+  const submitAction = useCallback(async (
+    action: Pick<CampaignPlayTurnAdmissionRequest, "source"> & {
+      text?: string;
+      choiceHandle?: string;
+    },
+  ) => {
+    const request = action.source === "freeform"
+      ? { source: "freeform" as const, text: action.text ?? "" }
+      : { source: "suggested" as const, choiceHandle: action.choiceHandle ?? "" };
     if (
       operationRef.current?.campaignId === campaignId ||
-      campaignState?.phase !== "ready" || draft.trim().length === 0
+      campaignState?.phase !== "ready" ||
+      (request.source === "freeform" ? request.text.trim().length === 0 : request.choiceHandle.length === 0)
     ) return;
     const operation: PendingOperation = { campaignId, kind: "admission", token: Symbol() };
     operationRef.current = operation;
@@ -369,9 +536,8 @@ export function CampaignPlayPage({
     setRequestError(null);
     try {
       const admission = await admitCampaignPlayTurn(campaignId, {
-        source: "freeform",
+        ...request,
         idempotencyKey: crypto.randomUUID(),
-        text: draft,
         expectedWorldVersion: campaignState.worldVersion,
         expectedRuntimeRevision: campaignState.runtimeRevision,
       });
@@ -380,7 +546,7 @@ export function CampaignPlayPage({
         operationRef.current !== operation
       ) return;
       beginFollowing(admission.turnId, admission.sequence);
-      setDraft("");
+      if (request.source === "freeform") setDraft("");
     } catch (error) {
       await reconcileRequestFailure(operation, error);
     } finally {
@@ -389,7 +555,7 @@ export function CampaignPlayPage({
         if (mountedRef.current && campaignIdRef.current === campaignId) setPendingOperation(null);
       }
     }
-  }, [beginFollowing, campaignId, campaignState, draft, reconcileRequestFailure, setDraft]);
+  }, [beginFollowing, campaignId, campaignState, reconcileRequestFailure, setDraft]);
 
   const submitOpening = useCallback(async (startingConditions: CampaignPlayStartingConditions) => {
     if (
@@ -459,9 +625,22 @@ export function CampaignPlayPage({
   }
 
   if (campaignState === null) {
+    const initialError = campaignError ?? "service_unavailable";
+    const initialAction = ERROR_ACTIONS[initialError];
     return (
       <section className="grid min-h-dvh place-items-center p-6">
-        <p role="alert">{ERROR_COPY[campaignError ?? "service_unavailable"]}</p>
+        <div className="campaign-play-alert" role="alert">
+          <p>{ERROR_COPY[initialError]}</p>
+          {initialAction.kind === "campaigns" ? (
+            <Link href="/">{initialAction.label}</Link>
+          ) : initialAction.kind === "review" ? (
+            <Link href={`/campaign/${campaignId}/review`}>{initialAction.label}</Link>
+          ) : initialAction.kind === "character" ? (
+            <Link href={`/campaign/${campaignId}/character`}>{initialAction.label}</Link>
+          ) : (
+            <button onClick={retryAuthority} type="button">{initialAction.label}</button>
+          )}
+        </div>
       </section>
     );
   }
@@ -471,29 +650,38 @@ export function CampaignPlayPage({
   const followsCurrentCampaign = followedTurn?.campaignId === campaignId;
   const inputLocked = campaignState.phase !== "ready" || followsCurrentCampaign ||
     campaignPendingOperation !== null;
-  const interrupted = activeTurn?.status === "interrupted";
   const failedCode = campaignTurnRead?.result.status === "failed"
     ? campaignTurnRead.result.errorCode
     : null;
-  const progressCopy = progress === null
-    ? "Action received"
-    : activeTurn?.turnKind === "opening"
-      ? OPENING_PROGRESS_COPY[progress]
-      : PROGRESS_COPY[progress];
-
-  const selectedOpeningOption = openingSelection === null
-    ? null
-    : campaignState.openingOptions.find(
-        (option) => option.locationHandle === openingSelection.locationHandle,
-      ) ?? null;
-  const validOpeningSelection = selectedOpeningOption !== null && openingSelection !== null &&
-    selectedOpeningOption.roles.some((option) => option.handle === openingSelection.roleHandle) &&
-    selectedOpeningOption.arrivalModes.some(
-      (option) => option.handle === openingSelection.arrivalModeHandle,
-    ) &&
-    selectedOpeningOption.immediateSituations.some(
-      (option) => option.handle === openingSelection.immediateSituationHandle,
-    );
+  const activeError = campaignError ?? failedCode;
+  const actionSurfaceVisible = campaignState.phase === "ready" ||
+    campaignState.phase === "turn_active" || campaignState.phase === "narration_pending";
+  const turnProgress = (
+    <TurnProgress
+      accepted={followsCurrentCampaign}
+      connection={connection}
+      onResume={() => void resumeTurn()}
+      pendingResume={campaignPendingOperation?.kind === "resume"}
+      progress={progress}
+      ref={progressRef}
+      turn={activeTurn}
+    />
+  );
+  const errorAction = activeError === null ? null : ERROR_ACTIONS[activeError];
+  const runErrorAction = () => {
+    if (errorAction === null) return;
+    if (errorAction.kind === "opening") {
+      document.getElementById("campaign-play-arrival-heading")?.focus();
+    } else if (errorAction.kind === "edit") {
+      actionTextareaRef.current?.focus();
+    } else if (errorAction.kind === "refresh") {
+      retryAuthority();
+    } else if (errorAction.kind === "progress") {
+      progressRef.current?.focus();
+    } else if (errorAction.kind === "resume") {
+      void resumeTurn();
+    }
+  };
 
   if (campaignState.phase === "character_required") {
     return (
@@ -510,151 +698,65 @@ export function CampaignPlayPage({
       className="campaign-play-page"
       data-connection={connection}
     >
-      {campaignError || failedCode ? (
-        <p className="campaign-play-alert" role="alert">{ERROR_COPY[campaignError ?? failedCode ?? "service_unavailable"]}</p>
+      {activeError && errorAction ? (
+        <div className="campaign-play-alert" role="alert">
+          <p>{ERROR_COPY[activeError]}</p>
+          {errorAction.kind === "campaigns" ? (
+            <Link href="/">{errorAction.label}</Link>
+          ) : errorAction.kind === "review" ? (
+            <Link href={`/campaign/${campaignId}/review`}>{errorAction.label}</Link>
+          ) : errorAction.kind === "character" ? (
+            <Link href={`/campaign/${campaignId}/character`}>{errorAction.label}</Link>
+          ) : (
+            <button onClick={runErrorAction} ref={errorActionRef} type="button">
+              {errorAction.label}
+            </button>
+          )}
+        </div>
       ) : null}
 
       <CampaignPlayStage
-        connectionMessage={connection === "disconnected"
-          ? "Connection lost. The turn may still be running."
-          : ""}
+        narrationFocusRef={narrationFocusRef}
         state={campaignState}
       >
         {campaignState.phase === "opening_required" && !followsCurrentCampaign ? (
-          <section className="campaign-play-arrival" aria-labelledby="campaign-play-arrival-heading">
-            <p className="campaign-play-kicker">Enter the world</p>
-            <h1 id="campaign-play-arrival-heading">Choose your arrival</h1>
-            <p>Pick a starting point and role, or let the world place you.</p>
-            <div className="campaign-play-arrival-locations" role="group" aria-label="Starting places">
-              {campaignState.openingOptions.map((option) => {
-                const selected = option.locationHandle === openingSelection?.locationHandle;
-                return (
-                  <button
-                    aria-label={option.name}
-                    aria-pressed={selected}
-                    key={option.locationHandle}
-                    onClick={() => setOpeningSelection(initialOpeningSelection(option))}
-                    type="button"
-                  >
-                    <strong>{option.name}</strong>
-                    <span>{option.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {selectedOpeningOption && openingSelection ? (
-              <div className="campaign-play-arrival-details">
-                <label>
-                  Your place here
-                  <select
-                    onChange={(event) => setOpeningSelection({
-                      ...openingSelection,
-                      roleHandle: event.target.value,
-                    })}
-                    value={openingSelection.roleHandle}
-                  >
-                    {selectedOpeningOption.roles.map((option) => (
-                      <option key={option.handle} value={option.handle}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  How you arrive
-                  <select
-                    onChange={(event) => setOpeningSelection({
-                      ...openingSelection,
-                      arrivalModeHandle: event.target.value,
-                    })}
-                    value={openingSelection.arrivalModeHandle}
-                  >
-                    {selectedOpeningOption.arrivalModes.map((option) => (
-                      <option key={option.handle} value={option.handle}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  What is happening
-                  <select
-                    onChange={(event) => setOpeningSelection({
-                      ...openingSelection,
-                      immediateSituationHandle: event.target.value,
-                    })}
-                    value={openingSelection.immediateSituationHandle}
-                  >
-                    {selectedOpeningOption.immediateSituations.map((option) => (
-                      <option key={option.handle} value={option.handle}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            ) : null}
-            <div className="campaign-play-arrival-actions">
-              <button
-                disabled={campaignPendingOperation?.kind === "admission"}
-                onClick={() => void submitOpening({ mode: "delegate" })}
-                type="button"
-              >
-                Let the world decide
-              </button>
-              <button
-                className="campaign-play-primary-action"
-                disabled={!validOpeningSelection || campaignPendingOperation?.kind === "admission"}
-                onClick={() => openingSelection && void submitOpening({
-                  mode: "chosen",
-                  ...openingSelection,
-                })}
-                type="button"
-              >
-                Begin
-              </button>
-            </div>
-          </section>
+          <CampaignOpeningSetup
+            onSelectionChange={setOpeningSelection}
+            onSubmit={(startingConditions) => void submitOpening(startingConditions)}
+            openingOptions={campaignState.openingOptions}
+            pending={campaignPendingOperation?.kind === "admission"}
+            selection={openingSelection}
+          />
         ) : null}
 
-        {(followsCurrentCampaign || campaignState.phase === "opening_active" || campaignState.phase === "turn_active" || campaignState.phase === "narration_pending") ? (
-          <div className="campaign-play-progress" aria-live="polite" role="status" tabIndex={-1}>
-            <span aria-hidden="true" />
-            <p>{progressCopy}</p>
-          </div>
-        ) : null}
-
-        {interrupted ? (
-          <div className="campaign-play-interruption">
-            <p>{activeTurn?.turnKind === "opening" ? "The opening stopped before it finished." : "The turn stopped before it finished."}</p>
-            {activeTurn?.retryEligible ? (
-              <button
-                disabled={campaignPendingOperation?.kind === "resume"}
-                onClick={() => void resumeTurn()}
-                type="button"
-              >
-                Resume
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        {!actionSurfaceVisible && (followsCurrentCampaign || activeTurn !== null) ? turnProgress : null}
       </CampaignPlayStage>
 
-      {(campaignState.phase === "ready" || campaignState.phase === "turn_active" || campaignState.phase === "narration_pending") ? (
-        <div className="campaign-play-action-shell">
-          <label htmlFor="campaign-play-action">Your action</label>
-          <div>
-            <textarea
-              disabled={inputLocked}
-              id="campaign-play-action"
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="What do you do?"
-              value={draft}
-            />
-            <button
-              disabled={inputLocked || draft.trim().length === 0}
-              onClick={() => void submitAction()}
-              type="button"
-            >
-              Act
-            </button>
-          </div>
-        </div>
+      {actionSurfaceVisible ? (
+        <ActionDock
+          draft={draft}
+          inputLocked={inputLocked}
+          journalOpen={journalOpen}
+          journalTriggerRef={journalTriggerRef}
+          onDraftChange={setDraft}
+          onJournalOpen={() => setJournalOpenCampaignId(campaignId)}
+          onSubmitFreeform={() => void submitAction({ source: "freeform", text: draft })}
+          onSubmitSuggested={(choiceHandle) => void submitAction({ source: "suggested", choiceHandle })}
+          pendingAdmission={campaignPendingOperation?.kind === "admission"}
+          statusSlot={activeTurn !== null || followsCurrentCampaign ? turnProgress : undefined}
+          suggestedActions={campaignState.narration?.suggestedActions ?? []}
+          suggestionsHeadingRef={suggestionsHeadingRef}
+          textareaRef={actionTextareaRef}
+        />
       ) : null}
+
+      <JournalDrawer
+        key={campaignId}
+        loadPage={loadJournalPage}
+        onClose={() => setJournalOpenCampaignId(null)}
+        open={journalOpen}
+        returnFocusRef={journalTriggerRef}
+      />
     </section>
   );
 }

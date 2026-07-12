@@ -1007,7 +1007,7 @@ describe("Campaign Play shared public contracts", () => {
       {
         type: "turn.failed",
         retryEligible: false,
-        errorCode: "service_unavailable",
+        errorCode: "turn_failed",
         sequence: 5,
         turnId: "turn_1",
         acceptedWorldVersion: 7,
@@ -1074,7 +1074,7 @@ describe("Campaign Play shared public contracts", () => {
           retryEligible: false,
           completedAt: 1_100,
         },
-        result: { status: "failed", errorCode: "invalid_intent" },
+        result: { status: "failed", errorCode: "turn_failed" },
       },
     ];
     for (const turnRead of turnReads) {

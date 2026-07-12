@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useMemo, useState } from "react";
 import type { CampaignPlayNarration } from "@worldforge/shared";
 
 export interface NarrationDockProps {
@@ -13,7 +13,10 @@ function prefersReducedMotion(): boolean {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function NarrationDock({ narration, onBeatPresented }: NarrationDockProps) {
+export const NarrationDock = forwardRef<HTMLElement, NarrationDockProps>(function NarrationDock({
+  narration,
+  onBeatPresented,
+}, ref) {
   const [visibleBeatIndex, setVisibleBeatIndex] = useState(0);
   const [auto, setAuto] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -56,7 +59,12 @@ export function NarrationDock({ narration, onBeatPresented }: NarrationDockProps
   const atEnd = visibleBeatIndex >= narration.beats.length - 1;
 
   return (
-    <section className="campaign-play-narration" aria-labelledby="campaign-play-narration-heading">
+    <section
+      aria-labelledby="campaign-play-narration-heading"
+      className="campaign-play-narration"
+      ref={ref}
+      tabIndex={-1}
+    >
       <header>
         <p className="campaign-play-kicker" id="campaign-play-narration-heading">The moment</p>
         <span>{visibleBeatIndex + 1} of {narration.beats.length}</span>
@@ -88,6 +96,6 @@ export function NarrationDock({ narration, onBeatPresented }: NarrationDockProps
       ) : null}
     </section>
   );
-}
+});
 
 export default NarrationDock;

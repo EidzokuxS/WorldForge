@@ -25,6 +25,7 @@ import {
 import { createCampaignPlayApplication } from "../campaign-play/campaign-play-application.js";
 import {
   campaignPlayJournalPageSchema,
+  campaignPlayErrorResponseSchema,
   campaignPlayPutPlayerResponseSchema,
   campaignPlaySseEventSchema,
   campaignPlayStateSchema,
@@ -46,7 +47,10 @@ import {
   type CampaignPlayModelEvidence,
 } from "../campaign-play/judge.js";
 import { createCampaignPlayGameMaster } from "../campaign-play/game-master.js";
-import { createCampaignPlayTurnRuntime } from "../campaign-play/turn-runtime.js";
+import {
+  CampaignPlayTurnRuntimeError,
+  createCampaignPlayTurnRuntime,
+} from "../campaign-play/turn-runtime.js";
 import type { CampaignPlayTurnServiceClock } from "../campaign-play/turn-service.js";
 import { createCampaignPlayRoutes } from "./campaign-play.js";
 
@@ -643,6 +647,44 @@ describe("Campaign Play mounted route", () => {
       narration: { turnId: actionAdmission.turnId },
     });
     expect(finalState.worldVersion).toBeGreaterThan(readyState.worldVersion);
+
+    const misconfiguredApplication = createCampaignPlayApplication({
+      now: time.now,
+      owner: "mounted-route-invalid-runtime",
+      runtimeFactory: {
+        createOpening: runtimeFactory.createOpening,
+        createTurn: () => {
+          throw new CampaignPlayTurnRuntimeError(
+            "turn_state_invalid",
+            "Campaign Play uncertainty seed key is invalid.",
+          );
+        },
+      },
+    });
+    const misconfiguredRoutes = createCampaignPlayRoutes({
+      application: misconfiguredApplication,
+      readCampaign: readCampaignConfig,
+      eventPollMilliseconds: 1,
+    });
+    const misconfiguredResponse = await misconfiguredRoutes.request(
+      `/${CAMPAIGN_ID}/play/turns`,
+      jsonRequest("POST", {
+        idempotencyKey: "misconfigured-action",
+        expectedWorldVersion: finalState.worldVersion,
+        expectedRuntimeRevision: finalState.runtimeRevision,
+        source: "freeform",
+        text: "I wait for the bells.",
+      }),
+    );
+    expect(misconfiguredResponse.status).toBe(503);
+    expect(campaignPlayErrorResponseSchema.parse(await misconfiguredResponse.json()))
+      .toMatchObject({
+        code: "service_unavailable",
+        expectedWorldVersion: finalState.worldVersion,
+        currentWorldVersion: finalState.worldVersion,
+        expectedRuntimeRevision: finalState.runtimeRevision,
+        currentRuntimeRevision: finalState.runtimeRevision,
+      });
 
     const journalResponse = await app.request(`/${CAMPAIGN_ID}/play/journal?cursor=0&limit=20`);
     expect(journalResponse.status).toBe(200);

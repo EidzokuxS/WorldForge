@@ -1468,7 +1468,7 @@ export function createCampaignPlayTurnRuntime(
                 repository.failTurn({
                   token: context.token,
                   errorCode: "rulebook_denied",
-                  publicErrorCode: "service_unavailable",
+                  publicErrorCode: "turn_failed",
                   mutationAudit: {
                     stage: "planned",
                     denial: preflight.denial as unknown as CampaignPlayProjectionRecord,
@@ -1521,7 +1521,7 @@ export function createCampaignPlayTurnRuntime(
                 repository.failTurn({
                   token: context.token,
                   errorCode: "stale_artifact",
-                  publicErrorCode: "service_unavailable",
+                  publicErrorCode: "turn_failed",
                   mutationAudit: {
                     stage: "planned",
                     cause: cause instanceof CampaignPlayTurnRuntimeError ? cause.code : "invalid_artifact",

@@ -15,6 +15,7 @@ import {
 } from "../campaign-world/world-repository.test-support.js";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
+import { createCampaignPlayReadModel } from "./campaign-play-read-model.js";
 import { createCampaignPlayStateRepository } from "./campaign-play-state-repository.js";
 import {
   canonicalizeCampaignPlayProjection,
@@ -1788,7 +1789,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     expectTurnError(() => repository.failTurn({
       token,
       errorCode: "model_contract_invalid",
-      publicErrorCode: "service_unavailable",
+      publicErrorCode: "turn_failed",
       mutationAudit,
       modelEvidence: {
         actualProviderId: "test-provider", actualModel: "planner",
@@ -1801,7 +1802,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     const failed = repository.failTurn({
       token,
       errorCode: "model_contract_invalid",
-      publicErrorCode: "service_unavailable",
+      publicErrorCode: "turn_failed",
       mutationAudit,
       modelEvidence: {
         actualProviderId: "test-provider", actualModel: "planner",
@@ -1821,7 +1822,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
       workerLeaseOwner: null,
     });
     expect(failed.events.at(-1)).toMatchObject({
-      type: "turn.failed", errorCode: "service_unavailable", retryEligible: false,
+      type: "turn.failed", errorCode: "turn_failed", retryEligible: false,
     });
     expect(repository.loadRecoveryState("turn-opening", 1_700)).toEqual({
       kind: "terminal_failure",
@@ -1834,7 +1835,7 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     expectTurnError(() => repository.failTurn({
       token,
       errorCode: "model_contract_invalid",
-      publicErrorCode: "service_unavailable",
+      publicErrorCode: "turn_failed",
       mutationAudit,
       modelEvidence: {
         actualProviderId: null, actualModel: null, actualStrategy: null,
@@ -1850,6 +1851,10 @@ describe("Campaign Play deterministic and terminal turn boundaries", () => {
     const reopened = openPlay();
     expect(createCampaignPlayTurnRepository(reopened).loadRecoveryState("turn-opening", 2_000))
       .toMatchObject({ kind: "terminal_failure", mutationAudit });
+    expect(createCampaignPlayReadModel(reopened).loadTurn("turn-opening").result).toEqual({
+      status: "failed",
+      errorCode: "turn_failed",
+    });
   });
 
   it("recovers the current game-master interruption after an earlier judge retry", () => {

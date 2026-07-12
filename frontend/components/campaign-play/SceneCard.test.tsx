@@ -27,6 +27,13 @@ describe("SceneCard", () => {
           label: "The late train",
           summary: "Its lamps are visible beyond the rain.",
         }]}
+        consequences={[{
+          observationHandle: "observation-secret",
+          whatChanged: "The North Cut is now restricted.",
+          whereOrRoute: "North Cut",
+          worldTimeLabel: "Before dawn",
+          causalCue: "route_change",
+        }]}
       />,
     );
 
@@ -37,6 +44,7 @@ describe("SceneCard", () => {
     expect(within(routes).getByText("North Cut")).toBeInTheDocument();
     expect(within(routes).getByText("Restricted")).toBeInTheDocument();
     expect(screen.getByText("The late train")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "What changed" })).toHaveTextContent("Route changed");
     expect(document.body.textContent?.includes("secret")).toBe(false);
   });
 

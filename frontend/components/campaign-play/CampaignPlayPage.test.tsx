@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   loadState: vi.fn(),
   loadTurn: vi.fn(),
+  loadJournal: vi.fn(),
   admitOpening: vi.fn(),
   admitTurn: vi.fn(),
   resumeTurn: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("@/lib/campaign-play-api", () => ({
   },
   loadCampaignPlayState: api.loadState,
   loadCampaignPlayTurn: api.loadTurn,
+  loadCampaignPlayJournal: api.loadJournal,
   admitCampaignPlayOpening: api.admitOpening,
   admitCampaignPlayTurn: api.admitTurn,
   resumeCampaignPlayTurn: api.resumeTurn,
@@ -119,7 +121,7 @@ function turnRead(
       : status === "interrupted"
         ? { status: "interrupted", errorCode: "turn_interrupted" }
         : status === "failed"
-          ? { status: "failed", errorCode: "invalid_intent" }
+          ? { status: "failed", errorCode: "turn_failed" }
           : {
               status: "completed",
               narration: {
@@ -163,6 +165,19 @@ function completed(sequence: number): CampaignPlaySseEvent {
   };
 }
 
+function interrupted(sequence: number): CampaignPlaySseEvent {
+  return {
+    sequence,
+    turnId: "turn-1",
+    type: "turn.interrupted",
+    retryEligible: true,
+    acceptedWorldVersion: 2,
+    worldVersion: 3,
+    runtimeRevision: 4,
+    createdAt: 200,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
@@ -172,6 +187,23 @@ beforeEach(() => {
 });
 
 describe("CampaignPlayPage durable state", () => {
+  it("offers a working retry when the initial state load fails", async () => {
+    api.loadState
+      .mockRejectedValueOnce(new CampaignPlayApiError(
+        "service_unavailable",
+        "Campaign Play is temporarily unavailable.",
+        503,
+        null,
+      ))
+      .mockResolvedValueOnce(state("ready"));
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByLabelText("Your action")).toBeEnabled();
+    expect(api.loadState).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["character_required", "Create a player character before entering the world."],
     ["opening_required", "Choose your arrival"],
@@ -232,8 +264,9 @@ describe("CampaignPlayPage durable state", () => {
     render(<CampaignPlayPage campaignId="campaign-1" />);
     const input = await screen.findByLabelText("Your action");
     fireEvent.change(input, { target: { value: "I listen at the signal box." } });
-    fireEvent.click(screen.getByRole("button", { name: "Act" }));
-    fireEvent.click(screen.getByRole("button", { name: "Act" }));
+    const actButton = screen.getByRole("button", { name: "Act" });
+    fireEvent.click(actButton);
+    fireEvent.click(actButton);
 
     expect(api.admitTurn).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem("worldforge:campaign-play:draft:campaign-1"))
@@ -244,6 +277,52 @@ describe("CampaignPlayPage durable state", () => {
     expect(input).toHaveValue("");
     expect(input).toBeDisabled();
     expect(window.localStorage.getItem("worldforge:campaign-play:draft:campaign-1")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveFocus());
+  });
+
+  it("admits a suggested action by opaque handle", async () => {
+    const ready = state("ready");
+    ready.narration!.suggestedActions = [{ choiceHandle: "choice-hidden", label: "Follow the signal" }];
+    api.loadState.mockResolvedValue(ready);
+    api.admitTurn.mockResolvedValue({ turnId: "turn-1", sequence: 1 });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Follow the signal" }));
+
+    await waitFor(() => expect(api.admitTurn).toHaveBeenCalledWith("campaign-1", {
+      source: "suggested",
+      idempotencyKey: "request-1",
+      choiceHandle: "choice-hidden",
+      expectedWorldVersion: 3,
+      expectedRuntimeRevision: 4,
+    }));
+    expect(document.body).not.toHaveTextContent("choice-hidden");
+  });
+
+  it("opens earned journal entries through the campaign loader", async () => {
+    api.loadState.mockResolvedValue(state("ready"));
+    api.loadJournal.mockResolvedValue({
+      campaignId: "campaign-1",
+      acceptedWorldVersion: 2,
+      worldVersion: 3,
+      runtimeRevision: 4,
+      entries: [{
+        observationHandle: "observation-hidden",
+        title: "The signal changed",
+        text: "The east lamp went dark.",
+        whereOrRoute: "Signal Yard",
+        worldTimeLabel: "Before dawn",
+        consequence: null,
+      }],
+      nextCursor: null,
+    });
+    render(<CampaignPlayPage campaignId="campaign-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Journal" }));
+
+    expect(await screen.findByText("The signal changed")).toBeInTheDocument();
+    expect(api.loadJournal).toHaveBeenCalledWith("campaign-1", { cursor: 0, limit: 20 });
+    expect(document.body).not.toHaveTextContent("observation-hidden");
   });
 
   it("keeps the draft when admission fails", async () => {
@@ -295,9 +374,14 @@ describe("CampaignPlayPage durable state", () => {
   });
 
   it("deduplicates replayed events and unlocks only after exact turn and state refetch", async () => {
+    const completedState = state("ready");
+    completedState.narration!.suggestedActions = [{
+      choiceHandle: "choice-next",
+      label: "Follow the new signal",
+    }];
     api.loadState
       .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "interpreting", 1)))
-      .mockResolvedValueOnce(state("ready"));
+      .mockResolvedValueOnce(completedState);
     api.loadTurn
       .mockResolvedValueOnce(turnRead("processing", 1))
       .mockResolvedValueOnce(turnRead("completed", 3));
@@ -318,6 +402,27 @@ describe("CampaignPlayPage durable state", () => {
       campaignId: "campaign-1",
       lastSeenSequence: 3,
     });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your move" })).toHaveFocus());
+  });
+
+  it("keeps terminal interruption focus on its recovery surface", async () => {
+    api.loadState
+      .mockResolvedValueOnce(state("turn_active", publicTurn("processing", "interpreting", 1)))
+      .mockResolvedValueOnce(state("turn_active", publicTurn("interrupted", null, 2)));
+    api.loadTurn
+      .mockResolvedValueOnce(turnRead("processing", 1))
+      .mockResolvedValueOnce(turnRead("interrupted", 2));
+    api.streamEvents.mockImplementationOnce(async (_campaignId, _turnId, options) => {
+      const event = interrupted(2);
+      options.onEvent(event);
+      return { lastSequence: 2, terminalEvent: event };
+    });
+
+    render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
+
+    const status = await screen.findByText("The turn stopped before it finished.");
+    await waitFor(() => expect(status.parentElement).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
   });
 
   it("refetches authority after a sequence gap and reconnects from the durable cursor", async () => {
@@ -423,6 +528,21 @@ describe("CampaignPlayPage durable state", () => {
     }));
   });
 
+  it("closes the journal when campaign navigation resets its cache", async () => {
+    api.loadState
+      .mockResolvedValueOnce(state("ready"))
+      .mockResolvedValueOnce({ ...state("ready"), campaignId: "campaign-2" });
+    api.loadJournal.mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(<CampaignPlayPage campaignId="campaign-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Journal" }));
+    expect(screen.getByRole("dialog", { name: "The journal" })).toBeInTheDocument();
+
+    rerender(<CampaignPlayPage campaignId="campaign-2" />);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "The journal" }))
+      .not.toBeInTheDocument());
+  });
+
   it("ignores a late admission from the previous campaign without clearing its draft", async () => {
     let resolvePreviousAdmission!: (value: { turnId: string; sequence: number }) => void;
     api.loadState
@@ -501,7 +621,7 @@ describe("CampaignPlayPage durable state", () => {
         turnId: "turn-1",
         type: "turn.failed",
         retryEligible: false,
-        errorCode: "invalid_intent",
+        errorCode: "turn_failed",
         acceptedWorldVersion: 2,
         worldVersion: 3,
         runtimeRevision: 4,
@@ -513,7 +633,8 @@ describe("CampaignPlayPage durable state", () => {
 
     render(<CampaignPlayPage campaignId="campaign-1" reconnectDelayMilliseconds={0} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("grounded in the current scene");
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be completed");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Return to scene" })).toHaveFocus());
     expect(screen.getByLabelText("Your action")).toBeEnabled();
   });
 });

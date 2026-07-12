@@ -706,7 +706,7 @@ export function createCampaignPlayOpeningRuntime(
               repository.failTurn({
                 token: context.token,
                 errorCode: "stale_artifact",
-                publicErrorCode: "service_unavailable",
+                publicErrorCode: "turn_failed",
                 mutationAudit: {
                   worldVersionAdvance: 0,
                   commands: 0,

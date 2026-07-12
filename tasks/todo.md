@@ -53,7 +53,7 @@ Execution board:
 - [x] Task 12: UI and copy design gate.
 - [x] Task 13: frontend client and durable page state.
 - [x] Task 14A: scene and narration surface.
-- [ ] Task 14B: action, consequence, journal, and recovery surface.
+- [x] Task 14B: action, consequence, journal, and recovery surface.
 - [ ] Task 15: product handoff and hard cutover.
 - [ ] Task 16A: deterministic integration and promotion gate.
 - [ ] Task 16B: first playable slice gate.
@@ -1284,3 +1284,43 @@ Stop boundary: stop at transport, durable page state, semantic status surfaces, 
 - Krypton POST returned `ALIGNED`, correctness returned `PASS`, and maintainability returned `MAINTAINABLE`; remaining P0/P1/P2 findings are `0/0/0`. Humanizer/deslop retained direct product copy. Standalone smoke additions: `0`.
 - Checkpoints: implementation `b322ed7e`; refreshed GitNexus contains 9,248 symbols, 25,815 relationships, 300 flows, and 7,386 embeddings.
 - Evidence: `rpi/campaign-play/implement/14a-scene-narration.md`.
+
+## Campaign Play Task 14B Execution Packet (2026-07-12)
+
+Goal: complete the playable action loop surface around the authoritative Campaign Play state: opaque suggested choices, durable freeform admission, progress and recovery, bounded public consequences, and the earned-observation Journal.
+
+Truth owners: `CampaignPlayState`, `CampaignPlayTurnReadResponse`, Campaign Play SSE, `CampaignPlayJournalPage`, and the existing public error union. Local UI state owns the draft, admission confirmation, reconnect status, Journal page cache/open state, and focus return only.
+
+Files:
+
+- `frontend/components/campaign-play/ActionDock.tsx` and its adjacent test
+- `frontend/components/campaign-play/TurnProgress.tsx` and its adjacent test
+- `frontend/components/campaign-play/ConsequenceCard.tsx` and its adjacent test
+- `frontend/components/campaign-play/JournalDrawer.tsx` and its adjacent test
+- `frontend/components/campaign-play/CampaignPlayPage.tsx` and its integration test
+- `frontend/app/globals.css`
+- `rpi/campaign-play/implement/14b-action-journal.md`
+- `tasks/todo.md`
+
+Implementation order:
+
+- [x] Extract opening presentation from the page controller while preserving chosen/delegated admission.
+- [x] Bind suggested actions by `choiceHandle` and freeform actions by text; keep the draft until admission returns `202`.
+- [x] Move active, disconnected, interrupted, Resume, and terminal-unlock presentation into `TurnProgress` and `ActionDock` without creating optimistic world facts.
+- [x] Render the exhaustive public consequence cue mapping and earned Journal pages with `nextCursor` pagination.
+- [x] Prove keyboard submission, drawer Escape/focus return and narrow focus trap, polite progress announcements, completion focus, and input locking.
+- [x] Capture real persisted campaign states for consequence, Journal, active turn, interruption, public error, and narrow action layout.
+- [x] Run focused and complete frontend verification, typecheck, scoped lint, production build, GitNexus change detection, copy review, and fresh Sol semantic verification.
+
+Stop boundary: Task 14B completes the action-and-observation presentation on `/campaign/[id]/play`. Task 15 owns navigation cutover, removal of displaced `/game` and legacy client/router paths, and capture-script productization. Standalone smoke additions remain zero unless verification exposes a named risk that component, integration, or browser evidence cannot cover.
+
+## Campaign Play Task 14B Review (2026-07-12)
+
+- The action surface now supports opaque suggested choices, durable freeform admission, explicit progress and recovery, public consequences, and the earned-observation Journal.
+- The ready and opening campaigns prove the current consequence, Journal, accepted opening, Resume, public error, and narrow action layout. Resume advanced the public event sequence from interruption at 3 through a second attempt and interruption at 5.
+- Four isolated persisted action lanes prove Judge-active, Narrator-pending, player-action interruption with the committed scene, and terminal failure through the real HTTP/SSE route. Every active/recovery state has 1440x900 and 390x844 evidence. The lane exposed and verified the dedicated non-resumable `turn_failed` contract; its temporary harness and campaign folders were removed after capture.
+- Verification passed: focused Task 14B frontend/API 52/52, complete frontend 548/548, mounted route 1/1, focused terminal/runtime backend 114/114, Campaign Play backend 322/322, complete backend 3,886/3,886, both typechecks, scoped lint, production build, diff check, GitNexus MEDIUM scope across 17 indexed change entries (15 code symbols and two task sections) and five affected processes, and fresh Sol review with zero P0/P1 findings.
+- The first parallel Campaign Play run hit the existing five-second Windows/SQLite race-test limit. Its isolated retry and the complete serial Campaign Play suite passed.
+- Humanizer/deslop retained the direct product copy after normalizing `Open world review` and approved the terminal `turn_failed` copy and next action. GLM remains outside the provider list and delivery pipeline. Standalone smoke additions: `0`.
+- Narrow-layout advisory for Task 15 polish: the fixed dock's translucent gaps can reveal scene text behind the controls at 390px; interaction remains usable and the navigation cutover can add a unified dock backdrop.
+- Evidence: `rpi/campaign-play/implement/14b-action-journal.md` and `rpi/campaign-play/implement/evidence/task14b/`.

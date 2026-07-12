@@ -1280,6 +1280,7 @@ export const CAMPAIGN_PLAY_ERROR_METADATA = {
   turn_not_found: { status: 404, retryEligible: false, context: "play" },
   turn_not_resumable: { status: 409, retryEligible: false, context: "play" },
   turn_interrupted: { status: 503, retryEligible: true, context: "play" },
+  turn_failed: { status: 503, retryEligible: false, context: "play" },
   service_unavailable: { status: 503, retryEligible: true, context: "play" },
 } as const satisfies Record<
   (typeof CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES)[number],

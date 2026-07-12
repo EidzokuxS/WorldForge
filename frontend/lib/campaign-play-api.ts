@@ -89,6 +89,7 @@ const ERROR_METADATA: Record<
   turn_not_found: { status: 404, retryEligible: false, context: "play" },
   turn_not_resumable: { status: 409, retryEligible: false, context: "play" },
   turn_interrupted: { status: 503, retryEligible: true, context: "play" },
+  turn_failed: { status: 503, retryEligible: false, context: "play" },
   service_unavailable: { status: 503, retryEligible: true, context: "play" },
 };
 

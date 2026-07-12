@@ -139,6 +139,7 @@ export const CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES = [
   "turn_not_found",
   "turn_not_resumable",
   "turn_interrupted",
+  "turn_failed",
   "service_unavailable",
 ] as const;
 

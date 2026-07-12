@@ -357,7 +357,7 @@ function mapFailure(error: unknown): never {
       return fail("invalid_intent", "Player action is invalid.", error);
     }
     if (error.code === "turn_state_invalid") {
-      return fail("stale_runtime_revision", "Player action authority is stale.", error);
+      return fail("service_unavailable", "Campaign Play action runtime is unavailable.", error);
     }
     return fail("service_unavailable", "Campaign Play action failed.", error);
   }
