@@ -1362,3 +1362,60 @@ Stop condition: normal product navigation reaches Character and Play through cam
 - Verification passed: focused cutover tests, complete frontend `491/491`, complete backend including the new route-registration contract, both typechecks, production build, scoped lint, capture-script syntax, and diff check. Full frontend lint retains the pre-existing Forge hook error and dependency warning.
 - Fresh Sol verification returned `PASS` with zero P0/P1 findings; both P2 advisories were resolved. GitNexus impact calls were unavailable through its Ladybug WAL assertion, while exact caller inventories and change detection bounded the cutover. Standalone smoke additions: `0`.
 - Evidence: `rpi/campaign-play/implement/15-cutover.md` and `rpi/campaign-play/implement/evidence/task15/`.
+
+## Campaign Play Task 16A Execution Packet (2026-07-12)
+
+Goal: build the deterministic promotion gate and evidence format used by every later Campaign Play lane.
+
+Success criteria:
+
+- Seeded 10, 30, and 60-action runs produce identical canonical projections, receipt order, visibility, actor job state, event cursors, and replay hashes when repeated from the same accepted world and inputs.
+- A paired run from one opening produces different durable outcomes for intervention and peripheral wait/leave play while preserving visibility rules.
+- One integration lane covers accepted snapshot, player creation, opening turn zero, custom action, reload, process restart, and the next completed action.
+- A clean-start child proves independent player, versions, turns, observations, and runtime identity while the parent accepted bytes remain unchanged.
+- The bundle validator rejects missing terminals, partial commits, hidden-state leaks, duplicate inputs, stale execution, donor requests, inventory mismatches, and incomplete evidence.
+- Task 16A adds focused deterministic and integration tests plus the reusable playtest runner. It adds no standalone smoke suite.
+
+Packet 16A.1, evidence contracts and validator:
+
+- [x] Define strict run configuration, manifest, eligibility, action count, checkpoint, scorecard, and SHA-256 inventory contracts in `e2e/campaign-play/contracts.ts`.
+- [x] Implement read-only bundle probes and validation in `e2e/campaign-play/probes.ts` and `e2e/campaign-play/scorecard.ts`.
+- [x] Prove complete bundles pass and missing, mismatched, duplicated, leaked, or displaced-path evidence fails through adjacent tests.
+
+Packet 16A.2, deterministic replay:
+
+- [ ] Build a seeded Campaign Play fixture from accepted Campaign World through character and opening.
+- [ ] Execute 10, 30, and 60 completed player actions twice with fixed clock, IDs, model artifacts, RNG, and input scripts.
+- [ ] Compare canonical public/protected projections, runtime and mechanical versions, receipts, events, jobs, visibility, terminal rows, and replay hash.
+- [ ] Run paired intervention and peripheral scripts from the same opening and prove distinct durable outcomes with eligible observations only.
+
+Packet 16A.3, restart and provenance integration:
+
+- [ ] Aggregate the existing transaction fault, concurrent idempotency, stage restart, narration resume, scheduler fairness, route direction, impossible action, hidden knowledge, and stale proposal proofs into one promotion report.
+- [ ] Extend the mounted full path through reload, application restart, and a second completed player action.
+- [ ] Clone an accepted zero-turn parent, bootstrap the child independently, and compare parent and child provenance plus Campaign Play tables.
+- [ ] Repeat accepted Review byte and hash comparison after real child mechanical and runtime mutations.
+
+Packet 16A.4, runner and promotion gate:
+
+- [ ] Implement `e2e/campaign-play/playtest-runner.ts` for deterministic lanes, bundle validation, and later live-lane capture.
+- [ ] Implement `scripts/capture-campaign-play-state.mjs` as a read-only browser and network evidence collector.
+- [ ] Emit and validate the required manifest, eligibility, ledgers, checkpoints, probes, transcript, scorecard, screenshots, logs, and inventory.
+- [ ] Run the complete Task 16A verification matrix, fresh semantic review, GitNexus change detection, checkpoint commit, and push.
+
+Dependencies: 16A.1 fixes the format consumed by 16A.2 through Task 20. Packet 16A.2 supplies replay snapshots to 16A.3. Packet 16A.4 integrates only after deterministic and provenance proofs pass.
+
+Validation:
+
+- `npm --prefix shared run build`
+- `npm --prefix backend test -- src/campaign-play src/routes/campaign-play.test.ts src/routes/campaign-play.integration.test.ts src/campaign/__tests__/clone.test.ts`
+- `npm --prefix frontend test -- --run`
+- `npm --prefix backend run typecheck`
+- `npm --prefix frontend run typecheck`
+- `npm run build`
+- `git diff --check`
+- GitNexus impact before existing symbol edits and staged change detection before commit.
+
+Stop condition: the deterministic report contains zero divergence, partial commit, missing terminal, hidden leak, duplicate input, stale execution, or active donor call, and every accepted live defect has a focused regression before Task 16B begins.
+
+Prose review: main Sol applied the humanizer and deslop checks. The packet uses direct technical language, names concrete owners and failures, and contains no promotional or filler copy.

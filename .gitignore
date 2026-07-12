@@ -51,6 +51,7 @@ rpi/campaign-play/**/*.log
 # E2E test artifacts
 e2e/*
 !e2e/
+!e2e/campaign-play/
 !e2e/**/*.ts
 qa-results/
 qa-screenshots/
