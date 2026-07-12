@@ -127,6 +127,33 @@ describe("Campaign Play Judge", () => {
     });
   });
 
+  it("keeps reasoning tokens in evidence without charging them to the ruling output budget", async () => {
+    const thinkingTrace = trace();
+    thinkingTrace.usage = {
+      inputTokens: 120,
+      outputTokens: 800,
+      totalTokens: 920,
+      reasoningTokens: 600,
+    };
+    const generateObject = vi.fn(async () => ({
+      object: proposal(),
+      trace: thinkingTrace,
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await judge.judge({
+      frame: frame(),
+      input: { originalText: "I look around.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget: { ...budget, maximumOutputTokens: 512 },
+    });
+
+    expect(result.modelEvidence.outputTokens).toBe(800);
+  });
+
   it("aborts one provider attempt at the admitted Judge deadline", async () => {
     const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
       new Promise((_resolve, reject) => {
@@ -168,11 +195,30 @@ describe("Campaign Play Judge", () => {
 
   it("accepts a suggested action only through a visible choice handle", () => {
     const judge = createCampaignPlayJudge();
+    const { clarificationQuestion: _clarificationQuestion, ...withoutClarification } = proposal();
+    const suggestedInput = {
+      originalText: "Ask the guard.",
+      source: "suggested" as const,
+      choiceHandle: "choice-ask",
+      frozenChoice: {
+        kind: "contact" as const,
+        targets: [{ handle: "actor-guard", kind: "actor" as const }],
+      },
+    };
     expect(judge.compile(frame(), {
-      originalText: "Ask the guard.", source: "suggested", choiceHandle: "choice-ask",
-    }, proposal())).toMatchObject({ normalizedIntent: { choiceHandle: "choice-ask" } });
+      ...suggestedInput,
+    }, withoutClarification)).toMatchObject({
+      normalizedIntent: { choiceHandle: "choice-ask" },
+      clarificationQuestion: null,
+    });
+    expect(judge.compile(frame(), {
+      ...suggestedInput,
+    }, proposal({ clarificationQuestion: "" }))).toMatchObject({
+      clarificationQuestion: null,
+    });
     expect(() => judge.compile(frame(), {
-      originalText: "Ask the guard.", source: "suggested", choiceHandle: "choice-hidden",
+      ...suggestedInput,
+      choiceHandle: "choice-hidden",
     }, proposal())).toThrowError(expect.objectContaining({ code: "judge_input_invalid" }));
   });
 

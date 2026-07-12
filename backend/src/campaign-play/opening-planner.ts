@@ -16,6 +16,7 @@ import {
   getStructuredOutputModelMetadata,
   resolveStructuredOutputCapability,
 } from "../ai/structured-output-capabilities.js";
+import { createLogger } from "../lib/index.js";
 import {
   campaignPlayActorIntentSchema,
   campaignPlayActorPlanSchema,
@@ -34,16 +35,38 @@ import {
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
 import { buildCampaignPlayOpeningPrompt } from "./opening-prompts.js";
+import { isActorPresentInOpeningArea } from "./opening-location.js";
 import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
 const OPENING_MAX_EXPOSURE_ACTIONS = 5;
+const log = createLogger("campaign-play-opening-planner");
 
 const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim())
   .refine((value) => !value.includes("\n") && !value.includes("\r"));
 const boundedText = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
+
+const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
+  z.object({
+    channel: z.literal("local_aftermath"),
+    locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+    validUntilWorldTimeMinutes: z.number().int().safe().min(0),
+  }).strict(),
+  z.object({
+    channel: z.literal("route_state"),
+    routeId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+    triggers: z.array(z.enum(["inspect", "attempt", "traverse"]))
+      .min(1)
+      .max(3)
+      .refine((triggers) => new Set(triggers).size === triggers.length),
+  }).strict(),
+  z.object({
+    channel: z.literal("witness_report"),
+    witnessActorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+  }).strict(),
+]);
 
 const openingPlanStepProposalSchema = z.object({
   intent: campaignPlayActorIntentSchema,
@@ -80,7 +103,7 @@ export const campaignPlayOpeningProposalSchema = z.object({
     goalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
-    exposure: campaignPlayExposurePredicateSchema,
+    exposure: openingHiddenExposurePredicateSchema,
   }).strict(),
 }).strict();
 
@@ -565,19 +588,6 @@ function compilePlans(
     if (locationIds.length === 0) fail("opening_proposal_invalid");
     validateIntent(world, locationIds, proposed.intent);
     proposed.steps.forEach((step) => validateIntent(world, locationIds, step.intent));
-    const covered = intentTargetKeys(proposed.intent);
-    proposed.steps.forEach((step) => {
-      for (const key of intentTargetKeys(step.intent)) covered.add(key);
-    });
-    if (!goals.every((goal) => covered.has(`goal:${goal.id}`))) {
-      fail("opening_proposal_invalid");
-    }
-    if (
-      canonicalizeCampaignPlayProjection(proposed.intent)
-      !== canonicalizeCampaignPlayProjection(proposed.steps[0]!.intent)
-    ) {
-      fail("opening_proposal_invalid");
-    }
 
     const primaryGoal = goals.find((goal) => goal.id === proposed.primaryGoalId)!;
     const planId = stableId("plan", {
@@ -732,10 +742,8 @@ function compileScene(
   const destination = route
     ? world.locations.find((value) => value.id === route.toLocationId)
     : undefined;
-  const supportPresent = support && world.placements.some((placement) =>
-    placement.actorId === support.id
-    && placement.locationId === start.locationId
-    && placement.placementKind === "present");
+  const supportPresent = support
+    && isActorPresentInOpeningArea(world, support.id, start.locationId);
   if (
     !location
     || !canonicalStart
@@ -799,8 +807,6 @@ function compileExposureSeed(
   const firstStepTargets = intentTargetKeys(plan.steps[0]!.intent);
   let discoverableWithinPlayerActions: number;
   switch (hidden.exposure.channel) {
-    case "direct_perception":
-      fail("opening_proposal_invalid");
     case "route_state": {
       if (
         hidden.exposure.routeId !== narratorFacts.route.id
@@ -1017,12 +1023,28 @@ export function createCampaignPlayOpeningPlanner(
         };
         fail("model_contract_failed", error, evidence);
       }
-      return compile(
-        request.frame,
-        startingConditions,
-        generated.object,
-        successfulEvidence(generated.trace),
-      );
+      const modelEvidence = successfulEvidence(generated.trace);
+      try {
+        return compile(
+          request.frame,
+          startingConditions,
+          generated.object,
+          modelEvidence,
+        );
+      } catch (cause) {
+        log.warn("Opening proposal failed semantic compilation.", {
+          code: cause instanceof CampaignPlayOpeningPlannerError ? cause.code : null,
+          stack: cause instanceof Error ? cause.stack : String(cause),
+        });
+        if (cause instanceof CampaignPlayOpeningPlannerError) {
+          throw new CampaignPlayOpeningPlannerError(
+            cause.code,
+            modelEvidence,
+            { cause },
+          );
+        }
+        throw cause;
+      }
     },
   };
 }

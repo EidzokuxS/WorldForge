@@ -83,6 +83,7 @@
 - Route checks prove availability only. Movement requires movement authority and committed location/clock mutation.
 - Player sensory follow-ups that ask about danger, source, proximity, mechanism, route truth, or current property route to bounded observation.
 - Exact hard micro-results with no prose latitude should be typed renderables, not model paraphrase traps.
+- Budget model stages against visible answer tokens separately from provider reasoning tokens, and set timeouts from measured thinking-model latency; a healthy 55–65 second GLM response must not be classified as unavailable.
 
 ## Evidence Handling
 

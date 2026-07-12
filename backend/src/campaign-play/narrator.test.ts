@@ -170,6 +170,28 @@ describe("Campaign Play narrator", () => {
     }]);
   });
 
+  it("allows opening pressure to remain part of orientation without a consequence beat", () => {
+    const narrator = createCampaignPlayNarrator();
+    const proposal: CampaignPlayNarratorProposal = {
+      beats: [
+        proposalFixture().beats[0]!,
+        proposalFixture().beats[2]!,
+      ],
+    };
+
+    const result = narrator.compile({
+      narrationId: "narration-opening-orientation",
+      packet: packetFixture(),
+      proposal,
+      createdAt: 1_000,
+    });
+
+    expect(result.narration.effects).toEqual([{
+      kind: "flash",
+      beatId: result.narration.beats[0]!.beatId,
+    }]);
+  });
+
   it("rejects missing orientation, missing handoff, model-owned choices, and leaked handles", () => {
     const narrator = createCampaignPlayNarrator();
     const base = {

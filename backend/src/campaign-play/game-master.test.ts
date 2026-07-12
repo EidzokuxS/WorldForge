@@ -191,6 +191,8 @@ describe("Campaign Play Game Master", () => {
     expect(options).toMatchObject({ strictSchema: true, allowRepair: false, allowTextFallback: false,
       retries: 1, timeout: budget.maximumDurationMs, abortSignal: expect.any(AbortSignal) });
     expect(String(options.prompt)).toContain("opaque handles");
+    expect(String(options.prompt)).toContain("Never return an empty effects array");
+    expect(String(options.prompt)).toContain("eventClass discovery");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
   });

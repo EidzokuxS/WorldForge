@@ -16,6 +16,7 @@ import {
   getStructuredOutputModelMetadata,
   resolveStructuredOutputCapability,
 } from "../ai/structured-output-capabilities.js";
+import { createLogger } from "../lib/index.js";
 import {
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
@@ -25,6 +26,8 @@ import {
   canonicalizeCampaignPlayProjection,
   hashCampaignPlayProjection,
 } from "./campaign-play-projection.js";
+
+const log = createLogger("campaign-play-narrator");
 
 const text = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim());
@@ -245,9 +248,6 @@ function assertProposalForPacket(
     (packet.turnKind === "opening" && proposal.beats[0]?.purpose !== "orientation") ||
     (packet.availableIntents.length > 0 &&
       proposal.beats.at(-1)?.purpose !== "action_handoff") ||
-    (packet.turnKind === "opening" &&
-      (packet.visiblePressures.length > 0 || packet.consequences.length > 0) &&
-      !proposal.beats.some((beat) => beat.purpose === "consequence")) ||
     (packet.actionContext !== null &&
       packet.actionContext.disposition !== "clarification_required" &&
       !proposal.beats.some((beat) => beat.purpose === "consequence"))
@@ -320,7 +320,12 @@ export function createCampaignPlayNarrator(
       : consequenceBeat
         ? { kind: "flash" as const, beatId: consequenceBeat.beatId }
         : openingBeat
-          ? { kind: "fade" as const, beatId: openingBeat.beatId }
+          ? {
+              kind: packet.visiblePressures.length > 0 || packet.consequences.length > 0
+                ? "flash" as const
+                : "fade" as const,
+              beatId: openingBeat.beatId,
+            }
           : null;
     const narration = campaignPlayNarrationSchema.parse({
       narrationId: input.narrationId,
@@ -452,6 +457,10 @@ export function createCampaignPlayNarrator(
         });
       } catch (cause) {
         if (cause instanceof CampaignPlayNarratorError) {
+          log.warn("Narration proposal failed semantic compilation.", {
+            code: cause.code,
+            stack: cause.stack,
+          });
           throw new CampaignPlayNarratorError(cause.code, {
             ...modelEvidence,
             errorCode: "narration_invalid",

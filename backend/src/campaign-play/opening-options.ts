@@ -8,6 +8,7 @@ import {
 } from "./contracts.js";
 import { deriveCampaignPlayPublicHandle } from "./campaign-play-projection.js";
 import type { LoadedCampaignPlayState } from "./campaign-play-state-repository.js";
+import { isActorPresentInOpeningArea } from "./opening-location.js";
 
 const ROLE_OPTIONS = [
   { key: "outsider", label: "Outsider" },
@@ -61,10 +62,8 @@ function isViableOpeningLocation(
       .filter((actor) => actor.kind === "person" && actor.role === "support")
       .map((actor) => actor.id),
   );
-  const hasSupport = review.placements.some((placement) =>
-    placement.locationId === locationId &&
-    placement.placementKind === "present" &&
-    supportActorIds.has(placement.actorId)
+  const hasSupport = [...supportActorIds].some((actorId) =>
+    isActorPresentInOpeningArea(review, actorId, locationId)
   );
   const hasPressure = review.pressures.some((pressure) =>
     pressure.locationIds.includes(locationId)

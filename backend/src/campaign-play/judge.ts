@@ -13,6 +13,7 @@ import {
   getStructuredOutputModelMetadata,
   resolveStructuredOutputCapability,
 } from "../ai/structured-output-capabilities.js";
+import { createLogger } from "../lib/index.js";
 import {
   CAMPAIGN_PLAY_RESULT_TIER_VALUES,
   campaignPlayElapsedBoundsSchema,
@@ -26,6 +27,8 @@ import {
   type CampaignPlayUncertaintyResolution,
 } from "./contracts.js";
 import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
+
+const log = createLogger("campaign-play-judge");
 
 const line = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim())
@@ -67,7 +70,13 @@ const judgeProposalSchema = z.object({
   elapsedBounds: campaignPlayElapsedBoundsSchema,
   uncertainty: campaignPlayUncertaintySpecSchema,
   reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
-  clarificationQuestion: line(CAMPAIGN_PLAY_LIMITS.shortText).nullable(),
+  clarificationQuestion: z.union([
+    line(CAMPAIGN_PLAY_LIMITS.shortText),
+    z.literal(""),
+  ])
+    .nullable()
+    .optional()
+    .transform((value) => value || null),
 }).strict();
 
 export interface CampaignPlayJudgeFrame extends z.infer<typeof campaignPlayJudgeFrameSchema> {}
@@ -75,6 +84,10 @@ export interface CampaignPlayJudgeInput {
   originalText: string;
   source: "freeform" | "suggested";
   choiceHandle: string | null;
+  frozenChoice?: {
+    kind: PlayerIntent["kind"];
+    targets: PlayerIntent["targets"];
+  } | null;
 }
 
 export interface CampaignPlayModelBudget {
@@ -181,11 +194,24 @@ function evidenceFromTrace(
   };
 }
 
-function withinBudget(evidence: CampaignPlayModelEvidence, budget: CampaignPlayModelBudget): boolean {
+function withinBudget(
+  evidence: CampaignPlayModelEvidence,
+  budget: CampaignPlayModelBudget,
+  reasoningTokens = 0,
+): boolean {
+  const boundedReasoningTokens = Number.isSafeInteger(reasoningTokens) && reasoningTokens > 0
+    ? reasoningTokens
+    : 0;
+  const contentOutputTokens = evidence.outputTokens === null
+    ? null
+    : Math.max(0, evidence.outputTokens - boundedReasoningTokens);
+  const contentTotalTokens = evidence.totalTokens === null
+    ? null
+    : Math.max(0, evidence.totalTokens - boundedReasoningTokens);
   return evidence.durationMs <= budget.maximumDurationMs
     && (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens)
-    && (evidence.outputTokens === null || evidence.outputTokens <= budget.maximumOutputTokens)
-    && (evidence.totalTokens === null || evidence.totalTokens <= budget.maximumTotalTokens)
+    && (contentOutputTokens === null || contentOutputTokens <= budget.maximumOutputTokens)
+    && (contentTotalTokens === null || contentTotalTokens <= budget.maximumTotalTokens)
     && (evidence.estimatedCostMicros === null || evidence.estimatedCostMicros <= budget.maximumCostMicros);
 }
 
@@ -202,10 +228,12 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "Classify the action as deterministic, uncertain, impossible, or clarification_required.",
     "For deterministic rulings use one exact result tier. For impossible or clarification use no_effect.",
     "For uncertain rulings define a d20 check; code performs the roll. Never claim a roll result.",
+    "For suggested input, copy FROZEN_CHOICE kind and targets exactly. Judge feasibility and outcome without reinterpreting the selected action.",
     "Return one strict schema object and no prose.",
     `VISIBLE_FRAME=${JSON.stringify(visibleFrame)}`,
     `INPUT_SOURCE=${input.source}`,
     `CHOICE_HANDLE=${JSON.stringify(input.choiceHandle)}`,
+    `FROZEN_CHOICE=${JSON.stringify(input.frozenChoice ?? null)}`,
     `PLAYER_INPUT=${JSON.stringify(input.originalText)}`,
   ].join("\n");
 }
@@ -221,9 +249,16 @@ function compile(
     originalText: z.string().min(1).max(CAMPAIGN_PLAY_LIMITS.playerInput),
     source: z.enum(["freeform", "suggested"]),
     choiceHandle: line(CAMPAIGN_PLAY_LIMITS.handle).nullable(),
+    frozenChoice: z.object({
+      kind: z.enum(["observe", "move", "contact", "wait", "attempt"]),
+      targets: z.array(campaignPlayVisibleTargetSchema).max(CAMPAIGN_PLAY_LIMITS.targets),
+    }).strict().nullable().optional(),
   }).strict().superRefine((value, context) => {
     if ((value.source === "suggested") !== (value.choiceHandle !== null)) {
       context.addIssue({ code: "custom", path: ["choiceHandle"], message: "Choice handle must match source." });
+    }
+    if ((value.source === "suggested") !== (value.frozenChoice != null)) {
+      context.addIssue({ code: "custom", path: ["frozenChoice"], message: "Frozen choice must match source." });
     }
   }).safeParse(input);
   if (!inputResult.success) throw new CampaignPlayJudgeError("judge_input_invalid", null, { cause: inputResult.error });
@@ -325,7 +360,11 @@ export function createCampaignPlayJudge(
           errorCode: "model_contract_failed",
         });
       }
-      if (!withinBudget(modelEvidence, request.budget)) {
+      if (!withinBudget(
+        modelEvidence,
+        request.budget,
+        generated.trace.usage?.reasoningTokens,
+      )) {
         throw new CampaignPlayJudgeError("stage_budget_exceeded", { ...modelEvidence, errorCode: "stage_budget_exceeded" });
       }
       let ruling: CampaignPlayJudgeRuling;
@@ -333,6 +372,10 @@ export function createCampaignPlayJudge(
         ruling = compile(parsedFrame.data, request.input, generated.object);
       } catch (cause) {
         if (cause instanceof CampaignPlayJudgeError) {
+          log.warn("Judge proposal failed semantic compilation.", {
+            code: cause.code,
+            stack: cause.stack,
+          });
           throw new CampaignPlayJudgeError(cause.code, {
             ...modelEvidence,
             errorCode: cause.code,

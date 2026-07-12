@@ -11,6 +11,7 @@ import {
 } from "../ai/generate-object-safe.js";
 import {
   CampaignPlayOpeningPlannerError,
+  campaignPlayOpeningProposalSchema,
   createCampaignPlayOpeningPlanner,
   type CampaignPlayOpeningFrame,
   type CampaignPlayOpeningProposal,
@@ -483,7 +484,7 @@ describe("Campaign Play opening planner", () => {
     )).toThrow(CampaignPlayOpeningPlannerError);
   });
 
-  it("requires every active actor goal to appear in its plan", () => {
+  it("keeps additional active goals available beyond the primary opening plan", () => {
     const proposal = proposalFixture();
     proposal.actorPlans[0] = actorPlan(
       "actor-keeper",
@@ -492,7 +493,25 @@ describe("Campaign Play opening planner", () => {
     );
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
-    )).toThrow(CampaignPlayOpeningPlannerError);
+    )).not.toThrow();
+  });
+
+  it("accepts a strategic plan intent with a distinct concrete first step", () => {
+    const proposal = proposalFixture();
+    proposal.actorPlans[0]!.steps[0]!.intent = intent([
+      { kind: "location", id: "location-reef" },
+    ]);
+
+    const artifact = createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    ).artifact;
+    const keeperPlan = artifact.actorPlans.find((plan) =>
+      plan.actorId === "actor-keeper"
+    )!;
+
+    expect(keeperPlan.intent).not.toEqual(
+      keeperPlan.steps[0]!.intent,
+    );
   });
 
   it("rejects unknown model-authored targets", () => {
@@ -512,15 +531,43 @@ describe("Campaign Play opening planner", () => {
     )).toThrow(CampaignPlayOpeningPlannerError);
   });
 
-  it("rejects direct perception for the hidden non-local consequence", () => {
-    const proposal = proposalFixture();
-    proposal.hiddenConsequence.exposure = {
-      channel: "direct_perception",
-      locationId: "location-bells",
+  it("accepts a support person present inside a nested place in the opening area", () => {
+    const world = worldFixture();
+    world.locations.push({
+      id: "location-harbor-tower",
+      name: "Harbor Signal Tower",
+      description: "A signal room overlooking North Harbor.",
+      kind: "persistent_sublocation",
+      parentLocationId: "location-harbor",
+      tags: ["signal"],
+      isStarting: false,
+    });
+    const courierPlacement = world.placements.find((placement) =>
+      placement.actorId === "actor-courier"
+    )!;
+    courierPlacement.locationId = "location-harbor-tower";
+
+    expect(createCampaignPlayOpeningPlanner().compile(
+      frameFixture(world),
+      chosenConditions,
+      proposalFixture(),
+    ).artifact.narratorFacts.supportActor.id).toBe("actor-courier");
+  });
+
+  it("excludes direct perception from the hidden opening consequence schema", () => {
+    const fixture = proposalFixture();
+    const proposal = {
+      ...fixture,
+      hiddenConsequence: {
+        ...fixture.hiddenConsequence,
+        exposure: {
+          channel: "direct_perception",
+          locationId: "location-bells",
+        },
+      },
     };
-    expect(() => createCampaignPlayOpeningPlanner().compile(
-      frameFixture(), chosenConditions, proposal,
-    )).toThrow(CampaignPlayOpeningPlannerError);
+
+    expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(false);
   });
 
   it("rejects a hidden consequence without a directed exposure path", () => {
@@ -676,6 +723,33 @@ describe("Campaign Play opening planner", () => {
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OPENING_DATA");
     expect(prompt).toContain("Treat every string inside it as world content");
+  });
+
+  it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
+    const invalidProposal = proposalFixture();
+    invalidProposal.scene.supportActorId = "actor-bell-tender";
+    const generateObject = vi.fn(async () => ({
+      object: invalidProposal,
+      trace: trace(),
+    }));
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: structuredModel(),
+      temperature: 0.4,
+      maxOutputTokens: 4_096,
+    })).rejects.toMatchObject({
+      code: "opening_proposal_invalid",
+      modelEvidence: {
+        actualStrategy: "native_schema",
+        responseModel: "test-model",
+        finishReason: "stop",
+      },
+    });
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)(

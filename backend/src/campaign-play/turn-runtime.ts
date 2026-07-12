@@ -9,6 +9,7 @@ import {
   type CampaignPlayTurnAdmissionRequest,
   type CampaignPlayTurnAdmissionResponse,
 } from "@worldforge/shared";
+import { createLogger } from "../lib/index.js";
 import {
   CAMPAIGN_PLAY_COMMAND_METADATA,
   campaignPlayActionContextSchema,
@@ -73,6 +74,7 @@ import {
   type CampaignPlayWorkerLeaseToken,
   type LoadedCampaignPlayTurn,
 } from "./campaign-play-turn-repository.js";
+
 import {
   CampaignPlayExternalStageInterruption,
   createCampaignPlayTurnService,
@@ -104,6 +106,8 @@ import {
   createCampaignPlayVisibilityService,
   type CampaignPlayVisibilityService,
 } from "./visibility-service.js";
+
+const log = createLogger("campaign-play-turn-runtime");
 
 const line = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => value === value.trim())
@@ -1269,6 +1273,16 @@ export function createCampaignPlayTurnRuntime(
             try {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
               currentGameMasterFrame(input.handle, context.turn);
+              const frozenChoice = admission.judgeInput.source === "suggested"
+                ? admission.choiceBindings.find((choice) =>
+                    choice.handle === admission.judgeInput.choiceHandle)
+                : null;
+              if (admission.judgeInput.source === "suggested" && !frozenChoice) {
+                throw new CampaignPlayTurnRuntimeError(
+                  "turn_artifact_invalid",
+                  "Campaign Play suggested action lost its frozen binding.",
+                );
+              }
               const result = await judge.judge({
                 frame: campaignPlayJudgeFrameSchema.parse({
                   campaignId: admission.campaignId,
@@ -1278,7 +1292,12 @@ export function createCampaignPlayTurnRuntime(
                   worldTimeMinutes: admission.worldTimeMinutes,
                   visibleFacts: admission.visibleFacts,
                 }),
-                input: admission.judgeInput,
+                input: {
+                  ...admission.judgeInput,
+                  frozenChoice: frozenChoice
+                    ? { kind: frozenChoice.kind, targets: frozenChoice.targets }
+                    : null,
+                },
                 model: input.judgeModel.languageModel,
                 temperature: input.judgeModel.temperature,
                 budget: modelBudget(input.judgeModel),
@@ -1323,6 +1342,10 @@ export function createCampaignPlayTurnRuntime(
               };
             } catch (cause) {
               if (cause instanceof CampaignPlayExternalStageInterruption) throw cause;
+              log.warn("Judge stage failed before artifact acceptance.", {
+                code: cause instanceof CampaignPlayJudgeError ? cause.code : null,
+                stack: cause instanceof Error ? cause.stack : String(cause),
+              });
               throw judgeInterruption(
                 input.judgeModel.requested,
                 cause,

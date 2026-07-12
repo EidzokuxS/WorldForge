@@ -79,9 +79,9 @@ import {
   type CampaignPlayReadModel,
 } from "./campaign-play-read-model.js";
 
-const LEASE_DURATION_MS = 60_000;
+const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
-const MAXIMUM_STAGE_DURATION_MS = 45_000;
+const MAXIMUM_STAGE_DURATION_MS = 120_000;
 const MAXIMUM_INPUT_TOKENS = 64_000;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
 
@@ -126,7 +126,7 @@ interface CampaignPlayApplicationDependencies {
   runtimeFactory?: CampaignPlayRuntimeFactory;
   now: () => number;
   owner: string;
-  uncertaintySeedKey: () => string;
+  uncertaintySeedKey: (campaignId: string, acceptedContentHash: string) => string;
   setTimer: (callback: () => void, delayMilliseconds: number) => ReturnType<typeof setTimeout>;
   clearTimer: (timer: ReturnType<typeof setTimeout>) => void;
 }
@@ -391,7 +391,13 @@ export function createCampaignPlayApplication(
     createReadModel: createCampaignPlayReadModel,
     now: Date.now,
     owner: `campaign-play-${process.pid}-${crypto.randomUUID()}`,
-    uncertaintySeedKey: () => process.env.CAMPAIGN_PLAY_UNCERTAINTY_SEED_KEY ?? "",
+    uncertaintySeedKey: (campaignId, acceptedContentHash) =>
+      process.env.CAMPAIGN_PLAY_UNCERTAINTY_SEED_KEY
+      ?? hashCampaignPlayProjection({
+        domain: "campaign_play_uncertainty_seed_key",
+        campaignId,
+        acceptedContentHash,
+      }),
     setTimer: (callback, delayMilliseconds) => setTimeout(callback, delayMilliseconds),
     clearTimer: (timer) => clearTimeout(timer),
     ...overrides,
@@ -445,6 +451,10 @@ export function createCampaignPlayApplication(
     selection?: CampaignPlayTurnModelSelection,
   ): CampaignPlayTurnRuntime => {
     const settings = dependencies.loadSettings();
+    const state = createCampaignPlayStateRepository(handle).loadState();
+    if (!state) {
+      return fail("service_unavailable", "Campaign Play state is unavailable.");
+    }
     const turnSelection = selection?.turnKind === "player_action" ? selection : null;
     const judge = turnSelection
       ? frozenRole(settings, "Judge", settings.judge, turnSelection.judge)
@@ -467,7 +477,10 @@ export function createCampaignPlayApplication(
       owner: dependencies.owner,
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-      uncertaintySeedKey: dependencies.uncertaintySeedKey(),
+      uncertaintySeedKey: dependencies.uncertaintySeedKey(
+        handle.campaignId,
+        state.authority.acceptedContentHash,
+      ),
       judgeModel: stageModel(
         judge,
         judgeRequested,
