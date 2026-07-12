@@ -33,6 +33,17 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --r
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane first-playable --run-config <config>
 ```
 
+Accepted worlds are snapshotted before character creation and reused through isolated campaign roots:
+
+```powershell
+node --import tsx e2e/campaign-play/world-template-cli.ts --phase snapshot --campaign-id <id> --template-id <template>
+node --import tsx e2e/campaign-play/world-template-cli.ts --phase materialize --template <template-directory> --run-id <run>
+$env:GSD_CAMPAIGNS_ROOT = '<materialized-campaigns-root>'
+npm run dev:playtest
+```
+
+Snapshot fails unless the campaign is `character_required` with zero characters and zero turns. It uses SQLite's online backup API instead of copying WAL files, freezes the accepted content and source commit, and hashes `state.db` plus `config.json`. Materialization verifies those hashes and creates a new run-owned `campaigns` root without rekeying IDs, overwriting a prior run, or touching the live campaign library.
+
 The browser collector attaches to the already open exact campaign URL. With `--watch-actions 2`, it records CDP request and response evidence until two player-action admissions and the following settled state refresh have occurred. It captures the resulting public DOM, screenshot, browser errors, failed requests, and inventory without clicking or submitting controls.
 
 Finalization reopens SQLite read-only, compares accepted snapshot, content, and eligibility hashes with the pre-character freeze, requires the configured action count and reload proof, merges signed browser/network evidence, writes the bundle, and runs the standard validator.
@@ -67,6 +78,7 @@ Metered runs derive each stage cost from the exact pricing frozen in that turn's
 - The fresh Brass Orchard Roads world passed review with 10 locations, 20 directed routes, 10 actors, and five pressures, then exposed an opening-option topology gap after character creation. Its viable starting macro reached the terrace network through a persistent lift-station sublocation, but option admission compared the sublocation ID directly with the reachable-macro set and returned no starting choices. Opening route viability now lifts a route destination through its location ancestry; a focused regression proves a macro opening with a support actor, pressure, and outgoing sublocation route remains selectable.
 - Brass Orchard Roads then completed five manually chosen `glm-5.2` actions. A peripheral lift-cage watch produced a bounded craft observation; an unsolicited inspection at Ironshaft was plausibly rejected; two visible route choices carried Mara through First Terrace to Blacksoil Orchard; and the fourth action exposed Ahren's opening event as concrete `Visible aftermath` without naming its source or hidden cause. This proves the world, topology, actor scheduling, exact exposure channel, and narrator projection work together. It also proves the two-action promotion budget was too short: the accepted exposure path required three moves after the required peripheral wait, so the next clean lane uses four player actions.
 - The fifth action exposed an NPC-agency defect. Judge correctly recognized that Mara had no tested trust but allowed `strong_success`; Game Master then treated that tier as permission for Ahren to volunteer his hidden fragment cache after one neutral question. Judge now caps private disclosure without visible trust or leverage, and Game Master must keep every result tier inside the exact player intent instead of manufacturing trust, access, or unrelated admissions. Focused Judge and Game Master verification passes 32 tests, backend typecheck passes, and prompt-craft plus humanizer/deslop review found the final instructions concrete and direct. Manual prose review otherwise found coherent scene continuity; one earlier line incorrectly described metal chains as `frayed`, which remains a Storyteller quality finding for the clean replay.
+- Brass Orchard Longroad is frozen as the first reusable accepted-world template at commit `d59fa3a4`, content hash `af2f9af62ff8d94cd9ddf8427f5076f1afa9199d61d8c019bac40d0793a94d1f`. The template is verified at `character_required`, world/runtime revision `1/1`, with zero characters and turns. It was materialized successfully into an isolated run-owned campaigns root. Two focused template tests and the Campaign Play E2E typecheck pass.
 - The pricing change had CRITICAL transitive Settings impact. Full shared, backend, frontend, E2E typechecks/tests and the production build pass; absent pricing keeps the previous serialized settings shape.
 
 The configured Coding Plan provider is authenticated and resolves Generator, Judge, and Storyteller to `glm-5.2`. The provider reports plan `pro`; the evidence lane uses subscription quota accounting because Coding Plan does not expose a truthful per-token charge for this run. Deterministic narration and zero-cost accounting are not accepted as substitutes.
