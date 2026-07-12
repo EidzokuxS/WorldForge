@@ -1261,6 +1261,25 @@ describe("Campaign Play shared public contracts", () => {
         retryEligible: !metadata.retryEligible,
       }).success).toBe(false);
     }
+    const unavailableWithoutState = {
+      code: "service_unavailable" as const,
+      status: 503 as const,
+      campaignPhase: null,
+      acceptedWorldVersion: null,
+      expectedWorldVersion: null,
+      currentWorldVersion: null,
+      expectedRuntimeRevision: null,
+      currentRuntimeRevision: null,
+      turnId: null,
+      retryEligible: true,
+      unmetRequirements: [],
+    };
+    expect(campaignPlayErrorResponseSchema.parse(unavailableWithoutState))
+      .toEqual(unavailableWithoutState);
+    expect(campaignPlayErrorResponseSchema.safeParse({
+      ...unavailableWithoutState,
+      campaignPhase: "ready",
+    }).success).toBe(false);
   });
 
   it("rejects nested unknown keys and invalid discriminators", () => {

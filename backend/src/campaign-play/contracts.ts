@@ -1281,13 +1281,13 @@ export const CAMPAIGN_PLAY_ERROR_METADATA = {
   turn_not_resumable: { status: 409, retryEligible: false, context: "play" },
   turn_interrupted: { status: 503, retryEligible: true, context: "play" },
   turn_failed: { status: 503, retryEligible: false, context: "play" },
-  service_unavailable: { status: 503, retryEligible: true, context: "play" },
+  service_unavailable: { status: 503, retryEligible: true, context: "optional" },
 } as const satisfies Record<
   (typeof CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES)[number],
   {
     status: 404 | 409 | 422 | 503;
     retryEligible: boolean;
-    context: "none" | "play";
+    context: "none" | "play" | "optional";
   }
 >;
 
@@ -1345,6 +1345,17 @@ export const campaignPlayErrorResponseSchema:
         code: "custom",
         path: ["campaignPhase"],
         message: "Play error requires the current versioned state context.",
+      });
+    }
+    if (
+      metadata.context === "optional" &&
+      playContext.some((value) => value === null) &&
+      playContext.some((value) => value !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["campaignPhase"],
+        message: "Optional play error context must be complete or absent.",
       });
     }
     if (

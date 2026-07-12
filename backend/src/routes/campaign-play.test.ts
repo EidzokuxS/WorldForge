@@ -307,6 +307,24 @@ describe("Campaign Play routes", () => {
     const unacceptedResponse = await unaccepted.request(`/${CAMPAIGN_ID}/play/state`);
     expect(campaignPlayErrorResponseSchema.parse(await unacceptedResponse.json()))
       .toMatchObject({ code: "world_not_accepted", status: 422 });
+
+    vi.mocked(fixture.application.loadState).mockImplementation(() => {
+      throw new Error("private database failure");
+    });
+    const unavailable = createCampaignPlayRoutes({
+      application: fixture.application,
+      readCampaign: vi.fn(() => ({ name: "Campaign" } as never)),
+    });
+    const unavailableResponse = await unavailable.request(`/${CAMPAIGN_ID}/play/state`);
+    expect(unavailableResponse.status).toBe(503);
+    expect(campaignPlayErrorResponseSchema.parse(await unavailableResponse.json()))
+      .toMatchObject({
+        code: "service_unavailable",
+        campaignPhase: null,
+        acceptedWorldVersion: null,
+        currentWorldVersion: null,
+        currentRuntimeRevision: null,
+      });
     vi.mocked(fixture.application.loadState).mockImplementation(() => fixture.state);
 
     vi.mocked(fixture.application.admitTurn).mockImplementation(() => {

@@ -1432,6 +1432,7 @@ Goal: prove the first genuinely playable real-provider slice through the rendere
 - [x] Capture exact CDP network methods, paths, statuses, and request hashes without choosing or submitting actions.
 - [x] Merge live browser actions, network evidence, screenshots, reload probes, errors, and human notes into the standard bundle.
 - [x] Prove the live session and bundle overlay through adjacent regressions; add no smoke suite.
+- [x] Keep `service_unavailable` schema-valid when Campaign Play state itself cannot be loaded, without inventing version context.
 - [ ] Configure and verify one real provider/model set plus known frozen pricing for Generator, Judge, and Storyteller.
 - [ ] Build and accept one fresh eligible Campaign World through normal UI navigation.
 - [ ] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.

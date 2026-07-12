@@ -46,6 +46,7 @@ The writer derives each stage cost from the exact model pricing frozen in that t
 - Deterministic replay regressions remain byte-identical after extracting the shared read-only report capture.
 - E2E typecheck, focused live/bundle/replay tests, capture-script syntax, and diff check pass.
 - GitNexus reports LOW impact for the E2E report, writer, and runner seams with no affected production execution flow.
+- A saved campaign without loadable Campaign Play state exposed a recursive error-contract failure: `service_unavailable` required state fields that the failing state load could not supply. The contract now admits either a complete versioned context or no context for that code, rejects partial context, and returns a schema-valid retryable `503` without logging a second Zod failure.
 
 The current Settings state has no authenticated model provider. A control Generator request reaches the configured remote endpoint and is rejected for missing credentials. The default application selection also records unknown model pricing, so provider setup must establish real pricing authority before this lane can promote. Deterministic narration and zero-cost accounting are not accepted as substitutes.
 
