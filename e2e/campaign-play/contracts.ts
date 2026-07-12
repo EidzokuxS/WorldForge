@@ -95,6 +95,26 @@ const liveModelPricingSchema = z.object({
   outputCostMicros: nonnegativeIntegerSchema,
 }).strict();
 
+const meteredBillingSchema = z.object({
+  kind: z.literal("metered"),
+  pricing: z.object({
+    generator: liveModelPricingSchema,
+    judge: liveModelPricingSchema,
+    storyteller: liveModelPricingSchema,
+  }).strict(),
+  maximumCostMicros: positiveIntegerSchema,
+}).strict();
+
+const subscriptionBillingSchema = z.object({
+  kind: z.literal("subscription"),
+  providerName: identifierSchema,
+  planId: identifierSchema,
+  currency: z.literal("USD"),
+  monthlyListPriceMicros: positiveIntegerSchema,
+  pricingSourceUrl: z.string().url(),
+  quotaEndpoint: z.string().url(),
+}).strict();
+
 const liveExecutionSchema = z.object({
   kind: z.literal("live"),
   providerId: identifierSchema,
@@ -103,14 +123,9 @@ const liveExecutionSchema = z.object({
     judge: identifierSchema,
     storyteller: identifierSchema,
   }).strict(),
-  pricing: z.object({
-    generator: liveModelPricingSchema,
-    judge: liveModelPricingSchema,
-    storyteller: liveModelPricingSchema,
-  }).strict(),
+  billing: z.discriminatedUnion("kind", [meteredBillingSchema, subscriptionBillingSchema]),
   maximumInputTokens: positiveIntegerSchema,
   maximumOutputTokens: positiveIntegerSchema,
-  maximumCostMicros: positiveIntegerSchema,
   maximumTurnDurationMs: positiveIntegerSchema,
 }).strict();
 
@@ -220,17 +235,42 @@ export const campaignPlayCheckpointSchema = z.object({
   foreignKeyViolations: z.literal(0),
 }).strict();
 
-export const campaignPlayBudgetSchema = z.object({
+const campaignPlayBudgetBaseShape = {
   evidenceVersion: z.literal(CAMPAIGN_PLAY_EVIDENCE_VERSION),
   runId: identifierSchema,
   maximumInputTokens: nonnegativeIntegerSchema,
   maximumOutputTokens: nonnegativeIntegerSchema,
-  maximumCostMicros: nonnegativeIntegerSchema,
   actualInputTokens: nonnegativeIntegerSchema,
   actualOutputTokens: nonnegativeIntegerSchema,
-  actualCostMicros: nonnegativeIntegerSchema,
   p95TurnDurationMs: nonnegativeIntegerSchema,
   p99TurnDurationMs: nonnegativeIntegerSchema,
+} as const;
+
+export const campaignPlaySubscriptionQuotaSnapshotSchema = z.object({
+  capturedAt: timestampSchema,
+  planId: identifierSchema,
+  tokensFiveHours: z.object({
+    percentage: nonnegativeIntegerSchema.max(100),
+    nextResetAt: timestampSchema,
+  }).strict(),
+  tokensWeekly: z.object({
+    percentage: nonnegativeIntegerSchema.max(100),
+    nextResetAt: timestampSchema,
+  }).strict(),
+  toolsMonthly: z.object({
+    limit: nonnegativeIntegerSchema,
+    used: nonnegativeIntegerSchema,
+    remaining: nonnegativeIntegerSchema,
+    percentage: nonnegativeIntegerSchema.max(100),
+    nextResetAt: timestampSchema,
+  }).strict(),
+}).strict();
+
+const meteredBudgetSchema = z.object({
+  ...campaignPlayBudgetBaseShape,
+  billingKind: z.literal("metered"),
+  maximumCostMicros: nonnegativeIntegerSchema,
+  actualCostMicros: nonnegativeIntegerSchema,
 }).strict().superRefine((value, context) => {
   if (value.actualInputTokens > value.maximumInputTokens) {
     context.addIssue({ code: "custom", path: ["actualInputTokens"], message: "Input token budget was exceeded." });
@@ -242,6 +282,36 @@ export const campaignPlayBudgetSchema = z.object({
     context.addIssue({ code: "custom", path: ["actualCostMicros"], message: "Cost budget was exceeded." });
   }
 });
+
+const subscriptionBudgetSchema = z.object({
+  ...campaignPlayBudgetBaseShape,
+  billingKind: z.literal("subscription"),
+  providerName: identifierSchema,
+  planId: identifierSchema,
+  currency: z.literal("USD"),
+  monthlyListPriceMicros: positiveIntegerSchema,
+  attributableCostMicros: z.null(),
+  quotaBefore: campaignPlaySubscriptionQuotaSnapshotSchema,
+  quotaAfter: campaignPlaySubscriptionQuotaSnapshotSchema,
+}).strict().superRefine((value, context) => {
+  if (value.actualInputTokens > value.maximumInputTokens) {
+    context.addIssue({ code: "custom", path: ["actualInputTokens"], message: "Input token budget was exceeded." });
+  }
+  if (value.actualOutputTokens > value.maximumOutputTokens) {
+    context.addIssue({ code: "custom", path: ["actualOutputTokens"], message: "Output token budget was exceeded." });
+  }
+  if (value.quotaBefore.planId !== value.planId || value.quotaAfter.planId !== value.planId) {
+    context.addIssue({ code: "custom", path: ["planId"], message: "Quota snapshots must match the frozen subscription plan." });
+  }
+  if (value.quotaAfter.capturedAt < value.quotaBefore.capturedAt) {
+    context.addIssue({ code: "custom", path: ["quotaAfter", "capturedAt"], message: "The final quota snapshot cannot precede the initial snapshot." });
+  }
+});
+
+export const campaignPlayBudgetSchema = z.discriminatedUnion("billingKind", [
+  meteredBudgetSchema,
+  subscriptionBudgetSchema,
+]);
 
 export const campaignPlayTurnEvidenceSchema = z.object({
   runId: identifierSchema,
@@ -329,7 +399,7 @@ export const campaignPlayModelStageEvidenceSchema = z.object({
   textFallbackUsed: z.literal(false),
   inputTokens: nonnegativeIntegerSchema,
   outputTokens: nonnegativeIntegerSchema,
-  costMicros: nonnegativeIntegerSchema,
+  costMicros: nonnegativeIntegerSchema.nullable(),
   durationMs: nonnegativeIntegerSchema,
   artifactHash: hashSchema,
 }).strict();

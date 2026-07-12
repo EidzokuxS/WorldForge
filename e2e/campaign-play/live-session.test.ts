@@ -11,6 +11,7 @@ import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./co
 import { createDefaultSettings } from "@worldforge/shared";
 import {
   bindCampaignPlayManualDecision,
+  captureCampaignPlaySubscriptionQuota,
   campaignPlayLiveSessionRoot,
   prepareCampaignPlayLiveSession,
   stageCampaignPlayManualDecision,
@@ -47,11 +48,44 @@ function liveConfig(outputRoot: string, campaignId: string, expectedPlayerAction
       kind: "live",
       providerId: "provider",
       models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
-      pricing: { generator: pricing, judge: pricing, storyteller: pricing },
+      billing: {
+        kind: "metered",
+        pricing: { generator: pricing, judge: pricing, storyteller: pricing },
+        maximumCostMicros: 1_000_000,
+      },
       maximumInputTokens: 10_000,
       maximumOutputTokens: 10_000,
-      maximumCostMicros: 1_000_000,
       maximumTurnDurationMs: 120_000,
+    },
+    restartAfterPlayerActions: [],
+    operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+  };
+}
+
+function subscriptionConfig(outputRoot: string, campaignId: string): CampaignPlayRunConfig {
+  return {
+    evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+    runId: "first-playable-subscription",
+    lane: "first-playable",
+    campaignId,
+    expectedPlayerActions: 2,
+    outputRoot,
+    execution: {
+      kind: "live",
+      providerId: "zai-coding-plan",
+      models: { generator: "glm-5.2", judge: "glm-5.2", storyteller: "glm-5.2" },
+      billing: {
+        kind: "subscription",
+        providerName: "Z.AI Coding Plan",
+        planId: "pro",
+        currency: "USD",
+        monthlyListPriceMicros: 72_000_000,
+        pricingSourceUrl: "https://z.ai/subscribe",
+        quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
+      },
+      maximumInputTokens: 100_000,
+      maximumOutputTokens: 20_000,
+      maximumTurnDurationMs: 180_000,
     },
     restartAfterPlayerActions: [],
     operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
@@ -84,12 +118,14 @@ describe("Campaign Play live evidence session", () => {
       apiKey: "",
       defaultModel: "generator",
     };
-    const pricing = config.execution.kind === "live" ? config.execution.pricing : null;
+    const pricing = config.execution.kind === "live" && config.execution.billing.kind === "metered"
+      ? config.execution.billing.pricing
+      : null;
     settings.providers.push(localProvider);
     settings.generator = { ...settings.generator, providerId: "provider", model: "generator", pricing: pricing?.generator };
     settings.judge = { ...settings.judge, providerId: "provider", model: "judge", pricing: pricing?.judge };
     settings.storyteller = { ...settings.storyteller, providerId: "provider", model: "storyteller", pricing: pricing?.storyteller };
-    const sessionRoot = prepareCampaignPlayLiveSession({
+    const sessionRoot = await prepareCampaignPlayLiveSession({
       runConfig: config,
       commit: "0000000",
       dirty: true,
@@ -98,13 +134,13 @@ describe("Campaign Play live evidence session", () => {
     });
     expect(sessionRoot).toBe(campaignPlayLiveSessionRoot(config));
     expect(fs.existsSync(path.join(sessionRoot, "probes", "eligibility-freeze.json"))).toBe(true);
-    expect(() => prepareCampaignPlayLiveSession({
+    await expect(prepareCampaignPlayLiveSession({
       runConfig: config,
       commit: "0000000",
       dirty: true,
       startedAt: 1_100,
       settings,
-    })).toThrow("already exists");
+    })).rejects.toThrow("already exists");
 
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       phase: "ready",
@@ -128,6 +164,83 @@ describe("Campaign Play live evidence session", () => {
       decisionNote: "This must wait for the first durable turn.",
       signedAt: 1_201,
     })).rejects.toThrow("already awaiting");
+  });
+
+  it("captures Coding Plan quota before and after a subscription-backed live session", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-subscription-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000003";
+    createSeededAcceptedCampaign(root, campaignId);
+    const handle = openCampaignPlayDatabase(campaignId);
+    try {
+      createCampaignPlayStateRepository(handle).createState({
+        eventId: "subscription-session-created",
+        createdAt: 1_000,
+      });
+    } finally {
+      handle.close();
+    }
+    const config = subscriptionConfig(path.join(root, "evidence"), campaignId);
+    const settings = createDefaultSettings();
+    settings.providers.push({
+      id: "zai-coding-plan",
+      name: "Z.AI Coding Plan",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      apiKey: "test-key",
+      defaultModel: "glm-5.2",
+    });
+    settings.generator = { ...settings.generator, providerId: "zai-coding-plan", model: "glm-5.2" };
+    settings.judge = { ...settings.judge, providerId: "zai-coding-plan", model: "glm-5.2" };
+    settings.storyteller = { ...settings.storyteller, providerId: "zai-coding-plan", model: "glm-5.2" };
+    const quotaResponse = {
+      code: 200,
+      success: true,
+      data: {
+        level: "pro",
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 1, nextResetTime: 10_000 },
+          { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 9, nextResetTime: 20_000 },
+          { type: "TIME_LIMIT", unit: 5, number: 1, usage: 1_000, currentValue: 0, remaining: 1_000, percentage: 0, nextResetTime: 30_000 },
+        ],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(quotaResponse), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const unsafeConfig = structuredClone(config);
+    if (unsafeConfig.execution.kind !== "live" || unsafeConfig.execution.billing.kind !== "subscription") {
+      throw new Error("The fixture must use subscription billing.");
+    }
+    unsafeConfig.runId = "first-playable-unsafe-quota";
+    unsafeConfig.execution.billing.quotaEndpoint = "https://example.invalid/collect";
+    await expect(prepareCampaignPlayLiveSession({
+      runConfig: unsafeConfig,
+      commit: "0000000",
+      dirty: false,
+      startedAt: 1_050,
+      settings,
+    })).rejects.toThrow("configured provider origin");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const sessionRoot = await prepareCampaignPlayLiveSession({
+      runConfig: config,
+      commit: "0000000",
+      dirty: false,
+      startedAt: 1_100,
+      settings,
+    });
+    await captureCampaignPlaySubscriptionQuota(config, settings);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fs.readFileSync(
+      path.join(sessionRoot, "probes", "subscription-quota-before.json"), "utf8",
+    ))).toMatchObject({ planId: "pro", tokensFiveHours: { percentage: 1 } });
+    expect(fs.existsSync(path.join(
+      sessionRoot,
+      "probes",
+      "subscription-quota-after.json",
+    ))).toBe(true);
   });
 
   it("binds a signed freeform decision to the exact completed durable turn", async () => {

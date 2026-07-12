@@ -46,7 +46,17 @@ function createCompleteBundle(): void {
   for (const directory of ["build", "checkpoints", "probes", "screenshots"]) {
     fs.mkdirSync(path.join(root, directory));
   }
-  fs.writeFileSync(path.join(root, "build", "run-config.json"), "{}", "utf8");
+  writeJson("build/run-config.json", {
+    evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+    runId: RUN_ID,
+    lane: "deterministic-10",
+    campaignId: CAMPAIGN_ID,
+    expectedPlayerActions: 1,
+    outputRoot: root,
+    execution: { kind: "deterministic", fixtureId: "bell-island", seed: "test-seed" },
+    restartAfterPlayerActions: [],
+    operators: { runner: "vitest", player: null, auditor: "validator" },
+  });
   fs.writeFileSync(path.join(root, "checkpoints", "action-1.json"), "{}", "utf8");
   fs.writeFileSync(path.join(root, "probes", "secrecy.json"), "{}", "utf8");
   fs.writeFileSync(path.join(root, "screenshots", "ready.png"), Buffer.from([1, 2, 3]));
@@ -121,6 +131,7 @@ function createCompleteBundle(): void {
   writeJson("budget.json", {
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: RUN_ID,
+    billingKind: "metered",
     maximumInputTokens: 100,
     maximumOutputTokens: 100,
     maximumCostMicros: 1,

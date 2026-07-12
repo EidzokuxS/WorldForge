@@ -12,6 +12,7 @@ import { assertCampaignPlayBundle } from "./probes.js";
 import {
   bindCampaignPlayManualDecision,
   captureCampaignPlayReloadBoundary,
+  captureCampaignPlaySubscriptionQuota,
   loadCampaignPlayLiveSession,
   prepareCampaignPlayLiveSession,
   stageCampaignPlayManualDecision,
@@ -116,7 +117,7 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
   }
   switch (phase) {
     case "prepare": {
-      const root = prepareCampaignPlayLiveSession({
+      const root = await prepareCampaignPlayLiveSession({
         runConfig: config,
         commit: gitText("rev-parse", "HEAD"),
         dirty: gitText("status", "--porcelain").length > 0,
@@ -154,6 +155,7 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
       return;
     }
     case "finalize": {
+      await captureCampaignPlaySubscriptionQuota(config);
       const session = loadCampaignPlayLiveSession(config);
       if (!session.reloadMatches) throw new Error("The live UI reload did not preserve public state bytes.");
       if (session.browserActions.length !== config.expectedPlayerActions) {

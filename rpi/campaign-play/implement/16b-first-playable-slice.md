@@ -1,6 +1,6 @@
 # Task 16B: first playable slice
 
-Status: live evidence path ready; real-provider play is waiting for a configured provider.
+Status: GLM-5.2 Coding Plan authority is verified; fresh live play is in progress.
 
 ## Outcome and gate
 
@@ -15,7 +15,7 @@ The first playable bundle requires:
 - identical public state before and after browser reload;
 - one browser action per durable completed player action;
 - exact network methods, paths, statuses, and request-body hashes captured while the UI is active;
-- known frozen input/output pricing for every accepted model stage and truthful aggregate token/cost accounting;
+- frozen billing authority, exact token accounting, and quota evidence before and after the run;
 - manual answers for location, current pressure, present actors, available attempts, and player-independent change.
 
 ## Live evidence flow
@@ -37,7 +37,7 @@ The browser collector attaches to the already open exact campaign URL. With `--w
 
 Finalization reopens SQLite read-only, compares accepted snapshot, content, and eligibility hashes with the pre-character freeze, requires the configured action count and reload proof, merges signed browser/network evidence, writes the bundle, and runs the standard validator.
 
-The writer derives each stage cost from the exact model pricing frozen in that turn's durable selection. Unknown pricing, a second attempt, or a configured aggregate token/cost overrun rejects the bundle instead of recording zero cost.
+Metered runs derive each stage cost from the exact pricing frozen in that turn's durable selection. Subscription runs freeze the provider, plan, public list price source, and quota endpoint; capture quota before and after play; and record per-run attributable cost as `null`. They never turn an unknown per-token price into a zero-dollar claim. A second attempt or configured token overrun rejects either form of bundle.
 
 ## Verification so far
 
@@ -47,9 +47,11 @@ The writer derives each stage cost from the exact model pricing frozen in that t
 - E2E typecheck, focused live/bundle/replay tests, capture-script syntax, and diff check pass.
 - GitNexus reports LOW impact for the E2E report, writer, and runner seams with no affected production execution flow.
 - A saved campaign without loadable Campaign Play state exposed a recursive error-contract failure: `service_unavailable` required state fields that the failing state load could not supply. The contract now admits either a complete versioned context or no context for that code, rejects partial context, and returns a schema-valid retryable `503` without logging a second Zod failure.
-- Role configuration now carries optional strict USD pricing for its exact resolved model. Legacy settings omit it and remain `unknown`; valid pricing is cloned through model resolution and frozen as known Campaign Play authority. Live preparation requires one matching provider, exact Generator/Judge/Storyteller model names, credentials, and role prices from both Settings and the immutable run config.
+- Role configuration carries optional strict USD pricing for metered models. Live preparation requires one matching provider, exact Generator/Judge/Storyteller model names, credentials, and billing authority from both Settings and the immutable run config.
+- Z.AI Coding Plan Pro is frozen as subscription authority for this lane with `glm-5.2` in all three roles. The runner records the published monthly list price as plan context, captures the official five-hour, weekly, and monthly-tool quota response before and after play, and leaves attributable run cost unknown.
+- Subscription regressions prove exact provider/model matching, quota capture, nullable stage costs, budget/probe consistency, and rejection of invented metered accounting. The focused runner suite passes 20 tests and the Campaign Play E2E typecheck passes.
 - The pricing change had CRITICAL transitive Settings impact. Full shared, backend, frontend, E2E typechecks/tests and the production build pass; absent pricing keeps the previous serialized settings shape.
 
-The current Settings state has no authenticated model provider. A control Generator request reaches the configured remote endpoint and is rejected for missing credentials. The default application selection also records unknown model pricing, so provider setup must establish real pricing authority before this lane can promote. Deterministic narration and zero-cost accounting are not accepted as substitutes.
+The configured Coding Plan provider is authenticated and resolves Generator, Judge, and Storyteller to `glm-5.2`. The provider reports plan `pro`; the evidence lane uses subscription quota accounting because Coding Plan does not expose a truthful per-token charge for this run. Deterministic narration and zero-cost accounting are not accepted as substitutes.
 
-Prose review: humanizer/deslop review kept this note direct, removed no domain facts, and found no promotional or filler language.
+Prose review: humanizer/deslop review kept the note and seeded action details concrete, direct, and free of promotional or formulaic language. The review removed no domain facts.

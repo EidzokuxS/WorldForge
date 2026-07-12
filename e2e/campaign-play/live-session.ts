@@ -9,6 +9,7 @@ import { isLocalProvider, type Settings } from "@worldforge/shared";
 import {
   campaignPlayBrowserActionEvidenceSchema,
   campaignPlayRunConfigSchema,
+  campaignPlaySubscriptionQuotaSnapshotSchema,
   type CampaignPlayBrowserActionEvidence,
   type CampaignPlayRunConfig,
 } from "./contracts.js";
@@ -78,20 +79,89 @@ function assertLiveConfig(input: CampaignPlayRunConfig): CampaignPlayRunConfig &
 function assertLiveModelAuthority(
   config: ReturnType<typeof assertLiveConfig>,
   settings: Settings = loadSettings(),
-): void {
+): { apiKey: string; baseUrl: string } {
+  let authority: { apiKey: string; baseUrl: string } | null = null;
   for (const roleName of ["generator", "judge", "storyteller"] as const) {
     const resolved = resolveRoleModel(settings[roleName], settings.providers);
-    const expectedPricing = config.execution.pricing[roleName];
+    const expectedPricing = config.execution.billing.kind === "metered"
+      ? config.execution.billing.pricing[roleName]
+      : null;
+    const pricingMatches = expectedPricing === null
+      ? !resolved.pricing
+      : Boolean(resolved.pricing) && JSON.stringify(resolved.pricing) === JSON.stringify(expectedPricing);
     if (
       resolved.provider.id !== config.execution.providerId
       || resolved.provider.model !== config.execution.models[roleName]
-      || !resolved.pricing
-      || JSON.stringify(resolved.pricing) !== JSON.stringify(expectedPricing)
+      || !pricingMatches
       || (!isLocalProvider(resolved.provider.baseUrl) && resolved.provider.apiKey.trim().length === 0)
     ) {
-      throw new Error(`Live ${roleName} provider, model, credentials, or pricing do not match the run config.`);
+      throw new Error(`Live ${roleName} provider, model, credentials, or billing authority do not match the run config.`);
     }
+    authority ??= { apiKey: resolved.provider.apiKey, baseUrl: resolved.provider.baseUrl };
   }
+  return authority!;
+}
+
+interface ZaiQuotaLimit {
+  type: string;
+  unit: number;
+  number: number;
+  percentage: number;
+  nextResetTime: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
+}
+
+async function requestSubscriptionQuota(
+  config: ReturnType<typeof assertLiveConfig>,
+  authority: { apiKey: string; baseUrl: string },
+): Promise<ReturnType<typeof campaignPlaySubscriptionQuotaSnapshotSchema.parse>> {
+  if (config.execution.billing.kind !== "subscription") {
+    throw new Error("Subscription quota capture requires subscription billing.");
+  }
+  const quotaUrl = new URL(config.execution.billing.quotaEndpoint);
+  const providerUrl = new URL(authority.baseUrl);
+  if (quotaUrl.protocol !== "https:" || quotaUrl.origin !== providerUrl.origin) {
+    throw new Error("Subscription quota endpoint must use HTTPS on the configured provider origin.");
+  }
+  const response = await fetch(quotaUrl, {
+    headers: { Authorization: `Bearer ${authority.apiKey}` },
+  });
+  if (!response.ok) throw new Error(`Subscription quota request failed with ${response.status}.`);
+  const payload = await response.json() as {
+    code?: number;
+    success?: boolean;
+    data?: { level?: string; limits?: ZaiQuotaLimit[] };
+  };
+  if (payload.code !== 200 || payload.success !== true || !payload.data?.limits) {
+    throw new Error("Subscription quota response did not carry the expected successful contract.");
+  }
+  const fiveHours = payload.data.limits.find((limit) =>
+    limit.type === "TOKENS_LIMIT" && limit.unit === 3 && limit.number === 5);
+  const weekly = payload.data.limits.find((limit) =>
+    limit.type === "TOKENS_LIMIT" && limit.unit === 6 && limit.number === 1);
+  const monthlyTools = payload.data.limits.find((limit) =>
+    limit.type === "TIME_LIMIT" && limit.unit === 5 && limit.number === 1);
+  if (!fiveHours || !weekly || !monthlyTools) {
+    throw new Error("Subscription quota response is missing the five-hour, weekly, or monthly limit.");
+  }
+  if (payload.data.level !== config.execution.billing.planId) {
+    throw new Error("Subscription quota response does not match the frozen plan.");
+  }
+  return campaignPlaySubscriptionQuotaSnapshotSchema.parse({
+    capturedAt: Date.now(),
+    planId: payload.data.level,
+    tokensFiveHours: { percentage: fiveHours.percentage, nextResetAt: fiveHours.nextResetTime },
+    tokensWeekly: { percentage: weekly.percentage, nextResetAt: weekly.nextResetTime },
+    toolsMonthly: {
+      limit: monthlyTools.usage,
+      used: monthlyTools.currentValue,
+      remaining: monthlyTools.remaining,
+      percentage: monthlyTools.percentage,
+      nextResetAt: monthlyTools.nextResetTime,
+    },
+  });
 }
 
 export function campaignPlayLiveSessionRoot(config: CampaignPlayRunConfig): string {
@@ -118,15 +188,15 @@ async function loadPublicState(campaignId: string): Promise<Record<string, unkno
   return await response.json() as Record<string, unknown>;
 }
 
-export function prepareCampaignPlayLiveSession(input: {
+export async function prepareCampaignPlayLiveSession(input: {
   runConfig: CampaignPlayRunConfig;
   commit: string;
   dirty: boolean;
   startedAt: number;
   settings?: Settings;
-}): string {
+}): Promise<string> {
   const config = assertLiveConfig(input.runConfig);
-  assertLiveModelAuthority(config, input.settings);
+  const authority = assertLiveModelAuthority(config, input.settings);
   const root = campaignPlayLiveSessionRoot(config);
   if (fs.existsSync(root) || fs.existsSync(path.resolve(config.outputRoot, config.runId))) {
     throw new Error(`Campaign Play live evidence path already exists for ${config.runId}.`);
@@ -143,6 +213,9 @@ export function prepareCampaignPlayLiveSession(input: {
     if (captured.report.integrity !== "ok" || captured.report.foreignKeyViolations !== 0) {
       throw new Error("Live evidence cannot begin from an invalid campaign database.");
     }
+    const quotaBefore = config.execution.billing.kind === "subscription"
+      ? await requestSubscriptionQuota(config, authority)
+      : null;
     for (const directory of ["build", "probes", "screenshots"]) {
       fs.mkdirSync(path.join(root, directory), { recursive: true });
     }
@@ -168,6 +241,9 @@ export function prepareCampaignPlayLiveSession(input: {
       eligibility: captured.report.eligibility,
       authority: captured.report.authority,
     });
+    if (quotaBefore) {
+      writeJson(path.join(root, "probes", "subscription-quota-before.json"), quotaBefore);
+    }
     fs.writeFileSync(path.join(root, "browser-actions.jsonl"), "", "utf8");
     fs.writeFileSync(path.join(root, "network-trace.jsonl"), "", "utf8");
     writeJson(path.join(root, "browser-console.json"), []);
@@ -181,6 +257,20 @@ export function prepareCampaignPlayLiveSession(input: {
   } finally {
     handle.close();
   }
+}
+
+export async function captureCampaignPlaySubscriptionQuota(
+  input: CampaignPlayRunConfig,
+  settings?: Settings,
+): Promise<void> {
+  const config = assertLiveConfig(input);
+  if (config.execution.billing.kind !== "subscription") return;
+  const root = campaignPlayLiveSessionRoot(config);
+  const manifest = sessionManifest(config);
+  assertSessionOwnership(config, manifest);
+  const authority = assertLiveModelAuthority(config, settings);
+  const quotaAfter = await requestSubscriptionQuota(config, authority);
+  writeJson(path.join(root, "probes", "subscription-quota-after.json"), quotaAfter);
 }
 
 export async function stageCampaignPlayManualDecision(input: {

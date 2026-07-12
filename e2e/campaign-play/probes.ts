@@ -17,6 +17,7 @@ import {
   campaignPlayModelStageEvidenceSchema,
   campaignPlayNetworkEvidenceSchema,
   campaignPlayReceiptEvidenceSchema,
+  campaignPlayRunConfigSchema,
   campaignPlayRuntimeEventEvidenceSchema,
   campaignPlayScorecardSchema,
   campaignPlayTurnEvidenceSchema,
@@ -186,7 +187,10 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
   try {
     manifest = campaignPlayManifestSchema.parse(readJson(path.join(bundleRoot, "manifest.json")));
     campaignPlayEligibilitySchema.parse(readJson(path.join(bundleRoot, "eligibility.json")));
-    campaignPlayBudgetSchema.parse(readJson(path.join(bundleRoot, "budget.json")));
+    const runConfig = campaignPlayRunConfigSchema.parse(
+      readJson(path.join(bundleRoot, "build", "run-config.json")),
+    );
+    const budget = campaignPlayBudgetSchema.parse(readJson(path.join(bundleRoot, "budget.json")));
     scorecard = campaignPlayScorecardSchema.parse(readJson(path.join(bundleRoot, "scorecard.json")));
     const inventory = campaignPlayInventorySchema.parse(readJson(path.join(bundleRoot, "inventory.json")));
     const browserConsole = z.array(z.unknown()).parse(readJson(path.join(bundleRoot, "browser-console.json")));
@@ -216,7 +220,50 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     const inputs = ledgers["inputs.jsonl"] as Array<z.infer<typeof campaignPlayInputEvidenceSchema>>;
     const browserActions = ledgers["browser-actions.jsonl"] as Array<z.infer<typeof campaignPlayBrowserActionEvidenceSchema>>;
     const network = ledgers["network-trace.jsonl"] as Array<z.infer<typeof campaignPlayNetworkEvidenceSchema>>;
+    const modelStages = ledgers["model-stages.jsonl"] as Array<z.infer<typeof campaignPlayModelStageEvidenceSchema>>;
     const runtimeEvents = ledgers["runtime-events.jsonl"] as Array<z.infer<typeof campaignPlayRuntimeEventEvidenceSchema>>;
+
+    if (runConfig.runId !== manifest.runId || runConfig.campaignId !== manifest.campaignId) {
+      issues.push("Run config, manifest, and campaign ownership differ.");
+    }
+    const subscription = runConfig.execution.kind === "live"
+      && runConfig.execution.billing.kind === "subscription";
+    if (subscription) {
+      if (budget.billingKind !== "subscription") {
+        issues.push("Subscription execution requires a subscription budget.");
+      } else {
+        const billing = runConfig.execution.kind === "live"
+          && runConfig.execution.billing.kind === "subscription"
+          ? runConfig.execution.billing
+          : null;
+        if (
+          !billing
+          || budget.providerName !== billing.providerName
+          || budget.planId !== billing.planId
+          || budget.monthlyListPriceMicros !== billing.monthlyListPriceMicros
+        ) {
+          issues.push("Subscription budget does not match the frozen run config.");
+        }
+        const quotaBefore = readJson(path.join(bundleRoot, "probes", "subscription-quota-before.json"));
+        const quotaAfter = readJson(path.join(bundleRoot, "probes", "subscription-quota-after.json"));
+        if (
+          JSON.stringify(quotaBefore) !== JSON.stringify(budget.quotaBefore)
+          || JSON.stringify(quotaAfter) !== JSON.stringify(budget.quotaAfter)
+        ) {
+          issues.push("Subscription quota probes do not match budget evidence.");
+        }
+      }
+      if (modelStages.some((stage) => stage.costMicros !== null)) {
+        issues.push("Subscription model stages must not claim an attributable per-run cost.");
+      }
+    } else {
+      if (budget.billingKind !== "metered") {
+        issues.push("Metered or deterministic execution requires a metered budget.");
+      }
+      if (modelStages.some((stage) => stage.costMicros === null)) {
+        issues.push("Metered model stages require attributable costs.");
+      }
+    }
 
     for (const [fileName, records] of Object.entries(ledgers)) {
       for (const record of records as Array<{ runId: string; campaignId: string }>) {

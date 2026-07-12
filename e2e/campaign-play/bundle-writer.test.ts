@@ -88,6 +88,23 @@ describe("Campaign Play evidence bundle writer", () => {
     fs.writeFileSync(path.join(evidenceRoot, "network-errors.json"), "[]\n", "utf8");
     fs.writeFileSync(path.join(evidenceRoot, "screenshots", "ready.png"), "image", "utf8");
     fs.writeFileSync(path.join(evidenceRoot, "probes", "reload-proof.json"), "{\"matches\":true}\n", "utf8");
+    const quotaSnapshot = (capturedAt: number, percentage: number) => ({
+      capturedAt,
+      planId: "pro",
+      tokensFiveHours: { percentage, nextResetAt: 10_000 },
+      tokensWeekly: { percentage: 9, nextResetAt: 20_000 },
+      toolsMonthly: { limit: 1_000, used: 0, remaining: 1_000, percentage: 0, nextResetAt: 30_000 },
+    });
+    fs.writeFileSync(
+      path.join(evidenceRoot, "probes", "subscription-quota-before.json"),
+      `${JSON.stringify(quotaSnapshot(900, 1))}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(evidenceRoot, "probes", "subscription-quota-after.json"),
+      `${JSON.stringify(quotaSnapshot(2_100, 2))}\n`,
+      "utf8",
+    );
     const runConfig: CampaignPlayRunConfig = {
       evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
       runId: "first-playable-one",
@@ -99,14 +116,17 @@ describe("Campaign Play evidence bundle writer", () => {
         kind: "live",
         providerId: "provider",
         models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
-        pricing: {
-          generator: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
-          judge: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
-          storyteller: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
+        billing: {
+          kind: "subscription",
+          providerName: "Z.AI Coding Plan",
+          planId: "pro",
+          currency: "USD",
+          monthlyListPriceMicros: 72_000_000,
+          pricingSourceUrl: "https://z.ai/subscribe",
+          quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
         },
         maximumInputTokens: 10_000,
         maximumOutputTokens: 10_000,
-        maximumCostMicros: 1_000_000,
         maximumTurnDurationMs: 120_000,
       },
       restartAfterPlayerActions: [],
@@ -131,5 +151,13 @@ describe("Campaign Play evidence bundle writer", () => {
     expect(fs.readFileSync(path.join(bundleRoot, "human-notes.md"), "utf8"))
       .toContain("scene remained legible");
     expect(fs.existsSync(path.join(bundleRoot, "screenshots", "ready.png"))).toBe(true);
+    const budget = JSON.parse(fs.readFileSync(path.join(bundleRoot, "budget.json"), "utf8")) as {
+      billingKind: string;
+      attributableCostMicros: number | null;
+    };
+    expect(budget).toMatchObject({ billingKind: "subscription", attributableCostMicros: null });
+    const modelStages = fs.readFileSync(path.join(bundleRoot, "model-stages.jsonl"), "utf8")
+      .split("\n").filter(Boolean).map((line) => JSON.parse(line) as { costMicros: number | null });
+    expect(modelStages.every((stage) => stage.costMicros === null)).toBe(true);
   });
 });

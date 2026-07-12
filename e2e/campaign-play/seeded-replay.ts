@@ -323,6 +323,15 @@ function openingNarratorFixture() {
             { purpose: "consequence", text: "Signal keepers brace the route gate while warning bells gather pace." },
             { purpose: "action_handoff", text: "The open path and the waiting keeper leave a clear choice." },
           ],
+          actionDetails: packet.availableIntents.map((intent) => {
+            switch (intent.kind) {
+              case "observe": return "the warning bells at the gate";
+              case "move": return "old signal marks on the posts";
+              case "contact": return "the route keeper's warning";
+              case "wait": return "listen for the next bell";
+              case "attempt": return "test the gate latch";
+            }
+          }),
         },
         createdAt: request.createdAt,
         modelEvidence: { ...narratorEvidence, responseModel: "fixture-opening-narrator" },
@@ -351,6 +360,15 @@ function playerNarratorFixture() {
               text: `The scene at ${packet.currentLocation.name} leaves another move open.`,
             },
           ],
+          actionDetails: packet.availableIntents.map((intent) => {
+            switch (intent.kind) {
+              case "observe": return "the new marks left nearby";
+              case "move": return "fresh tracks beyond the scene";
+              case "contact": return "the witness's account";
+              case "wait": return "watch for another change";
+              case "attempt": return "test what changed here";
+            }
+          }),
         },
         createdAt: request.createdAt,
         modelEvidence: narratorEvidence,

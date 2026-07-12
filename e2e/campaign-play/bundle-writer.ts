@@ -15,6 +15,7 @@ import {
   campaignPlayNetworkEvidenceSchema,
   campaignPlayReceiptEvidenceSchema,
   campaignPlayRunConfigSchema,
+  campaignPlaySubscriptionQuotaSnapshotSchema,
   campaignPlayRuntimeEventEvidenceSchema,
   campaignPlayTurnEvidenceSchema,
   campaignPlayVisibilityEvidenceSchema,
@@ -71,6 +72,10 @@ function writeJsonLines(filePath: string, records: unknown[]): void {
 function readJsonLines(filePath: string): unknown[] {
   const text = fs.readFileSync(filePath, "utf8");
   return text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as unknown);
+}
+
+function readJson(filePath: string): unknown {
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
 }
 
 function copyEvidenceDirectory(source: string, target: string): void {
@@ -151,7 +156,13 @@ function requestedModelForStage(turn: RawRow, kind: string): FrozenRequestedMode
   return requested;
 }
 
-function modelCostMicros(inputTokens: number, outputTokens: number, pricing: FrozenModelPricing): number {
+function modelCostMicros(
+  inputTokens: number,
+  outputTokens: number,
+  pricing: FrozenModelPricing,
+  subscription: boolean,
+): number | null {
+  if (subscription) return null;
   if (!pricing.known) throw new Error("Campaign Play live evidence requires known frozen model pricing.");
   return Math.ceil(inputTokens * pricing.inputCostMicros / pricing.tokenUnit)
     + Math.ceil(outputTokens * pricing.outputCostMicros / pricing.tokenUnit);
@@ -297,6 +308,8 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
   writeJsonLines(path.join(input.bundleRoot, "network-trace.jsonl"), networkTrace);
 
   const turnById = new Map(turnRows.map((row) => [value<string>(row, "id"), row]));
+  const subscription = config.execution.kind === "live"
+    && config.execution.billing.kind === "subscription";
   const modelStages = report.tables.modelStages
     .filter((row) => value<string>(row, "status") === "accepted")
     .map((row) => {
@@ -321,7 +334,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
         textFallbackUsed: false,
         inputTokens,
         outputTokens,
-        costMicros: modelCostMicros(inputTokens, outputTokens, requested.pricing),
+        costMicros: modelCostMicros(inputTokens, outputTokens, requested.pricing, subscription),
         durationMs: value<number>(row, "duration_ms"),
         artifactHash: value<string>(row, "artifact_hash"),
       });
@@ -339,22 +352,55 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
   const maximumOutputTokens = config.execution.kind === "live"
     ? config.execution.maximumOutputTokens
     : Math.max(actualOutputTokens, 1);
-  const maximumCostMicros = config.execution.kind === "live"
-    ? config.execution.maximumCostMicros
-    : Math.max(modelStages.reduce((total, stage) => total + stage.costMicros, 0), 1);
-  const actualCostMicros = modelStages.reduce((total, stage) => total + stage.costMicros, 0);
-  writeJson(path.join(input.bundleRoot, "budget.json"), campaignPlayBudgetSchema.parse({
+  const budgetBase = {
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: config.runId,
     maximumInputTokens,
     maximumOutputTokens,
-    maximumCostMicros,
     actualInputTokens,
     actualOutputTokens,
-    actualCostMicros,
     p95TurnDurationMs: percentile(0.95),
     p99TurnDurationMs: percentile(0.99),
-  }));
+  };
+  if (subscription) {
+    if (!input.evidenceRoot || config.execution.kind !== "live" || config.execution.billing.kind !== "subscription") {
+      throw new Error("Subscription evidence requires a live session with quota snapshots.");
+    }
+    const quotaBefore = campaignPlaySubscriptionQuotaSnapshotSchema.parse(
+      readJson(path.join(input.evidenceRoot, "probes", "subscription-quota-before.json")),
+    );
+    const quotaAfter = campaignPlaySubscriptionQuotaSnapshotSchema.parse(
+      readJson(path.join(input.evidenceRoot, "probes", "subscription-quota-after.json")),
+    );
+    writeJson(path.join(input.bundleRoot, "budget.json"), campaignPlayBudgetSchema.parse({
+      ...budgetBase,
+      billingKind: "subscription",
+      providerName: config.execution.billing.providerName,
+      planId: config.execution.billing.planId,
+      currency: config.execution.billing.currency,
+      monthlyListPriceMicros: config.execution.billing.monthlyListPriceMicros,
+      attributableCostMicros: null,
+      quotaBefore,
+      quotaAfter,
+    }));
+  } else {
+    const stageCosts = modelStages.map((stage) => {
+      if (stage.costMicros === null) throw new Error("Metered evidence requires attributable model-stage costs.");
+      return stage.costMicros;
+    });
+    const maximumCostMicros = config.execution.kind === "live"
+      ? config.execution.billing.kind === "metered"
+        ? config.execution.billing.maximumCostMicros
+        : (() => { throw new Error("Subscription billing cannot produce a metered budget."); })()
+      : Math.max(stageCosts.reduce((total, cost) => total + cost, 0), 1);
+    const actualCostMicros = stageCosts.reduce((total, cost) => total + cost, 0);
+    writeJson(path.join(input.bundleRoot, "budget.json"), campaignPlayBudgetSchema.parse({
+      ...budgetBase,
+      billingKind: "metered",
+      maximumCostMicros,
+      actualCostMicros,
+    }));
+  }
 
   const runtimeEvents = report.tables.runtimeEvents.map((row) =>
     campaignPlayRuntimeEventEvidenceSchema.parse({

@@ -52,14 +52,49 @@ describe("Campaign Play evidence contracts", () => {
         kind: "live",
         providerId: "provider-one",
         models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
+        billing: { kind: "metered", maximumCostMicros: 1_000_000 },
         maximumInputTokens: 10_000,
         maximumOutputTokens: 10_000,
-        maximumCostMicros: 1_000_000,
         maximumTurnDurationMs: 120_000,
       },
       restartAfterPlayerActions: [],
       operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
     })).toThrow();
+  });
+
+  it("accepts subscription authority without inventing per-token pricing", () => {
+    const config = campaignPlayRunConfigSchema.parse({
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-subscription",
+      lane: "first-playable",
+      campaignId: "campaign-one",
+      expectedPlayerActions: 2,
+      outputRoot: "output/playtests/campaign-play",
+      execution: {
+        kind: "live",
+        providerId: "zai-coding-plan",
+        models: { generator: "glm-5.2", judge: "glm-5.2", storyteller: "glm-5.2" },
+        billing: {
+          kind: "subscription",
+          providerName: "Z.AI Coding Plan",
+          planId: "pro",
+          currency: "USD",
+          monthlyListPriceMicros: 72_000_000,
+          pricingSourceUrl: "https://z.ai/subscribe",
+          quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
+        },
+        maximumInputTokens: 100_000,
+        maximumOutputTokens: 20_000,
+        maximumTurnDurationMs: 180_000,
+      },
+      restartAfterPlayerActions: [],
+      operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+    });
+    expect(config.execution).toMatchObject({
+      kind: "live",
+      providerId: "zai-coding-plan",
+      billing: { kind: "subscription", planId: "pro" },
+    });
   });
 
   it("requires complete manifests to carry a terminal timestamp", () => {
