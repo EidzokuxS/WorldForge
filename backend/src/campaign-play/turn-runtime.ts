@@ -226,6 +226,7 @@ export type CampaignPlayPlayerActionAdmissionFrame = z.infer<
 
 export type CampaignPlayTurnRuntimeErrorCode =
   | "turn_request_invalid"
+  | "turn_idempotency_conflict"
   | "turn_state_invalid"
   | "turn_public_context_invalid"
   | "turn_judge_invalid"
@@ -1175,6 +1176,26 @@ export function createCampaignPlayTurnRuntime(
     outcome: string,
   ): void => {
     const committedAt = now();
+    if (outcome === "interrupted") {
+      const turn = repository.loadTurn(token.turnId);
+      const job = actorScheduler.listTurnJobs(token.turnId).find((candidate) =>
+        candidate.jobId === jobId);
+      if (
+        turn?.stage === "primary_settled" && turn.workerLeaseOwner === token.owner &&
+        turn.workerEpoch === token.epoch && turn.workerLeaseExpiresAt === token.expiresAt &&
+        committedAt >= token.expiresAt && job?.stage === "claimed"
+      ) {
+        actorReplanner.interruptExpired({
+          jobId,
+          observedWorkerEpoch: job.workerEpoch,
+          observedTurnWorkerEpoch: token.epoch,
+          observedTurnOwner: token.owner,
+          observedTurnLeaseExpiresAt: token.expiresAt,
+          observedAt: committedAt,
+        });
+      }
+      return;
+    }
     repository.commitDeterministic({
       token,
       transition: "actor_job_transitioned",
@@ -1783,7 +1804,7 @@ export function createCampaignPlayTurnRuntime(
             canonicalizeCampaignPlayProjection(frozenSelection)
         ) {
           throw new CampaignPlayTurnRuntimeError(
-            "turn_request_invalid",
+            "turn_idempotency_conflict",
             "Campaign Play idempotency key belongs to another player action.",
           );
         }
@@ -1816,6 +1837,21 @@ export function createCampaignPlayTurnRuntime(
     },
     async recoverActiveTurn() {
       interruptExpiredActorReplanner();
+      const active = repository.loadActiveTurn();
+      if (active?.stage === "primary_settled") {
+        const next = actorScheduler.listTurnJobs(active.turnId).find((job) =>
+          ["queued", "claimed", "proposed"].includes(job.stage));
+        if (
+          next?.stage === "queued" &&
+          actorScheduler.buildActorFrame(next.jobId).selection.kind === "replan_required"
+        ) {
+          return {
+            turn: active,
+            recovery: repository.loadRecoveryState(active.turnId, now()),
+            telemetry: null,
+          };
+        }
+      }
       return service.recoverActiveTurn();
     },
     async resumeInterruptedStage(resume) {

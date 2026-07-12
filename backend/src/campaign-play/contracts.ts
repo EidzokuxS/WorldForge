@@ -1019,9 +1019,9 @@ export const campaignPlayStartingConditionsSchema = z.discriminatedUnion("mode",
   z.object({
     mode: z.literal("chosen"),
     locationHandle: handleSchema,
-    role: shortTextSchema,
-    arrivalMode: shortTextSchema,
-    immediateSituation: textSchema,
+    roleHandle: handleSchema,
+    arrivalModeHandle: handleSchema,
+    immediateSituationHandle: handleSchema,
   }).strict(),
 ]);
 
@@ -1035,7 +1035,6 @@ export const campaignPlayOpeningAdmissionRequestSchema:
 
 export const campaignPlayResumeTurnRequestSchema:
   z.ZodType<CampaignPlayResumeTurnRequest> = z.object({
-    idempotencyKey: idempotencyKeySchema,
     expectedWorldVersion: positiveIntegerSchema,
     expectedRuntimeRevision: positiveIntegerSchema,
   }).strict();
@@ -1273,6 +1272,8 @@ export const CAMPAIGN_PLAY_ERROR_METADATA = {
   invalid_starting_conditions: { status: 422, retryEligible: false, context: "play" },
   invalid_intent: { status: 422, retryEligible: false, context: "play" },
   invalid_choice: { status: 422, retryEligible: false, context: "play" },
+  invalid_event_cursor: { status: 422, retryEligible: false, context: "play" },
+  idempotency_conflict: { status: 409, retryEligible: false, context: "play" },
   stale_world_version: { status: 409, retryEligible: false, context: "play" },
   stale_runtime_revision: { status: 409, retryEligible: false, context: "play" },
   turn_in_progress: { status: 409, retryEligible: false, context: "play" },
@@ -3246,6 +3247,19 @@ export function validateCampaignPlayStartingConditionsAgainstOptions(
       "invalid_starting_conditions",
       "Chosen starting location does not match the public opening options.",
     );
+  }
+  const selections = [
+    [location.roles, parsed.roleHandle, "role"],
+    [location.arrivalModes, parsed.arrivalModeHandle, "arrival mode"],
+    [location.immediateSituations, parsed.immediateSituationHandle, "immediate situation"],
+  ] as const;
+  for (const [options, selectedHandle, label] of selections) {
+    if (!options.some((option) => option.handle === selectedHandle)) {
+      throw new CampaignPlayContractError(
+        "invalid_starting_conditions",
+        `Chosen ${label} does not match the selected location options.`,
+      );
+    }
   }
 }
 

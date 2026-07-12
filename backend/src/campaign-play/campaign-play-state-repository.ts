@@ -697,7 +697,7 @@ function selectPublicState(
   const narration = sqlite.prepare(`
     SELECT narration_id AS narrationId, turn_id AS turnId, display_text AS displayText,
       beats_json AS beatsJson, suggested_actions_json AS suggestedActionsJson,
-      effects_json AS effectsJson
+      effects_json AS effectsJson, created_at AS createdAt
     FROM campaign_play_narrations
     WHERE campaign_id = ? AND status = 'complete'
     ORDER BY completed_at DESC, narration_id DESC LIMIT 1
@@ -713,6 +713,7 @@ function selectPublicState(
         "Narration suggested actions",
       ),
       effects: parseJson(narration.effectsJson as string, "Narration effects"),
+      createdAt: narration.createdAt,
     })
     : null;
   return projectCampaignPlayPublicState({

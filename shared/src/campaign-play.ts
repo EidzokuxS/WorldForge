@@ -131,6 +131,8 @@ export const CAMPAIGN_PLAY_PUBLIC_ERROR_CODE_VALUES = [
   "invalid_starting_conditions",
   "invalid_intent",
   "invalid_choice",
+  "invalid_event_cursor",
+  "idempotency_conflict",
   "stale_world_version",
   "stale_runtime_revision",
   "turn_in_progress",
@@ -398,9 +400,9 @@ export type CampaignPlayStartingConditions =
   | {
       mode: "chosen";
       locationHandle: string;
-      role: string;
-      arrivalMode: string;
-      immediateSituation: string;
+      roleHandle: string;
+      arrivalModeHandle: string;
+      immediateSituationHandle: string;
     };
 
 export interface CampaignPlayOpeningAdmissionRequest
@@ -411,7 +413,6 @@ export interface CampaignPlayOpeningAdmissionRequest
 
 export interface CampaignPlayResumeTurnRequest
   extends CampaignPlayVersionExpectation {
-  idempotencyKey: string;
 }
 
 export interface CampaignPlayTurnAdmissionResponse {

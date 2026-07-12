@@ -34,6 +34,7 @@ import {
   createCampaignPlayNarrator,
   type CampaignPlayNarratorModelEvidence,
 } from "./narrator.js";
+import { buildCampaignPlayOpeningOptions } from "./opening-options.js";
 import { deriveCampaignPlayPublicHandle } from "./campaign-play-projection.js";
 import { createCampaignPlayOpeningRuntime } from "./opening-runtime.js";
 import { createCampaignPlayActorScheduler } from "./actor-scheduler.js";
@@ -42,7 +43,7 @@ import type { CampaignPlayTurnServiceClock } from "./turn-service.js";
 
 const CAMPAIGN_ID = "77777777-7777-4777-8777-777777777777";
 const PLAYER_ID = "actor-player-opening";
-const TEST_MODEL_PRICING = { currency: "USD", tokenUnit: 1_000_000,
+const TEST_MODEL_PRICING = { known: true, currency: "USD", tokenUnit: 1_000_000,
   inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
 let root = "";
 let previousCampaignsRoot: string | undefined;
@@ -280,24 +281,26 @@ function plannerFixture() {
           arrivalMode: request.startingConditions.arrivalMode,
           immediateSituation: request.startingConditions.immediateSituation,
         };
-        proposal.scene = {
-          supportActorId: "actor-b",
-          pressureId: "pressure-a",
-          routeId: "route-a",
-        };
-        const hiddenPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-c")!;
-        hiddenPlan.intent.targets.unshift({ kind: "location", id: "location-c" });
-        proposal.hiddenConsequence = {
-          actorId: "actor-c",
-          goalId: "goal-c",
-          locationId: "location-c",
-          summary: "The bell tender changes which warning reaches the harbor.",
-          exposure: {
-            channel: "local_aftermath",
+        if (request.startingConditions.locationId === "location-a") {
+          proposal.scene = {
+            supportActorId: "actor-b",
+            pressureId: "pressure-a",
+            routeId: "route-a",
+          };
+          const hiddenPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-c")!;
+          hiddenPlan.intent.targets.unshift({ kind: "location", id: "location-c" });
+          proposal.hiddenConsequence = {
+            actorId: "actor-c",
+            goalId: "goal-c",
             locationId: "location-c",
-            validUntilWorldTimeMinutes: 5,
-          },
-        };
+            summary: "The bell tender changes which warning reaches the harbor.",
+            exposure: {
+              channel: "local_aftermath",
+              locationId: "location-c",
+              validUntilWorldTimeMinutes: 5,
+            },
+          };
+        }
       }
       return compiler.compile(
         request.frame,
@@ -371,16 +374,26 @@ describe("Campaign Play opening runtime", () => {
         openingPlanner: planner,
         narrator,
       });
+      const canonicalLocationHandle = deriveCampaignPlayPublicHandle(
+        "location",
+        CAMPAIGN_ID,
+        state.eligibility.projection.openingLocationId!,
+      );
+      const openingOption = mode === "chosen"
+        ? buildCampaignPlayOpeningOptions(state).find((option) =>
+            option.locationHandle !== canonicalLocationHandle
+          )!
+        : buildCampaignPlayOpeningOptions(state)[0]!;
+      if (mode === "chosen") {
+        expect(openingOption).toBeDefined();
+        expect(openingOption.locationHandle).not.toBe(canonicalLocationHandle);
+      }
       const chosen = {
         mode: "chosen" as const,
-        locationHandle: deriveCampaignPlayPublicHandle(
-          "location",
-          CAMPAIGN_ID,
-          state.eligibility.projection.openingLocationId!,
-        ),
-        role: "A visitor on Bell Island",
-        arrivalMode: "On foot",
-        immediateSituation: "Signal keepers prepare for another route closure.",
+        locationHandle: openingOption.locationHandle,
+        roleHandle: openingOption.roles[0]!.handle,
+        arrivalModeHandle: openingOption.arrivalModes[0]!.handle,
+        immediateSituationHandle: openingOption.immediateSituations[0]!.handle,
       };
       const request = {
         idempotencyKey: `opening-${mode}`,
@@ -452,9 +465,9 @@ describe("Campaign Play opening runtime", () => {
           startingConditions: {
             mode: "chosen",
             locationHandle: "location_unknown",
-            role: "Visitor",
-            arrivalMode: "On foot",
-            immediateSituation: "The gate is closing.",
+            roleHandle: "role_unknown",
+            arrivalModeHandle: "arrival_unknown",
+            immediateSituationHandle: "situation_unknown",
           },
         },
       });

@@ -677,9 +677,9 @@ describe("Campaign Play shared public contracts", () => {
       startingConditions: {
         mode: "chosen",
         locationHandle: "location_bridge",
-        role: "Newly arrived traveler",
-        arrivalMode: "On foot",
-        immediateSituation: "Seeking shelter from the rain",
+        roleHandle: "role_traveler",
+        arrivalModeHandle: "arrival_foot",
+        immediateSituationHandle: "situation_shelter",
       },
     }).success).toBe(true);
   });
@@ -837,9 +837,9 @@ describe("Campaign Play shared public contracts", () => {
     const chosen = {
       mode: "chosen" as const,
       locationHandle: option.locationHandle,
-      role: option.roles[0]!.label,
-      arrivalMode: option.arrivalModes[0]!.label,
-      immediateSituation: option.immediateSituations[0]!.label,
+      roleHandle: option.roles[0]!.handle,
+      arrivalModeHandle: option.arrivalModes[0]!.handle,
+      immediateSituationHandle: option.immediateSituations[0]!.handle,
     };
     expect(() => validateCampaignPlayStartingConditionsAgainstOptions(
       chosen,
@@ -853,6 +853,19 @@ describe("Campaign Play shared public contracts", () => {
       { ...chosen, locationHandle: "location_hidden" },
       [option],
     )).toThrow(expect.objectContaining({ code: "invalid_starting_conditions" }));
+    expect(() => validateCampaignPlayStartingConditionsAgainstOptions(
+      { ...chosen, roleHandle: option.arrivalModes[0]!.handle },
+      [option],
+    )).toThrow(expect.objectContaining({ code: "invalid_starting_conditions" }));
+    const otherLocation = {
+      ...option,
+      locationHandle: "location_harbor",
+      roles: [{ handle: "role_harbor_local", label: "Harbor local" }],
+    };
+    expect(() => validateCampaignPlayStartingConditionsAgainstOptions(
+      { ...chosen, roleHandle: otherLocation.roles[0]!.handle },
+      [option, otherLocation],
+    )).toThrow(expect.objectContaining({ code: "invalid_starting_conditions" }));
     expect(campaignPlayOpeningLocationOptionSchema.safeParse({
       ...option,
       roles: [option.roles[0], option.roles[0]],
@@ -865,7 +878,7 @@ describe("Campaign Play shared public contracts", () => {
     }
     expect(campaignPlayStartingConditionsSchema.safeParse({
       ...chosen,
-      role: null,
+      roleHandle: null,
     }).success).toBe(false);
 
     const openingState = {
@@ -919,7 +932,6 @@ describe("Campaign Play shared public contracts", () => {
       startingConditions: { mode: "delegate" },
     };
     const resume = {
-      idempotencyKey: "resume_1",
       expectedWorldVersion: 11,
       expectedRuntimeRevision: 29,
     };
@@ -1322,9 +1334,9 @@ describe("Campaign Play shared public contracts", () => {
       ["chosen start", campaignPlayStartingConditionsSchema, {
         mode: "chosen",
         locationHandle: "location_bridge",
-        role: "Newly arrived traveler",
-        arrivalMode: "On foot",
-        immediateSituation: "Seeking shelter from the rain",
+        roleHandle: "role_traveler",
+        arrivalModeHandle: "arrival_foot",
+        immediateSituationHandle: "situation_shelter",
       }],
     ];
     for (const [label, schema, fixture] of fixtures) {

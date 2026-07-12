@@ -1090,3 +1090,137 @@ Depends on: 10C.3. Parallel safe: read-only review only.
 - Krypton POST, correctness, maintainability, and fresh Sol semantic verification all passed with remaining P0/P1 findings `0`. Prompt/copy review passed through direct Sol semantic review plus `humanizer` and `deslop`; GLM is outside the current delivery pipeline.
 - GitNexus change detection reports the inherited dirty tracked scope as `CRITICAL`; current Campaign Play files remain outside its index. Direct source tracing, integration tests, and independent Sol reviews provide the local Task 10C evidence.
 - Standalone smoke-suite additions: `0`. Evidence: `rpi/campaign-play/implement/10c-player-turn-runtime.md`.
+
+## Campaign Play Task 11 Execution Packet (2026-07-12)
+
+Goal: expose the durable Campaign Play runtime through one campaign-scoped HTTP and SSE boundary, then recover eligible work after process restart.
+
+Plan path: `docs/goals/campaign-play/PLAN.md`, Task 11.
+
+Truth owner: Campaign Play state, turn, narration, observation, and event ledgers.
+
+Contract boundary: `/api/campaigns/:id/play/*` plus one startup recovery registration in `backend/src/index.ts`.
+
+Cutover: Task 11 creates the mechanics-owned transport. Task 15 removes the active `/api/chat` and old character handoff.
+
+Acceptance evidence: real migrated campaign storage, public-schema parsing, HTTP request and response assertions, durable SSE replay, process restart, explicit resume, terminal replay, and concurrent admission.
+
+Kill criteria: any provider switch, second model attempt hidden behind one request, repeated committed command, protected payload in a response or log, optimistic world mutation, or recovery that resumes an interrupted external stage without a player request.
+
+### 11A. Public contract corrections
+
+Owner: main agent.
+
+Input: the Task 2A public DTOs, Task 5 opening contract, Task 10C frozen model selection, and the approved Task 12 UI field inventory.
+
+Files allowed:
+
+- `shared/src/campaign-play.ts`
+- `backend/src/campaign-play/contracts.ts`
+- `backend/src/campaign-play/contracts.test.ts`
+- `backend/src/campaign-play/opening-options.ts`
+- `backend/src/campaign-play/opening-options.test.ts`
+- `backend/src/campaign-play/opening-runtime.ts`
+- `backend/src/campaign-play/opening-runtime.test.ts`
+- model-evidence and telemetry files required for explicit unknown-pricing semantics
+- `backend/src/campaign-play/index.ts`
+- `tasks/todo.md`
+
+Output:
+
+- Chosen opening requests carry `locationHandle`, `roleHandle`, `arrivalModeHandle`, and `immediateSituationHandle`.
+- One pure opening-options module derives bounded viable locations and code-owned detail handles from immutable accepted-world truth. The same module resolves handles for runtime admission.
+- Public errors include `idempotency_conflict` and `invalid_event_cursor` with fixed status metadata.
+- Resume requests carry version expectations. The service derives the interrupted stage and epoch from durable turn truth.
+- Frozen model pricing records whether rates are known. Unknown rates produce nullable cost and `costComplete: false` while time and token budgets remain enforced.
+
+Evidence:
+
+- [x] Public schemas reject labels where a handle belongs and reject a detail handle from another location or option family.
+- [x] A reachable viable chosen location resolves to exact internal labels and reaches the opening planner.
+- [x] Same-key/different-input admission maps to `idempotency_conflict`.
+- [x] Unknown pricing remains nullable before and after reopen.
+
+Stop condition: public contracts, runtime admission, and telemetry agree. HTTP routes remain outside this packet.
+
+### 11B. Public read model and campaign application service
+
+Owner: main agent.
+
+Input: stable repository read APIs, one addressed campaign database, current settings, frozen turn model selection, and an injected campaign enumerator.
+
+Files allowed:
+
+- `backend/src/campaign-play/campaign-play-read-model.ts`
+- `backend/src/campaign-play/campaign-play-read-model.test.ts`
+- `backend/src/campaign-play/campaign-play-application.ts`
+- `backend/src/campaign-play/campaign-play-application.test.ts`
+- `backend/src/campaign-play/index.ts`
+- narrow supporting changes proved necessary by the packet
+- `tasks/todo.md`
+
+Files protected by default: `createCampaignPlayStateRepository` is CRITICAL and `createCampaignPlayTurnRepository` is HIGH in the current GitNexus graph. New modules consume their existing `loadState`, `loadActiveTurn`, `loadTurn`, and `listTurnEvents` surfaces.
+
+Output:
+
+- The read model assembles `CampaignPlayState`, exact turn reads, and cursor-based journal pages from public projections and durable rows.
+- First state load creates the campaign play state exactly once after the accepted-world gate.
+- Character intake and bootstrap bind to the addressed campaign and return public DTOs.
+- Admission freezes current role selections: judge uses `judge`; opening planner, game master, and actor replanner use `generator`; narrator uses `storyteller`.
+- Restart reconstructs each runtime from its frozen provider and model plus current credentials for that exact provider.
+- A per-campaign driver advances one durable stage at a time, closes its database handle, and stops at interruption or terminal completion.
+- Startup recovery continues deterministic and never-started work. A live foreign lease remains authoritative until expiry. Interrupted external work waits for explicit resume.
+
+Evidence:
+
+- [x] State phases cover character required, opening required, opening active, ready, turn active, and narration pending.
+- [x] Concurrent state initialization produces one state and one creation event.
+- [x] Concurrent same-key admission produces one turn and one driver.
+- [x] Restart uses the frozen model identity and makes zero provider calls for an interrupted attempt.
+- [x] Explicit resume creates one new epoch and one provider call.
+- [x] Completed turn and journal reads remain byte-stable after reopen.
+
+Stop condition: application tests prove persistence and recovery without an HTTP server.
+
+### 11C. HTTP, SSE, and startup registration
+
+Owner: main agent.
+
+Input: the 11B application service and the stable public schemas.
+
+Files allowed:
+
+- `backend/src/routes/campaign-play.ts`
+- `backend/src/routes/campaign-play.test.ts`
+- `backend/src/campaign-play/index.ts`
+- `backend/src/index.ts`
+- `rpi/campaign-play/implement/11-api.md`
+- `tasks/todo.md`
+
+Output:
+
+- Mount the complete `/api/campaigns/:id/play/*` route family.
+- Admission and resume return `202` after durable validation and driver scheduling.
+- SSE replays numeric event sequence through `Last-Event-ID` or `afterSequence`, reads SQLite only, and closes on interruption or terminal state.
+- Backend startup enumerates campaigns and registers recovery after the server begins listening.
+- Error responses contain only the strict `CampaignPlayErrorResponse` fields.
+
+Evidence:
+
+- [x] Route tests cover accepted-world gate, character setup, opening, player admission, typed stale and concurrency errors, disconnect/reconnect, terminal replay, and explicit resume.
+- [x] Every response, SSE payload, and journal page parses through its public schema.
+- [x] A real migrated campaign completes opening plus one player action through the mounted route family.
+- [x] Backend typecheck, full Campaign Play tests, full backend tests, production build, diff check, GitNexus change detection, correctness review, and maintainability review pass.
+
+Stop condition: the mounted API proves the Task 11 acceptance matrix. Frontend work remains in Tasks 13 and 14.
+
+Plan prose review: main Sol reviewed the packet for direct technical language. `humanizer` and `deslop` found no filler, promotional language, fake contrasts, or unsupported claims after the final edit.
+
+## Campaign Play Task 11 Review (2026-07-12)
+
+- The campaign-scoped application and route family now cover character setup, opening, player actions, exact turn reads, journal paging, SSE replay, interruption, resume, startup recovery, and durable same-key replay.
+- The mounted route playtest creates a migrated accepted campaign and completes player bootstrap, opening, one player action, public reads, ledger checks, and exact reopen comparisons. It exposed a missing durable narration timestamp in the state projection; the source projection was corrected and the same playtest passed.
+- Verification passed: Campaign Play and route suite `322/322`, full backend suite `3886/3886`, backend typecheck, shared/frontend/backend production build, diff check, and GitNexus change detection at LOW risk with zero affected indexed processes.
+- A first unconstrained backend run hit the five-second limit in one existing SQLite race test. The isolated race test passed, and the complete bounded-worker run passed all 3,886 tests.
+- Fresh Sol semantic verification returned `PASS` with remaining P0/P1 findings `0`. Humanizer/deslop review found the Task 11 note and public copy direct and evidence-bound. GLM remains outside the delivery pipeline. Standalone smoke additions: `0`.
+- Evidence: `rpi/campaign-play/implement/11-api.md`.

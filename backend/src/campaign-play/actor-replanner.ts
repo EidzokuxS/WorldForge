@@ -438,6 +438,7 @@ export function createCampaignPlayActorReplanner(
           stage: "primary_settled",
         },
         leaseMode: "expired",
+        publicInterruption: true,
         worldVersionAdvance: 0,
         mutationId: stableId("actor-job-event", {
           jobId: request.jobId,
@@ -772,6 +773,7 @@ export function createCampaignPlayActorReplanner(
         turnRepository.commitActorTransition({
           token: request.token,
           leaseMode: "live",
+          publicInterruption: true,
           worldVersionAdvance: 0,
           mutationId: stableId("actor-job-event", { jobId: request.jobId, stage: "replan_interrupted", workerEpoch }),
           protectedPayloadHash: hashCampaignPlayProjection({ errorCode, actorWorkerEpoch: workerEpoch }),

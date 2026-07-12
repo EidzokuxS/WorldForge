@@ -38,7 +38,7 @@ import {
 
 const CAMPAIGN_A = "11111111-1111-4111-8111-111111111111";
 const CAMPAIGN_B = "22222222-2222-4222-8222-222222222222";
-const TEST_MODEL_PRICING = { currency: "USD", tokenUnit: 1_000_000,
+const TEST_MODEL_PRICING = { known: true, currency: "USD", tokenUnit: 1_000_000,
   inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);

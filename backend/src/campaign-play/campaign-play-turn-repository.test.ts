@@ -34,8 +34,10 @@ import {
 const campaignId = "11111111-1111-4111-8111-111111111111";
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);
-const TEST_MODEL_PRICING = { currency: "USD", tokenUnit: 1_000_000,
+const TEST_MODEL_PRICING = { known: true, currency: "USD", tokenUnit: 1_000_000,
   inputCostMicros: 1_000, outputCostMicros: 2_000, rounding: "ceil" } as const;
+const UNKNOWN_MODEL_PRICING = { known: false, currency: "USD", tokenUnit: 1_000_000,
+  inputCostMicros: 0, outputCostMicros: 0, rounding: "ceil" } as const;
 let root = "";
 let previousCampaignsRoot: string | undefined;
 let handles: CampaignPlayDatabaseHandle[] = [];
@@ -1184,6 +1186,45 @@ describe("Campaign Play external artifact and recovery fencing", () => {
       mutationId: "late-opening-plan",
     }), "turn_fence_lost");
     expect(runtimeSnapshot(handle)).toEqual(after);
+  });
+
+  it("keeps token telemetry while marking unknown frozen pricing incomplete", () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    const input = openingInput(state);
+    if (input.modelSelection.turnKind !== "opening") {
+      throw new Error("Opening fixture lost its model selection contract.");
+    }
+    input.modelSelection.openingPlanner.pricing = UNKNOWN_MODEL_PRICING;
+    repository.admitTurn(input);
+    const token = repository.claimStage(claimInput());
+    repository.acceptModelArtifact({
+      token,
+      artifact: { plan: { summary: "Begin locally", steps: ["observe"] } },
+      evidence: acceptedEvidence,
+      mutationDomain: "runtime",
+      acceptedAt: 1_700,
+      mutationId: "unknown-pricing-plan-accepted",
+    });
+
+    const telemetry = repository.loadTurnTelemetry("turn-opening");
+    expect(telemetry).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 34,
+      totalTokens: 46,
+      estimatedCostMicros: null,
+      costComplete: false,
+    });
+    expect(telemetry.modelAttempts).toContainEqual(expect.objectContaining({
+      kind: "opening_planner",
+      inputTokens: 12,
+      outputTokens: 34,
+      estimatedCostMicros: null,
+      costComplete: false,
+    }));
+    const reopened = openPlay();
+    expect(createCampaignPlayTurnRepository(reopened).loadTurnTelemetry("turn-opening"))
+      .toEqual(telemetry);
   });
 
   it("rolls back the artifact, stage, event, and runtime revision when its callback fails", () => {

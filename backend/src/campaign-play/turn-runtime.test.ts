@@ -59,6 +59,7 @@ import {
   type CampaignPlayActorProposalService,
 } from "./actor-proposal-service.js";
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
+import { createCampaignPlayReadModel } from "./campaign-play-read-model.js";
 import {
   safeGenerateObject,
   type SafeGenerateTrace,
@@ -67,6 +68,7 @@ import {
 const CAMPAIGN_ID = "79797979-7979-4797-8797-797979797979";
 const PLAYER_ID = "actor-player-turn-runtime";
 const TEST_MODEL_PRICING = {
+  known: true,
   currency: "USD",
   tokenUnit: 1_000_000,
   inputCostMicros: 1_000,
@@ -1973,22 +1975,28 @@ describe("Campaign Play player-action turn runtime", () => {
     await runtime.runNextStage(admission.turnId);
     expect(providerCalls).toBe(1);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "claimed", workerEpoch: 1 });
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "interrupted", workerEpoch: 1 });
     expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_model_stages
       WHERE campaign_id = ? AND turn_id = ? AND kind = 'actor_replanner'`).get(
         CAMPAIGN_ID,
         admission.turnId,
-      )).toEqual({ status: "started" });
+      )).toEqual({ status: "interrupted" });
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_plans
       WHERE campaign_id = ? AND actor_id = (
         SELECT actor_id FROM campaign_play_actor_jobs WHERE job_id = ?
       ) AND plan_version = 2`).get(CAMPAIGN_ID, jobId)).toEqual({ count: 0 });
 
-    await runtime.runNextStage(admission.turnId);
-    expect(providerCalls).toBe(1);
-    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
-      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "interrupted", workerEpoch: 1 });
     const interruptedTurn = runtime.loadTurn(admission.turnId)!;
+    expect(interruptedTurn).toMatchObject({
+      stage: "primary_settled",
+      workerLeaseOwner: null,
+      workerLeaseExpiresAt: null,
+    });
+    expect(interruptedTurn.events.at(-1)).toMatchObject({ type: "turn.interrupted" });
+    expect(createCampaignPlayReadModel(handle).loadTurn(admission.turnId)).toMatchObject({
+      turn: { status: "interrupted", retryEligible: true },
+      result: { status: "interrupted", errorCode: "turn_interrupted" },
+    });
     time.advance();
     await runtime.resumeInterruptedStage({
       turnId: admission.turnId,
@@ -1998,6 +2006,49 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(providerCalls).toBe(2);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
       .find((job) => job.jobId === jobId)).toMatchObject({ stage: "deferred", workerEpoch: 2 });
+  });
+
+  it("keeps a queued actor replan outside startup recovery until explicit runtime work", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(4_450);
+    let providerCalls = 0;
+    const actorReplanner = createCampaignPlayActorReplanner(handle, {
+      now: time.clock.now,
+      generateObject: (async (request: { prompt: string }) => {
+        providerCalls += 1;
+        return {
+          object: actorReplanProposalFromPrompt(request.prompt),
+          trace: actorReplanTrace(),
+        };
+      }) as unknown as typeof safeGenerateObject,
+    });
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(),
+      { actorReplanner, owner: "deterministic-startup-worker" },
+    );
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "startup-replan-boundary"),
+      submittedAt: 4_450,
+    });
+    await advanceToPrimarySettlement(runtime, time, admission.turnId);
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    const jobId = forceFirstActorReplan(handle, time, admission.turnId);
+
+    time.advance();
+    await runtime.recoverActiveTurn();
+    expect(providerCalls).toBe(0);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "queued", workerEpoch: 0 });
+
+    time.advance();
+    await runtime.runNextStage(admission.turnId);
+    expect(providerCalls).toBe(1);
+    expect(createCampaignPlayActorScheduler(handle).listTurnJobs(admission.turnId)
+      .find((job) => job.jobId === jobId)).toMatchObject({ stage: "deferred", workerEpoch: 1 });
   });
 
   it("interrupts an expired claimed replanner before recovery and rejects its late result", async () => {

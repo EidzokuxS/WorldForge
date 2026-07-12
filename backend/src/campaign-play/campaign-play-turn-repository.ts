@@ -57,6 +57,7 @@ export interface CampaignPlayRequestedModel {
 }
 
 export interface CampaignPlayModelPricing {
+  known: boolean;
   currency: "USD";
   tokenUnit: 1_000_000;
   inputCostMicros: number;
@@ -192,6 +193,7 @@ export interface CommitCampaignPlayDeterministicInput {
 export interface CommitCampaignPlayActorTransitionInput {
   token: CampaignPlayWorkerLeaseToken;
   leaseMode: "live" | "expired";
+  publicInterruption?: boolean;
   worldVersionAdvance: number;
   protectedPayloadHash: string;
   committedAt: number;
@@ -410,6 +412,7 @@ export interface CampaignPlayTurnRepository {
   loadWorkerStageTiming(turnId: string, workerEpoch: number): CampaignPlayWorkerStageTiming;
   loadTurnTelemetry(turnId: string): CampaignPlayTurnTelemetry;
   loadTurn(turnId: string): LoadedCampaignPlayTurn | null;
+  loadTurnByIdempotencyKey(idempotencyKey: string): LoadedCampaignPlayTurn | null;
   loadActiveTurn(): LoadedCampaignPlayTurn | null;
   loadSupersedableOpening(): LoadedCampaignPlayTurn | null;
   listTurnEvents(turnId: string, afterSequence?: number): CampaignPlaySseEvent[];
@@ -524,10 +527,13 @@ function isModelPricing(value: unknown): value is CampaignPlayModelPricing {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return Object.keys(record).sort().join("|") ===
-      "currency|inputCostMicros|outputCostMicros|rounding|tokenUnit" &&
+      "currency|inputCostMicros|known|outputCostMicros|rounding|tokenUnit" &&
+    typeof record.known === "boolean" &&
     record.currency === "USD" && record.tokenUnit === 1_000_000 &&
     isNonnegativeInteger(record.inputCostMicros) &&
     isNonnegativeInteger(record.outputCostMicros) &&
+    (record.known ||
+      (record.inputCostMicros === 0 && record.outputCostMicros === 0)) &&
     record.rounding === "ceil";
 }
 
@@ -1106,6 +1112,7 @@ function telemetryCost(
   outputTokens: number | null,
   pricing: CampaignPlayModelPricing,
 ): number | null {
+  if (!pricing.known) return null;
   if (inputTokens === null || outputTokens === null) return null;
   const unit = BigInt(pricing.tokenUnit);
   const ceilComponent = (tokens: number, rate: number): bigint => {
@@ -1627,13 +1634,15 @@ function loadEvents(handle: CampaignPlayDatabaseHandle, row: TurnRow): CampaignP
         throw corrupt("Campaign Play turn event follows a terminal boundary.");
       }
       if (runtimeEvent.kind === "worker_claimed") {
-        if (event.type !== "turn.progressed" || replayInterrupted) {
+        const resumesActorReplan = replayInterrupted && replayStage === "primary_settled";
+        if (event.type !== "turn.progressed" || (replayInterrupted && !resumesActorReplan)) {
           throw corrupt("Campaign Play worker claim must expose progress from an active stage.");
         }
         if (runtimeEvent.workerEpoch !== observedWorkerEpoch + 1) {
           throw corrupt("Campaign Play worker claim epoch is not contiguous.");
         }
         observedWorkerEpoch = runtimeEvent.workerEpoch;
+        replayInterrupted = false;
         const expectedProgress = publicProgressForStage(replayStage);
         if (event.progress !== expectedProgress) {
           throw corrupt("Campaign Play worker claim exposes false public progress.");
@@ -1701,13 +1710,15 @@ function loadEvents(handle: CampaignPlayDatabaseHandle, row: TurnRow): CampaignP
         }
       } else if (runtimeEvent.kind === "actor_job_transitioned") {
         if (
-          event.type !== "turn.progressed" || replayInterrupted ||
+          (event.type !== "turn.progressed" && event.type !== "turn.interrupted") ||
+          replayInterrupted ||
           replayStage !== "primary_settled" || observedWorkerEpoch === 0 ||
           runtimeEvent.workerEpoch !== observedWorkerEpoch
         ) {
           throw corrupt("Campaign Play actor settlement is illegal at its replayed stage.");
         }
-        if (event.progress === "revealing") replayStage = "actors_settled";
+        if (event.type === "turn.interrupted") replayInterrupted = true;
+        else if (event.progress === "revealing") replayStage = "actors_settled";
         else if (event.progress !== "world_acting") {
           throw corrupt("Campaign Play actor settlement exposes false public progress.");
         }
@@ -1770,9 +1781,18 @@ function loadEvents(handle: CampaignPlayDatabaseHandle, row: TurnRow): CampaignP
   if (observedWorkerEpoch !== row.workerEpoch) {
     throw corrupt("Campaign Play turn worker epoch disagrees with its event ledger.");
   }
+  const nestedActorInterruption = replayInterrupted && row.stage === "primary_settled" &&
+    row.interruptedStage === null && row.workerLeaseOwner === null &&
+    row.workerLeaseExpiresAt === null &&
+    (handle.sqlite.prepare(`SELECT COUNT(*) AS count FROM campaign_play_actor_jobs
+      WHERE campaign_id = ? AND turn_id = ? AND stage = 'interrupted'`).get(
+        handle.campaignId,
+        row.turnId,
+      ) as { count: number }).count === 1;
   if (
     (replayTerminal !== null && row.stage !== replayTerminal) ||
     (replayTerminal === null && replayInterrupted &&
+      !nestedActorInterruption &&
       (row.stage !== "interrupted" || row.interruptedStage !== replayStage)) ||
     (replayTerminal === null && !replayInterrupted && row.stage !== replayStage)
   ) {
@@ -2004,6 +2024,12 @@ export function createCampaignPlayTurnRepository(
 
   const loadTurn = (turnId: string): LoadedCampaignPlayTurn | null => {
     const row = selectTurn(handle, "id", turnId);
+    if (!row || row.campaignId !== handle.campaignId) return null;
+    return loadRow(handle, row);
+  };
+
+  const loadTurnByIdempotencyKey = (idempotencyKey: string): LoadedCampaignPlayTurn | null => {
+    const row = selectTurn(handle, "idempotency", idempotencyKey);
     if (!row || row.campaignId !== handle.campaignId) return null;
     return loadRow(handle, row);
   };
@@ -2719,7 +2745,8 @@ export function createCampaignPlayTurnRepository(
         !Number.isSafeInteger(input.worldVersionAdvance) || input.worldVersionAdvance < 0 ||
         !isCanonicalHash(input.protectedPayloadHash) ||
         (input.leaseMode === "live" && input.committedAt >= input.token.expiresAt) ||
-        (input.leaseMode === "expired" && input.committedAt < input.token.expiresAt)
+        (input.leaseMode === "expired" && input.committedAt < input.token.expiresAt) ||
+        (input.publicInterruption === true && input.worldVersionAdvance !== 0)
       ) {
         throw stageInvalid("Campaign Play actor transition has an invalid lease or payload contract.");
       }
@@ -2770,33 +2797,58 @@ export function createCampaignPlayTurnRepository(
             throw fenceLost("Campaign Play actor transition lost its in-transaction main-turn fence.");
           }
           assertMutationIdUnused(handle, input.mutationId);
-          const turnUpdate = handle.sqlite.prepare(`UPDATE campaign_play_turns
-            SET next_event_sequence = ?, updated_at = ?
-            WHERE id = ? AND campaign_id = ? AND stage = 'primary_settled'
-              AND worker_lease_owner = ? AND worker_epoch = ? AND worker_lease_expires_at = ?
-              AND next_event_sequence = ?`).run(
-            loaded.nextEventSequence + 1,
-            input.committedAt,
-            input.token.turnId,
-            handle.campaignId,
-            input.token.owner,
-            input.token.epoch,
-            input.token.expiresAt,
-            loaded.nextEventSequence,
-          );
+          const turnUpdate = input.publicInterruption === true
+            ? handle.sqlite.prepare(`UPDATE campaign_play_turns
+                SET worker_lease_owner = NULL, worker_lease_expires_at = NULL,
+                  next_event_sequence = ?, updated_at = ?
+                WHERE id = ? AND campaign_id = ? AND stage = 'primary_settled'
+                  AND worker_lease_owner = ? AND worker_epoch = ? AND worker_lease_expires_at = ?
+                  AND next_event_sequence = ?`).run(
+                loaded.nextEventSequence + 1,
+                input.committedAt,
+                input.token.turnId,
+                handle.campaignId,
+                input.token.owner,
+                input.token.epoch,
+                input.token.expiresAt,
+                loaded.nextEventSequence,
+              )
+            : handle.sqlite.prepare(`UPDATE campaign_play_turns
+                SET next_event_sequence = ?, updated_at = ?
+                WHERE id = ? AND campaign_id = ? AND stage = 'primary_settled'
+                  AND worker_lease_owner = ? AND worker_epoch = ? AND worker_lease_expires_at = ?
+                  AND next_event_sequence = ?`).run(
+                loaded.nextEventSequence + 1,
+                input.committedAt,
+                input.token.turnId,
+                handle.campaignId,
+                input.token.owner,
+                input.token.epoch,
+                input.token.expiresAt,
+                loaded.nextEventSequence,
+              );
           if (turnUpdate.changes !== 1) {
             throw fenceLost("Campaign Play actor transition lost its turn-event compare-and-swap.");
           }
           input.mutate(context);
-          insertTurnEvent(handle, input.mutationId, createWorkerProgressEvent({
-            turnId: input.token.turnId,
-            sequence: loaded.nextEventSequence,
-            acceptedWorldVersion: readAcceptedWorldVersion(handle),
-            worldVersion: context.targetWorldVersion,
-            runtimeRevision: context.targetRuntimeRevision,
-            createdAt: input.committedAt,
-            progress: "world_acting",
-          }));
+          insertTurnEvent(handle, input.mutationId, input.publicInterruption === true
+            ? createInterruptedEvent({
+                turnId: input.token.turnId,
+                sequence: loaded.nextEventSequence,
+                acceptedWorldVersion: readAcceptedWorldVersion(handle),
+                worldVersion: context.targetWorldVersion,
+                runtimeRevision: context.targetRuntimeRevision,
+                createdAt: input.committedAt,
+              })
+            : createWorkerProgressEvent({
+                turnId: input.token.turnId,
+                sequence: loaded.nextEventSequence,
+                acceptedWorldVersion: readAcceptedWorldVersion(handle),
+                worldVersion: context.targetWorldVersion,
+                runtimeRevision: context.targetRuntimeRevision,
+                createdAt: input.committedAt,
+                progress: "world_acting",
+              }));
         },
       });
       const committed = loadTurn(input.token.turnId);
@@ -3589,6 +3641,7 @@ export function createCampaignPlayTurnRepository(
       };
     },
     loadTurn,
+    loadTurnByIdempotencyKey,
     loadActiveTurn() {
       const row = selectTurn(handle, "active");
       return row ? loadRow(handle, row) : null;

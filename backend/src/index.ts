@@ -29,8 +29,14 @@ import worldgenRoutes from "./routes/worldgen.js";
 import characterRoutes from "./routes/character.js";
 import campaignKernelRoutes from "./routes/campaign-kernel.js";
 import campaignWorldRoutes from "./routes/campaign-world.js";
+import campaignPlayRoutes from "./routes/campaign-play.js";
 import imageRoutes from "./routes/images.js";
 import personaTemplateRoutes from "./routes/persona-templates.js";
+import { listCampaigns } from "./campaign/index.js";
+import {
+  campaignPlayApplication,
+  CampaignPlayApplicationError,
+} from "./campaign-play/index.js";
 
 const app = new Hono();
 
@@ -82,6 +88,7 @@ app.get("/api/debug/prompt", async (c) => {
 app.route("/api/settings", settingsRoutes);
 app.route("/api/campaigns", campaignRoutes);
 app.route("/api/campaigns", campaignWorldRoutes);
+app.route("/api/campaigns", campaignPlayRoutes);
 app.route("/api/campaigns", loreRoutes);
 app.route("/api/campaigns/:id/persona-templates", personaTemplateRoutes);
 app.route("/api/worldgen", worldgenRoutes);
@@ -120,6 +127,17 @@ function startServer(retries = 3): void {
     },
     (info) => {
       console.log(`WorldForge backend listening on http://localhost:${info.port}`);
+      queueMicrotask(() => {
+        for (const campaign of listCampaigns()) {
+          void campaignPlayApplication.recoverCampaign(campaign.id).catch((error: unknown) => {
+            if (
+              error instanceof CampaignPlayApplicationError &&
+              (error.publicCode === "world_not_accepted" || error.publicCode === "campaign_not_found")
+            ) return;
+            console.error(`Campaign Play recovery failed for campaign ${campaign.id}.`);
+          });
+        }
+      });
     }
   );
 

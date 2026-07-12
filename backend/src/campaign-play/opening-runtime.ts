@@ -14,10 +14,10 @@ import {
 import type { CampaignPlayDatabaseHandle } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
-  deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
+import { resolveCampaignPlayStartingConditions } from "./opening-options.js";
 import {
   CampaignPlayOpeningPlannerError,
   campaignPlayOpeningArtifactSchema,
@@ -49,6 +49,7 @@ import {
 import {
   createCampaignPlayStateRepository,
   loadCampaignPlayRulebookFrame,
+  type LoadedCampaignPlayState,
 } from "./campaign-play-state-repository.js";
 import {
   createCampaignPlayTurnRepository,
@@ -102,6 +103,7 @@ type CampaignPlayOpeningAdmissionFrame = z.infer<typeof openingAdmissionFrameSch
 
 export type CampaignPlayOpeningRuntimeErrorCode =
   | "opening_request_invalid"
+  | "opening_idempotency_conflict"
   | "opening_state_invalid"
   | "opening_player_invalid"
   | "opening_artifact_invalid"
@@ -285,35 +287,20 @@ function loadPlayer(handle: CampaignPlayDatabaseHandle): CampaignPlayOpeningAdmi
 }
 
 function resolveStartingConditions(
-  handle: CampaignPlayDatabaseHandle,
   request: CampaignPlayOpeningAdmissionRequest,
-  openingLocationId: string | null,
+  state: LoadedCampaignPlayState,
 ): CampaignPlayResolvedStartingConditions {
-  if (request.startingConditions.mode === "delegate") return { mode: "delegate" };
-  if (openingLocationId === null) {
-    throw new CampaignPlayOpeningRuntimeError(
-      "opening_state_invalid",
-      "Campaign Play accepted world has no eligible opening location.",
+  try {
+    return campaignPlayResolvedStartingConditionsSchema.parse(
+      resolveCampaignPlayStartingConditions(state, request.startingConditions),
     );
-  }
-  const expectedHandle = deriveCampaignPlayPublicHandle(
-    "location",
-    handle.campaignId,
-    openingLocationId,
-  );
-  if (request.startingConditions.locationHandle !== expectedHandle) {
+  } catch (cause) {
     throw new CampaignPlayOpeningRuntimeError(
       "opening_request_invalid",
-      "Chosen opening location does not match accepted world authority.",
+      "Chosen opening conditions do not match the current Campaign Play options.",
+      { cause },
     );
   }
-  return campaignPlayResolvedStartingConditionsSchema.parse({
-    mode: "chosen",
-    locationId: openingLocationId,
-    role: request.startingConditions.role,
-    arrivalMode: request.startingConditions.arrivalMode,
-    immediateSituation: request.startingConditions.immediateSituation,
-  });
 }
 
 function allRulebookRefs(frame: CampaignPlayRulebookFrame): CampaignPlayEntityRef[] {
@@ -919,7 +906,7 @@ export function createCampaignPlayOpeningRuntime(
             canonicalizeCampaignPlayProjection(selection)
         ) {
           throw new CampaignPlayOpeningRuntimeError(
-            "opening_request_invalid",
+            "opening_idempotency_conflict",
             "Campaign Play idempotency key belongs to another opening request.",
           );
         }
@@ -945,9 +932,8 @@ export function createCampaignPlayOpeningRuntime(
         );
       }
       const startingConditions = resolveStartingConditions(
-        input.handle,
         request,
-        state.eligibility.projection.openingLocationId,
+        state,
       );
       const frame = openingAdmissionFrameSchema.parse({
         campaignId: input.handle.campaignId,

@@ -38,6 +38,7 @@ const CAMPAIGN_ID = "12121212-1212-4212-8212-121212121212";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const TEST_MODEL_PRICING = {
+  known: true,
   currency: "USD",
   tokenUnit: 1_000_000,
   inputCostMicros: 1_000,
