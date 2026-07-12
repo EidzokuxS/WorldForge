@@ -20,18 +20,7 @@ try {
   // No process on port — normal case
 }
 
-import aiRoutes from "./routes/ai.js";
-import campaignRoutes from "./routes/campaigns.js";
-import chatRoutes from "./routes/chat.js";
-import loreRoutes from "./routes/lore.js";
-import settingsRoutes from "./routes/settings.js";
-import worldgenRoutes from "./routes/worldgen.js";
-import characterRoutes from "./routes/character.js";
-import campaignKernelRoutes from "./routes/campaign-kernel.js";
-import campaignWorldRoutes from "./routes/campaign-world.js";
-import campaignPlayRoutes from "./routes/campaign-play.js";
-import imageRoutes from "./routes/images.js";
-import personaTemplateRoutes from "./routes/persona-templates.js";
+import { registerApiRoutes } from "./api-routes.js";
 import { listCampaigns } from "./campaign/index.js";
 import {
   campaignPlayApplication,
@@ -85,18 +74,7 @@ app.get("/api/debug/prompt", async (c) => {
   }
 });
 
-app.route("/api/settings", settingsRoutes);
-app.route("/api/campaigns", campaignRoutes);
-app.route("/api/campaigns", campaignWorldRoutes);
-app.route("/api/campaigns", campaignPlayRoutes);
-app.route("/api/campaigns", loreRoutes);
-app.route("/api/campaigns/:id/persona-templates", personaTemplateRoutes);
-app.route("/api/worldgen", worldgenRoutes);
-app.route("/api/worldgen", characterRoutes);
-app.route("/api/kernel", campaignKernelRoutes);
-app.route("/api", aiRoutes);
-app.route("/api/chat", chatRoutes);
-app.route("/api/images", imageRoutes);
+registerApiRoutes(app);
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 

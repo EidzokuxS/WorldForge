@@ -1,23 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 const apiMock = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiDelete: vi.fn(),
   getActiveCampaign: vi.fn(),
-  getWorldData: vi.fn(),
   loadCampaign: vi.fn(),
 }));
 
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+const campaignNavigation = vi.hoisted(() => ({ loadCampaignDestination: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => navigation,
 }));
+
+vi.mock("@/lib/campaign-navigation", () => campaignNavigation);
 
 vi.mock("@/lib/api", () => ({
   apiGet: apiMock.apiGet,
   apiDelete: apiMock.apiDelete,
   getActiveCampaign: apiMock.getActiveCampaign,
-  getWorldData: apiMock.getWorldData,
   loadCampaign: apiMock.loadCampaign,
 }));
 
@@ -40,8 +44,30 @@ describe("LauncherPage", () => {
     apiMock.apiGet.mockReset();
     apiMock.apiDelete.mockReset();
     apiMock.getActiveCampaign.mockReset();
-    apiMock.getWorldData.mockReset();
     apiMock.loadCampaign.mockReset();
+    navigation.push.mockReset();
+    campaignNavigation.loadCampaignDestination.mockReset();
+  });
+
+  it("loads the campaign before navigating to its persisted product phase", async () => {
+    const campaign = {
+      id: "c1",
+      name: "The Seventh Mercy",
+      premise: "A generation ship premise.",
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    apiMock.apiGet.mockResolvedValue([campaign]);
+    apiMock.getActiveCampaign.mockResolvedValue(null);
+    apiMock.loadCampaign.mockResolvedValue(campaign);
+    campaignNavigation.loadCampaignDestination.mockResolvedValue("/campaign/c1/character");
+
+    render(<LauncherPage />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Load" }));
+
+    await waitFor(() => expect(campaignNavigation.loadCampaignDestination).toHaveBeenCalledWith("c1"));
+    expect(navigation.push).toHaveBeenCalledWith("/campaign/c1/character");
   });
 
   it("renders the launcher with campaign actions and recent campaigns section", async () => {
@@ -58,68 +84,24 @@ describe("LauncherPage", () => {
     });
   });
 
-  it("uses real world scene data for the V4 home hero instead of campaign-library placeholders", async () => {
+  it("uses campaign metadata for the home hero", async () => {
     const campaign = {
       id: "c1",
       name: "The Seventh Mercy",
       premise: "A generation ship premise.",
       createdAt: Date.now() - 10_000,
       updatedAt: Date.now() - 120_000,
-      generationComplete: true,
     };
 
     apiMock.apiGet.mockResolvedValueOnce([campaign]);
     apiMock.getActiveCampaign.mockResolvedValueOnce(campaign);
-    apiMock.getWorldData.mockResolvedValueOnce({
-      currentScene: {
-        id: "scene-1",
-        name: "Spinal Chapel deck 12",
-        broadLocationId: "loc-1",
-        broadLocationName: "Spinal Chapel",
-        sceneNpcIds: [],
-        clearNpcIds: [],
-        awareness: { byNpcId: {}, hintSignals: [] },
-      },
-      locations: [{
-        id: "scene-1",
-        campaignId: "c1",
-        name: "Spinal Chapel deck 12",
-        description: "Iru has stopped by the bulkhead with the captain's log in his hand.",
-        tags: [],
-        connectedTo: [],
-        isStarting: true,
-      }],
-      npcs: [],
-      factions: [],
-      relationships: [],
-      items: [],
-      player: {
-        id: "p1",
-        campaignId: "c1",
-        name: "Iru",
-        race: "",
-        gender: "",
-        age: "",
-        appearance: "",
-        hp: 10,
-        tags: [],
-        equippedItems: [],
-        inventory: [],
-        equipment: [],
-        currentLocationId: "scene-1",
-        sceneScopeId: "scene-1",
-      },
-      personaTemplates: [],
-    });
-
     render(<LauncherPage />);
 
-    expect(await screen.findByText("Current scene")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Spinal Chapel deck 12/i })).toBeInTheDocument();
-    expect(screen.getByText("Iru is present")).toBeInTheDocument();
-    expect(screen.getByText("dialogue beat open")).toBeInTheDocument();
-    expect(screen.queryByText("Saved campaigns")).not.toBeInTheDocument();
-    expect(screen.queryByText("Local disk")).not.toBeInTheDocument();
+    expect(await screen.findByText("Current campaign")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /The Seventh Mercy/i })).toBeInTheDocument();
+    expect(document.querySelector(".wf-home-lede")).toHaveTextContent("A generation ship premise.");
+    expect(screen.getByText("Ready to enter")).toBeInTheDocument();
+    expect(screen.getByText("campaign state")).toBeInTheDocument();
     expect(document.querySelector(".wf-home-pin[data-state='hot']")).not.toBeNull();
   });
 });

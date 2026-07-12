@@ -1,7 +1,6 @@
 import type {
   CampaignMeta,
   CampaignWorldbookSelection,
-  CharacterImportMode,
   IpResearchContext,
   PremiseDivergence,
   SeedCategory,
@@ -17,14 +16,10 @@ import type {
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
-  ScaffoldNpc,
   ParsedCharacter,
-  CharacterResult,
   CheckpointMeta,
-  LoadoutPreviewResult,
   PersonaTemplateListResult,
   PersonaTemplateRecord,
-  ResolveStartConditionsResult,
   WorldbookLibraryItem,
   WorldCurrentScene,
   WorldLocationConnectedPath,
@@ -42,10 +37,7 @@ import type {
 } from "@worldforge/shared";
 import {
   characterDraftToParsedCharacter,
-  characterDraftToScaffoldNpc,
   characterRecordToDraft,
-  parsedCharacterToDraft,
-  scaffoldNpcToDraft,
 } from "./character-drafts";
 import type { OracleResultData } from "./oracle-result";
 import { normalizeOracleResult } from "./oracle-result";
@@ -59,15 +51,11 @@ export type {
   WorldData,
   LoreCardItem,
   LoreCardUpdateInput,
-  ScaffoldNpc,
   ParsedCharacter,
-  CharacterResult,
   ApplyPersonaTemplateResult,
   CheckpointMeta,
-  LoadoutPreviewResult,
   PersonaTemplateListResult,
   PersonaTemplateRecord,
-  ResolveStartConditionsResult,
   WorldbookLibraryItem,
 };
 
@@ -512,52 +500,6 @@ function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
   };
 }
 
-function normalizeCharacterResult(
-  raw: CharacterResult | ({
-    role: "player";
-    draft?: CharacterDraft;
-    character?: ParsedCharacter;
-    characterRecord?: CharacterRecord | null;
-  } | {
-    role: "key";
-    draft?: CharacterDraft;
-    npc?: ScaffoldNpc;
-    characterRecord?: CharacterRecord | null;
-  }),
-): CharacterResult {
-  if (raw.role === "player") {
-    const draft = raw.draft
-      ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
-      ?? raw.character?.draft
-      ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
-    return {
-      role: "player",
-      characterRecord: raw.characterRecord ?? null,
-      draft,
-      character: raw.character ?? characterDraftToParsedCharacter(draft),
-    };
-  }
-
-  const draft = raw.draft
-    ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
-    ?? raw.npc?.draft
-    ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
-  return {
-    role: "key",
-    characterRecord: raw.characterRecord ?? null,
-    draft,
-    npc: raw.npc
-      ? {
-          ...raw.npc,
-          characterRecord: raw.characterRecord ?? raw.npc.characterRecord ?? null,
-        }
-      : {
-          ...characterDraftToScaffoldNpc(draft),
-          characterRecord: raw.characterRecord ?? null,
-        },
-  };
-}
-
 type WorldDataProjection = "gameplay" | "review";
 
 function parseWorldData(raw: RawWorldData, projection: WorldDataProjection = "gameplay"): WorldData {
@@ -809,21 +751,6 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new Error(await readErrorMessage(res));
   }
   return (await res.json()) as T;
-}
-
-export async function apiStreamPost(
-  path: string,
-  body: unknown
-): Promise<Response> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
-  }
-  return res;
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
@@ -1356,13 +1283,6 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
 
 // ───── SSE Stream Parser ─────
 
-interface SSEHandlers<T> {
-  onProgress?: (data: Record<string, unknown>) => void;
-  onComplete: (data: Record<string, unknown>) => T;
-  onError?: (data: Record<string, unknown>) => never;
-  label: string;
-}
-
 export interface WorldgenDebugOperation {
   id: string;
   kind: "suggest-seeds" | "generate-world";
@@ -1382,55 +1302,6 @@ export interface WorldgenDebugProgress {
   active: WorldgenDebugOperation[];
   recent: WorldgenDebugOperation[];
 }
-async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSEHandlers<T>): Promise<T> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent = "";
-  let currentData = "";
-
-  for (; ;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop()!;
-
-    for (const line of lines) {
-      const normalizedLine = line.replace(/\r$/, "");
-      if (normalizedLine.startsWith("event:")) {
-        currentEvent = normalizedLine.slice(6).trim();
-      } else if (normalizedLine.startsWith("data:")) {
-        currentData += normalizedLine.slice(5).trim();
-      } else if (normalizedLine === "") {
-        if (currentEvent && currentData) {
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(currentData) as Record<string, unknown>;
-          } catch {
-            throw new Error(`${handlers.label}: invalid SSE data for event '${currentEvent}'`);
-          }
-
-          if (currentEvent === "progress") {
-            handlers.onProgress?.(parsed);
-          } else if (currentEvent === "complete") {
-            return handlers.onComplete(parsed);
-          } else if (currentEvent === "error") {
-            if (handlers.onError) handlers.onError(parsed);
-            const msg = typeof parsed.error === "string" ? parsed.error : `${handlers.label} failed.`;
-            throw new Error(msg);
-          }
-        }
-        currentEvent = "";
-        currentData = "";
-      }
-    }
-  }
-
-  throw new Error(`${handlers.label} stream ended without completion.`);
-}
-
 export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
   return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
@@ -1508,97 +1379,6 @@ export async function loadCampaign(campaignId: string): Promise<CampaignMeta> {
   return campaign;
 }
 
-// ───── Character Creation ─────
-
-export function saveCharacter(
-  campaignId: string,
-  character: ParsedCharacter | CharacterDraft
-): Promise<{ ok: boolean; playerId: string }> {
-  return apiPost<{ ok: boolean; playerId: string }>(
-    "/api/worldgen/save-character",
-    { campaignId, draft: "identity" in character ? character : parsedCharacterToDraft(character) }
-  );
-}
-
-export function parseCharacter(
-  campaignId: string,
-  concept: string,
-  role: "player" | "key" = "player",
-  locationNames?: string[],
-  factionNames?: string[],
-  overrideText?: string,
-): Promise<CharacterResult> {
-  return apiPost<CharacterResult>("/api/worldgen/parse-character", {
-    campaignId, concept, role, locationNames, factionNames,
-    ...(overrideText ? { overrideText } : {}),
-  }).then(normalizeCharacterResult);
-}
-
-export function generateCharacter(
-  campaignId: string,
-  role: "player" | "key" = "player",
-  locationNames?: string[],
-  factionNames?: string[],
-  overrideText?: string,
-): Promise<CharacterResult> {
-  return apiPost<CharacterResult>("/api/worldgen/generate-character", {
-    campaignId, role, locationNames, factionNames,
-    ...(overrideText ? { overrideText } : {}),
-  }).then(normalizeCharacterResult);
-}
-
-export function researchCharacter(
-  campaignId: string,
-  archetype: string,
-  role: "player" | "key" = "player",
-  locationNames?: string[],
-  factionNames?: string[],
-  overrideText?: string,
-): Promise<CharacterResult> {
-  return apiPost<CharacterResult>("/api/worldgen/research-character", {
-    campaignId, archetype, role, locationNames, factionNames,
-    ...(overrideText ? { overrideText } : {}),
-  }).then(normalizeCharacterResult);
-}
-
-export function importV2Card(
-  campaignId: string,
-  card: { name: string; description: string; personality: string; scenario: string; tags: string[] },
-  options?: {
-    role?: "player" | "key";
-    importMode?: CharacterImportMode;
-    locationNames?: string[];
-    factionNames?: string[];
-    overrideText?: string;
-  },
-): Promise<CharacterResult> {
-  const role = options?.role ?? "player";
-  const overrideText = options?.overrideText;
-  return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
-    campaignId,
-    ...card,
-    role,
-    importMode: options?.importMode ?? "native",
-    locationNames: options?.locationNames,
-    factionNames: options?.factionNames,
-    ...(overrideText ? { overrideText } : {}),
-  }).then(normalizeCharacterResult);
-}
-
-export function resolveStartingLocation(
-  campaignId: string,
-  prompt?: string,
-): Promise<ResolveStartConditionsResult> {
-  return apiPost("/api/worldgen/resolve-starting-location", { campaignId, prompt });
-}
-
-export function previewCanonicalLoadout(
-  campaignId: string,
-  draft: CharacterDraft,
-): Promise<LoadoutPreviewResult> {
-  return apiPost("/api/worldgen/preview-loadout", { campaignId, draft });
-}
-
 export function listPersonaTemplates(
   campaignId: string,
 ): Promise<PersonaTemplateListResult> {
@@ -1660,71 +1440,6 @@ export function getImageUrl(
 }
 
 // ───── Chat Controls (Retry / Undo / Edit) ─────
-
-export function chatHistory(campaignId: string): Promise<ChatHistoryResponse> {
-  return apiGet<ChatHistoryResponse>(
-    `/api/chat/history?campaignId=${encodeURIComponent(campaignId)}`,
-  );
-}
-
-export function chatAction(
-  campaignId: string,
-  playerAction: string,
-  intent: string,
-  method: string,
-  options: { quickActionHandle?: string } = {},
-): Promise<Response> {
-  const body: Record<string, unknown> = {
-    campaignId,
-    playerAction,
-    intent,
-    method,
-  };
-  if (options.quickActionHandle) {
-    body.quickActionHandle = options.quickActionHandle;
-  }
-  return apiStreamPost("/api/chat/action", body);
-}
-
-export function chatLookup(
-  campaignId: string,
-  request: ChatLookupRequest,
-): Promise<Response> {
-  return apiStreamPost("/api/chat/lookup", {
-    campaignId,
-    ...request,
-  });
-}
-
-export function chatOpening(campaignId: string): Promise<Response> {
-  return apiStreamPost("/api/chat/opening", { campaignId });
-}
-
-export function chatRetry(campaignId: string): Promise<Response> {
-  return apiStreamPost("/api/chat/retry", { campaignId });
-}
-
-export function chatResume(campaignId: string, resumeToken: string): Promise<Response> {
-  return apiStreamPost("/api/chat/resume", { campaignId, resumeToken });
-}
-
-export function chatUndo(campaignId: string): Promise<{ ok: boolean; messagesRemoved: number }> {
-  return apiPost<{ ok: boolean; messagesRemoved: number }>("/api/chat/undo", {
-    campaignId,
-  });
-}
-
-export function chatEdit(
-  campaignId: string,
-  messageIndex: number,
-  newContent: string,
-): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>("/api/chat/edit", {
-    campaignId,
-    messageIndex,
-    newContent,
-  });
-}
 
 // ───── Checkpoints ─────
 

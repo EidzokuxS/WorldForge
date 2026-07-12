@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiDelete, apiGet, loadCampaign } from "@/lib/api";
+import { loadCampaignDestination } from "@/lib/campaign-navigation";
 import { getErrorMessage } from "@/lib/settings";
 import {
   AlertDialog,
@@ -90,7 +91,7 @@ export function LoadCampaignDialog({ onLoaded }: LoadCampaignDialogProps) {
       toast.success("Campaign loaded", { description: loaded.name });
       setOpen(false);
       onLoaded();
-      router.push("/game");
+      router.push(await loadCampaignDestination(id));
     } catch (error) {
       toast.error("Failed to load campaign", {
         description: getErrorMessage(error, "Unknown API error."),

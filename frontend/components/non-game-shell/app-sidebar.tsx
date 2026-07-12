@@ -3,8 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { CampaignPlayPhase } from "@worldforge/shared";
 
 import { useCampaignStatus } from "@/components/non-game-shell/campaign-status-provider";
+import { loadCampaignPlayState } from "@/lib/campaign-play-api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,7 +72,44 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
   const draft = useForgeDraft(pathname);
   const draftHref = getDraftHref(draft);
   const [confirmFreshStart, setConfirmFreshStart] = React.useState(false);
+  const [playSnapshot, setPlaySnapshot] = React.useState<{
+    campaignId: string;
+    phase: CampaignPlayPhase;
+  } | null>(null);
+  const [playStateErrorCampaignId, setPlayStateErrorCampaignId] = React.useState<string | null>(null);
   const canOpenReview = worldState?.status === "review" || worldState?.status === "accepted";
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPlaySnapshot(null);
+    setPlayStateErrorCampaignId(null);
+
+    if (!campaignId || worldState?.status !== "accepted") return () => { cancelled = true; };
+
+    void loadCampaignPlayState(campaignId)
+      .then((state) => {
+        if (!cancelled) setPlaySnapshot({ campaignId, phase: state.phase });
+      })
+      .catch(() => {
+        if (!cancelled) setPlayStateErrorCampaignId(campaignId);
+      });
+
+    return () => { cancelled = true; };
+  }, [campaignId, worldState?.status]);
+
+  const playPhase = playSnapshot?.campaignId === campaignId ? playSnapshot.phase : null;
+  const campaignPlayItem: NavItem | null = campaignId && worldState?.status === "accepted" && playPhase
+    ? {
+        href: playPhase === "character_required"
+          ? `/campaign/${campaignId}/character`
+          : `/campaign/${campaignId}/play`,
+        label: playPhase === "character_required" ? "Player character" : "Play",
+        glyph: playPhase === "character_required" ? "♙" : "▶",
+        match: (value) => playPhase === "character_required"
+          ? value.startsWith(`/campaign/${campaignId}/character`)
+          : value.startsWith(`/campaign/${campaignId}/play`),
+      }
+    : null;
   const worldStatusLabel = loading
     ? "Loading campaign"
     : worldState?.status === "unbuilt"
@@ -100,6 +139,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
       disabled: !campaignId || !canOpenReview,
       match: (value) => value.startsWith("/campaign/") && value.endsWith("/review"),
     },
+    ...(campaignPlayItem ? [campaignPlayItem] : []),
   ];
 
   const workspaceItems: NavItem[] = [
@@ -177,6 +217,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
             <p className="wf-sidebar-campaign-meta">
               <span className="wf-sidebar-dot" aria-hidden="true" />
               <span>{worldStatusLabel}</span>
+              {playStateErrorCampaignId === campaignId ? <span> · Play state unavailable</span> : null}
             </p>
           </>
         ) : (

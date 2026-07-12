@@ -17,7 +17,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { apiDelete, apiGet, getActiveCampaign, getWorldData, loadCampaign, type WorldData } from "@/lib/api";
+import { apiDelete, apiGet, getActiveCampaign, loadCampaign } from "@/lib/api";
+import { loadCampaignDestination } from "@/lib/campaign-navigation";
 import { type CampaignMeta, formatUtcDate } from "@/components/title/utils";
 import { getErrorMessage } from "@worldforge/shared";
 import { clearCampaignNewFlowSession } from "@/components/campaign-new/flow-session";
@@ -43,10 +44,6 @@ export default function LauncherPage() {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<CampaignMeta[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
-  const [worldDataState, setWorldDataState] = useState<{
-    campaignId: string;
-    data: WorldData;
-  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -88,35 +85,6 @@ export default function LauncherPage() {
 
   const latestCampaign = sorted[0];
   const heroCampaign = activeCampaign ?? latestCampaign ?? null;
-  const worldData = heroCampaign && worldDataState?.campaignId === heroCampaign.id
-    ? worldDataState.data
-    : null;
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!heroCampaign) {
-      return;
-    }
-
-    void getWorldData(heroCampaign.id)
-      .then((world) => {
-        if (!cancelled) {
-          setWorldDataState({ campaignId: heroCampaign.id, data: world });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorldDataState((current) =>
-            current?.campaignId === heroCampaign.id ? null : current,
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [heroCampaign]);
 
   async function handleLoad(id: string) {
     setLoadingId(id);
@@ -124,7 +92,7 @@ export default function LauncherPage() {
       const loaded = await loadCampaign(id);
       setActiveCampaign(loaded);
       toast.success("Campaign loaded", { description: loaded.name });
-      router.push("/game");
+      router.push(await loadCampaignDestination(id));
     } catch (error) {
       toast.error("Failed to load campaign", {
         description: getErrorMessage(error, "Unknown API error."),
@@ -149,7 +117,7 @@ export default function LauncherPage() {
     }
   }
 
-  const heroState = createHeroState(heroCampaign, worldData, sorted.length);
+  const heroState = createHeroState(heroCampaign, sorted.length);
   const titleParts = heroState.title ? splitTitle(heroState.title, heroState.variant) : null;
 
   return (
@@ -201,14 +169,6 @@ export default function LauncherPage() {
                 {loadingId === heroCampaign.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 Continue session
               </button>
-            ) : null}
-            {heroCampaign ? (
-              <Link
-                href={`/campaign/${heroCampaign.id}/review`}
-                className="wf-v4-btn"
-              >
-                Walk the world
-              </Link>
             ) : null}
             <Link
               href="/campaign/new"
@@ -276,7 +236,6 @@ export default function LauncherPage() {
 
 function createHeroState(
   campaign: CampaignMeta | null,
-  world: WorldData | null,
   campaignCount: number,
 ): {
   kicker: string;
@@ -299,27 +258,20 @@ function createHeroState(
     };
   }
 
-  const currentScene = world?.currentScene ?? null;
-  const player = world?.player ?? null;
-  const sceneLocation = findSceneLocation(world);
-  const sceneTitle = currentScene?.name ?? sceneLocation?.name ?? null;
-  const locationName = currentScene?.broadLocationName ?? sceneLocation?.name ?? null;
-  const hasScene = Boolean(sceneTitle);
-
   return {
-    kicker: hasScene ? "Current scene" : "Current campaign",
-    title: sceneTitle ?? campaign.name,
-    variant: hasScene ? "scene" : "campaign",
-    lede: sceneLocation?.description ?? campaign.premise,
+    kicker: "Current campaign",
+    title: campaign.name,
+    variant: "campaign",
+    lede: campaign.premise,
     pins: [
       {
-        value: player?.name ? `${player.name} is present` : "Player ready",
-        label: player?.name ? "dialogue beat open" : "player state",
-        hot: Boolean(player?.name),
+        value: "Ready to enter",
+        label: "campaign state",
+        hot: true,
       },
       {
-        value: locationName ?? "World loaded",
-        label: locationName ? "current location" : "world state",
+        value: `${campaignCount} saved`,
+        label: "campaign library",
       },
       {
         value: "Last save",
@@ -327,29 +279,6 @@ function createHeroState(
       },
     ],
   };
-}
-
-function findSceneLocation(world: WorldData | null) {
-  if (!world) {
-    return null;
-  }
-
-  const scene = world.currentScene;
-  const ids = [
-    scene?.id,
-    world.player?.sceneScopeId,
-    world.player?.currentLocationId,
-    scene?.broadLocationId,
-  ].filter((id): id is string => Boolean(id));
-
-  for (const id of ids) {
-    const found = world.locations.find((location) => location.id === id);
-    if (found) {
-      return found;
-    }
-  }
-
-  return world.locations.find((location) => location.isStarting) ?? world.locations[0] ?? null;
 }
 
 function splitTitle(title: string, variant: "scene" | "campaign" = "campaign"): { head: string; emphasis: string; tail: string } {

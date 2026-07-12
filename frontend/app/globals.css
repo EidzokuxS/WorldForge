@@ -5423,6 +5423,12 @@
     width: calc(100% - 20px);
     max-height: min(52dvh, 440px);
     margin-bottom: max(10px, env(safe-area-inset-bottom));
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-l);
+    background: rgba(8, 8, 10, 0.97);
+    box-shadow: 0 22px 90px rgba(0, 0, 0, 0.64);
+    padding: 10px;
+    backdrop-filter: blur(24px);
   }
 
   .campaign-play-choices > div {

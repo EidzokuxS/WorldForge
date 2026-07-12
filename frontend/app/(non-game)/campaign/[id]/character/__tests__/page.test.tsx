@@ -1,108 +1,243 @@
 import { Suspense } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CampaignPlayCharacterDraft, CampaignPlayState } from "@worldforge/shared";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+const push = vi.fn();
+const replace = vi.fn();
+const router = { push, replace };
+
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/campaign-player-card", () => ({ readCampaignPlayerCard: vi.fn() }));
+vi.mock("@/lib/campaign-play-api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/campaign-play-api")>(),
+  loadCampaignPlayState: vi.fn(),
+  generateCampaignPlayPlayerDraft: vi.fn(),
+  researchCampaignPlayPlayer: vi.fn(),
+  parseCampaignPlayPlayerCard: vi.fn(),
+  putCampaignPlayPlayer: vi.fn(),
+}));
+vi.mock("@/components/character-creation/campaign-player-intake", () => ({
+  CampaignPlayerIntake: (props: {
+    onDraft: (prompt: string) => Promise<void>;
+    onResearch: (query: string) => Promise<void>;
+    onCard: (file: File, importMode: "native" | "outsider") => Promise<void>;
+  }) => <>
+    <button type="button" onClick={() => void props.onDraft("An observant cartographer")}>Build test draft</button>
+    <button type="button" onClick={() => void props.onResearch("Floodplain cartographers")}>Research test draft</button>
+    <button type="button" onClick={() => void props.onCard(new File(["card"], "iria.json"), "outsider")}>Import test card</button>
+  </>,
+}));
+vi.mock("@/components/character-creation/campaign-player-editor", () => ({
+  CampaignPlayerEditor: ({ draft }: { draft: CampaignPlayCharacterDraft }) => <div>Editing {draft.name}</div>,
 }));
 
-vi.mock("@/lib/api", () => ({
-  loadCampaign: vi.fn(),
-  getWorldData: vi.fn(),
-  parseCharacter: vi.fn(),
-  generateCharacter: vi.fn(),
-  importV2Card: vi.fn(),
-  listPersonaTemplates: vi.fn(),
-  resolveStartingLocation: vi.fn(),
-  previewCanonicalLoadout: vi.fn(),
-  applyPersonaTemplate: vi.fn(),
-  saveCharacter: vi.fn(),
-}));
-
-vi.mock("@/lib/v2-card-parser", () => ({
-  parseV2CardFile: vi.fn(),
-}));
-
-vi.mock("sonner", () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-vi.mock("@/components/character-creation/character-form", () => ({
-  CharacterForm: (props: Record<string, unknown>) => (
-    <div
-      data-testid="character-form"
-      data-parsing={String(props.parsing)}
-      data-generating={String(props.generating)}
-      data-importing={String(props.importing)}
-    />
-  ),
-}));
-
-vi.mock("@/components/character-creation/character-card", () => ({
-  CharacterCard: () => <div data-testid="character-card" />,
-}));
-
-import { getWorldData, listPersonaTemplates, loadCampaign } from "@/lib/api";
+import {
+  CampaignPlayApiError,
+  generateCampaignPlayPlayerDraft,
+  loadCampaignPlayState,
+  parseCampaignPlayPlayerCard,
+  putCampaignPlayPlayer,
+  researchCampaignPlayPlayer,
+} from "@/lib/campaign-play-api";
+import { readCampaignPlayerCard } from "@/lib/campaign-player-card";
 import CharacterCreationPage from "@/app/(non-game)/campaign/[id]/character/page";
 
-const mockedLoadCampaign = vi.mocked(loadCampaign);
-const mockedGetWorldData = vi.mocked(getWorldData);
-const mockedListPersonaTemplates = vi.mocked(listPersonaTemplates);
+const draft: CampaignPlayCharacterDraft = {
+  name: "Iria Vale",
+  summary: "A patient cartographer.",
+  species: "Human",
+  gender: "Woman",
+  ageText: "31",
+  appearance: "Ink-stained hands.",
+  biography: "She maps roads that no longer exist.",
+  personality: {
+    summary: "Careful and direct.",
+    voice: "Measured",
+    decisionStyle: "Evidence first",
+    worldview: "Every place leaves a trace.",
+    contradictions: ["Restless homebody"],
+    mythology: "Rivers remember.",
+    sampleLines: ["Show me where the road bends."],
+  },
+  motives: ["Finish the flood map"],
+  beliefs: ["Maps are promises"],
+  drives: ["Discover"],
+  traits: ["Patient"],
+  skills: [{ name: "Cartography", tier: "Master" }],
+  flaws: ["Overcautious"],
+  specialties: ["River deltas"],
+  inventory: ["Field journal"],
+  signatureItems: ["Brass compass"],
+  source: { kind: "generated", importMode: null, label: "An observant cartographer" },
+};
 
-async function renderPage(campaignId: string) {
+const state: CampaignPlayState = {
+  campaignId: "campaign-1",
+  phase: "character_required",
+  acceptedWorldVersion: 7,
+  worldVersion: 7,
+  runtimeRevision: 3,
+  character: null,
+  openingOptions: [],
+  currentLocation: null,
+  visibleActors: [],
+  visibleRoutes: [],
+  visiblePressures: [],
+  narration: null,
+  consequences: [],
+  activeTurn: null,
+  journalCursor: 0,
+  projectionHash: "projection",
+};
+
+async function renderPage() {
   await act(async () => {
-    render(
-      <Suspense fallback={<div>Loading route...</div>}>
-        <CharacterCreationPage params={Promise.resolve({ id: campaignId })} />
-      </Suspense>,
-    );
+    render(<Suspense fallback={<div>Route loading</div>}><CharacterCreationPage params={Promise.resolve({ id: "campaign-1" })} /></Suspense>);
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedListPersonaTemplates.mockResolvedValue({ personaTemplates: [] } as never);
+  vi.mocked(loadCampaignPlayState).mockResolvedValue(state);
+  vi.mocked(generateCampaignPlayPlayerDraft).mockResolvedValue({ draft });
+  vi.mocked(researchCampaignPlayPlayer).mockResolvedValue({ research: { summary: "Grounded notes", sources: [] } });
+  vi.mocked(parseCampaignPlayPlayerCard).mockResolvedValue({ draft: { ...draft, source: { kind: "character_card", importMode: "outsider", label: "Iria Vale" } } });
+  vi.mocked(readCampaignPlayerCard).mockResolvedValue(JSON.stringify({ spec: "chara_card_v2" }));
+  vi.mocked(putCampaignPlayPlayer).mockResolvedValue({
+    actorHandle: "player:iria",
+    acceptedWorldVersion: 7,
+    worldVersion: 8,
+    runtimeRevision: 4,
+  });
 });
 
 describe("CharacterCreationPage", () => {
-  it("renders the empty-state character launcher with a back link", async () => {
-    mockedLoadCampaign.mockResolvedValue({
-      id: "campaign-1",
-      name: "Arcadia",
-      premise: "A world",
-      generationComplete: true,
-    } as never);
-    mockedGetWorldData.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [], personaTemplates: [] } as never);
+  it("loads the Campaign Play character phase and offers player intake", async () => {
+    await renderPage();
 
-    await renderPage("campaign-1");
-
-    await waitFor(() => {
-      expect(screen.getByTestId("character-form")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByRole("button", { name: "Save & Begin Adventure" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to Review" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Build test draft" })).toBeInTheDocument();
+    expect(loadCampaignPlayState).toHaveBeenCalledWith("campaign-1");
+    expect(screen.getByRole("link", { name: "Back to review" })).toHaveAttribute("href", "/campaign/campaign-1/review");
   });
 
-  it("blocks character creation when the backend reports world generation is not ready", async () => {
-    mockedLoadCampaign.mockResolvedValue({
-      id: "campaign-1",
-      name: "Arcadia",
-      premise: "A world",
-      generationComplete: true,
-    } as never);
-    mockedGetWorldData.mockRejectedValue(new Error("World generation not complete yet."));
+  it("routes established characters to Campaign Play", async () => {
+    vi.mocked(loadCampaignPlayState).mockResolvedValue({ ...state, phase: "opening_required", character: { name: "Iria", monogram: "IV", descriptor: "Cartographer", accent: "gold" } });
 
-    await renderPage("campaign-1");
+    await renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByText("World generation required")).toBeInTheDocument();
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/campaign/campaign-1/play"));
+  });
+
+  it("saves the complete draft with server-authoritative versions and continues to Play", async () => {
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Build test draft" }));
+    expect(await screen.findByText("Editing Iria Vale")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to opening" }));
+
+    await waitFor(() => expect(putCampaignPlayPlayer).toHaveBeenCalledWith("campaign-1", {
+      acceptedWorldVersion: 7,
+      expectedWorldVersion: 7,
+      expectedRuntimeRevision: 3,
+      source: "generated",
+      character: draft,
+    }));
+    expect(push).toHaveBeenCalledWith("/campaign/campaign-1/play");
+  });
+
+  it("reloads authoritative versions after a save conflict and preserves the draft for retry", async () => {
+    const refreshedState = { ...state, worldVersion: 8, runtimeRevision: 4 };
+    vi.mocked(loadCampaignPlayState)
+      .mockResolvedValueOnce(state)
+      .mockResolvedValueOnce(refreshedState);
+    vi.mocked(putCampaignPlayPlayer)
+      .mockRejectedValueOnce(new CampaignPlayApiError(
+        "stale_runtime_revision",
+        "Campaign state changed.",
+        409,
+        null,
+      ))
+      .mockResolvedValueOnce({
+        actorHandle: "player:iria",
+        acceptedWorldVersion: 7,
+        worldVersion: 9,
+        runtimeRevision: 5,
+      });
+
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Build test draft" }));
+    expect(await screen.findByText("Editing Iria Vale")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to opening" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Campaign state changed. Review the character and save again.",
+    );
+    expect(screen.getByText("Editing Iria Vale")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to opening" }));
+
+    await waitFor(() => expect(putCampaignPlayPlayer).toHaveBeenLastCalledWith("campaign-1", {
+      acceptedWorldVersion: 7,
+      expectedWorldVersion: 8,
+      expectedRuntimeRevision: 4,
+      source: "generated",
+      character: draft,
+    }));
+    expect(push).toHaveBeenCalledWith("/campaign/campaign-1/play");
+  });
+
+  it("continues to Play when another session establishes the character first", async () => {
+    vi.mocked(loadCampaignPlayState)
+      .mockResolvedValueOnce(state)
+      .mockResolvedValueOnce({
+        ...state,
+        phase: "opening_required",
+        character: { name: "Iria", monogram: "IV", descriptor: "Cartographer", accent: "gold" },
+      });
+    vi.mocked(putCampaignPlayPlayer).mockRejectedValueOnce(new CampaignPlayApiError(
+      "character_already_exists",
+      "The campaign already has a player character.",
+      409,
+      null,
+    ));
+
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Build test draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue to opening" }));
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/campaign/campaign-1/play"));
+  });
+
+  it("grounds a researched concept before generating its draft", async () => {
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Research test draft" }));
+
+    await waitFor(() => expect(researchCampaignPlayPlayer).toHaveBeenCalledWith("campaign-1", { query: "Floodplain cartographers" }));
+    expect(generateCampaignPlayPlayerDraft).toHaveBeenCalledWith("campaign-1", {
+      prompt: "Floodplain cartographers",
+      research: { summary: "Grounded notes", sources: [] },
     });
+  });
 
-    expect(screen.queryByTestId("character-form")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Save.*Begin Adventure/ })).not.toBeInTheDocument();
+  it("sends complete card JSON and the chosen world placement to Campaign Play", async () => {
+    await renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Import test card" }));
+
+    await waitFor(() => expect(parseCampaignPlayPlayerCard).toHaveBeenCalledWith("campaign-1", {
+      cardJson: JSON.stringify({ spec: "chara_card_v2" }),
+      importMode: "outsider",
+    }));
+  });
+
+  it("keeps Campaign Play failures visible", async () => {
+    vi.mocked(generateCampaignPlayPlayerDraft).mockRejectedValue(new Error("character_generation_failed"));
+    await renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Build test draft" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("character_generation_failed");
   });
 });

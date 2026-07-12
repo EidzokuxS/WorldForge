@@ -18,6 +18,12 @@ const shell = vi.hoisted(() => ({
   refreshCampaignWorldState: vi.fn(),
 }));
 
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => navigation,
+}));
+
 vi.mock("@/lib/campaign-world-api", () => ({
   loadCampaignWorldState: worldApi.loadCampaignWorldState,
   acceptCampaignWorld: worldApi.acceptCampaignWorld,
@@ -134,7 +140,7 @@ describe("WorldReviewPage", () => {
     expect(screen.getByRole("button", { name: "Accept world" })).toBeEnabled();
   });
 
-  it("accepts the displayed version and refreshes shell lifecycle on the same route", async () => {
+  it("accepts the displayed version, refreshes shell lifecycle, and opens Character", async () => {
     worldApi.loadCampaignWorldState
       .mockResolvedValueOnce(worldState())
       .mockResolvedValueOnce(worldState("accepted"));
@@ -142,12 +148,11 @@ describe("WorldReviewPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept world" }));
 
-    expect(await screen.findByText("World accepted")).toBeInTheDocument();
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/campaign/campaign-1/character"));
     expect(shell.refreshCampaignWorldState).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Accept world" })).not.toBeInTheDocument();
   });
 
-  it("keeps persisted acceptance distinct from a shell refresh failure", async () => {
+  it("opens Character after persisted acceptance when shell refresh fails", async () => {
     worldApi.loadCampaignWorldState
       .mockResolvedValueOnce(worldState())
       .mockResolvedValueOnce(worldState("accepted"));
@@ -158,12 +163,7 @@ describe("WorldReviewPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Accept world" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "World accepted. Campaign status could not be refreshed.",
-    );
-    expect(screen.getByText("World accepted")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Accept world" })).not.toBeInTheDocument();
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/campaign/campaign-1/character"));
   });
 
   it("restores an accepted world and its exact source snapshot", async () => {
@@ -172,6 +172,10 @@ describe("WorldReviewPage", () => {
     await renderPage();
 
     expect(await screen.findByText("World accepted")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue to character" })).toHaveAttribute(
+      "href",
+      "/campaign/campaign-1/character",
+    );
     await user.click(screen.getByRole("tab", { name: "Source" }));
     expect(await screen.findByText("A drowned rail kingdom listens for impossible bells.")).toBeInTheDocument();
     expect(screen.getByText("Rail guilds organize the coast through signal authority.")).toBeInTheDocument();

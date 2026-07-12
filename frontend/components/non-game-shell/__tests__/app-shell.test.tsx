@@ -21,6 +21,8 @@ const campaignStatus = vi.hoisted(() => ({
   },
 }));
 
+const playApi = vi.hoisted(() => ({ loadCampaignPlayState: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => navigation.pathname,
   useRouter: () => navigation,
@@ -28,6 +30,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/non-game-shell/campaign-status-provider", () => ({
   useCampaignStatus: () => campaignStatus.current,
+}));
+
+vi.mock("@/lib/campaign-play-api", () => ({
+  loadCampaignPlayState: playApi.loadCampaignPlayState,
 }));
 
 const FLOW_KEY = "worldforge.campaign-new-flow";
@@ -62,6 +68,8 @@ describe("AppShell", () => {
     window.sessionStorage.clear();
     navigation.pathname = "/settings";
     navigation.push.mockClear();
+    playApi.loadCampaignPlayState.mockReset();
+    playApi.loadCampaignPlayState.mockResolvedValue({ phase: "opening_required" });
     campaignStatus.current = {
       campaignId: null,
       campaign: null,
@@ -138,6 +146,29 @@ describe("AppShell", () => {
     );
     expect(screen.queryByRole("link", { name: "Play" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Player character" })).not.toBeInTheDocument();
+  });
+
+  it("routes an accepted campaign to Character until its player character exists", async () => {
+    navigation.pathname = "/campaign/campaign-1/review";
+    setCampaignStatus("accepted");
+    playApi.loadCampaignPlayState.mockResolvedValue({ phase: "character_required" });
+
+    render(<AppShell><div>Campaign body</div></AppShell>);
+
+    const characterLink = await screen.findByRole("link", { name: "Player character" });
+    expect(characterLink).toHaveAttribute("href", "/campaign/campaign-1/character");
+    expect(screen.queryByRole("link", { name: "Play" })).not.toBeInTheDocument();
+  });
+
+  it("routes an accepted campaign with an opening or turn to Play", async () => {
+    navigation.pathname = "/campaign/campaign-1/review";
+    setCampaignStatus("accepted");
+    playApi.loadCampaignPlayState.mockResolvedValue({ phase: "opening_required" });
+
+    render(<AppShell><div>Campaign body</div></AppShell>);
+
+    const playLink = await screen.findByRole("link", { name: "Play" });
+    expect(playLink).toHaveAttribute("href", "/campaign/campaign-1/play");
   });
 
   it("uses Campaign Forge and World Review crumbs without a session action", () => {

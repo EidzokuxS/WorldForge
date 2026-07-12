@@ -54,7 +54,7 @@ Execution board:
 - [x] Task 13: frontend client and durable page state.
 - [x] Task 14A: scene and narration surface.
 - [x] Task 14B: action, consequence, journal, and recovery surface.
-- [ ] Task 15: product handoff and hard cutover.
+- [x] Task 15: product handoff and hard cutover.
 - [ ] Task 16A: deterministic integration and promotion gate.
 - [ ] Task 16B: first playable slice gate.
 - [ ] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
@@ -1324,3 +1324,41 @@ Stop boundary: Task 14B completes the action-and-observation presentation on `/c
 - Humanizer/deslop retained the direct product copy after normalizing `Open world review` and approved the terminal `turn_failed` copy and next action. GLM remains outside the provider list and delivery pipeline. Standalone smoke additions: `0`.
 - Narrow-layout advisory for Task 15 polish: the fixed dock's translucent gaps can reveal scene text behind the controls at 390px; interaction remains usable and the navigation cutover can add a unified dock backdrop.
 - Evidence: `rpi/campaign-play/implement/14b-action-journal.md` and `rpi/campaign-play/implement/evidence/task14b/`.
+
+## Campaign Play Task 15 Execution Packet (2026-07-12)
+
+Goal: make the accepted campaign flow enter the campaign-owned character and play surfaces exclusively, then remove the displaced `/game`, `/api/chat`, and worldgen-character path from the mounted product.
+
+Authority and navigation:
+
+- Campaign World state chooses Forge or Review until acceptance.
+- Campaign Play state chooses Character while `character_required` and Play for opening or active play phases.
+- Character owns parse, research, draft generation, card import, editing, and `PUT /player` only.
+- `/campaign/[id]/play` owns chosen or delegated starting conditions and `POST /opening`.
+- A campaign destination helper may read both authorities and returns one domain route; callers surface errors instead of guessing a destination.
+
+Implementation packets:
+
+- [x] Add phase-aware campaign navigation and connect Accept -> Character -> Play across Review, Character, home/load, and sidebar callers.
+- [x] Replace the active Character page's worldgen APIs and old draft/loadout model with Campaign Play player intake and a campaign-owned editor/card reader.
+- [x] Mount production API routes through one testable registration boundary; unmount `/api/chat` and the old character router while preserving Campaign World `/api/worldgen` ownership.
+- [x] Remove the `/game` route/controller and active old chat/character client exports after their callers reach zero.
+- [x] Replace `visual:v4` and its status-labeled script with a real-campaign Campaign Play capture command; add the unified narrow action-dock backdrop advisory from Task 14B.
+- [x] Prove focused route/client/component contracts, displaced backend `404`, direct `/game` Next `404`, fixed-string caller inventories, and normal browser Accept -> Character -> Play with Campaign World/Play network traffic only.
+- [x] Run full affected frontend/backend suites, typechecks, production build, diff check, GitNexus change detection, fresh Sol semantic review, then record the Task 15 evidence and checkpoint commit.
+
+Test strategy: use adjacent unit/component tests for destination and character transformations, a mounted-router integration test for backend cutover, and one browser E2E acceptance journey for the critical product path. Create no standalone smoke suite.
+
+Deletion boundary: unmounted donor modules may remain as reference where the production import graph is already zero. Task 15 removes active routes, controllers, exports, and callers; broader donor-source deletion belongs to a later cleanup only when it changes product correctness or build ownership.
+
+Stop condition: normal product navigation reaches Character and Play through campaign-owned APIs, displaced routes prove `404`, and the production import graph has zero old player/chat runtime calls.
+
+## Campaign Play Task 15 Review (2026-07-12)
+
+- Accepted Review now hands off to Character, and every campaign entry point resolves its destination from Campaign World plus Campaign Play phase authority. Character creation, opening, actions, recovery, and Journal all stay on campaign-owned routes.
+- The mounted backend keeps Campaign World and Campaign Play while the displaced chat and worldgen-character endpoints return `404`. The `/game` product route is gone and direct navigation renders the Next `404` page.
+- A persisted campaign completed the browser handoff into a ready Play scene. Its network ledger contained Campaign World, Campaign Play, campaign metadata, and Next route requests; the displaced APIs were absent. Desktop and 390x844 captures prove the unified narrow action dock.
+- Character save conflicts reload authoritative versions while preserving the draft, or continue to Play when another session has already established the character. Adjacent tests cover both concurrency outcomes.
+- Verification passed: focused cutover tests, complete frontend `491/491`, complete backend including the new route-registration contract, both typechecks, production build, scoped lint, capture-script syntax, and diff check. Full frontend lint retains the pre-existing Forge hook error and dependency warning.
+- Fresh Sol verification returned `PASS` with zero P0/P1 findings; both P2 advisories were resolved. GitNexus impact calls were unavailable through its Ladybug WAL assertion, while exact caller inventories and change detection bounded the cutover. Standalone smoke additions: `0`.
+- Evidence: `rpi/campaign-play/implement/15-cutover.md` and `rpi/campaign-play/implement/evidence/task15/`.

@@ -17,6 +17,9 @@ vi.mock("@/lib/api", () => ({
   loadCampaign: (...args: unknown[]) => mockLoadCampaign(...args),
 }));
 
+const campaignNavigation = vi.hoisted(() => ({ loadCampaignDestination: vi.fn() }));
+vi.mock("@/lib/campaign-navigation", () => campaignNavigation);
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -47,6 +50,7 @@ describe("LoadCampaignDialog", () => {
     vi.clearAllMocks();
     mockApiGet.mockResolvedValue(MOCK_CAMPAIGNS);
     mockLoadCampaign.mockResolvedValue(MOCK_CAMPAIGNS[0]);
+    campaignNavigation.loadCampaignDestination.mockResolvedValue("/campaign/camp-2/review");
   });
 
   it("renders the trigger button", () => {
@@ -130,5 +134,17 @@ describe("LoadCampaignDialog", () => {
 
     expect(mockLoadCampaign).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("loads the active campaign before navigating to its persisted destination", async () => {
+    const user = userEvent.setup();
+    render(<LoadCampaignDialog onLoaded={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /Load Campaign/i }));
+    await user.click((await screen.findAllByRole("button", { name: /^Load$/i }))[0]!);
+
+    await waitFor(() => expect(mockLoadCampaign).toHaveBeenCalledWith("camp-2"));
+    await waitFor(() => expect(campaignNavigation.loadCampaignDestination).toHaveBeenCalledWith("camp-2"));
+    expect(mockPush).toHaveBeenCalledWith("/campaign/camp-2/review");
   });
 });

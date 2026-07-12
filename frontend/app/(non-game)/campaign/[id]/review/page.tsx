@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { CampaignWorldReview, CampaignWorldStatus } from "@worldforge/shared";
 
@@ -176,6 +177,7 @@ function SourceSection({ world }: { world: CampaignWorldReview }) {
 
 export default function WorldReviewPage(props: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = use(props.params);
+  const router = useRouter();
   const { campaign, refreshCampaignWorldState } = useCampaignStatus();
   const [state, setState] = useState<CampaignWorldStateResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,6 +239,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
           "World accepted. Campaign status could not be refreshed.",
         );
       }
+      router.push(`/campaign/${campaignId}/character`);
     } catch (error) {
       if (errorCode(error) === "world_version_conflict") {
         setConflict(errorMessage(error, "The world changed before acceptance."));
@@ -323,7 +326,12 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
                 {accepting ? "Accepting world" : "Accept world"}
               </button>
             ) : (
-              <span className="wf-world-accepted-mark">World accepted</span>
+              <>
+                <span className="wf-world-accepted-mark">World accepted</span>
+                <Link className="wf-v4-btn wf-v4-btn-primary" href={`/campaign/${campaignId}/character`}>
+                  Continue to character
+                </Link>
+              </>
             )}
           </div>
         </header>
