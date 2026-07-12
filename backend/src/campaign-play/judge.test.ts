@@ -198,6 +198,10 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Return exactly these top-level keys");
     expect(sentPrompt).toContain("Spell citedVisibleFactHandles exactly");
     expect(sentPrompt).toContain("never use citedVisibleFacts");
+    expect(sentPrompt).toContain(
+      "resultBounds.minimum and resultBounds.maximum must be the same literal result tier",
+    );
+    expect(sentPrompt).toContain("Never return a range for deterministic");
     expect(sentPrompt).toContain(JSON.stringify(injection));
     expect(sentPrompt).not.toContain("campaign-one");
     expect(sentPrompt).not.toContain("turn-one");
