@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./contracts.js";
-import { validateCampaignPlayBundle } from "./probes.js";
+import { createCampaignPlayInventory, validateCampaignPlayBundle } from "./probes.js";
 import { runSeededCampaignPlayReplay } from "./seeded-replay.js";
 import { writeCampaignPlayBundle } from "./bundle-writer.js";
 
@@ -26,6 +26,7 @@ describe("Campaign Play evidence bundle writer", () => {
       runId: "deterministic-one",
       lane: "deterministic-10",
       campaignId: replay.campaignId,
+      worldSource: { kind: "fixture" },
       expectedPlayerActions: 1,
       outputRoot,
       execution: { kind: "deterministic", fixtureId: "bell-island", seed: "campaign-play-v1" },
@@ -110,6 +111,16 @@ describe("Campaign Play evidence bundle writer", () => {
       runId: "first-playable-one",
       lane: "first-playable",
       campaignId: replay.campaignId,
+      worldSource: {
+        kind: "template",
+        templateId: "accepted-world-template",
+        sourceCampaignId: replay.campaignId,
+        sourceCommit: "0000000",
+        acceptedWorldVersion: replay.report.authority.acceptedWorldVersion,
+        acceptedContentHash: replay.report.acceptedContentHash,
+        stateDbSha256: "a".repeat(64),
+        configSha256: "b".repeat(64),
+      },
       expectedPlayerActions: 1,
       outputRoot,
       execution: {
@@ -159,5 +170,20 @@ describe("Campaign Play evidence bundle writer", () => {
     const modelStages = fs.readFileSync(path.join(bundleRoot, "model-stages.jsonl"), "utf8")
       .split("\n").filter(Boolean).map((line) => JSON.parse(line) as { costMicros: number | null });
     expect(modelStages.every((stage) => stage.costMicros === null)).toBe(true);
+
+    const manifestPath = path.join(bundleRoot, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      worldSource: { acceptedContentHash: string };
+    };
+    manifest.worldSource.acceptedContentHash = "c".repeat(64);
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    fs.writeFileSync(
+      path.join(bundleRoot, "inventory.json"),
+      `${JSON.stringify(createCampaignPlayInventory(bundleRoot, runConfig.runId), null, 2)}\n`,
+      "utf8",
+    );
+    expect(validateCampaignPlayBundle(bundleRoot).issues).toContain(
+      "Template provenance does not match the eligible accepted world.",
+    );
   });
 });

@@ -53,6 +53,7 @@
 - Final longplay lanes require adaptive inspected actions, not preselected/generated batches.
 - A lane with failed, replayed, restored, or contradicted player-facing turns is diagnostic until fixed and replayed from a clean start.
 - Snapshot an accepted world before character creation, then materialize each playtest into its own `GSD_CAMPAIGNS_ROOT`. Reusing the same internal campaign ID in an isolated root is safer than rekeying SQLite or overwriting the live campaign library.
+- Treat reusable-world provenance as an executable evidence contract: verify materialized file hashes before opening the run, then bind accepted content identity through session and final manifests. A clone directory alone is not proof of a clean world.
 
 ## UI And Narration
 

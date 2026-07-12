@@ -42,6 +42,7 @@ function liveConfig(outputRoot: string, campaignId: string, expectedPlayerAction
     runId: `first-playable-${expectedPlayerActions}`,
     lane: "first-playable",
     campaignId,
+    worldSource: { kind: "generated" },
     expectedPlayerActions,
     outputRoot,
     execution: {
@@ -68,6 +69,7 @@ function subscriptionConfig(outputRoot: string, campaignId: string): CampaignPla
     runId: "first-playable-subscription",
     lane: "first-playable",
     campaignId,
+    worldSource: { kind: "generated" },
     expectedPlayerActions: 2,
     outputRoot,
     execution: {
@@ -259,9 +261,10 @@ describe("Campaign Play live evidence session", () => {
     fs.mkdirSync(sessionRoot, { recursive: true });
     fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
     fs.writeFileSync(path.join(sessionRoot, "manifest.json"), JSON.stringify({
-      evidenceVersion: 1,
+      evidenceVersion: 2,
       runId: config.runId,
       campaignId,
+      worldSource: config.worldSource,
       commit: "0000000",
       dirty: true,
       startedAt: 1,
@@ -309,9 +312,10 @@ describe("Campaign Play live evidence session", () => {
     fs.mkdirSync(sessionRoot, { recursive: true });
     fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
     fs.writeFileSync(path.join(sessionRoot, "manifest.json"), JSON.stringify({
-      evidenceVersion: 1,
+      evidenceVersion: 2,
       runId: config.runId,
       campaignId,
+      worldSource: config.worldSource,
       commit: "0000000",
       dirty: true,
       startedAt: 1,

@@ -235,6 +235,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: config.runId,
     campaignId: input.replay.campaignId,
+    worldSource: config.worldSource,
     parentCampaignId: null,
     lane: config.lane,
     commit: input.commit,

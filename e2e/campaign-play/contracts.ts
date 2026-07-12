@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const CAMPAIGN_PLAY_EVIDENCE_VERSION = 1 as const;
+export const CAMPAIGN_PLAY_EVIDENCE_VERSION = 2 as const;
 
 export const CAMPAIGN_PLAY_LANES = [
   "deterministic-10",
@@ -129,11 +129,37 @@ const liveExecutionSchema = z.object({
   maximumTurnDurationMs: positiveIntegerSchema,
 }).strict();
 
+const fixtureWorldSourceSchema = z.object({
+  kind: z.literal("fixture"),
+}).strict();
+
+const generatedWorldSourceSchema = z.object({
+  kind: z.literal("generated"),
+}).strict();
+
+const templateWorldSourceSchema = z.object({
+  kind: z.literal("template"),
+  templateId: identifierSchema,
+  sourceCampaignId: identifierSchema,
+  sourceCommit: z.string().min(7).max(64),
+  acceptedWorldVersion: positiveIntegerSchema,
+  acceptedContentHash: hashSchema,
+  stateDbSha256: hashSchema,
+  configSha256: hashSchema,
+}).strict();
+
+export const campaignPlayWorldSourceSchema = z.discriminatedUnion("kind", [
+  fixtureWorldSourceSchema,
+  generatedWorldSourceSchema,
+  templateWorldSourceSchema,
+]);
+
 export const campaignPlayRunConfigSchema = z.object({
   evidenceVersion: z.literal(CAMPAIGN_PLAY_EVIDENCE_VERSION),
   runId: identifierSchema,
   lane: campaignPlayLaneSchema,
   campaignId: identifierSchema.nullable(),
+  worldSource: campaignPlayWorldSourceSchema,
   expectedPlayerActions: nonnegativeIntegerSchema,
   outputRoot: z.string().min(1),
   execution: z.discriminatedUnion("kind", [
@@ -154,12 +180,19 @@ export const campaignPlayRunConfigSchema = z.object({
   if (value.restartAfterPlayerActions.some((action) => action > value.expectedPlayerActions)) {
     context.addIssue({ code: "custom", path: ["restartAfterPlayerActions"], message: "Restart checkpoints cannot exceed the action target." });
   }
+  if (value.execution.kind === "deterministic" && value.worldSource.kind !== "fixture") {
+    context.addIssue({ code: "custom", path: ["worldSource"], message: "Deterministic runs require fixture world provenance." });
+  }
+  if (value.execution.kind === "live" && value.worldSource.kind === "fixture") {
+    context.addIssue({ code: "custom", path: ["worldSource"], message: "Live runs require generated or template world provenance." });
+  }
 });
 
 export const campaignPlayManifestSchema = z.object({
   evidenceVersion: z.literal(CAMPAIGN_PLAY_EVIDENCE_VERSION),
   runId: identifierSchema,
   campaignId: identifierSchema,
+  worldSource: campaignPlayWorldSourceSchema,
   parentCampaignId: identifierSchema.nullable(),
   lane: campaignPlayLaneSchema,
   commit: z.string().min(7).max(64),
@@ -521,6 +554,7 @@ export const campaignPlayInventorySchema = z.object({
 
 export type CampaignPlayRunConfig = z.infer<typeof campaignPlayRunConfigSchema>;
 export type CampaignPlayManifest = z.infer<typeof campaignPlayManifestSchema>;
+export type CampaignPlayWorldSource = z.infer<typeof campaignPlayWorldSourceSchema>;
 export type CampaignPlayEligibility = z.infer<typeof campaignPlayEligibilitySchema>;
 export type CampaignPlayCheckpoint = z.infer<typeof campaignPlayCheckpointSchema>;
 export type CampaignPlayBudget = z.infer<typeof campaignPlayBudgetSchema>;

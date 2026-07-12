@@ -226,6 +226,22 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     if (runConfig.runId !== manifest.runId || runConfig.campaignId !== manifest.campaignId) {
       issues.push("Run config, manifest, and campaign ownership differ.");
     }
+    if (JSON.stringify(runConfig.worldSource) !== JSON.stringify(manifest.worldSource)) {
+      issues.push("Run config and manifest world provenance differ.");
+    }
+    const eligibility = campaignPlayEligibilitySchema.parse(
+      readJson(path.join(bundleRoot, "eligibility.json")),
+    );
+    if (
+      manifest.worldSource.kind === "template"
+      && (
+        manifest.worldSource.sourceCampaignId !== manifest.campaignId
+        || manifest.worldSource.acceptedWorldVersion !== eligibility.acceptedWorldVersion
+        || manifest.worldSource.acceptedContentHash !== eligibility.acceptedContentHash
+      )
+    ) {
+      issues.push("Template provenance does not match the eligible accepted world.");
+    }
     const subscription = runConfig.execution.kind === "live"
       && runConfig.execution.billing.kind === "subscription";
     if (subscription) {

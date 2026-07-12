@@ -1,8 +1,9 @@
 {
-  "evidenceVersion": 1,
+  "evidenceVersion": 2,
   "runId": "task16a-deterministic-60",
   "lane": "deterministic-60",
   "campaignId": null,
+  "worldSource": { "kind": "fixture" },
   "expectedPlayerActions": 60,
   "outputRoot": "output/playtests/campaign-play",
   "execution": {

@@ -12,13 +12,15 @@ import {
   campaignPlaySubscriptionQuotaSnapshotSchema,
   type CampaignPlayBrowserActionEvidence,
   type CampaignPlayRunConfig,
+  type CampaignPlayWorldSource,
 } from "./contracts.js";
 import { captureCampaignPlayReplay } from "./replay-report.js";
 
 export interface CampaignPlayLiveSessionManifest {
-  evidenceVersion: 1;
+  evidenceVersion: 2;
   runId: string;
   campaignId: string;
+  worldSource: CampaignPlayWorldSource;
   commit: string;
   dirty: boolean;
   startedAt: number;
@@ -44,6 +46,37 @@ interface PendingManualDecision {
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function sha256File(filePath: string): string {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function verifyTemplateWorldSource(
+  config: ReturnType<typeof assertLiveConfig>,
+): void {
+  if (config.worldSource.kind !== "template") return;
+  if (config.worldSource.sourceCampaignId !== config.campaignId) {
+    throw new Error("Template provenance does not own the configured campaign.");
+  }
+  const campaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
+  if (!campaignsRoot) {
+    throw new Error("Template-backed live evidence requires an isolated GSD_CAMPAIGNS_ROOT.");
+  }
+  const root = path.resolve(campaignsRoot);
+  const campaignDirectory = path.resolve(root, config.campaignId);
+  const relative = path.relative(root, campaignDirectory);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Template campaign path escaped GSD_CAMPAIGNS_ROOT.");
+  }
+  const stateDbPath = path.join(campaignDirectory, "state.db");
+  const configPath = path.join(campaignDirectory, "config.json");
+  if (
+    sha256File(stateDbPath) !== config.worldSource.stateDbSha256
+    || sha256File(configPath) !== config.worldSource.configSha256
+  ) {
+    throw new Error("Materialized world does not match its frozen template file hashes.");
+  }
 }
 
 function writeJson(filePath: string, value: unknown): void {
@@ -201,6 +234,7 @@ export async function prepareCampaignPlayLiveSession(input: {
   if (fs.existsSync(root) || fs.existsSync(path.resolve(config.outputRoot, config.runId))) {
     throw new Error(`Campaign Play live evidence path already exists for ${config.runId}.`);
   }
+  verifyTemplateWorldSource(config);
   const handle = openCampaignPlayDatabase(config.campaignId);
   try {
     const captured = captureCampaignPlayReplay(handle);
@@ -218,6 +252,15 @@ export async function prepareCampaignPlayLiveSession(input: {
         `Live evidence requires playable accepted topology: ${captured.report.eligibility.projection.unmetRequirements.join(", ")}.`,
       );
     }
+    if (
+      config.worldSource.kind === "template"
+      && (
+        config.worldSource.acceptedWorldVersion !== captured.report.authority.acceptedWorldVersion
+        || config.worldSource.acceptedContentHash !== captured.report.acceptedContentHash
+      )
+    ) {
+      throw new Error("Materialized world content does not match its frozen template provenance.");
+    }
     const quotaBefore = config.execution.billing.kind === "subscription"
       ? await requestSubscriptionQuota(config, authority)
       : null;
@@ -226,9 +269,10 @@ export async function prepareCampaignPlayLiveSession(input: {
     }
     writeJson(path.join(root, "build", "run-config.json"), config);
     writeJson(path.join(root, "manifest.json"), {
-      evidenceVersion: 1,
+      evidenceVersion: 2,
       runId: config.runId,
       campaignId: config.campaignId,
+      worldSource: config.worldSource,
       commit: input.commit,
       dirty: input.dirty,
       startedAt: input.startedAt,
