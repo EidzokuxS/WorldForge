@@ -8,7 +8,10 @@ import {
 } from "./contracts.js";
 import { deriveCampaignPlayPublicHandle } from "./campaign-play-projection.js";
 import type { LoadedCampaignPlayState } from "./campaign-play-state-repository.js";
-import { isActorPresentInOpeningArea } from "./opening-location.js";
+import {
+  isActorPresentInOpeningArea,
+  isLocationWithinOpeningArea,
+} from "./opening-location.js";
 
 const ROLE_OPTIONS = [
   { key: "outsider", label: "Outsider" },
@@ -72,7 +75,9 @@ function isViableOpeningLocation(
   const hasRoute = review.routes.some((route) =>
     route.fromLocationId === locationId &&
     route.toLocationId !== locationId &&
-    reachable.has(route.toLocationId)
+    [...reachable].some((macroLocationId) =>
+      isLocationWithinOpeningArea(review, route.toLocationId, macroLocationId)
+    )
   );
   return hasSupport && hasPressure && hasRoute;
 }
