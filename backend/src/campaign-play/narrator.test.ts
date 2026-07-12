@@ -280,6 +280,43 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not summarize the world");
   });
 
+  it("budgets visible narration separately from provider reasoning tokens", async () => {
+    const reasoningTrace = trace();
+    reasoningTrace.usage = {
+      inputTokens: 900,
+      outputTokens: 2_500,
+      totalTokens: 3_400,
+      reasoningTokens: 600,
+    };
+    const narrator = createCampaignPlayNarrator({
+      generateObject: vi.fn(async () => ({
+        object: proposalFixture(),
+        trace: reasoningTrace,
+      })) as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(narrator.narrate({
+      narrationId: "narration-reasoning-budget",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    })).resolves.toMatchObject({
+      modelEvidence: { outputTokens: 2_500, totalTokens: 3_400 },
+    });
+
+    reasoningTrace.usage.reasoningTokens = 400;
+    await expect(narrator.narrate({
+      narrationId: "narration-visible-output-over-budget",
+      packetBytes: canonicalizeCampaignPlayProjection(packetFixture()),
+      createdAt: 1_000,
+      model: structuredModel(),
+      temperature: 0.5,
+      budget,
+    })).rejects.toMatchObject({ code: "stage_budget_exceeded" });
+  });
+
   it.each(["repair", "full_retry", "text_fallback"] as const)(
     "rejects narration produced through %s",
     async (strategy) => {

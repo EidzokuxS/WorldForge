@@ -200,17 +200,27 @@ function evidence(
 function withinBudget(
   evidence: CampaignPlayNarratorModelEvidence,
   budget: CampaignPlayNarratorBudget,
+  reasoningTokens = 0,
 ): boolean {
+  const boundedReasoningTokens = Number.isSafeInteger(reasoningTokens) && reasoningTokens > 0
+    ? reasoningTokens
+    : 0;
+  const contentOutputTokens = evidence.outputTokens === null
+    ? null
+    : Math.max(0, evidence.outputTokens - boundedReasoningTokens);
+  const contentTotalTokens = evidence.totalTokens === null
+    ? null
+    : Math.max(0, evidence.totalTokens - boundedReasoningTokens);
   const costWithin = evidence.inputTokens === null || evidence.outputTokens === null
     ? true
     : evidence.estimatedCostMicros !== null &&
       evidence.estimatedCostMicros <= budget.maximumCostMicros;
   const totalWithin = evidence.inputTokens === null || evidence.outputTokens === null
     ? true
-    : evidence.totalTokens !== null && evidence.totalTokens <= budget.maximumTotalTokens;
+    : contentTotalTokens !== null && contentTotalTokens <= budget.maximumTotalTokens;
   return evidence.durationMs <= budget.maximumDurationMs &&
     (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens) &&
-    (evidence.outputTokens === null || evidence.outputTokens <= budget.maximumOutputTokens) &&
+    (contentOutputTokens === null || contentOutputTokens <= budget.maximumOutputTokens) &&
     totalWithin &&
     costWithin;
 }
@@ -456,7 +466,11 @@ export function createCampaignPlayNarrator(
           errorCode: "narration_invalid",
         });
       }
-      if (!withinBudget(modelEvidence, request.budget)) {
+      if (!withinBudget(
+        modelEvidence,
+        request.budget,
+        generated.trace.usage?.reasoningTokens ?? 0,
+      )) {
         throw new CampaignPlayNarratorError("stage_budget_exceeded", {
           ...modelEvidence,
           errorCode: "stage_budget_exceeded",
