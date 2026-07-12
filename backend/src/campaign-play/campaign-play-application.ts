@@ -235,11 +235,27 @@ function frozenRole(
 }
 
 function requestedModel(role: ResolvedRole): CampaignPlayRequestedModel {
+  return resolveCampaignPlayRequestedModel(role);
+}
+
+export function resolveCampaignPlayRequestedModel(
+  role: ResolvedRole,
+): CampaignPlayRequestedModel {
+  const pricing: CampaignPlayModelPricing = role.pricing
+    ? {
+        known: true,
+        currency: role.pricing.currency,
+        tokenUnit: role.pricing.tokenUnit,
+        inputCostMicros: role.pricing.inputCostMicros,
+        outputCostMicros: role.pricing.outputCostMicros,
+        rounding: "ceil",
+      }
+    : UNKNOWN_MODEL_PRICING;
   return {
     providerId: role.provider.id,
     model: role.provider.model,
     strategy: "strict_object",
-    pricing: UNKNOWN_MODEL_PRICING,
+    pricing,
   };
 }
 

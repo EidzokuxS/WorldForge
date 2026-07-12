@@ -40,6 +40,28 @@ describe("Campaign Play evidence contracts", () => {
     })).toThrow("Restart checkpoints cannot exceed the action target");
   });
 
+  it("requires exact role pricing for live provider lanes", () => {
+    expect(() => campaignPlayRunConfigSchema.parse({
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-one",
+      lane: "first-playable",
+      campaignId: "campaign-one",
+      expectedPlayerActions: 2,
+      outputRoot: "output/playtests/campaign-play",
+      execution: {
+        kind: "live",
+        providerId: "provider-one",
+        models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
+        maximumInputTokens: 10_000,
+        maximumOutputTokens: 10_000,
+        maximumCostMicros: 1_000_000,
+        maximumTurnDurationMs: 120_000,
+      },
+      restartAfterPlayerActions: [],
+      operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+    })).toThrow();
+  });
+
   it("requires complete manifests to carry a terminal timestamp", () => {
     expect(() => campaignPlayManifestSchema.parse({
       evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,

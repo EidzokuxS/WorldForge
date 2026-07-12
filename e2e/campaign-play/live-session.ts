@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { openCampaignPlayDatabase } from "../../backend/src/campaign-play/campaign-play-database.js";
+import { resolveRoleModel } from "../../backend/src/ai/resolve-role-model.js";
+import { loadSettings } from "../../backend/src/settings/index.js";
+import { isLocalProvider, type Settings } from "@worldforge/shared";
 import {
   campaignPlayBrowserActionEvidenceSchema,
   campaignPlayRunConfigSchema,
@@ -72,6 +75,25 @@ function assertLiveConfig(input: CampaignPlayRunConfig): CampaignPlayRunConfig &
   };
 }
 
+function assertLiveModelAuthority(
+  config: ReturnType<typeof assertLiveConfig>,
+  settings: Settings = loadSettings(),
+): void {
+  for (const roleName of ["generator", "judge", "storyteller"] as const) {
+    const resolved = resolveRoleModel(settings[roleName], settings.providers);
+    const expectedPricing = config.execution.pricing[roleName];
+    if (
+      resolved.provider.id !== config.execution.providerId
+      || resolved.provider.model !== config.execution.models[roleName]
+      || !resolved.pricing
+      || JSON.stringify(resolved.pricing) !== JSON.stringify(expectedPricing)
+      || (!isLocalProvider(resolved.provider.baseUrl) && resolved.provider.apiKey.trim().length === 0)
+    ) {
+      throw new Error(`Live ${roleName} provider, model, credentials, or pricing do not match the run config.`);
+    }
+  }
+}
+
 export function campaignPlayLiveSessionRoot(config: CampaignPlayRunConfig): string {
   return path.resolve(config.outputRoot, `${config.runId}.session`);
 }
@@ -101,8 +123,10 @@ export function prepareCampaignPlayLiveSession(input: {
   commit: string;
   dirty: boolean;
   startedAt: number;
+  settings?: Settings;
 }): string {
   const config = assertLiveConfig(input.runConfig);
+  assertLiveModelAuthority(config, input.settings);
   const root = campaignPlayLiveSessionRoot(config);
   if (fs.existsSync(root) || fs.existsSync(path.resolve(config.outputRoot, config.runId))) {
     throw new Error(`Campaign Play live evidence path already exists for ${config.runId}.`);

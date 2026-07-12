@@ -1,5 +1,6 @@
 export type {
   Provider,
+  ModelPricing,
   RoleConfig,
   ImageConfig,
   ResearchConfig,

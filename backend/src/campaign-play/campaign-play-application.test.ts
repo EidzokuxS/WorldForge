@@ -20,6 +20,7 @@ import { openCampaignPlayDatabase, type CampaignPlayDatabaseHandle } from "./cam
 import {
   CampaignPlayApplicationError,
   createCampaignPlayApplication,
+  resolveCampaignPlayRequestedModel,
 } from "./campaign-play-application.js";
 import {
   createCampaignPlayTurnRepository,
@@ -288,6 +289,38 @@ function openingRequest(
 }
 
 describe("CampaignPlayApplication", () => {
+  it("freezes exact known role pricing into Campaign Play model authority", () => {
+    expect(resolveCampaignPlayRequestedModel({
+      provider: {
+        id: "provider-priced",
+        name: "Priced Provider",
+        baseUrl: "https://example.test/v1",
+        apiKey: "key",
+        model: "priced-model",
+      },
+      temperature: 0,
+      maxTokens: 1_024,
+      pricing: {
+        currency: "USD",
+        tokenUnit: 1_000_000,
+        inputCostMicros: 150_000,
+        outputCostMicros: 600_000,
+      },
+    })).toEqual({
+      providerId: "provider-priced",
+      model: "priced-model",
+      strategy: "strict_object",
+      pricing: {
+        known: true,
+        currency: "USD",
+        tokenUnit: 1_000_000,
+        inputCostMicros: 150_000,
+        outputCostMicros: 600_000,
+        rounding: "ceil",
+      },
+    });
+  });
+
   it("initializes once and deduplicates same-key opening admission and its driver", async () => {
     createAcceptedCampaign();
     const runNextStage = vi.fn();

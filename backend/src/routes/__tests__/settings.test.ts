@@ -190,4 +190,22 @@ describe("settings contract defaults", () => {
 
     expect(normalized.ui.showRawReasoning).toBe(false);
   });
+
+  it("preserves strict role pricing and rejects malformed cost authority", () => {
+    const input = createDefaultSettings();
+    input.generator.pricing = {
+      currency: "USD",
+      tokenUnit: 1_000_000,
+      inputCostMicros: 150_000,
+      outputCostMicros: 600_000,
+    };
+    expect(normalizeSettings(input).generator.pricing).toEqual(input.generator.pricing);
+    expect(() => normalizeSettings({
+      ...input,
+      generator: {
+        ...input.generator,
+        pricing: { ...input.generator.pricing, inputCostMicros: -1 },
+      },
+    })).toThrow("nonnegative integer USD micros");
+  });
 });

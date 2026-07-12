@@ -8,6 +8,7 @@ import { closeDb } from "../../backend/src/db/index.js";
 import { openCampaignPlayDatabase } from "../../backend/src/campaign-play/campaign-play-database.js";
 import { createCampaignPlayStateRepository } from "../../backend/src/campaign-play/campaign-play-state-repository.js";
 import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./contracts.js";
+import { createDefaultSettings } from "@worldforge/shared";
 import {
   bindCampaignPlayManualDecision,
   campaignPlayLiveSessionRoot,
@@ -29,6 +30,12 @@ afterEach(() => {
 });
 
 function liveConfig(outputRoot: string, campaignId: string, expectedPlayerActions: number): CampaignPlayRunConfig {
+  const pricing = {
+    currency: "USD" as const,
+    tokenUnit: 1_000_000 as const,
+    inputCostMicros: 1_000,
+    outputCostMicros: 2_000,
+  };
   return {
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: `first-playable-${expectedPlayerActions}`,
@@ -40,6 +47,7 @@ function liveConfig(outputRoot: string, campaignId: string, expectedPlayerAction
       kind: "live",
       providerId: "provider",
       models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
+      pricing: { generator: pricing, judge: pricing, storyteller: pricing },
       maximumInputTokens: 10_000,
       maximumOutputTokens: 10_000,
       maximumCostMicros: 1_000_000,
@@ -68,11 +76,25 @@ describe("Campaign Play live evidence session", () => {
     }
     const outputRoot = path.join(root, "evidence");
     const config = liveConfig(outputRoot, campaignId, 2);
+    const settings = createDefaultSettings();
+    const localProvider = {
+      id: "provider",
+      name: "Provider",
+      baseUrl: "http://localhost:1234/v1",
+      apiKey: "",
+      defaultModel: "generator",
+    };
+    const pricing = config.execution.kind === "live" ? config.execution.pricing : null;
+    settings.providers.push(localProvider);
+    settings.generator = { ...settings.generator, providerId: "provider", model: "generator", pricing: pricing?.generator };
+    settings.judge = { ...settings.judge, providerId: "provider", model: "judge", pricing: pricing?.judge };
+    settings.storyteller = { ...settings.storyteller, providerId: "provider", model: "storyteller", pricing: pricing?.storyteller };
     const sessionRoot = prepareCampaignPlayLiveSession({
       runConfig: config,
       commit: "0000000",
       dirty: true,
       startedAt: 1_100,
+      settings,
     });
     expect(sessionRoot).toBe(campaignPlayLiveSessionRoot(config));
     expect(fs.existsSync(path.join(sessionRoot, "probes", "eligibility-freeze.json"))).toBe(true);
@@ -81,6 +103,7 @@ describe("Campaign Play live evidence session", () => {
       commit: "0000000",
       dirty: true,
       startedAt: 1_100,
+      settings,
     })).toThrow("already exists");
 
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({

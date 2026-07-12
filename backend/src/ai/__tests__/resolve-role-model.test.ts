@@ -132,6 +132,24 @@ describe("resolveRoleModel", () => {
     expect(result.maxTokens).toBe(4096);
   });
 
+  it("preserves pricing only when the exact role supplies it", () => {
+    const pricing = {
+      currency: "USD" as const,
+      tokenUnit: 1_000_000 as const,
+      inputCostMicros: 150_000,
+      outputCostMicros: 600_000,
+    };
+    const result = resolveRoleModel({
+      providerId: "openai",
+      model: "priced-model",
+      temperature: 0,
+      maxTokens: 1_024,
+      pricing,
+    }, providers);
+    expect(result.pricing).toEqual(pricing);
+    expect(result.pricing).not.toBe(pricing);
+  });
+
   it("returns temperature 0 correctly", () => {
     const role: RoleSettings = {
       providerId: "openai",

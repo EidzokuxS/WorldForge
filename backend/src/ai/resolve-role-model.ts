@@ -1,10 +1,12 @@
 import type { ProviderConfig } from "./provider-registry.js";
+import type { ModelPricing } from "@worldforge/shared";
 
 export interface RoleSettings {
   providerId: string;
   model?: string;
   temperature: number;
   maxTokens: number;
+  pricing?: ModelPricing;
 }
 
 export interface ProviderSettings {
@@ -19,6 +21,7 @@ export interface ResolvedRole {
   provider: ProviderConfig;
   temperature: number;
   maxTokens: number;
+  pricing?: ModelPricing;
 }
 
 export type ResolveResult =
@@ -49,5 +52,6 @@ export function resolveRoleModel(
     },
     temperature: role.temperature,
     maxTokens: role.maxTokens,
+    ...(role.pricing ? { pricing: { ...role.pricing } } : {}),
   };
 }

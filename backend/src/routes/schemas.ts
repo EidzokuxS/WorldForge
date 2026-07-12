@@ -68,6 +68,12 @@ const roleConfigSchema = z.object({
   model: z.string().optional(),
   temperature: z.number().default(0.8),
   maxTokens: z.number().int().default(1024),
+  pricing: z.object({
+    currency: z.literal("USD"),
+    tokenUnit: z.literal(1_000_000),
+    inputCostMicros: z.number().int().nonnegative(),
+    outputCostMicros: z.number().int().nonnegative(),
+  }).strict().optional(),
 });
 
 // --- Observability (Phase 58) ---

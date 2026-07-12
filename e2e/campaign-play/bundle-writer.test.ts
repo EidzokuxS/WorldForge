@@ -99,6 +99,11 @@ describe("Campaign Play evidence bundle writer", () => {
         kind: "live",
         providerId: "provider",
         models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
+        pricing: {
+          generator: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
+          judge: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
+          storyteller: { currency: "USD", tokenUnit: 1_000_000, inputCostMicros: 1_000, outputCostMicros: 2_000 },
+        },
         maximumInputTokens: 10_000,
         maximumOutputTokens: 10_000,
         maximumCostMicros: 1_000_000,

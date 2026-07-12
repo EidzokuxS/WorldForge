@@ -7,11 +7,19 @@ export interface Provider {
   isBuiltin?: boolean;
 }
 
+export interface ModelPricing {
+  currency: "USD";
+  tokenUnit: 1_000_000;
+  inputCostMicros: number;
+  outputCostMicros: number;
+}
+
 export interface RoleConfig {
   providerId: string;
   model?: string;
   temperature: number;
   maxTokens: number;
+  pricing?: ModelPricing;
 }
 
 export interface ImageConfig {

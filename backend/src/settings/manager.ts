@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ObservabilityConfig,
+  ModelPricing,
   Provider,
   RoleConfig,
   ResearchConfig,
@@ -123,13 +124,35 @@ function normalizeRoleConfig(
   defaults: RoleConfig
 ): RoleConfig {
   const source = isRecord(value) ? value : {};
+  const pricing = normalizeModelPricing(source.pricing);
 
   return {
     providerId: normalizeRoleProviderId(source.providerId, defaults),
     model: asString(source.model, defaults.model ?? ""),
     temperature: clampNumber(source.temperature, 0, 2, defaults.temperature),
     maxTokens: clampInt(source.maxTokens, 1, 32000, defaults.maxTokens),
+    ...(pricing ? { pricing } : {}),
   };
+}
+
+function normalizeModelPricing(value: unknown): ModelPricing | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("Role pricing must be a strict USD pricing object.");
+  const inputCostMicros = value.inputCostMicros;
+  const outputCostMicros = value.outputCostMicros;
+  if (
+    value.currency !== "USD"
+    || value.tokenUnit !== 1_000_000
+    || typeof inputCostMicros !== "number"
+    || !Number.isSafeInteger(inputCostMicros)
+    || inputCostMicros < 0
+    || typeof outputCostMicros !== "number"
+    || !Number.isSafeInteger(outputCostMicros)
+    || outputCostMicros < 0
+  ) {
+    throw new Error("Role pricing requires nonnegative integer USD micros per one million tokens.");
+  }
+  return { currency: "USD", tokenUnit: 1_000_000, inputCostMicros, outputCostMicros };
 }
 
 const VALID_SEARCH_PROVIDERS = new Set(["brave", "duckduckgo", "zai"]);

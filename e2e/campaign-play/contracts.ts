@@ -88,6 +88,13 @@ const deterministicExecutionSchema = z.object({
   seed: identifierSchema,
 }).strict();
 
+const liveModelPricingSchema = z.object({
+  currency: z.literal("USD"),
+  tokenUnit: z.literal(1_000_000),
+  inputCostMicros: nonnegativeIntegerSchema,
+  outputCostMicros: nonnegativeIntegerSchema,
+}).strict();
+
 const liveExecutionSchema = z.object({
   kind: z.literal("live"),
   providerId: identifierSchema,
@@ -95,6 +102,11 @@ const liveExecutionSchema = z.object({
     generator: identifierSchema,
     judge: identifierSchema,
     storyteller: identifierSchema,
+  }).strict(),
+  pricing: z.object({
+    generator: liveModelPricingSchema,
+    judge: liveModelPricingSchema,
+    storyteller: liveModelPricingSchema,
   }).strict(),
   maximumInputTokens: positiveIntegerSchema,
   maximumOutputTokens: positiveIntegerSchema,
