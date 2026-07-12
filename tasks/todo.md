@@ -52,7 +52,7 @@ Execution board:
 - [x] Task 11: Campaign Play API and resumable delivery.
 - [x] Task 12: UI and copy design gate.
 - [x] Task 13: frontend client and durable page state.
-- [ ] Task 14A: scene and narration surface.
+- [x] Task 14A: scene and narration surface.
 - [ ] Task 14B: action, consequence, journal, and recovery surface.
 - [ ] Task 15: product handoff and hard cutover.
 - [ ] Task 16A: deterministic integration and promotion gate.
@@ -69,7 +69,7 @@ Task 14A execution packet:
 - [x] Cover the route, stage, scene, and narration surfaces with focused component regressions using a rich schema-valid public fixture.
 - [x] Capture real-route opening, ready, narration, desktop, narrow, and reduced-motion evidence with zero console/network errors.
 - [x] Pass focused/full frontend tests, scoped lint, typecheck, build, Krypton POST, correctness, maintainability, and fresh Sol scene review. Repository-wide lint retains the unrelated Forge baseline recorded in the evidence note.
-- [ ] Record Task 14A evidence, GitNexus change scope, checkpoint commit, refreshed index, and push.
+- [x] Record Task 14A evidence, GitNexus change scope, checkpoint commit, refreshed index, and push.
 
 Task 14A ownership amendment:
 - `CampaignPlayPage.tsx` joins Task 14A as the existing authoritative state/admission integration seam required to render the planned scene components. Task 14B retains action, consequence, Journal, and recovery interaction ownership.
@@ -1274,3 +1274,13 @@ Stop boundary: stop at transport, durable page state, semantic status surfaces, 
 - Verification passed: focused `26/26`, complete frontend `514/514`, frontend typecheck, warning-free targeted lint, monorepo production build, and diff check. Standalone smoke additions: `0`.
 - Fresh Sol semantic verification returned `PASS` with remaining P0/P1 findings `0`. Humanizer/deslop review kept approved public copy intact and found the evidence direct and specific.
 - Evidence: `rpi/campaign-play/implement/13-frontend-state.md`.
+
+## Campaign Play Task 14A Review (2026-07-12)
+
+- The real `/campaign/[id]/play` route now renders chosen or delegated opening setup, public character identity, current location, visible actors, routes, pressures, progressive narration, and beat-bound effects from `CampaignPlayState`.
+- Effect regressions cover settled hydration suppression, accepted-artifact activation, bound beat timing, simultaneous effects, clearing on the next beat, same-kind retrigger, and a literal `artifact` beat ID distinct from a null artifact effect.
+- Two persisted campaigns prove opening-required and ready states at 1440x900 and 390x844. The opening captures include all selectors and enabled Begin; reduced motion shows both beats, disabled Auto, and the narration's static `flash` treatment. Browser console errors, failed requests, bad responses, and private player text were empty.
+- Verification passed: focused `29/29`, complete frontend `525/525`, frontend typecheck, warning-free scoped lint, monorepo production build, diff check, and GitNexus MEDIUM scope with no HIGH/CRITICAL risk.
+- Krypton POST returned `ALIGNED`, correctness returned `PASS`, and maintainability returned `MAINTAINABLE`; remaining P0/P1/P2 findings are `0/0/0`. Humanizer/deslop retained direct product copy. Standalone smoke additions: `0`.
+- Checkpoints: implementation `b322ed7e`; refreshed GitNexus contains 9,248 symbols, 25,815 relationships, 300 flows, and 7,386 embeddings.
+- Evidence: `rpi/campaign-play/implement/14a-scene-narration.md`.
