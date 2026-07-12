@@ -83,3 +83,5 @@ settings.json.bak
 settings.json.bak.*
 settings.json.tmp
 *.lnk
+rpi/campaign-world-build/implement/glm-string-contract-review.err.log
+rpi/campaign-world-build/implement/glm-string-contract-review.out.log
