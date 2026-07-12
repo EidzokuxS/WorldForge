@@ -21,6 +21,7 @@ import {
 } from "./campaign-play-database.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPublicHandle,
   hashCampaignPlayProjection,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
@@ -38,6 +39,7 @@ import {
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
 import {
+  availableIntents,
   createCampaignPlayVisibilityService,
   resolveCampaignPlayOpeningObservableTrace,
 } from "./visibility-service.js";
@@ -883,6 +885,84 @@ describe("Campaign Play visibility service", () => {
       ...matching,
       locationId: "location-b",
     })).toBeNull();
+  });
+
+  it("suggests the shortest open route toward a pending opening aftermath", () => {
+    const fixture = createVisibilityFixture();
+    fixture.handle.sqlite.prepare(`UPDATE actor_placements SET location_id = 'location-c'
+      WHERE campaign_id = ? AND actor_id = 'actor-player' AND placement_kind = 'present'`)
+      .run(CAMPAIGN_ID);
+    fixture.handle.sqlite.prepare(`INSERT INTO locations
+      (id, campaign_id, name, description, tags, connected_to, is_starting, kind, persistence)
+      VALUES ('location-detour', ?, 'Aardvark Detour', 'A plausible wrong turn.',
+        '[]', '[]', 0, 'macro', 'persistent')`).run(CAMPAIGN_ID);
+    fixture.handle.sqlite.prepare(`INSERT INTO location_edges
+      (id, campaign_id, from_location_id, to_location_id, travel_cost, discovered)
+      VALUES ('route-detour', ?, 'location-c', 'location-detour', 1, 1)`).run(CAMPAIGN_ID);
+    const currentLocation = fixture.handle.sqlite.prepare(`SELECT id, name, description
+      FROM locations WHERE campaign_id = ? AND id = 'location-c'`).get(CAMPAIGN_ID) as {
+        id: string;
+        name: string;
+        description: string;
+      };
+    const routeRows = fixture.handle.sqlite.prepare(`SELECT edge.id,
+        edge.to_location_id AS destinationId, destination.name AS destinationName,
+        edge.travel_cost AS travelCost
+      FROM location_edges edge JOIN locations destination ON destination.id = edge.to_location_id
+      WHERE edge.campaign_id = ? AND edge.from_location_id = 'location-c'
+      ORDER BY destination.name`).all(CAMPAIGN_ID) as Array<{
+        id: string;
+        destinationId: string;
+        destinationName: string;
+        travelCost: number;
+      }>;
+    const scene = {
+      currentLocation: {
+        handle: deriveCampaignPlayPublicHandle("location", CAMPAIGN_ID, currentLocation.id),
+        name: currentLocation.name,
+        description: currentLocation.description,
+      },
+      visibleActors: [],
+      visibleRoutes: routeRows.map((route) => ({
+        handle: deriveCampaignPlayPublicHandle("route", CAMPAIGN_ID, route.id),
+        destinationHandle: deriveCampaignPlayPublicHandle(
+          "location",
+          CAMPAIGN_ID,
+          route.destinationId,
+        ),
+        destinationName: route.destinationName,
+        state: "open" as const,
+        travelTimeLabel: `${route.travelCost} travel units`,
+      })),
+      visiblePressures: [],
+    };
+
+    const syntheticOpeningSeed: CampaignPlayOpeningExposureSeed = {
+      sourceActorId: "actor-player",
+      sourceGoalId: "goal-player",
+      sourceLocationId: "location-a",
+      summary: "The player's earlier action leaves a durable trace.",
+      observableTrace: "Fresh sealing wax marks the missing ledger.",
+      predicate: {
+        channel: "local_aftermath",
+        locationId: "location-a",
+        validUntilWorldTimeMinutes: 20,
+      },
+      discoverableWithinPlayerActions: 2,
+    };
+    const intents = availableIntents(
+      fixture.handle,
+      "turn-route-guidance",
+      scene,
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    const move = intents.find((intent) => intent.kind === "move");
+    const destination = scene.visibleRoutes.find((route) =>
+      route.handle === move?.targets[0]?.handle)?.destinationName;
+    expect(destination).toBe("North Harbor");
+    expect(destination).not.toBe("Aardvark Detour");
   });
 
   it("keeps route state protected when the committed interaction misses its trigger", () => {

@@ -716,18 +716,28 @@ function visibleScene(
   };
 }
 
-function availableIntents(
-  campaignId: string,
+export function availableIntents(
+  handle: CampaignPlayDatabaseHandle,
   turnId: string,
   scene: ReturnType<typeof visibleScene>,
+  humanActorId: string,
+  openingExposureSeed: CampaignPlayOpeningExposureSeed,
+  worldTimeMinutes: number,
 ): CampaignPlayAvailableIntent[] {
+  const campaignId = handle.campaignId;
   const intents: CampaignPlayAvailableIntent[] = [{
     handle: publicHandle("choice", campaignId, `${turnId}:observe`),
     label: "Look around",
     kind: "observe",
     targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
   }];
-  const route = scene.visibleRoutes.find((candidate) => candidate.state !== "blocked");
+  const route = preferredOpeningExposureRoute(
+    handle,
+    scene,
+    humanActorId,
+    openingExposureSeed,
+    worldTimeMinutes,
+  ) ?? scene.visibleRoutes.find((candidate) => candidate.state !== "blocked");
   if (route) intents.push({
     handle: publicHandle("choice", campaignId, `${turnId}:move:${route.handle}`),
     label: `Go to ${route.destinationName}`,
@@ -748,6 +758,94 @@ function availableIntents(
     targets: [],
   });
   return intents.slice(0, 4);
+}
+
+function preferredOpeningExposureRoute(
+  handle: CampaignPlayDatabaseHandle,
+  scene: ReturnType<typeof visibleScene>,
+  humanActorId: string,
+  seed: CampaignPlayOpeningExposureSeed,
+  worldTimeMinutes: number,
+): CampaignPlayVisibleRoute | undefined {
+  if (seed.predicate.channel !== "local_aftermath") return undefined;
+  if (seed.predicate.validUntilWorldTimeMinutes < worldTimeMinutes) return undefined;
+
+  const pendingExposures = handle.sqlite.prepare(`SELECT exposure.event_id AS eventId,
+      event.source_json AS eventSourceJson
+    FROM campaign_play_event_exposures exposure
+    JOIN campaign_play_events event ON event.event_id = exposure.event_id
+      AND event.campaign_id = exposure.campaign_id
+    WHERE exposure.campaign_id = ? AND exposure.channel = 'local_aftermath'
+      AND exposure.location_id = ?
+      AND exposure.valid_until_world_time_minutes >= ?
+      AND NOT EXISTS (
+        SELECT 1 FROM campaign_play_observations observation
+        WHERE observation.campaign_id = exposure.campaign_id
+          AND observation.event_id = exposure.event_id
+          AND observation.channel = exposure.channel
+      )
+    ORDER BY event.world_time_minutes, event.rowid`).all(
+      handle.campaignId,
+      seed.predicate.locationId,
+      worldTimeMinutes,
+    ) as Array<{ eventId: string; eventSourceJson: string }>;
+  const hasPendingOpeningExposure = pendingExposures.some((row) => {
+    const source = parseRecord(row.eventSourceJson, "opening exposure event source");
+    return source.kind === "actor" && source.actorId === seed.sourceActorId;
+  });
+  if (!hasPendingOpeningExposure) return undefined;
+
+  const placement = handle.sqlite.prepare(`SELECT location_id AS locationId
+    FROM actor_placements WHERE campaign_id = ? AND actor_id = ?
+      AND placement_kind = 'present' LIMIT 1`).get(
+        handle.campaignId,
+        humanActorId,
+      ) as { locationId: string } | undefined;
+  if (!placement || placement.locationId === seed.predicate.locationId) return undefined;
+
+  const routes = handle.sqlite.prepare(`SELECT edge.id, edge.from_location_id AS fromLocationId,
+      edge.to_location_id AS toLocationId, edge.travel_cost AS travelCost,
+      destination.name AS destinationName,
+      COALESCE(state.state, 'open') AS state
+    FROM location_edges edge
+    JOIN locations destination ON destination.id = edge.to_location_id
+    LEFT JOIN campaign_play_route_states state ON state.route_id = edge.id
+    WHERE edge.campaign_id = ? AND edge.discovered = 1
+      AND COALESCE(state.state, 'open') <> 'blocked'
+    ORDER BY edge.id`).all(handle.campaignId) as Array<{
+      id: string;
+      fromLocationId: string;
+      toLocationId: string;
+      travelCost: number;
+      destinationName: string;
+      state: "open" | "restricted";
+    }>;
+  const distances = new Map<string, number>([[seed.predicate.locationId, 0]]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const route of routes) {
+      const remaining = distances.get(route.toLocationId);
+      if (remaining === undefined) continue;
+      const candidate = remaining + 1;
+      const known = distances.get(route.fromLocationId);
+      if (known === undefined || candidate < known) {
+        distances.set(route.fromLocationId, candidate);
+        changed = true;
+      }
+    }
+  }
+  const next = routes
+    .filter((route) => route.fromLocationId === placement.locationId)
+    .filter((route) => distances.has(route.toLocationId))
+    .sort((left, right) =>
+      distances.get(left.toLocationId)! - distances.get(right.toLocationId)!
+      || left.travelCost - right.travelCost
+      || left.destinationName.localeCompare(right.destinationName)
+      || left.id.localeCompare(right.id))[0];
+  if (!next) return undefined;
+  const routeHandle = publicHandle("route", handle.campaignId, next.id);
+  return scene.visibleRoutes.find((route) => route.handle === routeHandle);
 }
 
 function priorContinuity(
@@ -1010,7 +1108,14 @@ export function createCampaignPlayVisibilityService(
           10_080,
           Math.max(0, state.worldTimeMinutes - admittedWorldTime(turn, state.worldTimeMinutes)),
         ),
-        availableIntents: availableIntents(handle.campaignId, turn.turnId, scene),
+        availableIntents: availableIntents(
+          handle,
+          turn.turnId,
+          scene,
+          human.id,
+          openingExposureSeed,
+          state.worldTimeMinutes,
+        ),
       });
       const packetJson = canonicalizeCampaignPlayProjection(packet);
       const packetHash = hashCampaignPlayNarratorPacket(
