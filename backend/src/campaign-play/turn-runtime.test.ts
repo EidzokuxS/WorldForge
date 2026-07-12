@@ -1302,7 +1302,7 @@ describe("Campaign Play player-action turn runtime", () => {
         }]);
   });
 
-  it("plays one real migrated campaign action through grounded narration and terminal telemetry", async () => {
+  it("admits a consecutive real action through grounded observation authority", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();
     const time = fixedClock(7_000);
     const narrator = playerNarratorFixture();
@@ -1382,6 +1382,19 @@ describe("Campaign Play player-action turn runtime", () => {
       "narrator",
     ]);
     expect(telemetry.stageExecutions.every((stage) => stage.outcome === "advanced")).toBe(true);
+
+    const nextState = createCampaignPlayStateRepository(handle).loadState()!;
+    const nextRequest = admissionRequest(nextState, "real-second-action-playtest");
+    const nextAdmission = runtime.admitAction({ request: nextRequest, submittedAt: 7_100 });
+
+    expect(runtime.loadTurn(nextAdmission.turnId)).toMatchObject({
+      stage: "admitted",
+      terminalReason: null,
+    });
+    expect(handle.sqlite.prepare(`SELECT count(*) AS value FROM campaign_play_turns
+      WHERE campaign_id = ? AND turn_kind = 'player_action'`).get(
+        CAMPAIGN_ID,
+      )).toEqual({ value: 2 });
   });
 
   it.each([

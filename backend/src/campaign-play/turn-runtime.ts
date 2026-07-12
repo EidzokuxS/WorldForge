@@ -14,6 +14,7 @@ import {
   campaignPlayActionContextSchema,
   campaignPlayEntityRefSchema,
   campaignPlayGameMasterArtifactSchema,
+  campaignPlayJournalEntrySchema,
   campaignPlayJudgeArtifactSchema,
   campaignPlayNarrationSchema,
   campaignPlayNarratorPacketSchema,
@@ -333,8 +334,8 @@ interface HumanRow {
 }
 
 interface ObservationBindingRow {
-  observationId: string;
   eventId: string;
+  publicEntryJson: string;
 }
 
 function runtimeId(domain: string, value: unknown): string {
@@ -490,14 +491,17 @@ function candidateBindings(
   frame.acceptedWorld.routes.forEach((route) => add("route", { kind: "route", id: route.id }));
   frame.acceptedWorld.pressures.forEach((pressure) =>
     add("pressure", { kind: "pressure", id: pressure.id }));
-  const observations = handle.sqlite.prepare(`SELECT observation_id AS observationId,
-      event_id AS eventId FROM campaign_play_observations
+  const observations = handle.sqlite.prepare(`SELECT event_id AS eventId,
+      public_entry_json AS publicEntryJson FROM campaign_play_observations
     WHERE campaign_id = ? ORDER BY observation_id`).all(
       handle.campaignId,
     ) as ObservationBindingRow[];
   observations.forEach((observation) => {
+    const publicEntry = campaignPlayJournalEntrySchema.parse(
+      JSON.parse(observation.publicEntryJson) as unknown,
+    );
     candidates.set(
-      deriveCampaignPlayPublicHandle("observation", handle.campaignId, observation.observationId),
+      publicEntry.observationHandle,
       { kind: "world_event", id: observation.eventId },
     );
   });

@@ -18,6 +18,7 @@
     "typecheck": "npm --prefix frontend run lint && npm --prefix backend run typecheck"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "tsx": "^4.21.0"
   }
 }

@@ -1384,10 +1384,10 @@ Packet 16A.1, evidence contracts and validator:
 
 Packet 16A.2, deterministic replay:
 
-- [ ] Build a seeded Campaign Play fixture from accepted Campaign World through character and opening.
-- [ ] Execute 10, 30, and 60 completed player actions twice with fixed clock, IDs, model artifacts, RNG, and input scripts.
-- [ ] Compare canonical public/protected projections, runtime and mechanical versions, receipts, events, jobs, visibility, terminal rows, and replay hash.
-- [ ] Run paired intervention and peripheral scripts from the same opening and prove distinct durable outcomes with eligible observations only.
+- [x] Build a seeded Campaign Play fixture from accepted Campaign World through character and opening.
+- [x] Execute 10, 30, and 60 completed player actions twice with fixed clock, IDs, model artifacts, RNG, and input scripts.
+- [x] Compare canonical public/protected projections, runtime and mechanical versions, receipts, events, jobs, visibility, terminal rows, and replay hash.
+- [x] Run paired intervention and peripheral scripts from the same opening and prove distinct durable outcomes with eligible observations only.
 
 Packet 16A.3, restart and provenance integration:
 
