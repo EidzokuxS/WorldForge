@@ -28,6 +28,7 @@ import { createCampaignPlayStateRepository } from "./campaign-play-state-reposit
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
 import {
   createCampaignPlayOpeningPlanner,
+  type CampaignPlayOpeningExposureSeed,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
 import {
@@ -36,7 +37,10 @@ import {
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
-import { createCampaignPlayVisibilityService } from "./visibility-service.js";
+import {
+  createCampaignPlayVisibilityService,
+  resolveCampaignPlayOpeningObservableTrace,
+} from "./visibility-service.js";
 
 const CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111";
 const HASH_A = "a".repeat(64);
@@ -164,6 +168,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
       goalId: "goal-b",
       locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
+      observableTrace: "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
       exposure: {
         channel: "local_aftermath",
         locationId: "location-a",
@@ -847,6 +852,37 @@ describe("Campaign Play visibility service", () => {
         (SELECT count(*) FROM campaign_play_observations WHERE campaign_id = ?) AS observations,
         (SELECT count(*) FROM campaign_play_narrations WHERE campaign_id = ?) AS narrations`)
       .get(CAMPAIGN_ID, CAMPAIGN_ID, CAMPAIGN_ID)).toEqual(countsBeforeRetry);
+  });
+
+  it("releases the opening observable trace only for its exact actor and earned predicate", () => {
+    const proposal = openingProposal();
+    const seed: CampaignPlayOpeningExposureSeed = {
+      sourceActorId: proposal.hiddenConsequence.actorId,
+      sourceGoalId: proposal.hiddenConsequence.goalId,
+      sourceLocationId: proposal.hiddenConsequence.locationId,
+      summary: proposal.hiddenConsequence.summary,
+      observableTrace: proposal.hiddenConsequence.observableTrace,
+      predicate: structuredClone(proposal.hiddenConsequence.exposure),
+      discoverableWithinPlayerActions: 2,
+    };
+    const matching = {
+      sourceActorId: seed.sourceActorId,
+      channel: seed.predicate.channel,
+      locationId: seed.predicate.channel === "local_aftermath" ? seed.predicate.locationId : null,
+      routeId: null,
+      witnessActorId: null,
+    } as const;
+    expect(resolveCampaignPlayOpeningObservableTrace(seed, matching)).toBe(
+      "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
+    );
+    expect(resolveCampaignPlayOpeningObservableTrace(seed, {
+      ...matching,
+      sourceActorId: "actor-a",
+    })).toBeNull();
+    expect(resolveCampaignPlayOpeningObservableTrace(seed, {
+      ...matching,
+      locationId: "location-b",
+    })).toBeNull();
   });
 
   it("keeps route state protected when the committed interaction misses its trigger", () => {

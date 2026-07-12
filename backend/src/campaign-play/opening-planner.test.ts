@@ -333,6 +333,7 @@ function proposalFixture(): CampaignPlayOpeningProposal {
       goalId: "goal-bells-explain",
       locationId: "location-bells",
       summary: "A false storm signal changes how Bell Island receives travelers.",
+      observableTrace: "The storm bell's fresh strike pattern conflicts with the clear horizon.",
       exposure: {
         channel: "local_aftermath",
         locationId: "location-bells",
@@ -622,6 +623,15 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
+  it("rejects an observable trace that reveals the hidden actor by name", () => {
+    const proposal = proposalFixture();
+    proposal.hiddenConsequence.observableTrace =
+      "Sel Bell left a fresh storm notation beside the bell rope.";
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+  });
+
   it("uses every collective base and influence placement for reachability", () => {
     const world = worldFixture();
     world.placements.push({
@@ -765,6 +775,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("set exposure.witnessActorId to scene.supportActorId");
     expect(prompt).toContain("set exposure.locationId to hiddenConsequence.locationId");
     expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
+    expect(prompt).toContain("hiddenConsequence.observableTrace");
+    expect(prompt).toContain("Do not name the hidden actor");
   });
 
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {

@@ -28,7 +28,10 @@ import {
   type CampaignPlayWorkerLeaseToken,
   type LoadedCampaignPlayTurn,
 } from "./campaign-play-turn-repository.js";
-import { campaignPlayOpeningArtifactSchema } from "./opening-planner.js";
+import {
+  campaignPlayOpeningArtifactSchema,
+  type CampaignPlayOpeningExposureSeed,
+} from "./opening-planner.js";
 
 type ExposureChannel =
   | "direct_perception"
@@ -459,6 +462,31 @@ function knownEventEvidence(
   return { persisted, planned: plannedEvidence };
 }
 
+export function resolveCampaignPlayOpeningObservableTrace(
+  seed: CampaignPlayOpeningExposureSeed,
+  exposure: {
+    sourceActorId: string | null;
+    channel: ExposureChannel;
+    locationId: string | null;
+    routeId: string | null;
+    witnessActorId: string | null;
+  },
+): string | null {
+  if (exposure.sourceActorId !== seed.sourceActorId || exposure.channel !== seed.predicate.channel) {
+    return null;
+  }
+  switch (seed.predicate.channel) {
+    case "local_aftermath":
+      return seed.predicate.locationId === exposure.locationId ? seed.observableTrace : null;
+    case "route_state":
+      return seed.predicate.routeId === exposure.routeId ? seed.observableTrace : null;
+    case "witness_report":
+      return seed.predicate.witnessActorId === exposure.witnessActorId ? seed.observableTrace : null;
+    case "direct_perception":
+      return null;
+  }
+}
+
 function deriveWitnessKnowledge(
   humanActorId: string,
   exposures: readonly ExposureRow[],
@@ -498,6 +526,7 @@ function publicEntry(
   candidate: EpistemicCandidate,
   humanActorId: string,
   currentTurnId: string,
+  openingExposureSeed: CampaignPlayOpeningExposureSeed,
 ): CampaignPlayJournalEntry {
   const exposure = candidate.exposure;
   const location = exposure.locationId
@@ -532,6 +561,13 @@ function publicEntry(
   );
   const eventSource = parseRecord(exposure.eventSourceJson, "Event source");
   const commandPayload = parseRecord(exposure.commandPayloadJson, "Command payload");
+  const openingTrace = resolveCampaignPlayOpeningObservableTrace(openingExposureSeed, {
+    sourceActorId: eventSourceActorId(exposure),
+    channel: exposure.channel,
+    locationId: exposure.locationId,
+    routeId: exposure.routeId,
+    witnessActorId: exposure.witnessActorId,
+  });
   const playerCaused = eventSourceActorId(exposure) === humanActorId || (
     playerParticipated && eventSource.kind === "system" && eventSource.system === "game_master"
   );
@@ -565,15 +601,15 @@ function publicEntry(
     }
   } else if (exposure.channel === "local_aftermath") {
     title = "Signs of change";
-    text = "Something changed here before you arrived.";
+    text = openingTrace ?? "Something changed here before you arrived.";
     cue = "visible_aftermath";
   } else if (exposure.channel === "route_state") {
     title = "Along the route";
-    text = `The route to ${route?.destinationName ?? "the next place"} is ${route?.state ?? "open"}.`;
+    text = openingTrace ?? `The route to ${route?.destinationName ?? "the next place"} is ${route?.state ?? "open"}.`;
     cue = "route_change";
   } else if (exposure.channel === "witness_report") {
     title = `${witness?.name ?? "A witness"}'s account`;
-    text = `${witness?.name ?? "A witness"} described a change they had witnessed.`;
+    text = openingTrace ?? `${witness?.name ?? "A witness"} described a change they had witnessed.`;
     cue = "witness_report";
   }
   const consequence: CampaignPlayConsequence = {
@@ -830,6 +866,23 @@ export function createCampaignPlayVisibilityService(
           "Visibility projection requires one human player actor.",
         );
       }
+      const openingTurnId = turn.turnKind === "opening"
+        ? turn.turnId
+        : (handle.sqlite.prepare(`SELECT id FROM campaign_play_turns
+            WHERE campaign_id = ? AND turn_kind = 'opening' AND stage = 'completed'
+            ORDER BY submitted_at DESC LIMIT 1`).get(handle.campaignId) as { id: string } | undefined)?.id;
+      const openingArtifact = openingTurnId
+        ? turnRepository.loadAcceptedModelArtifact(openingTurnId, "opening_planner")
+        : null;
+      if (!openingArtifact) {
+        throw new CampaignPlayVisibilityError(
+          "visibility_state_invalid",
+          "Visibility projection requires the accepted opening exposure seed.",
+        );
+      }
+      const openingExposureSeed = campaignPlayOpeningArtifactSchema.parse(
+        openingArtifact.artifact,
+      ).exposureSeed;
       const exposures = handle.sqlite.prepare(`SELECT exposure.exposure_id AS exposureId,
           exposure.event_id AS eventId, exposure.channel,
           exposure.location_id AS locationId, exposure.route_id AS routeId,
@@ -893,7 +946,13 @@ export function createCampaignPlayVisibilityService(
           return {
             candidate,
             observationId,
-            entry: publicEntry(handle, candidate, human.id, turn.turnId),
+            entry: publicEntry(
+              handle,
+              candidate,
+              human.id,
+              turn.turnId,
+              openingExposureSeed,
+            ),
           };
         });
       const scene = visibleScene(handle, human.id);

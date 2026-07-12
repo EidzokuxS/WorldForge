@@ -67,5 +67,7 @@ Choose the hidden consequence source only from openingConstraints.plannedActors.
 - For local_aftermath, set exposure.locationId to hiddenConsequence.locationId and include {"kind":"location","id":hiddenConsequence.locationId} in the first step targets.
 The exposure must become earnable within five player actions through that route, witness, or reachable non-local location.
 
+Write hiddenConsequence.summary as protected causal truth for the simulation. Write hiddenConsequence.observableTrace as concrete evidence available only after the exposure is earned. Describe only what a person could perceive at the exposure point or learn from the named witness. Do not name the hidden actor, state the actor's private goal or motivation, claim an unseen cause, or address the player.
+
 Keep the hidden actor, its identity, and its goal out of the scene fields. Describe only the player's immediate role, arrival, and situation in start. Code owns identifiers, command scopes, preconditions, scheduling, bootstrap commands, hashes, visibility, and narration.`;
 }

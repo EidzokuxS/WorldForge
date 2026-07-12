@@ -36,6 +36,7 @@ const TEST_EXPOSURE_SEED: CampaignPlayOpeningExposureSeed = {
   sourceGoalId: "goal-b",
   sourceLocationId: "location-a",
   summary: "The courier changes which route ledger reaches the reef.",
+  observableTrace: "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
   predicate: {
     channel: "local_aftermath",
     locationId: "location-a",

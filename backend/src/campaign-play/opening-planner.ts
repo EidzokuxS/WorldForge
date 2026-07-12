@@ -103,6 +103,7 @@ export const campaignPlayOpeningProposalSchema = z.object({
     goalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+    observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.text),
     exposure: openingHiddenExposurePredicateSchema,
   }).strict(),
 }).strict();
@@ -156,6 +157,7 @@ export interface CampaignPlayOpeningExposureSeed {
   sourceGoalId: string;
   sourceLocationId: string;
   summary: string;
+  observableTrace: string;
   predicate: CampaignPlayExposurePredicate;
   discoverableWithinPlayerActions: number;
 }
@@ -241,6 +243,7 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
       sourceGoalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
       sourceLocationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
       summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+      observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.text),
       predicate: campaignPlayExposurePredicateSchema,
       discoverableWithinPlayerActions: z.number().int().min(1).max(OPENING_MAX_EXPOSURE_ACTIONS),
     }).strict(),
@@ -821,6 +824,9 @@ function compileExposureSeed(
   ) {
     fail("opening_proposal_invalid");
   }
+  if (hidden.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
+    fail("opening_proposal_invalid");
+  }
   const firstStepTargets = intentTargetKeys(plan.steps[0]!.intent);
   let discoverableWithinPlayerActions: number;
   switch (hidden.exposure.channel) {
@@ -870,6 +876,7 @@ function compileExposureSeed(
     sourceGoalId: goal.id,
     sourceLocationId: locationId,
     summary: hidden.summary,
+    observableTrace: hidden.observableTrace,
     predicate: structuredClone(hidden.exposure),
     discoverableWithinPlayerActions,
   };
