@@ -42,3 +42,9 @@ Prompt and prose review: main-agent humanizer/deslop review found the revised in
 - Backend typecheck passed after each contract change.
 - Public state after the movement turn reported `phase=ready`, `worldVersion=13`, `runtimeRevision=251`, and current location `bellfall-reach`.
 - The rendered UI exposed Mira Saltwick, the Seven-Bell Cycle pressure, four onward routes, and `Talk to Mira Saltwick` as the next current-scene action.
+# Global model output floor
+
+- All text-generation models created through `createModel` now enforce `maxOutputTokens >= 32_768` at the provider boundary, including ordinary, reasoning, and explicit GLM reasoning-bypass calls. Larger caller budgets remain unchanged.
+- Shared defaults, settings normalization, API payload normalization, and the settings control use the same `32_768` minimum. This removes the former `32_000` ceiling and prevents local `512`–`4_096` role values from becoming provider requests.
+- Focused proof covers provider middleware behavior, settings contracts, shared defaults, and the settings control. No standalone smoke test was added.
+- Verification: full backend suite passed `3911` tests (`30` todo, one skipped file); backend and frontend typechecks passed. The repository-wide frontend lint remains blocked by the pre-existing Forge-page `react-hooks/set-state-in-effect` error outside this patch.

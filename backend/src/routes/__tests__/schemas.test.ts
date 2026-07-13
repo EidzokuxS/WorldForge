@@ -826,7 +826,7 @@ describe("testRoleSchema", () => {
       }
     });
 
-    it("applies default temperature (0.8) and maxTokens (1024) in role configs", () => {
+    it("applies default temperature (0.8) and the 32k minimum in role configs", () => {
       const result = testRoleSchema.safeParse({
         role: "judge",
         providers: [{ id: "p1" }],
@@ -837,7 +837,7 @@ describe("testRoleSchema", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.roles.judge!.temperature).toBe(0.8);
-        expect(result.data.roles.judge!.maxTokens).toBe(1024);
+        expect(result.data.roles.judge!.maxTokens).toBe(32_768);
       }
     });
 

@@ -297,7 +297,7 @@ describe("interpretPremiseDivergence", () => {
     ).resolves.toBeNull();
 
     expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
-    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(8192);
+    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(32_768);
   });
 
   it("normalizes protagonist kind synonyms instead of failing structured output", async () => {

@@ -5,6 +5,7 @@ import {
   AP_DURABILITY_TIERS,
   SPEED_TIERS,
   INTELLIGENCE_TIERS,
+  MODEL_OUTPUT_TOKEN_MINIMUM,
   normalizeApDurTier,
   normalizeSpeedTier,
   normalizeIntelligenceTier,
@@ -67,7 +68,9 @@ const roleConfigSchema = z.object({
   providerId: z.string().default(""),
   model: z.string().optional(),
   temperature: z.number().default(0.8),
-  maxTokens: z.number().int().default(1024),
+  maxTokens: z.number().int().positive()
+    .default(MODEL_OUTPUT_TOKEN_MINIMUM)
+    .transform((value) => Math.max(value, MODEL_OUTPUT_TOKEN_MINIMUM)),
   pricing: z.object({
     currency: z.literal("USD"),
     tokenUnit: z.literal(1_000_000),

@@ -1,5 +1,5 @@
 import { Loader2, Play } from "lucide-react";
-import { clamp } from "@/lib/clamp";
+import { MODEL_OUTPUT_TOKEN_MINIMUM } from "@worldforge/shared";
 import type { Provider, RoleConfig } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,15 +127,14 @@ export function RoleConfigCard({
               <Input
                 id={`${roleName}-max-tokens`}
                 type="number"
-                min={1}
-                max={32000}
+                min={MODEL_OUTPUT_TOKEN_MINIMUM}
                 value={config.maxTokens}
                 onChange={(event) =>
                   onConfigChange({
-                    maxTokens: clamp(
-                      Number.parseInt(event.target.value || "0", 10) || 1,
-                      1,
-                      32000
+                    maxTokens: Math.max(
+                      Number.parseInt(event.target.value || "0", 10)
+                        || MODEL_OUTPUT_TOKEN_MINIMUM,
+                      MODEL_OUTPUT_TOKEN_MINIMUM,
                     ),
                   })
                 }

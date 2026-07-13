@@ -117,7 +117,13 @@ describe("POST /api/settings", () => {
     const body = await res.json();
     expect(body).toEqual(savedResult);
     expect(mockedSave).toHaveBeenCalledOnce();
-    expect(mockedSave).toHaveBeenCalledWith(input);
+    expect(mockedSave).toHaveBeenCalledWith({
+      ...input,
+      judge: { ...input.judge, maxTokens: 32_768 },
+      storyteller: { ...input.storyteller, maxTokens: 32_768 },
+      generator: { ...input.generator, maxTokens: 32_768 },
+      embedder: { ...input.embedder, maxTokens: 32_768 },
+    });
   });
 
   it("returns 400 for invalid JSON body", async () => {

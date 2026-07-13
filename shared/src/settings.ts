@@ -1,6 +1,7 @@
 import type { Provider, Settings } from "./types.js";
 
 export const NONE_PROVIDER_ID = "none";
+export const MODEL_OUTPUT_TOKEN_MINIMUM = 32_768;
 
 export const BUILTIN_PROVIDER_PRESETS: Provider[] = [
   {
@@ -55,25 +56,25 @@ export function createDefaultSettings(): Settings {
       providerId: defaultProviderId,
       model: "",
       temperature: 0,
-      maxTokens: 512,
+      maxTokens: MODEL_OUTPUT_TOKEN_MINIMUM,
     },
     storyteller: {
       providerId: defaultProviderId,
       model: "",
       temperature: 0.8,
-      maxTokens: 4096,
+      maxTokens: MODEL_OUTPUT_TOKEN_MINIMUM,
     },
     generator: {
       providerId: defaultProviderId,
       model: "",
       temperature: 0.7,
-      maxTokens: 4096,
+      maxTokens: MODEL_OUTPUT_TOKEN_MINIMUM,
     },
     embedder: {
       providerId: defaultProviderId,
       model: "",
       temperature: 0,
-      maxTokens: 512,
+      maxTokens: MODEL_OUTPUT_TOKEN_MINIMUM,
     },
     images: {
       providerId: NONE_PROVIDER_ID,

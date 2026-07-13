@@ -207,8 +207,8 @@ describe("createDefaultSettings", () => {
       expect(settings.judge.temperature).toBe(0);
     });
 
-    it("has maxTokens 512", () => {
-      expect(settings.judge.maxTokens).toBe(512);
+    it("has at least 32k output tokens", () => {
+      expect(settings.judge.maxTokens).toBe(32_768);
     });
 
     it("has empty model string (user picks)", () => {
@@ -229,8 +229,8 @@ describe("createDefaultSettings", () => {
       expect(settings.storyteller.temperature).toBe(0.8);
     });
 
-    it("has maxTokens 4096 for full RP narration", () => {
-      expect(settings.storyteller.maxTokens).toBe(4096);
+    it("has at least 32k output tokens for full RP narration", () => {
+      expect(settings.storyteller.maxTokens).toBe(32_768);
     });
 
     it("has empty model string", () => {
@@ -251,8 +251,8 @@ describe("createDefaultSettings", () => {
       expect(settings.generator.temperature).toBe(0.7);
     });
 
-    it("has maxTokens 4096", () => {
-      expect(settings.generator.maxTokens).toBe(4096);
+    it("has at least 32k output tokens", () => {
+      expect(settings.generator.maxTokens).toBe(32_768);
     });
 
     it("has empty model string", () => {
@@ -294,8 +294,8 @@ describe("createDefaultSettings", () => {
       expect(settings.embedder.temperature).toBe(0);
     });
 
-    it("has maxTokens 512", () => {
-      expect(settings.embedder.maxTokens).toBe(512);
+    it("has at least 32k output tokens", () => {
+      expect(settings.embedder.maxTokens).toBe(32_768);
     });
 
     it("has empty model string", () => {

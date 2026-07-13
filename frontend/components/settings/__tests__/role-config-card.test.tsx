@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { RoleConfigCard } from "../role-config-card";
 import type { Provider, RoleConfig } from "@/lib/types";
 
@@ -87,6 +87,29 @@ describe("RoleConfigCard", () => {
     expect(screen.getByText("Default temperature")).toBeInTheDocument();
     expect(screen.getByText("0.7")).toBeInTheDocument();
     expect(screen.getByLabelText("Max tokens")).toBeInTheDocument();
+  });
+
+  it("does not allow an output budget below 32k", () => {
+    const onConfigChange = vi.fn();
+    render(
+      <RoleConfigCard
+        roleName="generator"
+        title="Generator"
+        description="Generates content"
+        config={{ ...mockConfig, maxTokens: 32_768 }}
+        providers={mockProviders}
+        resolvedProvider={mockProviders[0]}
+        isTesting={false}
+        onConfigChange={onConfigChange}
+        onTestRole={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Max tokens"), {
+      target: { value: "4096" },
+    });
+
+    expect(onConfigChange).toHaveBeenCalledWith({ maxTokens: 32_768 });
   });
 
   it("hides advanced controls when hideAdvanced is true", () => {

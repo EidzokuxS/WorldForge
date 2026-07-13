@@ -35,30 +35,26 @@ describe("clamp", () => {
 });
 
 describe("clampTokens", () => {
-  it("clamps to 1-32000 range and rounds", () => {
-    expect(clampTokens(1024)).toBe(1024);
+  it("raises smaller budgets to the 32k minimum", () => {
+    expect(clampTokens(1024)).toBe(32_768);
   });
 
-  it("rounds fractional values", () => {
-    expect(clampTokens(1024.7)).toBe(1025);
-    expect(clampTokens(1024.3)).toBe(1024);
+  it("rounds fractional values above the minimum", () => {
+    expect(clampTokens(32_768.7)).toBe(32_769);
+    expect(clampTokens(32_768.3)).toBe(32_768);
   });
 
-  it("clamps below minimum to 1", () => {
-    expect(clampTokens(0)).toBe(1);
-    expect(clampTokens(-100)).toBe(1);
+  it("raises nonpositive budgets to the 32k minimum", () => {
+    expect(clampTokens(0)).toBe(32_768);
+    expect(clampTokens(-100)).toBe(32_768);
   });
 
-  it("clamps above maximum to 32000", () => {
-    expect(clampTokens(50000)).toBe(32000);
-    expect(clampTokens(100000)).toBe(32000);
+  it("preserves budgets above the minimum", () => {
+    expect(clampTokens(50_000)).toBe(50_000);
+    expect(clampTokens(100_000)).toBe(100_000);
   });
 
-  it("returns 1 for exactly 1", () => {
-    expect(clampTokens(1)).toBe(1);
-  });
-
-  it("returns 32000 for exactly 32000", () => {
-    expect(clampTokens(32000)).toBe(32000);
+  it("returns the exact minimum unchanged", () => {
+    expect(clampTokens(32_768)).toBe(32_768);
   });
 });

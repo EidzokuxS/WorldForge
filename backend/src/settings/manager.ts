@@ -12,6 +12,7 @@ import type {
 } from "@worldforge/shared";
 import {
   BUILTIN_PROVIDER_PRESETS,
+  MODEL_OUTPUT_TOKEN_MINIMUM,
   NONE_PROVIDER_ID,
   createDefaultSettings,
 } from "@worldforge/shared";
@@ -132,7 +133,12 @@ function normalizeRoleConfig(
     providerId: normalizeRoleProviderId(source.providerId, defaults),
     model: asString(source.model, defaults.model ?? ""),
     temperature: clampNumber(source.temperature, 0, 2, defaults.temperature),
-    maxTokens: clampInt(source.maxTokens, 1, 32000, defaults.maxTokens),
+    maxTokens: clampInt(
+      source.maxTokens,
+      MODEL_OUTPUT_TOKEN_MINIMUM,
+      Number.MAX_SAFE_INTEGER,
+      defaults.maxTokens,
+    ),
     ...(pricing ? { pricing } : {}),
   };
 }

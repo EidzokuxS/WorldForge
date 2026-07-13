@@ -300,7 +300,7 @@ describe("createModel", () => {
 
     const result = createModel(config);
 
-    expect(result).toBe(fakeModel);
+    expect((result as unknown as { baseModel: unknown }).baseModel).toBe(fakeModel);
   });
 
   it("preserves default reasoning middleware behavior for non-storyteller callers", () => {
@@ -355,7 +355,7 @@ describe("createModel", () => {
         },
       },
     });
-    expect(result.middleware).toHaveLength(2);
+    expect(result.middleware).toHaveLength(3);
   });
 
   it("injects Z.AI thinking-disabled into chat completion bodies for explicit GLM bypass", async () => {
@@ -382,8 +382,8 @@ describe("createModel", () => {
       fetch?: typeof globalThis.fetch;
     };
 
-    expect(result).toBe(fakeModel);
-    expect(mockWrapLanguageModel).not.toHaveBeenCalled();
+    expect((result as unknown as { baseModel: unknown }).baseModel).toBe(fakeModel);
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
     expect(createOptions.fetch).toBeTypeOf("function");
 
     await createOptions.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
@@ -436,9 +436,9 @@ describe("createModel", () => {
       fetch?: typeof globalThis.fetch;
     };
 
-    expect(mockWrapLanguageModel).not.toHaveBeenCalled();
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
     expect(createOptions.fetch).toBeTypeOf("function");
-    expect(result).toBe(fakeModel);
+    expect((result as unknown as { baseModel: unknown }).baseModel).toBe(fakeModel);
   });
 
   it("keeps explicit reasoning bypass scoped to GLM-family providers", () => {
@@ -499,16 +499,49 @@ describe("createModel", () => {
       }>;
     };
 
-    const transform = result.middleware[1]?.transformParams;
-    expect(transform).toBeTypeOf("function");
-
-    const transformed = await transform!({
-      params: { temperature: 0.7, maxOutputTokens: 1024, providerOptions: { openai: { forceReasoning: true } } },
-    });
-
-    expect(transformed).toEqual({
+    let transformed: Record<string, unknown> = {
+      temperature: 0.7,
       maxOutputTokens: 1024,
       providerOptions: { openai: { forceReasoning: true } },
+    };
+    for (const middleware of result.middleware) {
+      if (middleware.transformParams) {
+        transformed = await middleware.transformParams({ params: transformed });
+      }
+    }
+
+    expect(transformed).toEqual({
+      maxOutputTokens: 32_768,
+      providerOptions: { openai: { forceReasoning: true } },
+    });
+  });
+
+  it("enforces at least 32k output tokens while preserving larger budgets", async () => {
+    const fakeModel = { modelId: "ordinary-model" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const result = createModel({
+      id: "ordinary",
+      name: "Ordinary",
+      baseUrl: "https://example.com/v1",
+      apiKey: "key",
+      model: "ordinary-model",
+    }) as unknown as {
+      middleware: Array<{
+        transformParams?: (options: { params: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+      }>;
+    };
+
+    const transform = result.middleware[0]?.transformParams;
+    expect(transform).toBeTypeOf("function");
+    await expect(transform!({ params: { maxOutputTokens: 4096 } })).resolves.toMatchObject({
+      maxOutputTokens: 32_768,
+    });
+    await expect(transform!({ params: { maxOutputTokens: 65_536 } })).resolves.toMatchObject({
+      maxOutputTokens: 65_536,
+    });
+    await expect(transform!({ params: {} })).resolves.toMatchObject({
+      maxOutputTokens: 32_768,
     });
   });
 });

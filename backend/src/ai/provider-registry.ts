@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { MODEL_OUTPUT_TOKEN_MINIMUM } from "@worldforge/shared";
 import {
   defaultSettingsMiddleware,
   type LanguageModel,
@@ -97,6 +98,19 @@ function reasoningMiddleware(): LanguageModelMiddleware[] {
   ];
 }
 
+function minimumOutputBudgetMiddleware(): LanguageModelMiddleware {
+  return {
+    specificationVersion: "v3",
+    transformParams: async ({ params }) => ({
+      ...params,
+      maxOutputTokens: Math.max(
+        params.maxOutputTokens ?? MODEL_OUTPUT_TOKEN_MINIMUM,
+        MODEL_OUTPUT_TOKEN_MINIMUM,
+      ),
+    }),
+  };
+}
+
 function createZaiThinkingDisabledFetch(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): typeof globalThis.fetch {
@@ -181,7 +195,12 @@ export function createModel(
     });
     const model = provider(config.model);
     rememberModelMetadata(model, "anthropic-messages");
-    return model;
+    const wrappedModel = wrapLanguageModel({
+      model,
+      middleware: [minimumOutputBudgetMiddleware()],
+    });
+    rememberModelMetadata(wrappedModel, "anthropic-messages");
+    return wrappedModel;
   }
 
   const bypassReasoning = shouldBypassReasoning(config, options);
@@ -198,17 +217,14 @@ export function createModel(
   const model = provider.chat(config.model);
   rememberModelMetadata(model, "chat-completions");
 
-  if (bypassReasoning) {
-    return model;
-  }
-
-  if (!shouldForceReasoning(config)) {
-    return model;
-  }
-
   const wrappedModel = wrapLanguageModel({
     model,
-    middleware: reasoningMiddleware(),
+    middleware: [
+      minimumOutputBudgetMiddleware(),
+      ...(bypassReasoning || !shouldForceReasoning(config)
+        ? []
+        : reasoningMiddleware()),
+    ],
   });
   rememberModelMetadata(wrappedModel, "chat-completions");
   return wrappedModel;

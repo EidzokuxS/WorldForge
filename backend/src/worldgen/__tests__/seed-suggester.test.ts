@@ -492,7 +492,7 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     expect(result.seeds.geography).toBe("Five Great Shinobi Nations");
     expect(mockGenerateObject).toHaveBeenCalledTimes(8);
     expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
-    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(8192);
+    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(32_768);
   });
 
   it("grounds political divergence prompts in preserved Star Wars canon instead of replacing the setting wholesale", async () => {

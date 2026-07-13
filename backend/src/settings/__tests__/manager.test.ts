@@ -236,16 +236,16 @@ describe("normalizeSettings", () => {
       expect(result2.storyteller.temperature).toBeGreaterThanOrEqual(0);
     });
 
-    it("clamps maxTokens to [1, 32000] range", () => {
+    it("raises maxTokens to at least 32k and preserves larger budgets", () => {
       const result = normalizeSettings({
         judge: { maxTokens: 100000 },
       });
-      expect(result.judge.maxTokens).toBeLessThanOrEqual(32000);
+      expect(result.judge.maxTokens).toBe(100_000);
 
       const result2 = normalizeSettings({
         judge: { maxTokens: -5 },
       });
-      expect(result2.judge.maxTokens).toBeGreaterThanOrEqual(1);
+      expect(result2.judge.maxTokens).toBe(32_768);
     });
 
     it("rounds maxTokens to nearest integer", () => {
