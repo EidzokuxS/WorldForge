@@ -144,7 +144,7 @@ function createCompleteBundle(): void {
   writeJsonLines("model-stages.jsonl", [{
     runId: RUN_ID, campaignId: CAMPAIGN_ID, turnId: "turn-action-1", stage: "judge",
     workerEpoch: 1, providerId: "fixture", model: "judge-fixture", strategy: "strict_object",
-    attempts: 1, retryUsed: false, textFallbackUsed: false, inputTokens: 10, outputTokens: 10,
+    attempts: 2, retryUsed: true, textFallbackUsed: false, inputTokens: 10, outputTokens: 10,
     costMicros: 0, durationMs: 1, artifactHash: HASH_A,
   }]);
   writeJson("budget.json", {
@@ -225,6 +225,21 @@ describe("Campaign Play evidence probes", () => {
       valid: false,
       promotionEligible: false,
       issues: [expect.stringContaining("inventory.json")],
+    });
+  });
+
+  it("preserves an over-budget bundle and reports it as ineligible evidence", () => {
+    createCompleteBundle();
+    const budgetPath = path.join(root, "budget.json");
+    const budget = JSON.parse(fs.readFileSync(budgetPath, "utf8")) as Record<string, unknown>;
+    budget.actualOutputTokens = 101;
+    writeJson("budget.json", budget);
+    refreshInventory();
+
+    expect(validateCampaignPlayBundle(root)).toMatchObject({
+      valid: false,
+      promotionEligible: false,
+      issues: ["Output token budget was exceeded."],
     });
   });
 

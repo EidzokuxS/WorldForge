@@ -332,17 +332,7 @@ const meteredBudgetSchema = z.object({
   billingKind: z.literal("metered"),
   maximumCostMicros: nonnegativeIntegerSchema,
   actualCostMicros: nonnegativeIntegerSchema,
-}).strict().superRefine((value, context) => {
-  if (value.actualInputTokens > value.maximumInputTokens) {
-    context.addIssue({ code: "custom", path: ["actualInputTokens"], message: "Input token budget was exceeded." });
-  }
-  if (value.actualOutputTokens > value.maximumOutputTokens) {
-    context.addIssue({ code: "custom", path: ["actualOutputTokens"], message: "Output token budget was exceeded." });
-  }
-  if (value.actualCostMicros > value.maximumCostMicros) {
-    context.addIssue({ code: "custom", path: ["actualCostMicros"], message: "Cost budget was exceeded." });
-  }
-});
+}).strict();
 
 const subscriptionBudgetSchema = z.object({
   ...campaignPlayBudgetBaseShape,
@@ -355,12 +345,6 @@ const subscriptionBudgetSchema = z.object({
   quotaBefore: campaignPlaySubscriptionQuotaSnapshotSchema,
   quotaAfter: campaignPlaySubscriptionQuotaSnapshotSchema,
 }).strict().superRefine((value, context) => {
-  if (value.actualInputTokens > value.maximumInputTokens) {
-    context.addIssue({ code: "custom", path: ["actualInputTokens"], message: "Input token budget was exceeded." });
-  }
-  if (value.actualOutputTokens > value.maximumOutputTokens) {
-    context.addIssue({ code: "custom", path: ["actualOutputTokens"], message: "Output token budget was exceeded." });
-  }
   if (value.quotaBefore.planId !== value.planId || value.quotaAfter.planId !== value.planId) {
     context.addIssue({ code: "custom", path: ["planId"], message: "Quota snapshots must match the frozen subscription plan." });
   }
@@ -455,15 +439,23 @@ export const campaignPlayModelStageEvidenceSchema = z.object({
   providerId: identifierSchema,
   model: identifierSchema,
   strategy: z.literal("strict_object"),
-  attempts: z.literal(1),
-  retryUsed: z.literal(false),
+  attempts: positiveIntegerSchema,
+  retryUsed: z.boolean(),
   textFallbackUsed: z.literal(false),
   inputTokens: nonnegativeIntegerSchema,
   outputTokens: nonnegativeIntegerSchema,
   costMicros: nonnegativeIntegerSchema.nullable(),
   durationMs: nonnegativeIntegerSchema,
   artifactHash: hashSchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.retryUsed !== (value.attempts > 1)) {
+    context.addIssue({
+      code: "custom",
+      path: ["retryUsed"],
+      message: "Retry evidence must match the accepted model-stage attempt number.",
+    });
+  }
+});
 
 export const campaignPlayRuntimeEventEvidenceSchema = z.object({
   runId: identifierSchema,

@@ -211,6 +211,15 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
       issues.push("Manifest and scorecard action counts differ.");
     }
     verifyInventory(bundleRoot, inventory, issues);
+    if (budget.actualInputTokens > budget.maximumInputTokens) {
+      issues.push("Input token budget was exceeded.");
+    }
+    if (budget.actualOutputTokens > budget.maximumOutputTokens) {
+      issues.push("Output token budget was exceeded.");
+    }
+    if (budget.billingKind === "metered" && budget.actualCostMicros > budget.maximumCostMicros) {
+      issues.push("Cost budget was exceeded.");
+    }
 
     const ledgers = Object.fromEntries(
       Object.entries(JSONL_SCHEMAS).map(([fileName, schema]) => [

@@ -7,6 +7,7 @@
 - Keep secret-bearing configuration reads side-effect free. Only an explicit save may rewrite `settings.json`, and every rewrite must preserve rotating recovery generations.
 - Treat long reasoning-model latency as normal until a configured timeout, transport error, or terminal event proves failure; elapsed time alone is not a hang diagnosis.
 - Give every thinking-model gameplay stage at least a 32k provider output window. Apply visible-content limits after subtracting reported reasoning tokens, while retaining full provider usage for billing and evidence.
+- Size aggregate playtest token budgets from measured per-action usage with headroom. A per-call 32k output floor and a whole-run evidence budget are different limits.
 - Once Judge normalizes a movement route and destination, code owns the player actor, origin, route, and destination handles; the model must not reconstruct mechanical movement authority.
 - Record isolated mixed-language tail tokens as cosmetic prose findings when the response remains coherent; reject a playtest for overall meaning, causality, continuity, or readability failures instead.
 - For strict discriminated unions, tell the model the complete field set for every variant and name fields that belong to only one variant. A schema alone may not stop a reasoning model from copying a plausible field across variants.
@@ -107,6 +108,7 @@
 ## Evidence Handling
 
 - Preserve evidence that explains current mechanics or accepted behavior; remove raw duplicate logs and generated run debris.
+- Write structurally complete evidence even when a declared budget is exceeded, then fail promotion through validation. A policy failure must not destroy the diagnostic artifact.
 - Do not count old contaminated transcripts as pristine acceptance after a later fix.
 - Read user-supplied attachments from disk when they shape current work; summaries do not replace the artifact.
 - Oracle/Pro asks need actual case files: code paths, failing output, target contract, current diff, and proof artifacts.

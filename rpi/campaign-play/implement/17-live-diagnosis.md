@@ -56,3 +56,21 @@ Focused verification:
 
 - `npx vitest run backend/src/campaign-play/game-master.test.ts` (19 passed)
 - `npm --prefix backend run typecheck`
+
+## Clone rehearsal: actions 7-20
+
+- Reload checkpoints after actions 10 and 20 matched exactly. The action-20 public-state hash is `ad4b2c3f7ecf273ed3c4b21ab4f74596694dc4640b6df362fd2b8b39f6381af2`.
+- Action 8 reached Lower Greyfork. The first projected NPC consequence was an unnamed placeholder caused by an unrelated actor reusing Tibbs Mallon's opening seed. Actor proposal and visibility projection now preserve the concrete public actor surface.
+- Action 9 narrated Senna leaving while public state still placed her beside the player. The narrator now rejects unsupported departure and empty-scene prose for visible actors.
+- Action 12 exposed a bad correction from that guard: `Maren has not moved from her spot.` Continuity checks now stay out of the prose.
+- Actions 13-18 remained mechanically coherent but did not feel like a living world. Small player actions advanced the clock by hours while Halden and other scheduled actors mostly repeated public pressure or stood still. Action 16 also described `pre-dawn` and `first light` at 11:25.
+- Action 19 was a deliberately small sensory action. The copper fruit and clean root line were concrete and readable, but the scene still treated Halden and the surplus conflict as static scenery.
+- Action 20 waited for the first frost drop. The local event was clear and pleasant to read: frost formed, fruit fell in bell tones, and the sealed bins gave the sound narrative context. It did not prove autonomous actor motion. The event occurred only because the player selected a wait action, while Halden still did nothing.
+
+Manual verdict: FAIL for living-world playability. The run proves persistence, reload integrity, bounded visibility, and mostly coherent local prose across 20 completed player actions. It does not prove that NPC goals advance into concrete, discoverable consequences without player prompting. The main defect is now pacing and scheduling, not basic turn persistence.
+
+Evidence bundle: `output/playtests/campaign-play/causal-20-glm52-brass-orchard-rehearsal-01`. It contains all 20 signed browser actions, 65 accepted GLM 5.2 stages, and the four matching reload checkpoints. The run used 206,125 input tokens and 132,990 output tokens. Its frozen aggregate output budget was 100,000, so the validator correctly marks the bundle ineligible even though the mechanical scorecard itself has no hard failure. Future 20-action configs need an aggregate output budget of at least 200,000 while every individual model call retains the global 32k minimum.
+
+Evidence-contract fix: accepted model-stage attempt numbers can exceed one after an explicit Resume. The bundle now records the accepted attempt and derives `retryUsed` from it. Budget overruns no longer prevent the artifact from being written; structural validation preserves the bundle and reports the overrun as an eligibility failure.
+
+Humanizer and deslop review: the diagnosis uses direct observations, timestamps, and measured totals. It avoids promotional language, generic conclusions, and invented intent. The only quoted prose is copied from the rendered playtest.

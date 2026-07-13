@@ -371,7 +371,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
         model: value<string>(row, "actual_model"),
         strategy: value<string>(row, "actual_strategy"),
         attempts: value<number>(row, "attempt"),
-        retryUsed: false,
+        retryUsed: value<number>(row, "attempt") > 1,
         textFallbackUsed: false,
         inputTokens,
         outputTokens,
