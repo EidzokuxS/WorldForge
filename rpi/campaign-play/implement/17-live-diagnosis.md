@@ -196,3 +196,12 @@ Final verification for this correction:
 - Campaign Play plus both mounted route suites — 26 files, 345/345 passed.
 - Clone provenance and live-session E2E — 6/6 passed.
 - `git diff --check` — passed with only the existing Windows line-ending notices.
+
+### Current-build r03: Judge rationale contract
+
+- The first twelve signed actions used the real UI and GLM 5.2. The run proved an independent Maren aftermath at Greyfork Bend, a distant Tibbs salvage action, and Senna drafting a demand while Neris travelled elsewhere. The action-5 and action-10 reload checkpoints matched exactly.
+- Action 12 stopped after one Judge call because its otherwise structured proposal used more than 500 characters in `reason`. Text fallback, repair, provider substitution, and automatic retry were disabled; the durable turn exposed an explicit Resume action.
+- `reason` is internal judgment rationale, not short player-facing copy. The model proposal and durable ruling now admit the existing 6,000-character reasoning envelope while retaining all structural, visibility, result-bound, uncertainty, and authority checks.
+- A focused regression sends a rationale longer than 500 characters through one Judge call and proves that no retry, repair, or fallback is used. The focused contract selection passed 363 tests, and backend typecheck passed.
+- After the backend restart, explicit Resume reused the frozen turn. Judge accepted one GLM 5.2 result in 40,965 ms and the turn completed normally. The run remains diagnostic because Resume was required.
+- Humanizer and deslop review: this note separates observed runtime evidence from the contract interpretation, avoids promotional phrasing, and does not recast the resumed run as pristine acceptance.

@@ -114,6 +114,7 @@
 - A direct autonomous observation must name the visible actor action, not only its passive environmental result. Otherwise the simulation advances while the prose makes the actor look inert.
 - Re-read browser DOM node IDs after every rendered state change during a manual playtest. React rerenders invalidate prior node ownership even when the same control appears in the same place.
 - Stage and verify the signed evidence decision before every manual browser action. If an action is submitted first, preserve the gap and restart the evidence lane instead of reconstructing a signature afterward.
+- Do not apply short player-copy limits to internal model rationale. Bound it by the durable storage envelope and reject semantic or authority violations, not ordinary explanatory length.
 
 ## Evidence Handling
 

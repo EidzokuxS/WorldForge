@@ -134,6 +134,38 @@ describe("Campaign Play Judge", () => {
     expect("timeout" in options).toBe(false);
   });
 
+  it("accepts a substantive rationale without retry, repair, or fallback", async () => {
+    const reason = Array.from(
+      { length: 12 },
+      (_, index) => `Visible fact ${index + 1} supports the bounded ruling and preserves the actor's authority.`,
+    ).join(" ");
+    expect(reason.length).toBeGreaterThan(500);
+    const generateObject = vi.fn(async () => ({
+      object: proposal({ reason }),
+      trace: trace(),
+    }));
+    const judge = createCampaignPlayJudge({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    const result = await judge.judge({
+      frame: frame(),
+      input: { originalText: "I ask the guard.", source: "freeform", choiceHandle: null },
+      model: model(),
+      temperature: 0.2,
+      budget,
+    });
+
+    expect(result.ruling.reason).toBe(reason);
+    expect(result.modelEvidence).toMatchObject({
+      totalAttempts: 1,
+      repairUsed: false,
+      retryUsed: false,
+      textFallbackUsed: false,
+    });
+    expect(generateObject).toHaveBeenCalledOnce();
+  });
+
   it("keeps reasoning tokens in evidence without charging them to the ruling output budget", async () => {
     const thinkingTrace = trace();
     thinkingTrace.usage = {

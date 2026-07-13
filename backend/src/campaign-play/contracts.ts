@@ -294,6 +294,10 @@ const shortTextSchema = boundedStringSchema(CAMPAIGN_PLAY_LIMITS.shortText, {
 const textSchema = boundedStringSchema(CAMPAIGN_PLAY_LIMITS.text, {
   singleLine: false,
 });
+const reasoningTextSchema = boundedStringSchema(
+  CAMPAIGN_PLAY_LIMITS.narrationText,
+  { singleLine: false },
+);
 const narrationBeatTextSchema = boundedStringSchema(
   CAMPAIGN_PLAY_LIMITS.narrationBeat,
   { singleLine: false },
@@ -1609,7 +1613,7 @@ const campaignPlayJudgeRulingBaseSchema = z.object({
   resultBounds: campaignPlayResultBoundsSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
   uncertainty: campaignPlayUncertaintySpecSchema,
-  reason: shortTextSchema,
+  reason: reasoningTextSchema,
   clarificationQuestion: shortTextSchema.nullable(),
 }).strict();
 

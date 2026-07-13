@@ -69,7 +69,7 @@ const judgeProposalSchema = z.object({
   resultBounds: campaignPlayResultBoundsSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
   uncertainty: campaignPlayUncertaintySpecSchema,
-  reason: line(CAMPAIGN_PLAY_LIMITS.shortText),
+  reason: text(CAMPAIGN_PLAY_LIMITS.narrationText),
   clarificationQuestion: z.union([
     line(CAMPAIGN_PLAY_LIMITS.shortText),
     z.literal(""),
