@@ -331,8 +331,44 @@ function canonicalMovement(
     binding.reference.kind === "actor" && binding.reference.id === actorId)?.handle;
   const fromLocationHandle = frame.handleBindings.find((binding) =>
     binding.reference.kind === "location" && binding.reference.id === placement?.locationId)?.handle;
-  const routeHandle = ruling.normalizedIntent.targets.find((target) => target.kind === "route")?.handle;
-  if (!actorHandle || !fromLocationHandle || !routeHandle || !placement) {
+  if (!actorHandle || !fromLocationHandle || !placement) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+
+  const targetRouteHandles = ruling.normalizedIntent.targets
+    .filter((target) => target.kind === "route")
+    .map((target) => target.handle);
+  const targetLocationHandles = ruling.normalizedIntent.targets
+    .filter((target) => target.kind === "location")
+    .map((target) => target.handle);
+  if (targetRouteHandles.length > 1 || targetLocationHandles.length > 1) {
+    throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  const destination = targetLocationHandles[0] === undefined
+    ? null
+    : requireRef(map, targetLocationHandles[0], "location");
+  const visibleRouteBindings = frame.handleBindings.filter((binding) =>
+    binding.reference.kind === "route");
+  const routeMatchesMovement = (handle: string): boolean => {
+    const reference = map.get(handle);
+    if (reference?.kind !== "route") return false;
+    const record = frame.rulebookFrame.acceptedWorld.routes.find((candidate) =>
+      candidate.id === reference.id);
+    return record?.fromLocationId === placement.locationId
+      && (destination === null || record.toLocationId === destination.id);
+  };
+  let routeHandle = targetRouteHandles[0] ?? null;
+  if (routeHandle === null) {
+    const citedRouteHandles = ruling.citedVisibleFactHandles.filter(routeMatchesMovement);
+    const matchingHandles = citedRouteHandles.length > 0
+      ? citedRouteHandles
+      : visibleRouteBindings.map((binding) => binding.handle).filter(routeMatchesMovement);
+    if (matchingHandles.length !== 1) {
+      throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+    }
+    routeHandle = matchingHandles[0]!;
+  }
+  if (!routeHandle || !routeMatchesMovement(routeHandle)) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   const route = requireRef(map, routeHandle, "route");

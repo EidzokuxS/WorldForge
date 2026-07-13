@@ -403,6 +403,37 @@ describe("Campaign Play Game Master", () => {
     );
   });
 
+  it("resolves a freeform destination through its cited visible route before asking the model", async () => {
+    const moveRuling = ruling({
+      normalizedIntent: {
+        originalText: "I take the open path to South Harbor.", source: "freeform", choiceHandle: null,
+        kind: "move", targets: [{ handle: "south", kind: "location" }],
+        method: "Follow the open passage", stakes: "Reach South Harbor",
+      },
+      citedVisibleFactHandles: ["passage", "south"],
+    });
+    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
+      object: { elapsedMinutes: 1, effects: [{ kind: "move_actor" as const }] },
+      trace: trace(),
+    }));
+
+    const result = await createCampaignPlayGameMaster({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    }).plan({ frame: frame(), ruling: moveRuling, resolution, uncertaintyAuthority: null,
+      model: model(), temperature: 0.2, budget });
+
+    expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(result.batch.commands[1]).toMatchObject({
+      kind: "move_actor",
+      routeId: "route-a-b",
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
+    );
+  });
+
   it("binds a movement result event to the destination after the move command", () => {
     const moveRuling = ruling({
       normalizedIntent: {
