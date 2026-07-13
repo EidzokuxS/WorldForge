@@ -3,9 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import type { LanguageModel } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  CampaignPlayCharacterDraft,
-  CampaignPlayNarratorPacket,
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayCharacterDraft,
+  type CampaignPlayNarratorPacket,
 } from "@worldforge/shared";
 import { closeDb } from "../db/index.js";
 import {
@@ -179,7 +180,7 @@ function acceptWorld(): void {
   }
 }
 
-function openingProposal(): CampaignPlayOpeningProposal {
+function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
   const actorPlans = ["a", "b", "c"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
@@ -199,7 +200,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     return {
       actorId,
       primaryGoalId: goalId,
-      cadenceMinutes: 1,
+      cadenceMinutes: actorCadenceMinutes,
       steps: [{
         intent,
         observableTrace: suffix === "b"
@@ -321,7 +322,7 @@ function isCanonicalHash(value: string): boolean {
     (character >= "a" && character <= "f"));
 }
 
-function openingPlannerFixture() {
+function openingPlannerFixture(actorCadenceMinutes = 1) {
   const compiler = createCampaignPlayOpeningPlanner();
   return {
     compile: compiler.compile,
@@ -329,7 +330,7 @@ function openingPlannerFixture() {
       compiler.compile(
         request.frame,
         request.startingConditions,
-        openingProposal(),
+        openingProposal(actorCadenceMinutes),
         openingPlannerEvidence,
       )),
   };
@@ -397,7 +398,7 @@ function playerNarratorFixture() {
   };
 }
 
-async function createReadyCampaignWithOpening() {
+async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
   acceptWorld();
   const handle = track(openCampaignPlayDatabase(CAMPAIGN_ID));
   const states = createCampaignPlayStateRepository(handle);
@@ -447,7 +448,7 @@ async function createReadyCampaignWithOpening() {
       maximumTotalTokens: 3_048,
       maximumCostMicros: 10_000,
     },
-    openingPlanner: openingPlannerFixture(),
+    openingPlanner: openingPlannerFixture(actorCadenceMinutes),
     narrator: openingNarratorFixture(),
   });
   const admitted = opening.admitOpening({
@@ -517,7 +518,7 @@ function judgeFixture(disposition: Disposition) {
   };
 }
 
-function gameMasterFixture() {
+function gameMasterFixture(worldEventCount = 1) {
   const compiler = createCampaignPlayGameMaster();
   return {
     plan: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0]) => {
@@ -535,12 +536,14 @@ function gameMasterFixture() {
           request.uncertaintyAuthority,
           {
             elapsedMinutes: 1,
-            effects: [{
+            effects: Array.from({ length: worldEventCount }, (_, index) => ({
               kind: "record_world_event",
               eventClass: "dialogue",
-              summary: "Mara tests the signal keepers' account against the ringing tower.",
+              summary: worldEventCount === 1
+                ? "Mara tests the signal keepers' account against the ringing tower."
+                : `Mara tests signal account ${index + 1} against the ringing tower.`,
               affectedHandles: [playerHandle, locationHandle],
-            }],
+            })),
           },
         ),
         modelEvidence: acceptedEvidence("test-game-master"),
@@ -1423,6 +1426,40 @@ describe("Campaign Play player-action turn runtime", () => {
       WHERE campaign_id = ? AND turn_kind = 'player_action'`).get(
         CAMPAIGN_ID,
       )).toEqual({ value: 2 });
+  });
+
+  it("admits the next action when the public moment fills both observation windows", async () => {
+    const { handle } = await createReadyCampaignWithOpening(10_000);
+    const time = fixedClock(7_500);
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic"),
+      gameMasterFixture(7),
+      { narrator: playerNarratorFixture() },
+    );
+
+    for (let index = 0; index < 3; index += 1) {
+      const state = createCampaignPlayStateRepository(handle).loadState()!;
+      const admission = runtime.admitAction({
+        request: admissionRequest(state, `observation-window-${index + 1}`),
+        submittedAt: time.clock.now(),
+      });
+      await advanceUntilStage(runtime, time, admission.turnId, "completed");
+      time.advance();
+    }
+
+    const state = createCampaignPlayStateRepository(handle).loadState()!;
+    const admission = runtime.admitAction({
+      request: admissionRequest(state, "observation-window-next-action"),
+      submittedAt: time.clock.now(),
+    });
+    const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
+
+    expect(frame.authority.knownWorldEventIds.length).toBeGreaterThan(16);
+    expect(frame.authority.knownWorldEventIds.length).toBeLessThanOrEqual(
+      CAMPAIGN_PLAY_LIMITS.newObservations + CAMPAIGN_PLAY_LIMITS.continuityEntries,
+    );
   });
 
   it.each([

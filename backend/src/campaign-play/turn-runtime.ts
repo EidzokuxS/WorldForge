@@ -147,6 +147,9 @@ const handleBindingSchema = z.object({
   reference: campaignPlayEntityRefSchema,
 }).strict();
 
+const MAXIMUM_VISIBLE_WORLD_EVENTS =
+  CAMPAIGN_PLAY_LIMITS.newObservations + CAMPAIGN_PLAY_LIMITS.continuityEntries;
+
 const playerActionAdmissionFrameSchema = z.object({
   campaignId: line(CAMPAIGN_PLAY_LIMITS.id),
   turnId: line(CAMPAIGN_PLAY_LIMITS.id),
@@ -173,7 +176,7 @@ const playerActionAdmissionFrameSchema = z.object({
   authority: z.object({
     authorizedRefs: z.array(campaignPlayEntityRefSchema).max(40),
     witnessActorIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(8),
-    knownWorldEventIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(16),
+    knownWorldEventIds: z.array(line(CAMPAIGN_PLAY_LIMITS.id)).max(MAXIMUM_VISIBLE_WORLD_EVENTS),
   }).strict(),
 }).strict().superRefine((frame, context) => {
   if (
