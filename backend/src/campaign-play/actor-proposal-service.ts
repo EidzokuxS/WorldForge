@@ -253,7 +253,10 @@ function compileProposal(
   } else {
     const affectedRefs = uniqueRefs([{ kind: "actor", id: frame.actorId }, ...intent.targets]);
     const readScope = affectedRefs;
-    const summary = seed && exposure.mode === "projectable"
+    const ownsOpeningConsequence = seed.sourceActorId === frame.actorId
+      && seed.sourceGoalId === frame.plan.goalId
+      && frame.selection.settledStepCount === 0;
+    const summary = ownsOpeningConsequence && exposure.mode === "projectable"
       ? seed.summary
       : `${frame.actor.name}: ${intent.method ?? intent.kind}${intent.stakes ? `. ${intent.stakes}` : ""}`;
     command = {

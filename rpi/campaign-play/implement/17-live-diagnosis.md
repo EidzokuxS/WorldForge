@@ -13,6 +13,15 @@
 
 - `npx vitest run e2e/campaign-play/contracts.test.ts e2e/campaign-play/live-session.test.ts e2e/campaign-play/bundle-writer.test.ts e2e/campaign-play/probes.test.ts`
 - `npm --prefix backend run typecheck`
+
+### Actions 7-8 visibility finding
+
+- Action 7 preserved the failed social boundary. Direct inspection exposed only observable blight structure and the already-public northward drift.
+- Action 8 proved freeform movement to the visible Lower Greyfork route, but an actor event reached the player packet as `You witnessed a change nearby.` The narrator echoed the missing fact as `perceptible, immediate, unnamed`.
+- SQLite showed the deeper cause: Senna Torres executed the event, but `actor-proposal-service` reused Tibbs Mallon's opening-consequence summary whenever any co-located actor received projectable exposure.
+- Opening-consequence prose is now used only when actor ID, goal ID, and first settled step all match the frozen seed. Unrelated actor events keep their own plan summary.
+- Directly perceived agent events no longer expose their protected summary or emit the abstract placeholder. Visibility renders a bounded surface from public actor names and event class, for example `Senna Torres is occupied with North Harbor Growers' Council.`
+- Focused verification: `npx vitest run backend/src/campaign-play/actor-proposal-service.test.ts backend/src/campaign-play/visibility-service.test.ts` (9 passed), plus backend typecheck.
 - `npm --prefix frontend run typecheck`
 - The previously accepted clean-14 first-playable bundle remains valid and promotion-eligible under the updated validator.
 

@@ -349,6 +349,7 @@ describe("Campaign Play actor proposal service", () => {
   it("projects a co-located actor action through direct perception", () => {
     const { handle, token } = createReadyFixture("location-a");
     let actorMoveExposure: unknown = null;
+    let unrelatedActorSummary: string | null = null;
 
     processDueActors(createCampaignPlayActorProposalService(handle, {
       now: () => 1_700,
@@ -361,6 +362,9 @@ describe("Campaign Play actor proposal service", () => {
         if (proposal.actorId === "actor-b") {
           actorMoveExposure = proposal.commands[0]?.exposure;
         }
+        if (proposal.actorId === "actor-a" && proposal.commands[0]?.kind === "record_world_event") {
+          unrelatedActorSummary = proposal.commands[0].summary;
+        }
       },
     });
 
@@ -368,6 +372,8 @@ describe("Campaign Play actor proposal service", () => {
       mode: "projectable",
       predicates: [{ channel: "direct_perception", locationId: "location-a" }],
     });
+    expect(unrelatedActorSummary).not.toBe(TEST_EXPOSURE_SEED.summary);
+    expect(unrelatedActorSummary).toContain("Advance the active goal");
   });
 
   it("rejects detached stale work with zero proposal mutation and one debt-bearing retry", () => {

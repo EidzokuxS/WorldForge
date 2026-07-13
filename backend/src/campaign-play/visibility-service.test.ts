@@ -41,6 +41,7 @@ import {
 import {
   availableIntents,
   createCampaignPlayVisibilityService,
+  renderCampaignPlayVisibleActorEvent,
   resolveCampaignPlayOpeningObservableTrace,
 } from "./visibility-service.js";
 
@@ -755,6 +756,24 @@ function createVisibilityFixture(
 }
 
 describe("Campaign Play visibility service", () => {
+  it("renders direct actor activity from public names without exposing a protected summary", () => {
+    expect(renderCampaignPlayVisibleActorEvent({
+      sourceActorName: "Senna Torres",
+      relatedActorName: "North Harbor Growers' Council",
+      eventClass: "interaction",
+    })).toBe("Senna Torres is occupied with North Harbor Growers' Council.");
+    expect(renderCampaignPlayVisibleActorEvent({
+      sourceActorName: "Senna Torres",
+      relatedActorName: "Ordunn Voss",
+      eventClass: "dialogue",
+    })).toBe("Senna Torres is speaking with Ordunn Voss.");
+    expect(renderCampaignPlayVisibleActorEvent({
+      sourceActorName: "Senna Torres",
+      relatedActorName: null,
+      eventClass: "interaction",
+    })).toBe("Senna Torres is occupied nearby.");
+  });
+
   it("earns all four channels, freezes a strict packet atomically, and excludes protected truth", () => {
     const fixture = createVisibilityFixture();
     const before = fixture.states.loadState()!;
