@@ -1,5 +1,24 @@
 # Task 17: live causal and diagnostic lanes
 
+## Current-build 20-action rehearsal contract
+
+Decision: determine whether commit `3e609fb3` is ready to spend a newly generated Campaign World on the pristine Task 17 causal proof.
+
+Method: one formative manual playtest on an isolated copy of the accepted Brass Orchard template. The main operator reads every rendered scene, chooses one action from player-visible information, signs it before submission, and reads every narration beat afterward. Browser control may enter the chosen action and capture evidence; it does not choose, rewrite, batch, or substitute actions. This single-world rehearsal can reveal failure mechanisms and prose defects, but it cannot establish population prevalence or satisfy Task 17's fresh-world requirement.
+
+Evidence contract:
+
+- Hypothesis: twenty completed player actions can preserve bounded perception, causal receipts, reload identity, and readable prose while autonomous people pursue goals that create discoverable change.
+- Expected checkpoints: action 1 has a grounded local result; by action 5 the player has refused or left the opening hook and encountered a persisted consequence; by action 10 a distant actor mutation is learned through an eligible channel; by action 20 every agent-controlled person has progressed or revised a plan and the public UI supports one player-caused and one player-independent causal chain.
+- Collection: signed action text and visible-state hash, completed turn and model-stage evidence, receipts, runtime and sanitized turn events, observations, actor jobs and plans, public narration read beat by beat, checkpoint hashes at actions 1, 5, 10, and 20, SQLite integrity and foreign keys, reload proof, quota evidence, and manual quality notes.
+- Coding: record observation before interpretation. Classify each finding as prose, causality, player agency, actor agency, continuity, secrecy, persistence, recovery, or evidence integrity; assign blocking or non-blocking severity and name the smallest retest.
+- Severe-failure rule: a hidden-state leak, hard contradiction, lost or duplicate input, stale acceptance, partial commit, unexplained teleport, checkpoint divergence, automatic retry, repair, provider switch, or contract interruption disqualifies the rehearsal as promotion evidence. A severe failure is preserved for diagnosis; it is not repaired inside the same accepted lane.
+- Decision rule: retain the current build only if all twenty actions and four reload checkpoints complete cleanly and the manual review finds concrete autonomous motion. Otherwise revise the owning subsystem, add a focused regression for every accepted defect, rerun deterministic Task 16A coverage, and start another isolated rehearsal before generating the fresh Task 17 world.
+
+Participant and data gates: one local project operator, no recruitment, no minors, no multiplayer or UGC, no participant recording, and no behavioral data beyond project state and operator notes. Accessibility is observed through the rendered controls but this rehearsal does not claim a representative accessibility evaluation. Privacy, monetization, mod-lifecycle, and causal-experiment gates are not applicable.
+
+Humanizer/deslop review: the contract uses observable criteria and direct technical language. It contains no leading facilitator prompt, promotional conclusion, or softened failure rule.
+
 ## Checkpoint and reload evidence contract
 
 - `causal-20` is pinned to exactly 20 completed player actions and declared reload checkpoints `[1, 5, 10, 20]`.
