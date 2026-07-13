@@ -27,6 +27,7 @@ import {
   type RulebookCommandBatch,
 } from "./contracts.js";
 import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
+import type { CampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
   deriveCampaignPlayCommandId,
   preflightCampaignPlayRulebook,
@@ -108,6 +109,7 @@ export interface CampaignPlayGameMasterHandleBinding {
 export interface CampaignPlayGameMasterFrame {
   visibleFacts: Array<{ handle: string; kind: string; summary: string }>;
   handleBindings: CampaignPlayGameMasterHandleBinding[];
+  actorContinuity: CampaignPlayActorContinuity[];
   rulebookFrame: CampaignPlayRulebookFrame;
   authority: CampaignPlayRulebookAuthority;
 }
@@ -230,6 +232,18 @@ function bindings(frame: CampaignPlayGameMasterFrame): Map<string, CampaignPlayE
   const authorized = new Set(frame.authority.authorizedRefs.map(referenceKey));
   if ([...map.values()].some((reference) => !authorized.has(referenceKey(reference)))) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+  }
+  const continuityHandles = new Set<string>();
+  for (const context of frame.actorContinuity) {
+    const reference = map.get(context.actorHandle);
+    if (
+      continuityHandles.has(context.actorHandle)
+      || reference?.kind !== "actor"
+      || context.recentOwnActions.length === 0
+    ) {
+      throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+    }
+    continuityHandles.add(context.actorHandle);
   }
   return map;
 }
@@ -563,6 +577,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Use the exact exposure predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
     "Propose only supported effect kinds. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
     "Resolve only the exact PLAYER_INTENT. Result tiers change the degree of success inside that scope; they never create trust, permission, leverage, knowledge, or access. Do not volunteer protected assets, secret routes or caches, unrelated motives, or risky admissions unless VISIBLE_FACTS justify disclosure and PLAYER_INTENT specifically seeks that information. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
+    "ACTOR_CONTINUITY is protected causal truth about visible actors' own completed actions and outranks conflicting earlier dialogue in VISIBLE_FACTS. Maintain identity and causality: an actor must not deny, misattribute, or forget an action listed under its handle. Reconcile a prior denial instead of repeating it. Use this truth only when the exact PLAYER_INTENT and RULING make it relevant; do not volunteer unrelated protected history. An absent action means unknown, not that the actor did nothing.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind and put it first in effects; code binds the player actor, route, endpoints, and direct perception at the destination. Put any record_world_event describing the arrival after move_actor and use eventClass scene for that arrival. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. For an observe result that changes no durable entity, use eventClass discovery. For contact, use eventClass dialogue or interaction. Use eventClass scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's post-effect location.",
     "Return at least one effect. Never return an empty effects array.",
@@ -571,6 +586,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     `HANDLES_BY_KIND=${JSON.stringify(handlesByKind)}`,
     `PLAYER_MOVEMENT=${JSON.stringify(movement?.handles ?? null)}`,
     `VISIBLE_FACTS=${JSON.stringify(frame.visibleFacts)}`,
+    `ACTOR_CONTINUITY=${JSON.stringify(frame.actorContinuity)}`,
     `PLAYER_INTENT=${JSON.stringify(ruling.normalizedIntent)}`,
     `RULING=${JSON.stringify({ ...ruling, normalizedIntent: undefined })}`,
     `RESOLUTION=${JSON.stringify(resolution)}`,

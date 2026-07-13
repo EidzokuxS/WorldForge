@@ -72,6 +72,13 @@ function frame(): CampaignPlayJudgeFrame {
       { handle: "actor-guard", kind: "actor", summary: "A tired guard watches the road." },
       { handle: "choice-ask", kind: "choice", summary: "Ask the guard why the road is closed." },
     ],
+    actorContinuity: [{
+      actorHandle: "actor-guard",
+      recentOwnActions: [{
+        summary: "The guard inspected and locked the reef-road gate before the traveler arrived.",
+        observableTrace: "Fresh oil and a new seal mark the gate latch.",
+      }],
+    }],
   };
 }
 
@@ -214,6 +221,10 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("uncertainty.kind must be check");
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
+    expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
+    expect(sentPrompt).toContain(
+      'ACTOR_CONTINUITY=[{"actorHandle":"actor-guard","recentOwnActions":[{"summary":"The guard inspected and locked the reef-road gate before the traveler arrived.","observableTrace":"Fresh oil and a new seal mark the gate latch."}]}]',
+    );
     expect(sentPrompt).toContain("Return exactly these top-level keys");
     expect(sentPrompt).toContain("Spell citedVisibleFactHandles exactly");
     expect(sentPrompt).toContain("never use citedVisibleFacts");

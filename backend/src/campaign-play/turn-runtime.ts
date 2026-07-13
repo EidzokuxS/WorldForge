@@ -51,6 +51,7 @@ import {
   createCampaignPlayGameMaster,
   type CampaignPlayGameMasterFrame,
 } from "./game-master.js";
+import { loadCampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
   executeCampaignPlayRulebookBatch,
   preflightCampaignPlayRulebook,
@@ -787,6 +788,15 @@ function currentGameMasterFrame(
     frame: {
       visibleFacts: admission.visibleFacts,
       handleBindings: admission.handleBindings,
+      actorContinuity: loadCampaignPlayActorContinuity(
+        handle,
+        admission.handleBindings.flatMap((binding) =>
+          binding.reference.kind === "actor"
+          && admission.authority.witnessActorIds.includes(binding.reference.id)
+            ? [{ actorHandle: binding.handle, actorId: binding.reference.id }]
+            : []),
+        mechanical.worldVersion,
+      ),
       rulebookFrame: mechanical,
       authority: rulebookAuthority(turn.turnId, admission),
     },
@@ -1267,7 +1277,7 @@ export function createCampaignPlayTurnRuntime(
             const startedAt = now();
             try {
               const admission = loadCampaignPlayPlayerActionAdmissionFrame(context.turn);
-              currentGameMasterFrame(input.handle, context.turn);
+              const current = currentGameMasterFrame(input.handle, context.turn);
               const frozenChoice = admission.judgeInput.source === "suggested"
                 ? admission.choiceBindings.find((choice) =>
                     choice.handle === admission.judgeInput.choiceHandle)
@@ -1286,6 +1296,7 @@ export function createCampaignPlayTurnRuntime(
                   locationHandle: admission.sourcePacket.currentLocation.handle,
                   worldTimeMinutes: admission.worldTimeMinutes,
                   visibleFacts: admission.visibleFacts,
+                  actorContinuity: current.frame.actorContinuity,
                 }),
                 input: {
                   ...admission.judgeInput,

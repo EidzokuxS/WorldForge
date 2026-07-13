@@ -71,6 +71,13 @@ function frame(): CampaignPlayGameMasterFrame {
       { handle: "trust", reference: { kind: "relation", id: "relation-player-guard" } },
       { handle: "guard-goal", reference: { kind: "goal", id: "goal-guard" } },
     ],
+    actorContinuity: [{
+      actorHandle: "guard",
+      recentOwnActions: [{
+        summary: "Oren Tide inspected the passage latch before the traveler arrived.",
+        observableTrace: "Fresh oil marks the passage latch.",
+      }],
+    }],
     rulebookFrame: {
       campaignId: CAMPAIGN_ID,
       acceptedWorldVersion: 3,
@@ -215,6 +222,10 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain("Resolve only the exact PLAYER_INTENT");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
+    expect(String(options.prompt)).toContain("an actor must not deny, misattribute, or forget an action");
+    expect(String(options.prompt)).toContain(
+      'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
+    );
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
     expect(String(options.prompt)).toContain("put it first in effects");
     expect(String(options.prompt)).toContain("post-effect location");
