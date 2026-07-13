@@ -1461,6 +1461,11 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - [x] Finalize and validate `causal-20-glm52-ashglass-reach-461289b1-r10`; machine invariants and artifact inventory pass.
 - [x] Record the manual prose, causality, agency, continuity, autonomy, and pacing verdict in `rpi/campaign-play/implement/17-live-diagnosis.md`.
 - [ ] Complete the separate 30-action adaptive diagnostic before accepting fixes.
+- [x] Reach action 10 in `diagnostic-30-glm52-ashglass-reach-d2dcc3f0-r01` and prove an exact full-backend restart checkpoint.
+- [ ] Continue the adaptive diagnostic through actions 11–20 from the restored action-10 state.
+- [ ] Complete actions 21–30 and the final restart checkpoint, then seal the diagnostic verdict.
 - [ ] Convert accepted findings into focused regressions, rerun Task 16A, then replace the failed 20-action promotion attempt only if the plan still requires a pristine pass.
 
 Current verdict: automated invariant gate PASS, human promotion gate REVISE. Major findings are multi-minute turn cadence and three inert collective actors with zero plans, schedules, jobs, or proposals. The 30-action diagnosis also owns static opening prose, repeated NPC wording, unchosen follow-up narration, and unsupported vent acoustics.
+
+Checkpoint 10/30: the new lane independently reproduces 84-event, roughly eight-minute movement while local inspection turns settle near 18–20 events. A one-hour wait produces useful autonomous motion from Keth and Paska, but the follow-up explanation contradicts the established lake pressure. Restart bytes match exactly.
