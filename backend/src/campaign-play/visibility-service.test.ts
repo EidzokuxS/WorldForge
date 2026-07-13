@@ -766,22 +766,12 @@ function createVisibilityFixture(
 }
 
 describe("Campaign Play visibility service", () => {
-  it("renders direct actor activity from public names without exposing a protected summary", () => {
+  it("renders directly perceived actor activity from its public-safe observable trace", () => {
     expect(renderCampaignPlayVisibleActorEvent({
-      sourceActorName: "Senna Torres",
-      relatedActorName: "North Harbor Growers' Council",
-      eventClass: "interaction",
-    })).toBe("Senna Torres is occupied with North Harbor Growers' Council.");
-    expect(renderCampaignPlayVisibleActorEvent({
-      sourceActorName: "Senna Torres",
-      relatedActorName: "Ordunn Voss",
-      eventClass: "dialogue",
-    })).toBe("Senna Torres is speaking with Ordunn Voss.");
-    expect(renderCampaignPlayVisibleActorEvent({
-      sourceActorName: "Senna Torres",
-      relatedActorName: null,
-      eventClass: "interaction",
-    })).toBe("Senna Torres is occupied nearby.");
+      observableTrace: "Grease-pencil measurements cover the frozen coupling housing.",
+    })).toBe("Grease-pencil measurements cover the frozen coupling housing.");
+    expect(() => renderCampaignPlayVisibleActorEvent({ observableTrace: null }))
+      .toThrow("A directly perceived autonomous actor event requires its persisted observable trace.");
   });
 
   it("earns all four channels, freezes a strict packet atomically, and excludes protected truth", () => {

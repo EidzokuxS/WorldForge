@@ -522,16 +522,15 @@ function deriveWitnessKnowledge(
 }
 
 export function renderCampaignPlayVisibleActorEvent(input: {
-  sourceActorName: string;
-  relatedActorName: string | null;
-  eventClass: string;
+  observableTrace: unknown;
 }): string {
-  if (input.relatedActorName !== null) {
-    return input.eventClass === "dialogue"
-      ? `${input.sourceActorName} is speaking with ${input.relatedActorName}.`
-      : `${input.sourceActorName} is occupied with ${input.relatedActorName}.`;
+  if (typeof input.observableTrace !== "string" || input.observableTrace.trim().length === 0) {
+    throw new CampaignPlayVisibilityError(
+      "visibility_projection_invalid",
+      "A directly perceived autonomous actor event requires its persisted observable trace.",
+    );
   }
-  return `${input.sourceActorName} is occupied nearby.`;
+  return input.observableTrace;
 }
 
 function publicEntry(
@@ -617,31 +616,10 @@ function publicEntry(
     eventSource.kind === "actor" && typeof eventSource.actorId === "string" &&
     eventSource.actorId !== humanActorId
   ) {
-    const sourceActor = handle.sqlite.prepare(`SELECT name FROM actors
-      WHERE id = ? AND campaign_id = ?`).get(
-        eventSource.actorId,
-        handle.campaignId,
-      ) as { name: string } | undefined;
-    const otherActorRef = affectedRefs.find((reference) =>
-      reference.kind === "actor" && reference.id !== eventSource.actorId
-      && reference.id !== humanActorId);
-    const otherActor = otherActorRef
-      ? handle.sqlite.prepare(`SELECT name FROM actors WHERE id = ? AND campaign_id = ?`).get(
-        otherActorRef.id,
-        handle.campaignId,
-      ) as { name: string } | undefined
-      : undefined;
-    const eventClass = typeof commandPayload.eventClass === "string"
-      ? commandPayload.eventClass
-      : "scene";
-    if (sourceActor) {
-      title = "Seen nearby";
-      text = renderCampaignPlayVisibleActorEvent({
-        sourceActorName: sourceActor.name,
-        relatedActorName: otherActor?.name ?? null,
-        eventClass,
-      });
-    }
+    title = "Seen nearby";
+    text = renderCampaignPlayVisibleActorEvent({
+      observableTrace: commandPayload.observableTrace,
+    });
   } else if (exposure.channel === "local_aftermath") {
     title = "Signs of change";
     if (openingTrace !== null) {
