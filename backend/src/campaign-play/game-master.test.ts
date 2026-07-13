@@ -319,8 +319,7 @@ describe("Campaign Play Game Master", () => {
   });
 
   it.each([
-    { kind: "move_actor",
-      exposure: { mode: "projectable", predicates: [{ channel: "direct_perception", anchorHandle: "here" }] } },
+    { kind: "move_actor" },
     { kind: "set_route_state", routeHandle: "passage", state: "restricted", reason: "The guard delays passage.",
       exposure: { mode: "projectable", predicates: [{ channel: "route_state", anchorHandle: "passage", triggers: ["inspect"] }] } },
     { kind: "set_actor_condition", actorHandle: "guard", condition: "occupied", operation: "set", summary: "The guard checks papers.",
@@ -356,7 +355,7 @@ describe("Campaign Play Game Master", () => {
     });
     const moveProposal = {
       elapsedMinutes: 1,
-      effects: [{ kind: "move_actor" as const, exposure: { mode: "protected" as const } }],
+      effects: [{ kind: "move_actor" as const }],
     };
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) =>
       ({ object: moveProposal, trace: trace() }));
@@ -371,9 +370,30 @@ describe("Campaign Play Game Master", () => {
       routeId: "route-a-b",
       fromLocationId: "location-a",
       toLocationId: "location-b",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
     });
+    expect(moveProposal.effects[0]).toEqual({ kind: "move_actor" });
+    expect(() => createCampaignPlayGameMaster().compile(
+      frame(),
+      moveRuling,
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{ kind: "move_actor", exposure: { mode: "protected" } }],
+      },
+    )).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "return exactly one move_actor effect containing only kind",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "Do not copy PLAYER_MOVEMENT fields or exposure into the effect",
     );
   });
 
@@ -388,7 +408,7 @@ describe("Campaign Play Game Master", () => {
     const result = createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
       elapsedMinutes: 1,
       effects: [
-        { kind: "move_actor", exposure: { mode: "protected" } },
+        { kind: "move_actor" },
         {
           kind: "record_world_event",
           eventClass: "scene",
@@ -414,7 +434,7 @@ describe("Campaign Play Game Master", () => {
           summary: "The player reaches South Harbor.",
           affectedHandles: ["you", "south"],
         },
-        { kind: "move_actor", exposure: { mode: "protected" } },
+        { kind: "move_actor" },
       ],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });

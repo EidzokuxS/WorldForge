@@ -75,7 +75,7 @@ const exposureProposalSchema = z.discriminatedUnion("mode", [
 
 const effectBase = { exposure: exposureProposalSchema };
 const effectProposalSchema = z.discriminatedUnion("kind", [
-  z.object({ ...effectBase, kind: z.literal("move_actor") }).strict(),
+  z.object({ kind: z.literal("move_actor") }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_route_state"), routeHandle: handle,
     state: z.enum(CAMPAIGN_PLAY_ROUTE_STATE_VALUES), reason: line(CAMPAIGN_PLAY_LIMITS.shortText) }).strict(),
   z.object({ ...effectBase, kind: z.literal("set_actor_condition"), actorHandle: handle,
@@ -361,11 +361,14 @@ function compileEffect(
 ): CommandArguments {
   switch (effect.kind) {
     case "move_actor": {
-      const exposurePolicy = exposure(effect.exposure, map, frame.rulebookFrame.worldTimeMinutes);
       if (!movement) throw new CampaignPlayGameMasterError("model_contract_failed", null);
       const { actor, route, from, to } = movement;
       return { kind: effect.kind, actorId: actor.id, routeId: route.id, fromLocationId: from.id,
-        toLocationId: to.id, readScope: [actor, route, from, to], writeScope: [actor, from, to], exposure: exposurePolicy };
+        toLocationId: to.id, readScope: [actor, route, from, to], writeScope: [actor, from, to],
+        exposure: {
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: to.id }],
+        } };
     }
     case "set_route_state": {
       const exposurePolicy = exposure(effect.exposure, map, frame.rulebookFrame.worldTimeMinutes);
@@ -524,7 +527,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Use the exact exposure predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
     "Propose only supported effect kinds. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
     "Resolve only the exact PLAYER_INTENT. Result tiers change the degree of success inside that scope; they never create trust, permission, leverage, knowledge, or access. Do not volunteer protected assets, secret routes or caches, unrelated motives, or risky admissions unless VISIBLE_FACTS justify disclosure and PLAYER_INTENT specifically seeks that information. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
-    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect with only kind and exposure, and put it first in effects; code binds the player actor, route, and endpoints. Put any record_world_event describing the arrival after move_actor. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields into the effect.",
+    "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind and put it first in effects; code binds the player actor, route, endpoints, and direct perception at the destination. Put any record_world_event describing the arrival after move_actor. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
     "Return at least one effect. For an observe result that changes no durable entity, use record_world_event with eventClass discovery, a grounded summary of the visible result, and grounded affectedHandles. For contact, use eventClass dialogue or interaction with an equally explicit summary. Omit exposure from record_world_event; code attaches direct perception at the player's post-effect location. Never return an empty effects array.",
     "Return one strict schema object and no prose.",
     `ALLOWED_HANDLES=${JSON.stringify(allowedHandles)}`,

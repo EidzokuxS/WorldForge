@@ -132,3 +132,37 @@ Humanizer and deslop review: the diagnosis uses direct observations, timestamps,
 - Token, cost, and output budgets remain enforced. No fallback provider, model substitution, or automatic retry was introduced. An interrupted durable turn still resumes only through the explicit Resume action.
 - Prompt-craft, humanizer, and deslop review: this note distinguishes measured evidence from interpretation, keeps the worker-lease caveat explicit, and does not treat one successful autonomous movement as proof that the full 20-action playtest has passed.
 - Verification: backend typecheck passed; focused Judge, Game Master, Narrator, opening, actor-replanner, and turn-runtime selection passed 121 tests. Provider-option assertions require the original worker signal and the absence of `timeout`.
+
+### Clone rehearsal 04: actions 8-20
+
+- Actions 8 and 9 deliberately left Neris silent on Weather-watch Ridge. Yalisa and Ordunn did not redirect their conflict toward the player, which preserved player peripherality, but an hour of waiting produced repetitive standoff prose before either schedule became due.
+- Action 10 advanced fifteen minutes and settled Yalisa's scheduled work. SQLite and the private event proved that she cleared rime from instrument housings, but the direct public trace described only the rime and the narrator incorrectly said neither actor moved. Autonomous work executed mechanically while its visible agency disappeared from the prose.
+- The manual operator reused a stale browser DOM node after React rerendered the narration controls. That submitted action 11 before the action-10 checkpoint could be bound. The strict evidence runner correctly rejected the checkpoint because two durable turns existed. The run remains useful diagnosis, but it is not promotion-eligible and no checkpoint was fabricated.
+- Actions 12-16 tested contact, departure, and material inspection. Yalisa gave a guarded technical answer without sudden trust. Brassgrove's boot prints and sealed stores produced grounded physical evidence, but action 13 contradicted itself with `Nothing has changed` immediately before describing Halden's absence, and action 15 inferred repeated purposeful visits too confidently from one tread pattern.
+- Actions 17-18 reached and inspected North Harbor. The quiet waterfront, maintained seals, and unattended resin stores were internally consistent, but repeated empty locations made the world feel authored around a sparse active cast. The narrator also repeated `carrying nothing` and `seals untouched` after those facts had stopped being narratively useful.
+- Action 19 crossed to Greyfork Bend. During the five-unit journey, Maren autonomously left for Lower Greyfork while Senna stayed behind. The new scene exposed the departure, an older material aftermath in the storeroom, and Senna's continued presence. This was the strongest living-world result in the run because the local situation changed without the player directing either NPC.
+- Action 20 asked Senna about Maren. Senna confirmed only what she could know: Maren left south with sealed parcels and did not explain her route or motive. The four-beat narration was coherent, restrained, and left the epistemic gap intact instead of turning the contact into an exposition dump.
+
+At the declared lane boundary, before the separate post-fix action below, SQLite recorded exactly 20 completed player-action turns and 83 model-stage attempts: 74 accepted GLM 5.2 artifacts, 7 strict-contract interruptions, and 2 obsolete opening deadline interruptions. Total recorded use at that boundary was 278,512 input tokens and 204,984 output tokens; the slowest accepted call was the 218,930 ms opening planner. No accepted Campaign Play stage used repair, text fallback, provider fallback, or model substitution. Each contract failure stopped durably and required explicit Resume.
+
+Manual verdict: PARTIAL PASS for the living-world direction, FAIL for promotion. The run now proves autonomous relocation that changes a later player scene, non-central player treatment, bounded NPC knowledge, coherent travel, and readable prose over 20 completed actions. It also exposes static sparsely populated locations, actor actions whose public trace loses the acting person, repetitive waiting prose, vague progress status, and several smaller continuity or inference defects. The missed action-10 checkpoint and accidental action-11 submission independently disqualify the run as pristine evidence.
+
+### Code-owned player movement exposure
+
+- Every strict Game Master failure at `effects.0.exposure.mode` occurred on a movement turn: actions 7, 17, and 19. `record_world_event` was not the source; its model-facing schema already omitted exposure.
+- The actual contract conflict was `move_actor`. Route, player actor, endpoints, and destination are all canonical Judge/backend facts, but the schema still required GLM to author their visibility policy. The prompt could not make that redundant field reliable.
+- The model-facing movement effect now contains only `{ kind: "move_actor" }`. Compilation attaches one code-owned `direct_perception` predicate at the canonical destination. A strict regression rejects any model-authored movement exposure instead of repairing or retrying it.
+- Campaign Play already calls `safeGenerateObject` with `retries: 1`, `allowRepair: false`, and `allowTextFallback: false`, and rejects traces labeled repair, retry, or text fallback. The generic capability telemetry still names `text_fallback` as the library's available fallback strategy, but the gameplay call site disables it and the failure path confirms it is not executed.
+- Prompt-craft review: the revised movement instruction names the only permitted field and the exact code-owned boundary once. Humanizer and deslop review: the sentence is plain technical language, contains no decorative framing, and does not add style steering or a disguised fallback path.
+
+Post-fix manual proof used the rendered UI for one additional diagnostic movement from Greyfork Bend to Cage Junction Yards. This action is outside the declared 20-action lane and is not counted as acceptance evidence. Every GLM 5.2 stage succeeded on attempt 1: Judge in 25,357 ms, Game Master in 87,840 ms, two actor replans in 51,514 ms and 73,053 ms, and Narrator in 64,364 ms. The Game Master returned a schema-valid movement proposal without `exposure`; no Resume appeared.
+
+The resulting scene also preserved autonomous motion. Senna arrived at the junction during the player's journey, Ordunn departed for Weather-watch Ridge, and Halden remained in the yard. The narrator described that placement change directly and did not invent motives. This proves the corrected movement contract on the real provider and player surface while adding no retry, repair, fallback, or model substitution.
+
+Final verification for this correction:
+
+- `npm --prefix backend run typecheck` — passed.
+- `npm --prefix backend test -- --run src/campaign-play/game-master.test.ts` — 19/19 passed.
+- Campaign Play plus both mounted route suites — 26 files, 345/345 passed.
+- Clone provenance and live-session E2E — 6/6 passed.
+- `git diff --check` — passed with only the existing Windows line-ending notices.
