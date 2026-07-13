@@ -764,6 +764,7 @@ describe("Campaign Play opening planner", () => {
       } as typeof chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
+      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
     expect(generateObject).not.toHaveBeenCalled();
@@ -784,6 +785,7 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
+      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     });
     expect(result.modelEvidence).toMatchObject({
@@ -800,6 +802,8 @@ describe("Campaign Play opening planner", () => {
       allowRepair: false,
       allowTextFallback: false,
       retries: 1,
+      timeout: 1_000,
+      abortSignal: expect.any(AbortSignal),
     });
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OPENING_DATA");
@@ -826,6 +830,33 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("Do not name the hidden actor");
   });
 
+  it("aborts an opening model call at the stage deadline", async () => {
+    const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
+      new Promise<never>((_resolve, reject) => {
+        options.abortSignal?.addEventListener("abort", () => reject(new Error("deadline")), {
+          once: true,
+        });
+      })
+    );
+    const planner = createCampaignPlayOpeningPlanner({
+      generateObject: generateObject as unknown as typeof safeGenerateObject,
+    });
+
+    await expect(planner.plan({
+      frame: frameFixture(),
+      startingConditions: chosenConditions,
+      model: structuredModel(),
+      temperature: 0.4,
+      maximumDurationMs: 10,
+      maxOutputTokens: 4_096,
+    })).rejects.toMatchObject({ code: "stage_timeout" });
+    expect(generateObject).toHaveBeenCalledOnce();
+    expect(generateObject.mock.calls[0]![0]).toMatchObject({
+      timeout: 10,
+      abortSignal: expect.any(AbortSignal),
+    });
+  });
+
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
     const invalidProposal = proposalFixture();
     invalidProposal.scene.supportActorId = "actor-bell-tender";
@@ -842,6 +873,7 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
+      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "opening_proposal_invalid",
@@ -868,6 +900,7 @@ describe("Campaign Play opening planner", () => {
         startingConditions: chosenConditions,
         model: structuredModel(),
         temperature: 0.4,
+        maximumDurationMs: 1_000,
         maxOutputTokens: 4_096,
       })).rejects.toMatchObject({
         code: "model_contract_failed",
@@ -892,6 +925,7 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: {} as LanguageModel,
       temperature: 0.4,
+      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "structured_output_unavailable",
@@ -917,6 +951,7 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
+      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "model_contract_failed",

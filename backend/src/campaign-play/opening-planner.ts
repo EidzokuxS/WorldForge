@@ -275,7 +275,8 @@ export interface CampaignPlayOpeningModelEvidence {
   textFallbackUsed: boolean;
   responseModel: string | null;
   finishReason: string | null;
-  errorCode: SafeGenerateErrorCode | "structured_output_unavailable" | "model_contract_failed" | null;
+  errorCode: SafeGenerateErrorCode | "structured_output_unavailable" | "transport_interrupted" |
+    "stage_timeout" | "model_contract_failed" | null;
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
@@ -292,6 +293,8 @@ export type CampaignPlayOpeningPlannerErrorCode =
   | "opening_frame_invalid"
   | "opening_proposal_invalid"
   | "structured_output_unavailable"
+  | "transport_interrupted"
+  | "stage_timeout"
   | "model_contract_failed";
 
 export class CampaignPlayOpeningPlannerError extends Error {
@@ -310,7 +313,9 @@ export interface CampaignPlayOpeningPlanRequest {
   startingConditions: CampaignPlayResolvedStartingConditions;
   model: LanguageModel;
   temperature: number;
+  maximumDurationMs: number;
   maxOutputTokens: number;
+  signal?: AbortSignal;
 }
 
 interface CampaignPlayOpeningPlannerDependencies {
@@ -1030,6 +1035,10 @@ export function createCampaignPlayOpeningPlanner(
           errorCode: "structured_output_unavailable",
         });
       }
+      const timeoutSignal = AbortSignal.timeout(request.maximumDurationMs);
+      const executionSignal = request.signal
+        ? AbortSignal.any([request.signal, timeoutSignal])
+        : timeoutSignal;
       let generated;
       try {
         generated = await dependencies.generateObject({
@@ -1038,6 +1047,8 @@ export function createCampaignPlayOpeningPlanner(
           prompt: buildCampaignPlayOpeningPrompt(request.frame, startingConditions),
           temperature: request.temperature,
           maxOutputTokens: request.maxOutputTokens,
+          timeout: request.maximumDurationMs,
+          abortSignal: executionSignal,
           mode: "auto",
           strictSchema: true,
           allowRepair: false,
@@ -1047,6 +1058,14 @@ export function createCampaignPlayOpeningPlanner(
       } catch (error) {
         const code = getSafeGenerateObjectErrorCode(error);
         const trace = getSafeGenerateObjectTrace(error);
+        const plannerCode: CampaignPlayOpeningPlannerErrorCode =
+          timeoutSignal.aborted && !request.signal?.aborted
+            ? "stage_timeout"
+            : code === "schema_validation_failed" ||
+                code === "invalid_structured_tool_call" ||
+                code === "missing_structured_tool_call"
+              ? "model_contract_failed"
+              : "transport_interrupted";
         const evidence: CampaignPlayOpeningModelEvidence = {
           ...codeOnlyEvidence,
           actualStrategy: trace?.strategy ?? trace?.capability?.actualMode ?? null,
@@ -1055,9 +1074,9 @@ export function createCampaignPlayOpeningPlanner(
           textFallbackUsed: trace?.strategy === "text_fallback",
           responseModel: trace?.response?.modelId ?? null,
           finishReason: trace?.finishReason ?? null,
-          errorCode: code ?? "model_contract_failed",
+          errorCode: code ?? plannerCode,
         };
-        fail("model_contract_failed", error, evidence);
+        fail(plannerCode, error, evidence);
       }
       const modelEvidence = successfulEvidence(generated.trace);
       try {

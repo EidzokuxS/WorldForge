@@ -425,6 +425,7 @@ async function createReadyCampaignWithOpening() {
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.2,
+      maximumDurationMs: 500,
       maxOutputTokens: 4_096,
     },
     narratorModel: {

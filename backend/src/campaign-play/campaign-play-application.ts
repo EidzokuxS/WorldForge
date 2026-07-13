@@ -439,6 +439,7 @@ export function createCampaignPlayApplication(
         languageModel: dependencies.createModel(generator.provider, { role: "generator" }),
         requested: openingRequested,
         temperature: generator.temperature,
+        maximumDurationMs: MAXIMUM_STAGE_DURATION_MS,
         maxOutputTokens: openingMaximumOutputTokens,
       },
       narratorModel: {

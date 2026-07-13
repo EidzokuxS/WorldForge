@@ -174,7 +174,7 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d"].map((suffix) => {
+  const actorPlans = ["a", "b", "c"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -190,12 +190,19 @@ function openingProposal(): CampaignPlayOpeningProposal {
       method: `Advance ${goalId} from the current situation`,
       stakes: "The actor's own objective",
     };
+    const observableTrace = suffix === "b"
+      ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
+      : `Fresh tool marks show that work on ${goalId} continued here.`;
     return {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 1_440,
       intent,
-      steps: [{ intent, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } }],
+      steps: [{
+        intent,
+        observableTrace,
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      }],
     };
   });
   return {
@@ -433,10 +440,6 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
             eventClass: "scene" as const,
             summary: `Mara waits and records the visible signal pattern for ${request.ruling.normalizedIntent.originalText}.`,
             affectedHandles: [playerHandle, locationHandle],
-            exposure: {
-              mode: "projectable" as const,
-              predicates: [{ channel: "direct_perception" as const, anchorHandle: locationHandle }],
-            },
           }];
       return {
         ...compiler.compile(
@@ -471,6 +474,7 @@ function openingRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayT
         pricing: PRICING,
       },
       temperature: 0.2,
+      maximumDurationMs: 500,
       maxOutputTokens: 32_768,
     },
     narratorModel: {

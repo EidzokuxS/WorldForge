@@ -25,6 +25,7 @@ import { createCampaignPlayStateRepository } from "./campaign-play-state-reposit
 import { createCampaignPlayCharacterService } from "./character-service.js";
 import { bootstrapCampaignPlayPlayer } from "./player-bootstrap.js";
 import {
+  CampaignPlayOpeningPlannerError,
   createCampaignPlayOpeningPlanner,
   type CampaignPlayOpeningModelEvidence,
   type CampaignPlayOpeningProposal,
@@ -352,6 +353,7 @@ function runtimeModels() {
       languageModel: {} as LanguageModel,
       requested: { providerId: "test", model: "test-opening-planner", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
       temperature: 0.2,
+      maximumDurationMs: 500,
       maxOutputTokens: 4_096,
     },
     narratorModel: {
@@ -600,6 +602,56 @@ describe("Campaign Play opening runtime", () => {
         durationMs: 77,
         status: "interrupted",
       });
+  });
+
+  it("persists an opening planner deadline as a stage timeout", async () => {
+    const { handle, state } = createPlayableCampaign();
+    const time = fixedClock(1_950);
+    const base = plannerFixture();
+    const runtime = createCampaignPlayOpeningRuntime({
+      handle,
+      owner: "opening-planner-timeout-worker",
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 100,
+      clock: time.clock,
+      ...runtimeModels(),
+      openingPlanner: {
+        compile: base.compile,
+        plan: vi.fn(async () => {
+          throw new CampaignPlayOpeningPlannerError("stage_timeout", {
+            ...plannerEvidence,
+            finishReason: "timeout",
+            errorCode: "stage_timeout",
+          });
+        }),
+      },
+      narrator: narratorFixture(),
+    });
+    const admission = runtime.admitOpening({
+      submittedAt: 1_950,
+      request: {
+        idempotencyKey: "opening-planner-timeout",
+        expectedWorldVersion: state.authority.worldVersion,
+        expectedRuntimeRevision: state.authority.runtimeRevision,
+        startingConditions: { mode: "delegate" },
+      },
+    });
+
+    time.advance();
+    const result = await runtime.runNextStage(admission.turnId);
+
+    expect(result.turn).toMatchObject({
+      stage: "interrupted",
+      interruptedStage: "admitted",
+      errorCode: "stage_timeout",
+      resumeEligible: true,
+    });
+    expect(handle.sqlite.prepare(`SELECT status, error_code AS errorCode
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'opening_planner'`).get(
+        CAMPAIGN_ID,
+        admission.turnId,
+      )).toEqual({ status: "interrupted", errorCode: "stage_timeout" });
   });
 
   it.each(["planner", "narrator"] as const)(
