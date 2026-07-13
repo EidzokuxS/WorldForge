@@ -95,6 +95,7 @@
 - Exact hard micro-results with no prose latitude should be typed renderables, not model paraphrase traps.
 - Budget model stages against visible answer tokens separately from provider reasoning tokens, and set timeouts from measured thinking-model latency; a healthy 55–65 second GLM response must not be classified as unavailable.
 - Do not impose wall-clock deadlines on Campaign Play GLM stages. Let each frozen call finish; cancel it only when worker authority is actually lost or the user stops it.
+- Treat worker leases as liveness fences, never inference deadlines. Every asynchronous lease holder must heartbeat and pass only real authority-loss cancellation into its model call.
 - Enforce the global model-output minimum at the provider model boundary as well as in settings; per-call defaults and forgotten low budgets must not bypass the 32k floor.
 - Narration must receive concrete projected receipts for the accepted player action and every same-turn NPC action the player could perceive. A post-turn scene snapshot alone cannot preserve event order or causal continuity.
 - Model-authored action copy may supply only a short grammatical detail under a code-owned intent and target prefix. Persist the rendered label for Judge while freezing kind and targets independently.

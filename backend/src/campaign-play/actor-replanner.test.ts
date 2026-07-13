@@ -385,7 +385,10 @@ describe("Campaign Play actor replanner", () => {
   it("accepts one strict job-owned attempt and atomically replaces its completed plan", async () => {
     const { handle, token, jobId } = createReplanFixture();
     let now = 1_600;
-    const generateObject = vi.fn(async (request: { prompt: string }) => ({
+    const generateObject = vi.fn(async (request: {
+      prompt: string;
+      abortSignal?: AbortSignal;
+    }) => ({
       object: replanProposalFromPrompt(request.prompt),
       trace: acceptedTrace(1_025, 1_000),
     }));
@@ -393,6 +396,7 @@ describe("Campaign Play actor replanner", () => {
       now: () => now,
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     });
+    const controller = new AbortController();
 
     const outcome = await replanner.replan({
       jobId,
@@ -404,6 +408,7 @@ describe("Campaign Play actor replanner", () => {
       maximumOutputTokens: 100,
       maximumTotalTokens: 2_000,
       maximumCostMicros: 10_000,
+      signal: controller.signal,
       createdAt: 1_590,
     });
     now += 1;
@@ -417,6 +422,7 @@ describe("Campaign Play actor replanner", () => {
       strictSchema: true,
     });
     expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
+    expect(generateObject.mock.calls[0]![0].abortSignal).toBe(controller.signal);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({ stage: "deferred", workerEpoch: 1 });
     expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,

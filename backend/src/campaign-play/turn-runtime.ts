@@ -1684,6 +1684,7 @@ export function createCampaignPlayTurnRuntime(
                 maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
                 maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
                 maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
+                signal: context.signal,
                 createdAt: now(),
               });
               releaseActorBoundary(context.token, outcome.jobId, replanned.kind);

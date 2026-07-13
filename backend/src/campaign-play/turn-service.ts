@@ -57,6 +57,7 @@ export interface CampaignPlayDeterministicStageContext {
   turn: LoadedCampaignPlayTurn;
   token: CampaignPlayWorkerLeaseToken;
   artifacts: CampaignPlayTurnServiceArtifactReader;
+  signal: AbortSignal;
 }
 
 export interface CampaignPlayExternalStageHandler {
@@ -570,23 +571,77 @@ export function createCampaignPlayTurnService(
 
   const runDeterministic = async (
     turn: LoadedCampaignPlayTurn,
-    token: CampaignPlayWorkerLeaseToken,
+    initialToken: CampaignPlayWorkerLeaseToken,
     claimedAt: number,
     queueTimeMs: number,
     handler: CampaignPlayDeterministicStageHandler,
   ): Promise<CampaignPlayTurnServiceResult> => {
+    const token = { ...initialToken };
+    let renewalCount = 0;
+    let lastObservedAt = claimedAt;
+    const controller = new AbortController();
+    let heartbeatStopped = false;
+    const heartbeat = (async () => {
+      while (!heartbeatStopped) {
+        try {
+          await clock.wait(input.heartbeatIntervalMs, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          throw error;
+        }
+        if (heartbeatStopped) return;
+        const renewedAt = now();
+        requireAtOrAfter(renewedAt, lastObservedAt, "heartbeat");
+        if (renewedAt >= token.expiresAt) {
+          throw new CampaignPlayTurnRepositoryError(
+            "turn_fence_lost",
+            "Campaign Play deterministic heartbeat reached an expired lease.",
+          );
+        }
+        const renewed = repository.renewLease({
+          token,
+          renewedAt,
+          leaseExpiresAt: leaseExpiry(renewedAt),
+          mutationId: mutationId({
+            campaignId: input.handle.campaignId,
+            turnId: token.turnId,
+            stage: token.stage,
+            owner: token.owner,
+            epoch: token.epoch,
+            kind: "renew",
+            occurredAt: renewedAt,
+            ordinal: renewalCount + 1,
+          }),
+        });
+        token.expiresAt = renewed.expiresAt;
+        lastObservedAt = renewedAt;
+        renewalCount += 1;
+      }
+    })();
+    const heartbeatFailure = new Promise<never>((_resolve, reject) => {
+      void heartbeat.catch(reject);
+    });
+    const execution = Promise.resolve().then(() => handler.execute({
+      turn,
+      token,
+      artifacts: artifactReader(turn.turnId),
+      signal: controller.signal,
+    }));
+    void execution.catch(() => undefined);
     try {
-      await handler.execute({
-        turn,
-        token,
-        artifacts: artifactReader(turn.turnId),
-      });
+      await Promise.race([execution, heartbeatFailure]);
     } catch (error) {
-      if (isFenceRace(error)) return snapshot(turn.turnId);
+      heartbeatStopped = true;
+      controller.abort();
+      await heartbeat.catch(() => undefined);
+      if (isFenceRace(error)) return snapshot(initialToken.turnId);
       throw error;
     }
+    heartbeatStopped = true;
+    controller.abort();
+    await heartbeat.catch(() => undefined);
     const finishedAt = now();
-    requireAtOrAfter(finishedAt, claimedAt, "deterministic completion");
+    requireAtOrAfter(finishedAt, lastObservedAt, "deterministic completion");
     const after = repository.loadRecoveryState(turn.turnId, finishedAt);
     if (recoveryUsesToken(after, token)) {
       throw new CampaignPlayTurnServiceError(
@@ -602,7 +657,7 @@ export function createCampaignPlayTurnService(
       attempt: null,
       queueTimeMs,
       stageTimeMs: finishedAt - claimedAt,
-      leaseRenewals: 0,
+      leaseRenewals: renewalCount,
       outcome: "advanced",
     };
     return snapshot(turn.turnId, telemetry);

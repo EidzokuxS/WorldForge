@@ -574,15 +574,7 @@ export function createCampaignPlayActorReplanner(
       });
       const compilation = compilationFrame(handle, scheduler.buildActorFrame(request.jobId));
       const startedAt = dependencies.now();
-      const leaseDurationMs = request.token.expiresAt - startedAt;
-      if (leaseDurationMs <= 0) {
-        throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-      }
-      const leaseDeadline = AbortSignal.timeout(leaseDurationMs);
-      const signals = [leaseDeadline, request.signal].filter(
-        (signal): signal is AbortSignal => signal !== undefined,
-      );
-      const signal = signals.length === 1 ? signals[0]! : AbortSignal.any(signals);
+      requireTurnLease(handle, request.token, startedAt);
       let observedTrace: Readonly<SafeGenerateTrace> | undefined;
       let processStoppedAfterProviderReturn = false;
       try {
@@ -597,7 +589,7 @@ export function createCampaignPlayActorReplanner(
           allowRepair: false,
           allowTextFallback: false,
           retries: 1,
-          abortSignal: signal,
+          abortSignal: request.signal,
         });
         observedTrace = generated.trace;
         try {
@@ -607,7 +599,7 @@ export function createCampaignPlayActorReplanner(
           throw cause;
         }
         const providerCompletedAt = dependencies.now();
-        if (leaseDeadline.aborted || providerCompletedAt >= request.token.expiresAt) {
+        if (providerCompletedAt >= request.token.expiresAt) {
           throw new CampaignPlayActorReplannerError("replan_epoch_lost");
         }
         const evidence = acceptedTrace(
@@ -754,7 +746,7 @@ export function createCampaignPlayActorReplanner(
         const durationMs = Math.max(0, interruptedAt - startedAt);
         const trace = observedTrace ?? getSafeGenerateObjectTrace(error) ?? undefined;
         const epochLost = (error instanceof CampaignPlayActorReplannerError
-          && error.code === "replan_epoch_lost") || leaseDeadline.aborted || request.signal?.aborted === true;
+          && error.code === "replan_epoch_lost") || request.signal?.aborted === true;
         const budgetExceeded = error instanceof CampaignPlayActorReplannerError
           && error.code === "replan_budget_exceeded";
         const persistenceFailed = error instanceof CampaignPlayActorReplannerError

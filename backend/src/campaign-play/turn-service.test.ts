@@ -364,6 +364,92 @@ describe("Campaign Play turn service", () => {
     });
   });
 
+  it("keeps an asynchronous deterministic stage alive past its initial lease deadline", async () => {
+    const { handle, state } = createOpeningReadyCampaign();
+    const repository = createCampaignPlayTurnRepository(handle);
+    repository.admitTurn(openingInput(state));
+    const plannerToken = repository.claimStage({
+      turnId: "turn-opening",
+      expectedStage: "admitted",
+      observedEpoch: 0,
+      owner: "planner-worker",
+      claimedAt: 1_600,
+      leaseExpiresAt: 1_800,
+      mutationId: "planner-claimed-before-deterministic-heartbeat",
+    });
+    repository.acceptModelArtifact({
+      token: plannerToken,
+      artifact: { plan: "accepted" },
+      evidence: executionEvidence(),
+      mutationDomain: "runtime",
+      acceptedAt: 1_600,
+      mutationId: "planner-accepted-before-deterministic-heartbeat",
+    });
+    let time = 1_700;
+    let waitCount = 0;
+    const renewed = deferred<void>();
+    const clock: CampaignPlayTurnServiceClock = {
+      now: () => time,
+      async wait(_delayMs, signal) {
+        waitCount += 1;
+        if (waitCount <= 5) {
+          time += 50;
+          return;
+        }
+        renewed.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    const stageState: { signal: AbortSignal | null } = { signal: null };
+    const service = createCampaignPlayTurnService({
+      handle,
+      owner: "deterministic-heartbeat-worker",
+      leaseDurationMs: 200,
+      heartbeatIntervalMs: 50,
+      clock,
+      resolveStage: ({ stage }) => stage === "planned"
+        ? {
+            kind: "deterministic",
+            ready: () => true,
+            async execute({ token, signal }) {
+              stageState.signal = signal;
+              expect(signal.aborted).toBe(false);
+              await renewed.promise;
+              expect(time).toBeGreaterThan(1_900);
+              expect(token.expiresAt).toBe(2_150);
+              repository.commitDeterministic({
+                token,
+                transition: "primary_settled",
+                worldVersionAdvance: 0,
+                committedAt: time,
+                mutationId: "primary-settled-after-deterministic-heartbeat",
+              });
+            },
+          }
+        : null,
+    });
+
+    const result = await service.runNextStage("turn-opening");
+
+    expect(result.turn.stage).toBe("primary_settled");
+    expect(result.telemetry).toMatchObject({
+      stage: "planned",
+      workerEpoch: 2,
+      attempt: null,
+      queueTimeMs: 100,
+      stageTimeMs: 250,
+      leaseRenewals: 5,
+      outcome: "advanced",
+    });
+    expect(stageState.signal?.aborted).toBe(true);
+    expect(handle.sqlite.prepare(`SELECT COUNT(*) AS count
+      FROM campaign_play_runtime_events
+      WHERE turn_id = 'turn-opening' AND kind = 'worker_lease_renewed'`).get())
+      .toEqual({ count: 5 });
+  });
+
   it("lets one of two services invoke the external stage and settle one artifact", async () => {
     const fixture = createOpeningReadyCampaign();
     createCampaignPlayTurnRepository(fixture.handle).admitTurn(openingInput(fixture.state));
