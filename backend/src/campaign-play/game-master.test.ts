@@ -220,6 +220,9 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("post-effect location");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
+    expect(String(options.prompt)).toContain(
+      "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene",
+    );
     expect(String(options.prompt)).toContain("eventClass discovery");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
     expect(String(options.prompt)).not.toContain("actor-player");
@@ -394,6 +397,9 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       "Do not copy PLAYER_MOVEMENT fields or exposure into the effect",
+    );
+    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
+      "use eventClass scene for that arrival",
     );
   });
 

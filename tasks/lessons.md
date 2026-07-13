@@ -110,6 +110,7 @@
 - Before creating a manual playtest character, inspect the accepted cast for names, roles, and defining professions. Use a distinct player concept so duplicate identities do not contaminate narrative-quality evidence.
 - Schedule autonomous people by controller and entity kind, not cast prominence. Background people still act; collectives remain world context unless they have an explicit non-person simulation contract.
 - Remove code-owned fields from the model-facing schema instead of asking the model to omit or reproduce them. A redundant schema field creates contract failures that prompts and retries cannot legitimately repair.
+- When a prompt requires a strict-enum object for a specific situation, bind that situation to one accepted literal. Naming the object without its permitted vocabulary makes valid intent depend on the model guessing internal terminology.
 - A direct autonomous observation must name the visible actor action, not only its passive environmental result. Otherwise the simulation advances while the prose makes the actor look inert.
 - Re-read browser DOM node IDs after every rendered state change during a manual playtest. React rerenders invalidate prior node ownership even when the same control appears in the same place.
 
