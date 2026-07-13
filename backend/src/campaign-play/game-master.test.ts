@@ -245,6 +245,8 @@ describe("Campaign Play Game Master", () => {
       "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene",
     );
     expect(String(options.prompt)).toContain("eventClass discovery");
+    expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
+    expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");

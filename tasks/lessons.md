@@ -117,6 +117,7 @@
 - Do not apply short player-copy limits to internal model rationale. Bound it by the durable storage envelope and reject semantic or authority violations, not ordinary explanatory length.
 - Give a visible NPC protected access to its own accepted action history when GM resolves contact. Public aftermath alone preserves player knowledge but cannot preserve the actor's identity or memory.
 - Give Narrator the exact prior public moment and treat connective atmosphere as factual output. Sound quality, temperature, light, weather, and object properties need packet evidence just as plot claims do.
+- Preserve epistemic modality across model stages. `Appears`, `suggests`, `may`, and `likely` are authority bounds; narration cannot promote them to facts, proofs, absolute comparisons, or completed causes.
 
 ## Evidence Handling
 

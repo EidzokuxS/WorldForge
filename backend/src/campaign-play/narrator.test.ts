@@ -288,6 +288,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("you may not decide that the ring is hollow or solid");
     expect(prompt).toContain("An action_handoff may combine supported facts but must add no new fact");
+    expect(prompt).toContain("Preserve epistemic modality and scope exactly");
+    expect(prompt).toContain("must not become an unqualified fact");
+    expect(prompt).toContain("Never increase certainty, precision, comparison scope, or causal strength");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
