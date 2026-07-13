@@ -197,7 +197,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 1_440,
-      intent,
       steps: [{
         intent,
         observableTrace,
@@ -474,7 +473,6 @@ function openingRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayT
         pricing: PRICING,
       },
       temperature: 0.2,
-      maximumDurationMs: 500,
       maxOutputTokens: 32_768,
     },
     narratorModel: {

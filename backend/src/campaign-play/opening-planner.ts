@@ -78,10 +78,8 @@ const openingActorPlanProposalSchema = z.object({
   actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   primaryGoalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   cadenceMinutes: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.elapsedMinutes),
-  intent: campaignPlayActorIntentSchema,
   steps: z.array(openingPlanStepProposalSchema)
-    .min(1)
-    .max(CAMPAIGN_PLAY_LIMITS.planSteps),
+    .length(1),
 }).strict();
 
 export const campaignPlayOpeningProposalSchema = z.object({
@@ -276,7 +274,7 @@ export interface CampaignPlayOpeningModelEvidence {
   responseModel: string | null;
   finishReason: string | null;
   errorCode: SafeGenerateErrorCode | "structured_output_unavailable" | "transport_interrupted" |
-    "stage_timeout" | "model_contract_failed" | null;
+    "model_contract_failed" | null;
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
@@ -294,7 +292,6 @@ export type CampaignPlayOpeningPlannerErrorCode =
   | "opening_proposal_invalid"
   | "structured_output_unavailable"
   | "transport_interrupted"
-  | "stage_timeout"
   | "model_contract_failed";
 
 export class CampaignPlayOpeningPlannerError extends Error {
@@ -313,7 +310,6 @@ export interface CampaignPlayOpeningPlanRequest {
   startingConditions: CampaignPlayResolvedStartingConditions;
   model: LanguageModel;
   temperature: number;
-  maximumDurationMs: number;
   maxOutputTokens: number;
   signal?: AbortSignal;
 }
@@ -616,7 +612,6 @@ function compilePlans(
     }
     const locationIds = actorLocations(world, actor.id);
     if (locationIds.length === 0) fail("opening_proposal_invalid");
-    validateIntent(world, locationIds, proposed.intent);
     proposed.steps.forEach((step) => {
       validateIntent(world, locationIds, step.intent);
       if (step.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
@@ -643,7 +638,7 @@ function compilePlans(
       actorId: actor.id,
       goalId: primaryGoal.id,
       planVersion: 1,
-      intent: proposed.intent,
+      intent: proposed.steps[0]!.intent,
       preconditions,
       cadenceMinutes: proposed.cadenceMinutes,
       priority: primaryGoal.priority,
@@ -1035,10 +1030,6 @@ export function createCampaignPlayOpeningPlanner(
           errorCode: "structured_output_unavailable",
         });
       }
-      const timeoutSignal = AbortSignal.timeout(request.maximumDurationMs);
-      const executionSignal = request.signal
-        ? AbortSignal.any([request.signal, timeoutSignal])
-        : timeoutSignal;
       let generated;
       try {
         generated = await dependencies.generateObject({
@@ -1047,8 +1038,7 @@ export function createCampaignPlayOpeningPlanner(
           prompt: buildCampaignPlayOpeningPrompt(request.frame, startingConditions),
           temperature: request.temperature,
           maxOutputTokens: request.maxOutputTokens,
-          timeout: request.maximumDurationMs,
-          abortSignal: executionSignal,
+          abortSignal: request.signal,
           mode: "auto",
           strictSchema: true,
           allowRepair: false,
@@ -1059,13 +1049,11 @@ export function createCampaignPlayOpeningPlanner(
         const code = getSafeGenerateObjectErrorCode(error);
         const trace = getSafeGenerateObjectTrace(error);
         const plannerCode: CampaignPlayOpeningPlannerErrorCode =
-          timeoutSignal.aborted && !request.signal?.aborted
-            ? "stage_timeout"
-            : code === "schema_validation_failed" ||
-                code === "invalid_structured_tool_call" ||
-                code === "missing_structured_tool_call"
-              ? "model_contract_failed"
-              : "transport_interrupted";
+          code === "schema_validation_failed" ||
+              code === "invalid_structured_tool_call" ||
+              code === "missing_structured_tool_call"
+            ? "model_contract_failed"
+            : "transport_interrupted";
         const evidence: CampaignPlayOpeningModelEvidence = {
           ...codeOnlyEvidence,
           actualStrategy: trace?.strategy ?? trace?.capability?.actualMode ?? null,

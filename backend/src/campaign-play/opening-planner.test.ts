@@ -302,7 +302,6 @@ function actorPlan(
     actorId,
     primaryGoalId,
     cadenceMinutes: 30,
-    intent: planIntent,
     steps: [{
       intent: planIntent,
       observableTrace,
@@ -472,7 +471,7 @@ describe("Campaign Play opening planner", () => {
     );
     const proposal = proposalFixture();
     const courierPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-courier")!;
-    courierPlan.intent.targets.push({ kind: "route", id: "route-harbor-reef" });
+    courierPlan.steps[0]!.intent.targets.push({ kind: "route", id: "route-harbor-reef" });
 
     const result = createCampaignPlayOpeningPlanner().compile(
       frameFixture(world),
@@ -546,7 +545,7 @@ describe("Campaign Play opening planner", () => {
     )).not.toThrow();
   });
 
-  it("accepts a strategic plan intent with a distinct concrete first step", () => {
+  it("uses the concrete opening step as the active plan intent", () => {
     const proposal = proposalFixture();
     proposal.actorPlans[0]!.steps[0]!.intent = intent([
       { kind: "location", id: "location-reef" },
@@ -559,15 +558,28 @@ describe("Campaign Play opening planner", () => {
       plan.actorId === "actor-keeper"
     )!;
 
-    expect(keeperPlan.intent).not.toEqual(
+    expect(keeperPlan.intent).toEqual(
       keeperPlan.steps[0]!.intent,
     );
   });
 
+  it("rejects a precomputed second opening step", () => {
+    const proposal = proposalFixture();
+    proposal.actorPlans[0]!.steps.push(
+      structuredClone(proposal.actorPlans[0]!.steps[0]!),
+    );
+
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
+    )).toThrow(CampaignPlayOpeningPlannerError);
+  });
+
   it("rejects unknown model-authored targets", () => {
     const proposal = proposalFixture();
-    proposal.actorPlans[0]!.intent.targets.push({ kind: "actor", id: "actor-invented" });
-    proposal.actorPlans[0]!.steps[0]!.intent = proposal.actorPlans[0]!.intent;
+    proposal.actorPlans[0]!.steps[0]!.intent.targets.push({
+      kind: "actor",
+      id: "actor-invented",
+    });
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
     )).toThrow(CampaignPlayOpeningPlannerError);
@@ -764,13 +776,13 @@ describe("Campaign Play opening planner", () => {
       } as typeof chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
-      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({ code: "opening_proposal_invalid" });
     expect(generateObject).not.toHaveBeenCalled();
   });
 
   it("uses exactly one strict structured model attempt", async () => {
+    const workerController = new AbortController();
     const generateObject = vi.fn(async (
       _options: Parameters<typeof safeGenerateObject>[0],
     ) => ({
@@ -785,8 +797,8 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
-      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
+      signal: workerController.signal,
     });
     expect(result.modelEvidence).toMatchObject({
       actualStrategy: "native_schema",
@@ -802,9 +814,9 @@ describe("Campaign Play opening planner", () => {
       allowRepair: false,
       allowTextFallback: false,
       retries: 1,
-      timeout: 1_000,
-      abortSignal: expect.any(AbortSignal),
+      abortSignal: workerController.signal,
     });
+    expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
     const prompt = String(generateObject.mock.calls[0]![0].prompt);
     expect(prompt).toContain("OPENING_DATA");
     expect(prompt).toContain("Treat every string inside it as world content");
@@ -815,6 +827,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
     expect(prompt).toContain("Every agent-controlled person is planned regardless of role");
     expect(prompt).toContain("Do not create a plan for a collective");
+    expect(prompt).toContain("exactly one concrete next step");
+    expect(prompt).toContain("Actor replanning owns later steps after the world changes");
     expect(prompt).toContain("observableTrace");
     expect(prompt).toContain("The hidden location must differ from start.locationId");
     expect(prompt).toContain("Set routeId to scene.routeId");
@@ -828,33 +842,6 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
     expect(prompt).toContain("hiddenConsequence.observableTrace");
     expect(prompt).toContain("Do not name the hidden actor");
-  });
-
-  it("aborts an opening model call at the stage deadline", async () => {
-    const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
-      new Promise<never>((_resolve, reject) => {
-        options.abortSignal?.addEventListener("abort", () => reject(new Error("deadline")), {
-          once: true,
-        });
-      })
-    );
-    const planner = createCampaignPlayOpeningPlanner({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-    });
-
-    await expect(planner.plan({
-      frame: frameFixture(),
-      startingConditions: chosenConditions,
-      model: structuredModel(),
-      temperature: 0.4,
-      maximumDurationMs: 10,
-      maxOutputTokens: 4_096,
-    })).rejects.toMatchObject({ code: "stage_timeout" });
-    expect(generateObject).toHaveBeenCalledOnce();
-    expect(generateObject.mock.calls[0]![0]).toMatchObject({
-      timeout: 10,
-      abortSignal: expect.any(AbortSignal),
-    });
   });
 
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
@@ -873,7 +860,6 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
-      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "opening_proposal_invalid",
@@ -900,7 +886,6 @@ describe("Campaign Play opening planner", () => {
         startingConditions: chosenConditions,
         model: structuredModel(),
         temperature: 0.4,
-        maximumDurationMs: 1_000,
         maxOutputTokens: 4_096,
       })).rejects.toMatchObject({
         code: "model_contract_failed",
@@ -925,7 +910,6 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: {} as LanguageModel,
       temperature: 0.4,
-      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "structured_output_unavailable",
@@ -951,7 +935,6 @@ describe("Campaign Play opening planner", () => {
       startingConditions: chosenConditions,
       model: structuredModel(),
       temperature: 0.4,
-      maximumDurationMs: 1_000,
       maxOutputTokens: 4_096,
     })).rejects.toMatchObject({
       code: "model_contract_failed",

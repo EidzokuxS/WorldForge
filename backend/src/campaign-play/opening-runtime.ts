@@ -124,7 +124,6 @@ export interface CampaignPlayOpeningRuntimeModel {
   languageModel: LanguageModel;
   requested: CampaignPlayRequestedModel;
   temperature: number;
-  maximumDurationMs: number;
   maxOutputTokens: number;
 }
 
@@ -200,7 +199,6 @@ function assertModel(model: CampaignPlayOpeningRuntimeModel): void {
     model.requested.providerId.length === 0 || model.requested.model.length === 0 ||
     model.requested.strategy !== "strict_object" ||
     !Number.isFinite(model.temperature) ||
-    !Number.isSafeInteger(model.maximumDurationMs) || model.maximumDurationMs < 1 ||
     !Number.isSafeInteger(model.maxOutputTokens) || model.maxOutputTokens < 1
   ) {
     throw new CampaignPlayOpeningRuntimeError(
@@ -614,7 +612,6 @@ export function createCampaignPlayOpeningRuntime(
                 startingConditions: admitted.startingConditions,
                 model: input.openingPlannerModel.languageModel,
                 temperature: input.openingPlannerModel.temperature,
-                maximumDurationMs: input.openingPlannerModel.maximumDurationMs,
                 maxOutputTokens: input.openingPlannerModel.maxOutputTokens,
                 signal: context.signal,
               });
@@ -648,13 +645,11 @@ export function createCampaignPlayOpeningRuntime(
               const plannerError = cause instanceof CampaignPlayOpeningPlannerError
                 ? cause
                 : null;
-              const errorCode = plannerError?.code === "stage_timeout"
-                ? "stage_timeout"
-                : plannerError?.code === "transport_interrupted"
-                  ? "provider_unavailable"
-                  : plannerError || cause instanceof CampaignPlayOpeningRuntimeError
-                    ? "model_contract_invalid"
-                    : "provider_unavailable";
+              const errorCode = plannerError?.code === "transport_interrupted"
+                ? "provider_unavailable"
+                : plannerError || cause instanceof CampaignPlayOpeningRuntimeError
+                  ? "model_contract_invalid"
+                  : "provider_unavailable";
               throw new CampaignPlayExternalStageInterruption(
                 interruptionEvidence(
                   input.openingPlannerModel.requested,

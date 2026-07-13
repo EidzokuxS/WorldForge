@@ -149,7 +149,6 @@ function openingProposal(): CampaignPlayOpeningProposal {
       actorId,
       primaryGoalId: goalId,
       cadenceMinutes: 15,
-      intent,
       steps: [{
         intent,
         observableTrace: suffix === "b"
