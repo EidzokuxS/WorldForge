@@ -512,6 +512,7 @@ const campaignPlayNarratorPacketBaseSchema =
     turnKind: z.enum(CAMPAIGN_TURN_KIND_VALUES),
     openingContext: campaignPlayOpeningContextSchema.nullable(),
     actionContext: campaignPlayActionContextSchema.nullable(),
+    sourceMoment: narrationTextSchema.nullable(),
     currentLocation: campaignPlayVisibleLocationSchema,
     visibleActors: z.array(campaignPlayVisibleActorSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visibleActors),
@@ -547,6 +548,13 @@ export const campaignPlayNarratorPacketSchema:
         code: "custom",
         path: ["actionContext"],
         message: "Action context belongs exactly to a player action turn.",
+      });
+    }
+    if ((packet.turnKind === "player_action") !== (packet.sourceMoment !== null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceMoment"],
+        message: "The exact prior public moment belongs to every player action and never to an opening.",
       });
     }
     if (packet.worldVersion < packet.acceptedWorldVersion) {

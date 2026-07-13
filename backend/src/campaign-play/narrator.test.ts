@@ -28,6 +28,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
       immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
     },
     actionContext: null,
+    sourceMoment: null,
     acceptedWorldVersion: 1,
     worldVersion: 5,
     runtimeRevision: 9,
@@ -283,6 +284,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("people in the current place who remain available to encounter");
     expect(prompt).toContain("Local gestures and stepping aside do not change placement");
     expect(prompt).toContain("do not claim that actor traveled to another place");
+    expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
+    expect(prompt).toContain("Every concrete claim in a beat must be supported");
+    expect(prompt).toContain("you may not decide that the ring is hollow or solid");
+    expect(prompt).toContain("An action_handoff may combine supported facts but must add no new fact");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
@@ -305,6 +310,7 @@ describe("Campaign Play narrator", () => {
         result: "setback" as const,
         clarificationQuestion: null,
       },
+      sourceMoment: "Cold rain crosses the harbor while Mara stands beside the shuttered gate.",
       elapsedMinutes: 5,
     };
     const invalid: CampaignPlayNarratorProposal = {

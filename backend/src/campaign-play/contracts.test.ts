@@ -212,6 +212,7 @@ function narratorPacketFixture(): CampaignPlayNarratorPacket {
     turnId: "turn_1",
     turnKind: "player_action",
     openingContext: null,
+    sourceMoment: "Rain threads across the bridge while the guards take position.",
     actionContext: {
       submittedText: "Watch the bridge from shelter.",
       intentKind: "observe",
@@ -1312,6 +1313,7 @@ describe("Campaign Play shared public contracts", () => {
       turnKind: "opening",
       openingContext,
       actionContext: null,
+      sourceMoment: null,
     }).success).toBe(true);
     expect(campaignPlayNarratorPacketSchema.safeParse({
       ...packet,

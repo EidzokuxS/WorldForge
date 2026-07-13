@@ -768,6 +768,7 @@ export function createCampaignPlayOpeningRuntime(
             visibility.projectTurn({
               token: context.token,
               actionContext: null,
+              sourceMoment: null,
               committedAt,
               mutationId: runtimeId("opening-visibility-projected", {
                 turnId: context.turn.turnId,

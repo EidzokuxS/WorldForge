@@ -526,6 +526,7 @@ function advanceOpeningToVisibility(
       arrivalMode: "On the last permitted ferry",
       immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
     },
+    sourceMoment: null,
     actionContext: null,
     currentLocation: {
       handle: "location_harbor",

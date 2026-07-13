@@ -1389,6 +1389,7 @@ describe("Campaign Play state repository transactions", () => {
       elapsedMinutes: 0,
       availableIntents: [],
       openingContext: null,
+      sourceMoment: "Rain threads across the bridge while the guards take position.",
       actionContext: {
         submittedText: "I wait and observe.",
         intentKind: "wait" as const,

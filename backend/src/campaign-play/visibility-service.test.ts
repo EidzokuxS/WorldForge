@@ -783,12 +783,14 @@ describe("Campaign Play visibility service", () => {
     const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
       token: fixture.visibilityToken,
       actionContext: null,
+      sourceMoment: null,
       committedAt: 1_650,
       mutationId: "visibility-projected",
     });
 
     expect(result.turn.stage).toBe("visibility_projected");
     expect(result.turn.finalWorldVersion).toBeNull();
+    expect(result.packet.sourceMoment).toBeNull();
     expect(result.packet.runtimeRevision).toBe(before.authority.runtimeRevision + 1);
     expect(result.packet.newObservations.map((entry) => entry.title).sort()).toEqual([
       "Along the route",
@@ -873,6 +875,7 @@ describe("Campaign Play visibility service", () => {
     expect(() => createCampaignPlayVisibilityService(fixture.handle).projectTurn({
       token: fixture.visibilityToken,
       actionContext: null,
+      sourceMoment: null,
       committedAt: 1_660,
       mutationId: "visibility-projected-retry",
     })).toThrowError(expect.objectContaining({ code: "visibility_turn_invalid" }));
@@ -997,6 +1000,7 @@ describe("Campaign Play visibility service", () => {
     const result = createCampaignPlayVisibilityService(fixture.handle).projectTurn({
       token: fixture.visibilityToken,
       actionContext: null,
+      sourceMoment: null,
       committedAt: 1_650,
       mutationId: "visibility-projected",
     });

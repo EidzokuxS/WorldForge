@@ -105,6 +105,7 @@ interface StoredObservationRow {
 export interface ProjectCampaignPlayVisibilityInput {
   token: CampaignPlayWorkerLeaseToken;
   actionContext: CampaignPlayActionContext | null;
+  sourceMoment: string | null;
   committedAt: number;
   mutationId: string;
 }
@@ -1127,6 +1128,7 @@ export function createCampaignPlayVisibilityService(
             })()
           : null,
         actionContext,
+        sourceMoment: input.sourceMoment,
         acceptedWorldVersion: state.acceptedWorldVersion,
         worldVersion: state.worldVersion,
         runtimeRevision: state.runtimeRevision + 1,

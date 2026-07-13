@@ -1366,6 +1366,8 @@ describe("Campaign Play player-action turn runtime", () => {
         status: string;
       };
     const packet = JSON.parse(narrationRow.packetJson) as CampaignPlayNarratorPacket;
+    const frozenAdmission = loadCampaignPlayPlayerActionAdmissionFrame(completed);
+    expect(packet.sourceMoment).toBe(frozenAdmission.sourceNarration.displayText);
     expect(packet.actionContext).toMatchObject({
       submittedText: request.text,
       disposition: "deterministic",
