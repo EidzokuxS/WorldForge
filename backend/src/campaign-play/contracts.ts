@@ -2000,6 +2000,7 @@ export const recordWorldEventCommandSchema = z.object({
   kind: z.literal("record_world_event"),
   eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
   summary: textSchema,
+  observableTrace: textSchema.nullable(),
   affectedRefs: z.array(campaignPlayEntityRefSchema)
     .min(1)
     .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
@@ -2488,6 +2489,7 @@ export const campaignPlayActorPlanStepSchema = z.object({
   stepId: idSchema,
   order: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.planSteps - 1),
   intent: campaignPlayActorIntentSchema,
+  observableTrace: shortTextSchema,
   elapsedBounds: campaignPlayElapsedBoundsSchema,
 }).strict();
 

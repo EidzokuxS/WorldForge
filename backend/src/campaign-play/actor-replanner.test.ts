@@ -146,7 +146,11 @@ function replanProposalFromPrompt(prompt: string) {
     cadenceMinutes: 15,
     priority: 4,
     intent,
-    steps: [{ intent, elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 } }],
+    steps: [{
+      intent,
+      observableTrace: "Fresh sealing wax flakes lie beside the open ledger case.",
+      elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
+    }],
   };
 }
 
@@ -221,6 +225,7 @@ function createReplanFixture(): {
             stepId: "actor-replanner-step",
             order: 0,
             intent,
+            observableTrace: "A ledger case stands open with fresh wax flakes beside it.",
             elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
           }]),
         );

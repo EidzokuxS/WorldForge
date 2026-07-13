@@ -73,6 +73,7 @@ describe("campaign play actor replan prompt", () => {
           method: "Question the watch",
           stakes: "The safe passage may close",
         },
+        observableTrace: "Fresh chalk marks interrupt the watch rota beside the gate.",
         elapsedBounds: { minimumMinutes: 5, maximumMinutes: 15 },
       }],
     };

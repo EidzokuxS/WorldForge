@@ -214,6 +214,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("Resolve only the exact PLAYER_INTENT");
     expect(String(options.prompt)).toContain("does not turn an unfamiliar actor into a fully cooperative informant");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
+    expect(String(options.prompt)).toContain("put it first in effects");
+    expect(String(options.prompt)).toContain("post-effect location");
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
     expect(String(options.prompt)).toContain("eventClass discovery");
@@ -393,6 +395,48 @@ describe("Campaign Play Game Master", () => {
     expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
       'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
     );
+  });
+
+  it("binds a movement result event to the destination after the move command", () => {
+    const moveRuling = ruling({
+      normalizedIntent: {
+        originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
+        kind: "move", targets: [{ handle: "passage", kind: "route" }],
+        method: "Cross the open passage", stakes: "Reach South Harbor",
+      },
+    });
+    const result = createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        { kind: "move_actor", exposure: { mode: "protected" } },
+        {
+          kind: "record_world_event",
+          eventClass: "scene",
+          summary: "The player reaches South Harbor.",
+          affectedHandles: ["you", "south"],
+        },
+      ],
+    });
+
+    expect(result.batch.commands[2]).toMatchObject({
+      kind: "record_world_event",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
+    });
+    expect(() => createCampaignPlayGameMaster().compile(frame(), moveRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        {
+          kind: "record_world_event",
+          eventClass: "scene",
+          summary: "The player reaches South Harbor.",
+          affectedHandles: ["you", "south"],
+        },
+        { kind: "move_actor", exposure: { mode: "protected" } },
+      ],
+    })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)("rejects %s output strategy", async (strategy) => {

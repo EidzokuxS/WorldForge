@@ -168,7 +168,7 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d"].map((suffix) => {
+  const actorPlans = ["a", "b", "c"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -189,7 +189,13 @@ function openingProposal(): CampaignPlayOpeningProposal {
       primaryGoalId: goalId,
       cadenceMinutes: 1_440,
       intent,
-      steps: [{ intent, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } }],
+      steps: [{
+        intent,
+        observableTrace: suffix === "b"
+          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
+          : "Fresh work marks show that someone acted here recently.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      }],
     };
   });
   return {
@@ -412,10 +418,6 @@ function gameMasterFixture() {
               eventClass: "dialogue",
               summary: "Mara tests the signal keepers' account against the ringing tower.",
               affectedHandles: [playerHandle, locationHandle],
-              exposure: {
-                mode: "projectable",
-                predicates: [{ channel: "direct_perception", anchorHandle: locationHandle }],
-              },
             }],
           },
         ),

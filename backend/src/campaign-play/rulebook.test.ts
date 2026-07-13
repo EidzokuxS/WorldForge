@@ -359,6 +359,7 @@ function ordinaryBatch() {
       writeScope: [],
       eventClass: "scene",
       summary: "The traveler reaches South Harbor with the repaired signal case.",
+      observableTrace: null,
       affectedRefs: [
         { kind: "actor", id: PLAYER_ID },
         { kind: "location", id: "location-b" },

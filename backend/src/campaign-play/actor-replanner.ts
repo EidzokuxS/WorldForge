@@ -299,6 +299,7 @@ function compilePlan(
     ? frame.goals.find((candidate) => candidate.id === goalRef.id && candidate.status === "active")
     : undefined;
   if (!goal) throw new CampaignPlayActorReplannerError("replan_state_invalid");
+  const actorName = frame.actor.name.toLowerCase();
   const resolveIntent = (intent: CampaignPlayActorReplanProposal["intent"]): CampaignPlayActorIntent => ({
     kind: intent.kind,
     targets: intent.targetHandles.map((targetHandle) => {
@@ -344,6 +345,12 @@ function compilePlan(
       stepId: stableId("actor-step", { planId, order }),
       order,
       intent: resolveIntent(step.intent),
+      observableTrace: (() => {
+        if (step.observableTrace.toLowerCase().includes(actorName)) {
+          throw new CampaignPlayActorReplannerError("replan_state_invalid");
+        }
+        return step.observableTrace;
+      })(),
       elapsedBounds: { ...step.elapsedBounds },
     })),
     status: "active",

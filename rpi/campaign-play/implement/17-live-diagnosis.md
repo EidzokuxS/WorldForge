@@ -74,3 +74,20 @@ Evidence bundle: `output/playtests/campaign-play/causal-20-glm52-brass-orchard-r
 Evidence-contract fix: accepted model-stage attempt numbers can exceed one after an explicit Resume. The bundle now records the accepted attempt and derives `retryUsed` from it. Budget overruns no longer prevent the artifact from being written; structural validation preserves the bundle and reports the overrun as an eligibility failure.
 
 Humanizer and deslop review: the diagnosis uses direct observations, timestamps, and measured totals. It avoids promotional language, generic conclusions, and invented intent. The only quoted prose is copied from the rendered playtest.
+
+### Movement exposure correction
+
+- Action 14 exposed an ordering bug in the earlier code-owned player exposure fix. The movement command placed the player in North Harbor, but the following `record_world_event` still anchored direct perception to the pre-turn Greyfork Bend placement.
+- Movement result events now bind to the canonical Judge destination. A move turn must put `move_actor` first, followed by any arrival event, so the exposure matches the post-command snapshot that earns it.
+- Prompt-craft review: the Game Master instruction now states one ordering invariant next to the existing code-authoritative movement rule. Humanizer and deslop review found no repeated rule or narrative-style steering; `post-effect location` names the mechanical ownership boundary directly.
+- Focused verification: `npx vitest run backend/src/campaign-play/game-master.test.ts` (20 passed), plus backend typecheck.
+
+### Autonomous-person agency correction
+
+- Opening planning, scheduling, actor-job authority, and topology eligibility now use one roster rule: every agent-controlled person participates regardless of `key`, `support`, or `background` role. Collectives remain world topology and narrative context, but they do not receive player-like plans or turns.
+- Every opening and replanned actor step now carries a required `observableTrace`. Code persists that trace with an autonomous event and gives an offscreen non-movement action a 1,440-minute local-aftermath window. Directly perceived actions remain direct; offscreen movement remains protected until another grounded channel reveals it.
+- Visibility no longer renders the generic `Something changed here before you arrived.` line for autonomous actor aftermath. It requires and publishes the persisted sensory trace; a missing trace is a projection error.
+- The hidden opening consequence must copy its actor plan's first trace exactly. This binds what can later be discovered to the step that actually executes rather than to a second, independently generated sentence.
+- Prompt-craft review: the opening and replan prompts state the trace field, sensory boundary, and actor roster once, next to the fields they govern. Humanizer and deslop review found no ornamental framing, synthetic enthusiasm, repeated conclusion, or player-facing style contamination; the terse technical register is intentional.
+- Verification: backend typecheck passed; the Campaign Play suite passed 343 tests after fixture migration, followed by focused Rulebook/state/turn-repository verification (85 passed). New focused assertions prove finite offscreen aftermath and exact trace rendering (10 passed).
+- Full backend verification reached 3,913 passing tests. Two cross-process SQLite race tests exceeded their five-second timeout under the full parallel suite and then hit Windows temp-directory cleanup locks; the same turn-repository file passed all 35 tests in isolation, so this is recorded as a suite-load limitation rather than a Campaign Play regression.

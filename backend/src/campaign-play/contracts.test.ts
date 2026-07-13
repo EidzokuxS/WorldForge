@@ -427,6 +427,7 @@ function commandFixtures(): RulebookBatchCommand[] {
       kind: "record_world_event",
       eventClass: "discovery",
       summary: "A fresh barricade appears at the bridge.",
+      observableTrace: null,
       affectedRefs: [{ kind: "route", id: "route_market" }],
     },
     {
@@ -599,6 +600,7 @@ function actorPlanFixture() {
         method: "on foot",
         stakes: null,
       },
+      observableTrace: "Fresh boot prints lead from the bridge toward the market.",
       elapsedBounds: { minimumMinutes: 10, maximumMinutes: 30 },
     }],
     status: "active" as const,

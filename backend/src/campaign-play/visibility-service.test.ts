@@ -129,7 +129,7 @@ function modelEvidence() {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d"].map((suffix) => {
+  const actorPlans = ["a", "b", "c"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -150,7 +150,13 @@ function openingProposal(): CampaignPlayOpeningProposal {
       primaryGoalId: goalId,
       cadenceMinutes: 15,
       intent,
-      steps: [{ intent, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } }],
+      steps: [{
+        intent,
+        observableTrace: suffix === "b"
+          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
+          : "Fresh work marks show that someone acted here recently.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      }],
     };
   });
   return {
@@ -460,6 +466,7 @@ function createVisibilityFixture(
           },
           eventClass: "discovery",
           summary: "Protected summary with hidden-cause-token.",
+          observableTrace: "Fresh scuff marks and a snapped seal remain beside the route board.",
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-c" },
@@ -483,6 +490,7 @@ function createVisibilityFixture(
           exposure: { mode: "protected" },
           eventClass: "dialogue",
           summary: "The player asks the nearby witness about hidden-cause-token and hidden-goal-token.",
+          observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-c" },
@@ -535,6 +543,7 @@ function createVisibilityFixture(
           },
           eventClass: "scene",
           summary: "A harbor worker tells the player that the signal lantern has failed.",
+          observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-player" },
             { kind: "actor", id: "actor-a" },
@@ -565,6 +574,7 @@ function createVisibilityFixture(
           },
           eventClass: "scene",
           summary: "Protected distant activity with hidden-distant-token.",
+          observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-c" },
             { kind: "location", id: "location-c" },
@@ -594,6 +604,7 @@ function createVisibilityFixture(
           },
           eventClass: "scene",
           summary: "Protected expired trace with hidden-expired-token.",
+          observableTrace: null,
           affectedRefs: [
             { kind: "actor", id: "actor-a" },
             { kind: "location", id: "location-a" },
@@ -803,6 +814,11 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
       "Mara Venn left for Glass Reef.",
     );
+    expect(result.packet.newObservations.map((entry) => entry.text)).toContain(
+      "Fresh scuff marks and a snapped seal remain beside the route board.",
+    );
+    expect(result.packet.newObservations.map((entry) => entry.text))
+      .not.toContain("Something changed here before you arrived.");
     expect(result.packet.currentLocation.name).toBe("North Harbor");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))

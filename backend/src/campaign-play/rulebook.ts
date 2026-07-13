@@ -360,7 +360,7 @@ function validateAuthority(
       || frame.worldTimeMinutes === null
       || !actor
       || actor.controller !== "agent"
-      || actor.role === "background"
+      || actor.kind !== "person"
     ) {
       deny("invalid_authority", "Actor jobs require one schedulable agent actor.");
     }

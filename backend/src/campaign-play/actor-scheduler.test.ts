@@ -116,9 +116,11 @@ function planJson(actorId: string, goalId: string, withLocationPrecondition: boo
       : []),
     stepsJson: canonicalizeCampaignPlayProjection([
       { stepId: `step-${actorId}-one`, order: 0, intent,
+        observableTrace: "Fresh work marks show that the objective advanced here.",
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       { stepId: `step-${actorId}-two`, order: 1,
         intent: { ...intent, method: "Continue the active goal" },
+        observableTrace: "A second set of fresh marks continues the same work.",
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 8 } },
     ]),
   };
@@ -268,6 +270,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
       expectedWorldVersion: ready.authority.worldVersion,
       eventClass: "scene" as const,
       summary: "The player watches the harbor.",
+      observableTrace: null,
       affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
       readScope: [{ kind: "actor" as const, id: "actor-player" }],
       writeScope: [],
@@ -395,11 +398,12 @@ describe("Campaign Play actor scheduler", () => {
         "actor-b", "actor-a", "actor-d",
       ]);
       expect(dueSet.decisions.map((decision) => decision.disposition)).toEqual([
-        "wake", "wake", "wake",
+        "wake", "wake", "skip",
       ]);
-      expect(dueSet.decisions[2]).toMatchObject({ dueReason: "agency_debt" });
+      expect(dueSet.decisions[2]).toMatchObject({ reason: "actor_ineligible" });
       expect(dueSet.decisions.some((decision) => decision.actorId === "actor-c")).toBe(false);
-      expect(dueSet.decisions.some((decision) => decision.actorId === "actor-d")).toBe(true);
+      expect(dueSet.decisions.some((decision) =>
+        decision.actorId === "actor-d" && decision.disposition === "skip")).toBe(true);
     },
   );
 
@@ -417,16 +421,21 @@ describe("Campaign Play actor scheduler", () => {
         admitted = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
       },
     });
-    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a", "actor-d"]);
-    expect(new Set(admitted.map((job) => job.jobId)).size).toBe(3);
+    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a"]);
+    expect(new Set(admitted.map((job) => job.jobId)).size).toBe(2);
     expect(admitted.every((job) => job.stage === "queued" && job.workerEpoch === 0)).toBe(true);
     expect(scheduler.loadDueSet("turn-player")).toEqual(dueSet);
     expect(() => handle.sqlite.prepare(`UPDATE campaign_play_actor_due_sets
       SET created_at = created_at + 1 WHERE turn_id = 'turn-player'`).run()).toThrow();
     expect(() => handle.sqlite.prepare(`DELETE FROM campaign_play_actor_due_sets
       WHERE turn_id = 'turn-player'`).run()).toThrow();
-    expect(freezeCurrent(handle).decisions.every((decision) =>
-      decision.disposition === "skip" && decision.reason === "already_considered_this_turn")).toBe(true);
+    expect(freezeCurrent(handle).decisions.map((decision) =>
+      [decision.actorId, decision.disposition,
+        "reason" in decision ? decision.reason : null])).toEqual([
+      ["actor-b", "skip", "already_considered_this_turn"],
+      ["actor-a", "skip", "already_considered_this_turn"],
+      ["actor-d", "skip", "actor_ineligible"],
+    ]);
 
     const before = structuredClone(admitted);
     handle.close();
@@ -547,11 +556,13 @@ describe("Campaign Play actor scheduler", () => {
         { stepId: "step-a-one", order: 0, intent: {
           kind: "attempt" as const, targets: [{ kind: "goal" as const, id: "goal-a" }],
           method: "Begin the active goal", stakes: "The actor's current objective",
-        }, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
+        }, observableTrace: "Fresh preparation marks the start of the work.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
         { stepId: "step-a-two", order: 1, intent: {
           kind: "attempt" as const, targets: [{ kind: "goal" as const, id: "goal-a" }],
           method: "Finish the active goal", stakes: "The actor's current objective",
-        }, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
+        }, observableTrace: "The completed work leaves fresh tool marks behind.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       ],
       status: "active" as const,
     };
@@ -638,7 +649,7 @@ describe("Campaign Play actor scheduler", () => {
       mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
     });
     expect(jobs.map((job) => [job.actorId, job.stage])).toEqual([
-      ["actor-b", "queued"], ["actor-a", "deferred"], ["actor-d", "queued"],
+      ["actor-b", "queued"], ["actor-a", "deferred"],
     ]);
     expect(jobs.find((job) => job.actorId === "actor-a")?.completedAt).toBe(1_600);
     expect(handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextAt,

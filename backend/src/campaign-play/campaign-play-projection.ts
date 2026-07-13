@@ -15,7 +15,6 @@ import {
 export type CampaignPlayEligibilityRequirementCode =
   | "active_actor_goal_missing"
   | "active_actor_placement_invalid"
-  | "collective_actor_missing"
   | "directed_routes_missing"
   | "key_person_missing"
   | "macro_location_unreachable"
@@ -321,7 +320,7 @@ function publicJournalEntry(entry: CampaignPlayJournalEntry): CampaignPlayJourna
 
 function activeAcceptedActors(review: CampaignWorldReview) {
   return review.actors.filter((actor) =>
-    actor.kind === "collective" || actor.role === "key" || actor.role === "support"
+    actor.controller === "agent" && actor.kind === "person"
   );
 }
 
@@ -456,10 +455,8 @@ export function projectAcceptedTopologyEligibility(
   const supportPeople = review.actors.filter((actor) =>
     actor.kind === "person" && actor.role === "support"
   );
-  const collectives = review.actors.filter((actor) => actor.kind === "collective");
   if (keyPeople.length < 1) unmet.add("key_person_missing");
   if (supportPeople.length < 2) unmet.add("support_people_below_minimum");
-  if (collectives.length < 1) unmet.add("collective_actor_missing");
 
   if (review.pressures.length < 2) unmet.add("pressures_below_minimum");
   const pressureAnchorKeys = uniqueSorted(

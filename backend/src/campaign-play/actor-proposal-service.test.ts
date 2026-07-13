@@ -145,9 +145,15 @@ function planJson(actorId: string, goalId: string) {
     preconditionsJson: canonicalizeCampaignPlayProjection([]),
     stepsJson: canonicalizeCampaignPlayProjection([
       { stepId: `step-${actorId}-one`, order: 0, intent,
+        observableTrace: move
+          ? "Fresh wet wheel tracks end beside the reef ledger office."
+          : "Fresh work marks show that the objective advanced here.",
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } },
       { stepId: `step-${actorId}-two`, order: 1,
         intent: { ...intent, method: move ? "Return with the route answer" : "Continue the active goal" },
+        observableTrace: move
+          ? "New wheel ruts turn back from the ledger office."
+          : "A second set of fresh marks continues the same work.",
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 8 } },
     ]),
   };
@@ -374,6 +380,36 @@ describe("Campaign Play actor proposal service", () => {
     });
     expect(unrelatedActorSummary).not.toBe(TEST_EXPOSURE_SEED.summary);
     expect(unrelatedActorSummary).toContain("Advance the active goal");
+  });
+
+  it("leaves a finite sensory aftermath for an offscreen autonomous action", () => {
+    const { handle, token } = createReadyFixture();
+    let actorCommand: unknown = null;
+
+    processDueActors(createCampaignPlayActorProposalService(handle, {
+      now: () => 1_700,
+    }), {
+      turnId: token.turnId,
+      token,
+      createdAt: 1_700,
+      openingExposureSeed: TEST_EXPOSURE_SEED,
+      beforeSettlement(proposal) {
+        if (proposal.actorId === "actor-a") actorCommand = proposal.commands[0];
+      },
+    });
+
+    expect(actorCommand).toMatchObject({
+      kind: "record_world_event",
+      observableTrace: "Fresh work marks show that the objective advanced here.",
+      exposure: {
+        mode: "projectable",
+        predicates: [{
+          channel: "local_aftermath",
+          locationId: "location-a",
+          validUntilWorldTimeMinutes: 1_440,
+        }],
+      },
+    });
   });
 
   it("rejects detached stale work with zero proposal mutation and one debt-bearing retry", () => {

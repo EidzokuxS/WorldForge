@@ -644,7 +644,19 @@ function publicEntry(
     }
   } else if (exposure.channel === "local_aftermath") {
     title = "Signs of change";
-    text = openingTrace ?? "Something changed here before you arrived.";
+    if (openingTrace !== null) {
+      text = openingTrace;
+    } else if (eventSource.kind === "actor" && exposure.commandKind === "record_world_event") {
+      if (typeof commandPayload.observableTrace !== "string") {
+        throw new CampaignPlayVisibilityError(
+          "visibility_projection_invalid",
+          "An autonomous actor aftermath requires its persisted observable trace.",
+        );
+      }
+      text = commandPayload.observableTrace;
+    } else {
+      text = "Something changed here before you arrived.";
+    }
     cue = "visible_aftermath";
   } else if (exposure.channel === "route_state") {
     title = "Along the route";

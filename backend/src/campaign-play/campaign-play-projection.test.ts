@@ -103,12 +103,23 @@ function acceptedReviewFixture(): CampaignWorldReview {
         traits: ["pragmatic"],
         tags: ["trade"],
       },
+      {
+        id: "actor:background",
+        kind: "person" as const,
+        controller: "agent" as const,
+        role: "background" as const,
+        name: "Toma",
+        summary: "A dock sweeper clearing storm debris.",
+        traits: ["quiet"],
+        tags: ["harbor"],
+      },
     ],
     goals: [
       { id: "goal:key", actorId: "actor:key", objective: "Keep the road open.", motivation: "Preserve order.", horizon: "ongoing" as const, priority: 5 as const, status: "active" as const },
       { id: "goal:support-a", actorId: "actor:support-a", objective: "Protect the crews.", motivation: "Mutual duty.", horizon: "immediate" as const, priority: 3 as const, status: "active" as const },
       { id: "goal:support-b", actorId: "actor:support-b", objective: "Map safe crossings.", motivation: "Keep neighbors alive.", horizon: "immediate" as const, priority: 4 as const, status: "active" as const },
       { id: "goal:collective", actorId: "actor:collective", objective: "Control harbor traffic.", motivation: "Retain leverage.", horizon: "ongoing" as const, priority: 4 as const, status: "active" as const },
+      { id: "goal:background", actorId: "actor:background", objective: "Clear the ferry passage.", motivation: "Keep the docks usable.", horizon: "immediate" as const, priority: 2 as const, status: "active" as const },
     ],
     relations: [
       { id: "relation:one", sourceActorId: "actor:key", targetActorId: "actor:collective", relationType: "rivalry" as const, summary: "They contest road tolls.", intensity: 4 as const },
@@ -120,6 +131,7 @@ function acceptedReviewFixture(): CampaignWorldReview {
       { id: "placement:support-a", actorId: "actor:support-a", locationId: "location:harbor", placementKind: "present" as const },
       { id: "placement:support-b", actorId: "actor:support-b", locationId: "location:marsh", placementKind: "present" as const },
       { id: "placement:collective", actorId: "actor:collective", locationId: "location:ridge", placementKind: "base" as const },
+      { id: "placement:background", actorId: "actor:background", locationId: "location:harbor", placementKind: "present" as const },
     ],
     pressures: [
       { id: "pressure:harbor", name: "Dock strike", description: "Crews refuse unsafe work.", trajectory: "Traffic stops.", urgency: 4 as const, actorIds: ["actor:support-a"], locationIds: ["location:harbor"] },
@@ -201,7 +213,7 @@ describe("accepted topology eligibility", () => {
       unmetRequirements: [],
       openingLocationId: "location:harbor",
       reachableMacroLocationIds: ["location:harbor", "location:marsh", "location:ridge"],
-      activeActorIds: ["actor:collective", "actor:key", "actor:support-a", "actor:support-b"],
+      activeActorIds: ["actor:background", "actor:key", "actor:support-a", "actor:support-b"],
       exposurePath: {
         fromLocationId: "location:harbor",
         toLocationId: "location:ridge",
@@ -277,7 +289,6 @@ describe("accepted topology eligibility", () => {
 
     expect(result.projection.eligible).toBe(false);
     expect(result.projection.unmetRequirements).toEqual([
-      "collective_actor_missing",
       "directed_routes_missing",
       "key_person_missing",
       "macro_location_unreachable",

@@ -70,6 +70,7 @@ const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
 
 const openingPlanStepProposalSchema = z.object({
   intent: campaignPlayActorIntentSchema,
+  observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.shortText),
   elapsedBounds: campaignPlayElapsedBoundsSchema,
 }).strict();
 
@@ -435,7 +436,7 @@ function actorLocations(
 
 function eligibleActors(world: CampaignWorldReview) {
   return world.actors
-    .filter((actor) => actor.kind === "collective" || actor.role === "key" || actor.role === "support")
+    .filter((actor) => actor.controller === "agent" && actor.kind === "person")
     .sort((left, right) => compareText(left.id, right.id));
 }
 
@@ -611,7 +612,12 @@ function compilePlans(
     const locationIds = actorLocations(world, actor.id);
     if (locationIds.length === 0) fail("opening_proposal_invalid");
     validateIntent(world, locationIds, proposed.intent);
-    proposed.steps.forEach((step) => validateIntent(world, locationIds, step.intent));
+    proposed.steps.forEach((step) => {
+      validateIntent(world, locationIds, step.intent);
+      if (step.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
+        fail("opening_proposal_invalid");
+      }
+    });
 
     const primaryGoal = goals.find((goal) => goal.id === proposed.primaryGoalId)!;
     const planId = stableId("plan", {
@@ -640,6 +646,7 @@ function compilePlans(
         stepId: stableId("step", { planId, order, step }),
         order,
         intent: step.intent,
+        observableTrace: step.observableTrace,
         elapsedBounds: step.elapsedBounds,
       })),
       status: "active",
@@ -812,8 +819,7 @@ function compileExposureSeed(
   const world = frame.acceptedWorld;
   const hidden = proposal.hiddenConsequence;
   const actor = world.actors.find((value) =>
-    value.id === hidden.actorId
-    && (value.kind === "collective" || value.role === "key" || value.role === "support"));
+    value.id === hidden.actorId && value.controller === "agent" && value.kind === "person");
   const goal = world.goals.find((value) =>
     value.id === hidden.goalId && value.actorId === hidden.actorId && value.status === "active");
   const locationIds = actor ? actorLocations(world, actor.id) : [];
@@ -824,6 +830,7 @@ function compileExposureSeed(
     || !goal
     || !plan
     || plan.goalId !== goal.id
+    || plan.steps[0]?.observableTrace !== hidden.observableTrace
     || !locationIds.includes(locationId)
     || locationId === narratorFacts.location.id
   ) {

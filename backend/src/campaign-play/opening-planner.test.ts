@@ -176,6 +176,15 @@ function worldFixture(): CampaignWorldReview {
         priority: 4,
         status: "active",
       },
+      {
+        id: "goal-background-clear",
+        actorId: "actor-background",
+        objective: "Clear the storm debris before the next ferry.",
+        motivation: "Keep the harbor passage usable.",
+        horizon: "immediate",
+        priority: 2,
+        status: "active",
+      },
     ],
     relations: [
       {
@@ -283,6 +292,7 @@ function actorPlan(
   primaryGoalId: string,
   goalIds: string[],
   extraTargets: Array<{ kind: "location" | "route" | "actor"; id: string }> = [],
+  observableTrace = "Fresh work marks show that someone acted here recently.",
 ) {
   const planIntent = intent([
     ...goalIds.map((id) => ({ kind: "goal" as const, id })),
@@ -295,6 +305,7 @@ function actorPlan(
     intent: planIntent,
     steps: [{
       intent: planIntent,
+      observableTrace,
       elapsedBounds: { minimumMinutes: 5, maximumMinutes: 30 },
     }],
   };
@@ -325,8 +336,9 @@ function proposalFixture(): CampaignPlayOpeningProposal {
         "goal-bells-explain",
         ["goal-bells-explain"],
         [{ kind: "location", id: "location-bells" }],
+        "The storm bell's fresh strike pattern conflicts with the clear horizon.",
       ),
-      actorPlan("actor-council", "goal-council-control", ["goal-council-control"]),
+      actorPlan("actor-background", "goal-background-clear", ["goal-background-clear"]),
     ],
     hiddenConsequence: {
       actorId: "actor-bell-tender",
@@ -404,7 +416,9 @@ describe("Campaign Play opening planner", () => {
     expect(first.artifact.actorPlans).toHaveLength(4);
     expect(first.artifact.actorSchedules).toHaveLength(4);
     expect(first.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-background")).toBe(false);
+      plan.actorId === "actor-background")).toBe(true);
+    expect(first.artifact.actorPlans.some((plan) =>
+      plan.actorId === "actor-council")).toBe(false);
     expect(first.artifact.actorSchedules.find((schedule) =>
       schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
     expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(3);
@@ -504,7 +518,7 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("requires one plan for every eligible actor and no background plan", () => {
+  it("requires one plan for every agent person and excludes collectives", () => {
     const missing = proposalFixture();
     missing.actorPlans.pop();
     expect(() => createCampaignPlayOpeningPlanner().compile(
@@ -512,7 +526,9 @@ describe("Campaign Play opening planner", () => {
     )).toThrow(CampaignPlayOpeningPlannerError);
 
     const extra = proposalFixture();
-    extra.actorPlans.push(actorPlan("actor-background", "goal-courier-deliver", ["goal-courier-deliver"]));
+    extra.actorPlans.push(actorPlan(
+      "actor-council", "goal-council-control", ["goal-council-control"],
+    ));
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, extra,
     )).toThrow(CampaignPlayOpeningPlannerError);
@@ -656,7 +672,7 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("uses every collective base and influence placement for reachability", () => {
+  it("keeps collectives in world topology without creating collective plans", () => {
     const world = worldFixture();
     world.placements.push({
       id: "placement-council-influence",
@@ -666,15 +682,11 @@ describe("Campaign Play opening planner", () => {
     });
     world.routes = world.routes.filter((route) => route.id !== "route-bells-harbor");
     const proposal = proposalFixture();
-    proposal.actorPlans[3] = actorPlan(
-      "actor-council",
-      "goal-council-control",
-      ["goal-council-control"],
-      [{ kind: "location", id: "location-reef" }],
-    );
-    expect(() => createCampaignPlayOpeningPlanner().compile(
+    const result = createCampaignPlayOpeningPlanner().compile(
       frameFixture(world), chosenConditions, proposal,
-    )).not.toThrow();
+    );
+    expect(result.artifact.actorPlans.some((plan) =>
+      plan.actorId === "actor-council")).toBe(false);
   });
 
   it("accepts a route-state exposure tied to the hidden actor's first step", () => {
@@ -684,6 +696,7 @@ describe("Campaign Play opening planner", () => {
       "goal-bells-explain",
       ["goal-bells-explain"],
       [{ kind: "route", id: "route-harbor-reef" }],
+      proposal.hiddenConsequence.observableTrace,
     );
     proposal.hiddenConsequence.exposure = {
       channel: "route_state",
@@ -703,6 +716,7 @@ describe("Campaign Play opening planner", () => {
       "goal-bells-explain",
       ["goal-bells-explain"],
       [{ kind: "actor", id: "actor-courier" }],
+      proposal.hiddenConsequence.observableTrace,
     );
     proposal.hiddenConsequence.exposure = {
       channel: "witness_report",
@@ -795,7 +809,9 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
     expect(prompt).toContain('"actorLocationIds":["location-bells"]');
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
-    expect(prompt).toContain("A collective remains required even when its actorRole is background");
+    expect(prompt).toContain("Every agent-controlled person is planned regardless of role");
+    expect(prompt).toContain("Do not create a plan for a collective");
+    expect(prompt).toContain("observableTrace");
     expect(prompt).toContain("The hidden location must differ from start.locationId");
     expect(prompt).toContain("Set routeId to scene.routeId");
     expect(prompt).toContain("Set witnessActorId to scene.supportActorId");

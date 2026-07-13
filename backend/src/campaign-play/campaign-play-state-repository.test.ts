@@ -817,6 +817,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
         kind: "record_world_event" as const,
         eventClass: "scene" as const,
         summary: "The traveler crosses as passage controls tighten.",
+        observableTrace: null,
         affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
         readScope: [{ kind: "actor" as const, id: "actor-player" }],
         writeScope: [],
@@ -966,6 +967,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
       exposure: { mode: "protected" as const },
       eventClass: "scene" as const,
       summary: "A duplicate batch must never append a second ledger.",
+      observableTrace: null,
       affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
     };
     const duplicatePreflight = preflightCampaignPlayRulebook({

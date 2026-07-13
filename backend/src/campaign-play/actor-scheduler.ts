@@ -183,7 +183,7 @@ interface DueRow {
   cadenceMinutes: number;
   planStatus: string;
   actorController: string;
-  actorRole: string;
+  actorKind: string;
   incapacitated: number;
   currentTurnJob: number;
   pendingJob: number;
@@ -290,7 +290,7 @@ function dueRows(
     SELECT s.schedule_id AS scheduleId, s.actor_id AS actorId, s.plan_id AS planId,
       s.next_act_at_world_time_minutes AS nextActAtWorldTimeMinutes,
       s.priority, s.agency_debt AS agencyDebt, p.cadence_minutes AS cadenceMinutes,
-      p.status AS planStatus, a.controller AS actorController, a.role AS actorRole,
+      p.status AS planStatus, a.controller AS actorController, a.kind AS actorKind,
       EXISTS (
         SELECT 1 FROM campaign_play_actor_conditions c
         WHERE c.campaign_id = s.campaign_id AND c.actor_id = s.actor_id
@@ -336,7 +336,7 @@ function makeDecision(
   if (row.pendingJob === 1) {
     return { ...base, disposition: "skip", reason: "pending_job" };
   }
-  if (row.actorController !== "agent" || row.actorRole === "background") {
+  if (row.actorController !== "agent" || row.actorKind !== "person") {
     return { ...base, disposition: "skip", reason: "actor_ineligible" };
   }
   const dueReason: CampaignPlayActorDueReason = row.planStatus !== "active"
@@ -534,8 +534,7 @@ export function createCampaignPlayActorScheduler(
       const planActorIds = plans.map((plan) => plan.actorId);
       const scheduleActorIds = schedules.map((schedule) => schedule.actorId);
       const eligibleActorIds = (handle.sqlite.prepare(`SELECT id FROM actors
-        WHERE campaign_id = ? AND controller = 'agent'
-          AND (kind = 'collective' OR role IN ('key', 'support'))
+        WHERE campaign_id = ? AND controller = 'agent' AND kind = 'person'
         ORDER BY id`).all(handle.campaignId) as Array<{ id: string }>).map((row) => row.id);
       if (
         plans.length === 0 || plans.length !== schedules.length ||
@@ -1085,7 +1084,7 @@ export function createCampaignPlayActorScheduler(
       }
       const plan = planFromRow(planRow);
       const actor = state.acceptedReview.actors.find((candidate) => candidate.id === job.actorId);
-      if (!actor || actor.controller !== "agent" || actor.role === "background") {
+      if (!actor || actor.controller !== "agent" || actor.kind !== "person") {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
       const placements = handle.sqlite.prepare(`SELECT id, actor_id AS actorId,

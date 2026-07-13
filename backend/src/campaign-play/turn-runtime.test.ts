@@ -179,7 +179,7 @@ function acceptWorld(): void {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c", "d"].map((suffix) => {
+  const actorPlans = ["a", "b", "c"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -200,7 +200,13 @@ function openingProposal(): CampaignPlayOpeningProposal {
       primaryGoalId: goalId,
       cadenceMinutes: 1,
       intent,
-      steps: [{ intent, elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 } }],
+      steps: [{
+        intent,
+        observableTrace: suffix === "b"
+          ? "Fresh sealing wax and torn binding thread mark a ledger removed in haste."
+          : "Fresh work marks show that someone acted here recently.",
+        elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      }],
     };
   });
   return {
@@ -529,10 +535,6 @@ function gameMasterFixture() {
               eventClass: "dialogue",
               summary: "Mara tests the signal keepers' account against the ringing tower.",
               affectedHandles: [playerHandle, locationHandle],
-              exposure: {
-                mode: "projectable",
-                predicates: [{ channel: "direct_perception", anchorHandle: locationHandle }],
-              },
             }],
           },
         ),
@@ -660,7 +662,11 @@ function actorReplanProposalFromPrompt(prompt: string) {
     cadenceMinutes: 15,
     priority: 4,
     intent,
-    steps: [{ intent, elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 } }],
+    steps: [{
+      intent,
+      observableTrace: "Fresh archive tabs mark a recently checked signal ledger.",
+      elapsedBounds: { minimumMinutes: 2, maximumMinutes: 10 },
+    }],
   };
 }
 
@@ -1310,6 +1316,11 @@ describe("Campaign Play player-action turn runtime", () => {
             channel: "local_aftermath",
             locationId: "location-a",
             validUntilWorldTimeMinutes: 4,
+          },
+          {
+            channel: "local_aftermath",
+            locationId: "location-a",
+            validUntilWorldTimeMinutes: 1_441,
           },
         ]);
   });
