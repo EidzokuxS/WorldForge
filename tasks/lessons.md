@@ -32,6 +32,7 @@
 - For manual UI playtests, use the in-app browser when it is available; reserve external browser automation for headless regression artifacts or explicit requests.
 - In `feat/revamp`, legacy code is quarantine reference: mechanics player paths, APIs, and UI land on mechanics-owned routes with explicit adapter boundaries for legacy data shapes.
 - At an adapter boundary, align required and optional field semantics explicitly. Preserve valid unknown values instead of inventing defaults or making successful upstream output pass only by chance.
+- When server and client duplicate runtime validation, update both validators and add one shared-shape round-trip fixture in the same change.
 - Workstream and version labels are internal bookkeeping. Player-facing routes, UI text, current files, symbols, test titles, helpers, and acceptance gates use domain outcomes from the AGENTS naming convention.
 - Treat `R:\Projects\SillytavernUpgrade\TarotEngine\Marinara-Engine` as WorldForge's sibling reference when the owner says TarotEngine. Inspect the local sibling and its git state before considering public repositories with the same name.
 - Background campaign work owns a dedicated campaign-scoped SQLite handle for its full lifetime. The global active-campaign connection can close or switch independently.

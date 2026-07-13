@@ -350,6 +350,29 @@ describe("Campaign Play API", () => {
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
   });
 
+  it("accepts unknown optional character descriptors without client-side defaults", async () => {
+    const optionalDraft = structuredClone(draft);
+    optionalDraft.species = "";
+    optionalDraft.gender = "";
+    optionalDraft.ageText = "";
+    optionalDraft.appearance = "";
+    optionalDraft.personality = {
+      summary: "",
+      voice: "",
+      decisionStyle: "",
+      worldview: "",
+      contradictions: ["x".repeat(300)],
+      mythology: "",
+      sampleLines: ["y".repeat(300)],
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ draft: optionalDraft })));
+
+    await expect(generateCampaignPlayPlayerDraft("campaign-1", {
+      prompt: "An outsider whose age and origin are unspecified.",
+      research: null,
+    })).resolves.toEqual({ draft: optionalDraft });
+  });
+
   it("parses chunked LF and CRLF records, suppresses exact duplicates, and returns the terminal event", async () => {
     const progressed: CampaignPlaySseEvent = {
       sequence: 3,

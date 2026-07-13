@@ -173,6 +173,17 @@ function isBoundedString(
     [...value].every((character) => options.characters?.includes(character));
 }
 
+function isOptionalBoundedString(
+  value: unknown,
+  maximum: number,
+  options: { singleLine: boolean },
+): value is string {
+  return typeof value === "string" &&
+    value.length <= maximum &&
+    value === value.trim() &&
+    (!options.singleLine || (!value.includes("\n") && !value.includes("\r")));
+}
+
 function isId(value: unknown): value is string {
   return isBoundedString(value, CAMPAIGN_PLAY_LIMITS.id, {
     singleLine: true,
@@ -195,8 +206,20 @@ function isLabel(value: unknown): value is string {
   return isBoundedString(value, CAMPAIGN_PLAY_LIMITS.label, { singleLine: true });
 }
 
+function isOptionalLabel(value: unknown): value is string {
+  return isOptionalBoundedString(value, CAMPAIGN_PLAY_LIMITS.label, { singleLine: true });
+}
+
+function isShortText(value: unknown): value is string {
+  return isBoundedString(value, CAMPAIGN_PLAY_LIMITS.shortText, { singleLine: true });
+}
+
 function isText(value: unknown): value is string {
   return isBoundedString(value, CAMPAIGN_PLAY_LIMITS.text, { singleLine: false });
+}
+
+function isOptionalText(value: unknown): value is string {
+  return isOptionalBoundedString(value, CAMPAIGN_PLAY_LIMITS.text, { singleLine: false });
 }
 
 function isNarrationBeatText(value: unknown): value is string {
@@ -735,10 +758,10 @@ function parseCharacterDraft(value: unknown): CampaignPlayCharacterDraft | null 
     ]) ||
     !isName(value.name) ||
     !isText(value.summary) ||
-    !isLabel(value.species) ||
-    !isLabel(value.gender) ||
-    !isLabel(value.ageText) ||
-    !isText(value.appearance) ||
+    !isOptionalLabel(value.species) ||
+    !isOptionalLabel(value.gender) ||
+    !isOptionalLabel(value.ageText) ||
+    !isOptionalText(value.appearance) ||
     !isText(value.biography) ||
     !isObject(value.personality) ||
     !hasExactKeys(value.personality, [
@@ -750,11 +773,11 @@ function parseCharacterDraft(value: unknown): CampaignPlayCharacterDraft | null 
       "mythology",
       "sampleLines",
     ]) ||
-    !isText(value.personality.summary) ||
-    !isText(value.personality.voice) ||
-    !isText(value.personality.decisionStyle) ||
-    !isText(value.personality.worldview) ||
-    !isText(value.personality.mythology) ||
+    !isOptionalText(value.personality.summary) ||
+    !isOptionalText(value.personality.voice) ||
+    !isOptionalText(value.personality.decisionStyle) ||
+    !isOptionalText(value.personality.worldview) ||
+    !isOptionalText(value.personality.mythology) ||
     !isObject(value.source) ||
     !hasExactKeys(value.source, ["kind", "importMode", "label"]) ||
     !isOneOf(value.source.kind, CAMPAIGN_PLAY_CHARACTER_SOURCE_VALUES) ||
@@ -764,7 +787,6 @@ function parseCharacterDraft(value: unknown): CampaignPlayCharacterDraft | null 
     return null;
   }
   const labelLists = [
-    value.personality.contradictions,
     value.motives,
     value.beliefs,
     value.drives,
@@ -779,8 +801,13 @@ function parseCharacterDraft(value: unknown): CampaignPlayCharacterDraft | null 
       parseArray(list, (item) => isLabel(item) ? item : null, CAMPAIGN_PLAY_LIMITS.characterList) === null,
     ) ||
     parseArray(
+      value.personality.contradictions,
+      (item) => isShortText(item) ? item : null,
+      CAMPAIGN_PLAY_LIMITS.characterList,
+    ) === null ||
+    parseArray(
       value.personality.sampleLines,
-      (item) => isText(item) ? item : null,
+      (item) => isShortText(item) ? item : null,
       CAMPAIGN_PLAY_LIMITS.characterList,
     ) === null ||
     parseArray(value.skills, (item) => {
