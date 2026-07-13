@@ -17,3 +17,20 @@
 - The previously accepted clean-14 first-playable bundle remains valid and promotion-eligible under the updated validator.
 
 The next execution step is a clone-based 20-action GLM 5.2 rehearsal. It is diagnostic preparation, not the fresh-campaign acceptance lane required by Task 17.
+
+## Clone rehearsal: actions 1-6
+
+- Run `causal-20-glm52-brass-orchard-rehearsal-01` uses isolated clone `brass-orchard-longroad-pristine-d59fa3a4`, GLM 5.2 through Z.AI Coding Plan, and the manual browser path.
+- Reload checkpoints after actions 1 and 5 matched exactly. The action-5 checkpoint hash is `31b61f079cdc18b23d82e58c9d3c1f5a9d8f712aca1eafb64da022cc95a68455`.
+- Actions 1-4 stayed peripheral. The prose remained grounded but repeatedly described a static yard; action 4 ended with the player-centred line that the junction waited for the player to act.
+- Action 5 reached Windcleft and surfaced a persisted, off-screen aftermath from Day 1, 01:00: fresh-dug soil, grey-streaked roots, a half-filled seed sack, and a dated skull mark. This satisfies the by-action-5 causal-discovery condition.
+- The manual player accidentally duplicated the name and profession of an existing background actor. SQLite confirms separate actor IDs for background `Maren` and human `Maren Tolven`; the run remains mechanically valid but its naming semantics are contaminated.
+- Action 6 exposed a reproducible Game Master contract defect. Two GLM proposals for a dialogue were schema-valid but selected a location exposure outside the command grounding, so Rulebook correctly interrupted both with `invalid_exposure`.
+- `record_world_event` no longer accepts model-authored exposure. Campaign Play derives one `direct_perception` predicate from the human player's durable `present` placement. The same interrupted turn completed after backend restart and explicit Resume.
+
+Prompt review: prompt-craft identified redundant model authority over a code-owned location anchor. The revised instruction states the exact `record_world_event` fields and tells the model to omit exposure. Humanizer and deslop review found no ornamental framing, filler, duplicated rule, or ambiguous retry language; the technical register is intentionally direct.
+
+Focused verification:
+
+- `npx vitest run backend/src/campaign-play/game-master.test.ts` (19 passed)
+- `npm --prefix backend run typecheck`

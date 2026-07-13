@@ -102,6 +102,7 @@
 - Bind an opening exposure seed to the exact actor plan and primary goal that will execute it. Actor-only matching can accept an unreachable consequence when one actor has multiple active goals.
 - A graph-distance discoverability promise must control the single curated travel choice while its exact aftermath remains unseen; merely listing the correct route elsewhere in the scene does not make the promised player path reliable.
 - For strict model objects, list the exact top-level keys in the prompt and forbid any observed near-synonym. A supplied JSON schema alone may not prevent semantic key renaming.
+- Before creating a manual playtest character, inspect the accepted cast for names, roles, and defining professions. Use a distinct player concept so duplicate identities do not contaminate narrative-quality evidence.
 
 ## Evidence Handling
 

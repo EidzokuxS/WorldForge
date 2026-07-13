@@ -134,7 +134,6 @@ const proposal = {
     eventClass: "dialogue" as const,
     summary: "The player asks the guard about the passage.",
     affectedHandles: ["you", "guard"],
-    exposure: { mode: "projectable" as const, predicates: [{ channel: "direct_perception" as const, anchorHandle: "here" }] },
   }],
 };
 
@@ -179,7 +178,8 @@ describe("Campaign Play Game Master", () => {
     expect(first.batch.commands[0]).toMatchObject({ kind: "advance_world_time", elapsedMinutes: 1, order: 0,
       source: { kind: "system", system: "game_master" }, expectedWorldVersion: 7 });
     expect(first.batch.commands[1]).toMatchObject({ kind: "record_world_event", order: 1,
-      expectedWorldVersion: 8, readScope: [{ kind: "actor", id: PLAYER_ID }, { kind: "actor", id: "actor-guard" }] });
+      expectedWorldVersion: 8, readScope: [{ kind: "actor", id: PLAYER_ID }, { kind: "actor", id: "actor-guard" }],
+      exposure: { mode: "projectable", predicates: [{ channel: "direct_perception", locationId: "location-a" }] } });
     expect(first.batch.commands[1]!.causalParent).toEqual({ kind: "command", commandId: first.batch.commands[0]!.commandId });
   });
 
@@ -202,7 +202,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain("This includes affectedHandles");
     expect(String(options.prompt)).toContain("affectedHandles must not repeat a handle");
-    expect(String(options.prompt)).toContain("every exposure predicate anchorHandle");
+    expect(String(options.prompt)).toContain("every model-authored exposure predicate anchorHandle");
     expect(String(options.prompt)).toContain("route_state anchorHandle requires route");
     expect(String(options.prompt)).toContain("witness_report anchorHandle requires actor");
     expect(String(options.prompt)).toContain(
@@ -217,6 +217,7 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT=null");
     expect(String(options.prompt)).toContain("Never return an empty effects array");
     expect(String(options.prompt)).toContain("eventClass discovery");
+    expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
   });
@@ -290,6 +291,10 @@ describe("Campaign Play Game Master", () => {
     const gameMaster = createCampaignPlayGameMaster();
     expect(() => gameMaster.compile(frame(), ruling(), resolution, null, {
       ...proposal, effects: [{ ...proposal.effects[0], affectedHandles: ["hidden-actor"] }],
+    })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => gameMaster.compile(frame(), ruling(), resolution, null, {
+      ...proposal,
+      effects: [{ ...proposal.effects[0], exposure: { mode: "protected" } }],
     })).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => gameMaster.compile(frame(), ruling(), resolution, null, {
       ...proposal, effects: [{ kind: "delete_actor", actorHandle: "guard", exposure: { mode: "protected" } }],
