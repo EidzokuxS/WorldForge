@@ -786,6 +786,7 @@ function currentGameMasterFrame(
   return {
     admission,
     frame: {
+      sourceMoment: admission.sourceNarration.displayText,
       visibleFacts: admission.visibleFacts,
       handleBindings: admission.handleBindings,
       actorContinuity: loadCampaignPlayActorContinuity(
@@ -1295,6 +1296,7 @@ export function createCampaignPlayTurnRuntime(
                   playerActorHandle: admission.player.actorHandle,
                   locationHandle: admission.sourcePacket.currentLocation.handle,
                   worldTimeMinutes: admission.worldTimeMinutes,
+                  sourceMoment: admission.sourceNarration.displayText,
                   visibleFacts: admission.visibleFacts,
                   actorContinuity: current.frame.actorContinuity,
                 }),

@@ -51,6 +51,7 @@ function world(): CampaignWorldReview {
 
 function frame(): CampaignPlayGameMasterFrame {
   return {
+    sourceMoment: "Oren paints a fresh white line across the passage latch.",
     visibleFacts: [
       { handle: "you", kind: "actor", summary: "You stand by the gate." },
       { handle: "guard", kind: "actor", summary: "A guard waits nearby." },
@@ -203,6 +204,11 @@ describe("Campaign Play Game Master", () => {
       retries: 1, abortSignal: workerController.signal });
     expect("timeout" in options).toBe(false);
     expect(String(options.prompt)).toContain("opaque handles");
+    expect(String(options.prompt)).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
+    expect(String(options.prompt)).toContain(
+      'SOURCE_MOMENT="Oren paints a fresh white line across the passage latch."',
+    );
+    expect(String(options.prompt)).toContain("Do not change that detail's origin, age, owner, location, or state");
     expect(String(options.prompt)).toContain(
       'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal"]',
     );

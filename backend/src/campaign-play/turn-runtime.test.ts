@@ -950,6 +950,8 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({ stage: "primary_settled" });
     expect(judge.judge).toHaveBeenCalledTimes(1);
     expect(gameMaster.plan).toHaveBeenCalledTimes(1);
+    expect(judge.judge.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceNarration.displayText);
+    expect(gameMaster.plan.mock.calls[0]![0].frame.sourceMoment).toBe(frame.sourceNarration.displayText);
   });
 
   it("interrupts a current suggestion when Judge changes its frozen kind or targets", async () => {

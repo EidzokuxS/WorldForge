@@ -65,6 +65,7 @@ function frame(): CampaignPlayJudgeFrame {
     playerActorHandle: "actor-you",
     locationHandle: "location-harbor",
     worldTimeMinutes: 120,
+    sourceMoment: "The guard finishes painting a fresh white line across the gate latch.",
     visibleFacts: [
       { handle: "actor-you", kind: "actor", summary: "You are standing by the gate." },
       { handle: "location-harbor", kind: "location", summary: "The harbor gate is closed." },
@@ -222,6 +223,11 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
+    expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
+    expect(sentPrompt).toContain(
+      'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
+    );
+    expect(sentPrompt).toContain("Do not change that detail's origin, age, owner, location, or state");
     expect(sentPrompt).toContain(
       'ACTOR_CONTINUITY=[{"actorHandle":"actor-guard","recentOwnActions":[{"summary":"The guard inspected and locked the reef-road gate before the traveler arrived.","observableTrace":"Fresh oil and a new seal mark the gate latch."}]}]',
     );
