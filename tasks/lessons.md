@@ -121,6 +121,9 @@
 - Treat browser node IDs as remount-scoped. After an asynchronous scene replacement, navigate local beats with an exact text control or read accepted narration from state; never let a nominal `Next` node become an unstaged gameplay submission.
 - Enumerate strict-union discriminants in the model instruction even when the native schema carries them. Separate similarly named fields such as effect `kind` and event `eventClass`, and show one valid canonical object for the common path.
 - Treat narrative evidence as location-scoped. Continuity from another place is history, not permission to transplant its dust, objects, actors, sound, weather, temperature, or lighting into the current scene.
+- Keep an autonomous action's private summary and public aftermath internally consistent: an object cannot be removed from a location and simultaneously remain in its discoverable trace.
+- Protected actor continuity owns authorship and the actor's knowledge, but it cannot silently override the player's current visible placement or condition of a prop; require a later visible change.
+- Treat unknowns as output constraints, not prose requirements. Public summaries should lead with concrete evidence and use at most one decision-relevant uncertainty instead of reciting every unsupported interpretation.
 
 ## Evidence Handling
 

@@ -209,10 +209,14 @@ describe("Campaign Play Game Master", () => {
       'SOURCE_MOMENT="Oren paints a fresh white line across the passage latch."',
     );
     expect(String(options.prompt)).toContain("Do not change that detail's origin, age, owner, location, or state");
+    expect(String(options.prompt)).toContain("It never overrides the current visible placement or condition of an object");
+    expect(String(options.prompt)).toContain("never make a visible object vanish or move without explicit evidence");
     expect(String(options.prompt)).toContain("RULING defines feasibility, result bounds, and elapsed bounds");
     expect(String(options.prompt)).toContain("not a new source of world facts");
     expect(String(options.prompt)).toContain("A clean, empty, missing, or disturbed surface establishes only its current observable state");
     expect(String(options.prompt)).toContain("Do not expose protected truth by guessing");
+    expect(String(options.prompt)).toContain("Unknowns are constraints, not a checklist for the public summary");
+    expect(String(options.prompt)).toContain("do not enumerate every interpretation the evidence fails to prove");
     expect(String(options.prompt)).toContain(
       'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal"]',
     );

@@ -228,6 +228,8 @@ describe("Campaign Play Judge", () => {
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
     );
     expect(sentPrompt).toContain("Do not change that detail's origin, age, owner, location, or state");
+    expect(sentPrompt).toContain("it never overrides the current visible placement or condition of an object");
+    expect(sentPrompt).toContain("never make a visible object vanish or move without explicit evidence");
     expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
     expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");
     expect(sentPrompt).toContain("reason field explains feasibility and result bounds");

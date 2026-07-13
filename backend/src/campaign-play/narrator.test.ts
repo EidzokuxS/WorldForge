@@ -295,6 +295,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Preserve epistemic modality and scope exactly");
     expect(prompt).toContain("must not become an unqualified fact");
     expect(prompt).toContain("Never increase certainty, precision, comparison scope, or causal strength");
+    expect(prompt).toContain("natural scene prose rather than copying audit-like qualifications");
+    expect(prompt).toContain("Unknowns are boundaries on what you may claim, not a checklist to recite");
+    expect(prompt).toContain("Do not enumerate every unsupported alternative");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');

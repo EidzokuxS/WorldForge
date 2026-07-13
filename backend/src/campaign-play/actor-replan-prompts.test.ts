@@ -114,6 +114,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain(`${reason} means`);
     expect(prompt).toContain("Priority 5 ranks highest");
     expect(prompt).toContain("Do not introduce an absent handle, identifier, state, or fact");
+    expect(prompt).toContain("If the actor removes or carries away an object");
+    expect(prompt).toContain("the trace must not leave that object at the location");
     expect(prompt).toContain("Code owns canonical identifiers");
   });
 });
