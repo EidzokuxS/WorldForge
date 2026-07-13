@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -74,6 +75,7 @@ describe("Campaign Play evidence bundle writer", () => {
     const bundleRoot = path.join(outputRoot, "first-playable-one");
     const evidenceRoot = path.join(outputRoot, "first-playable-one.session");
     fs.mkdirSync(path.join(evidenceRoot, "screenshots"), { recursive: true });
+    fs.mkdirSync(path.join(evidenceRoot, "checkpoints"), { recursive: true });
     fs.mkdirSync(path.join(evidenceRoot, "probes"), { recursive: true });
     const replay = await runSeededCampaignPlayReplay({ playerActions: 1, policy: "peripheral" });
     const playerTurn = replay.report.tables.turns.find((row) => row.turn_kind === "player_action")!;
@@ -95,7 +97,45 @@ describe("Campaign Play evidence bundle writer", () => {
     fs.writeFileSync(path.join(evidenceRoot, "browser-console.json"), "[]\n", "utf8");
     fs.writeFileSync(path.join(evidenceRoot, "network-errors.json"), "[]\n", "utf8");
     fs.writeFileSync(path.join(evidenceRoot, "screenshots", "ready.png"), "image", "utf8");
-    fs.writeFileSync(path.join(evidenceRoot, "probes", "reload-proof.json"), "{\"matches\":true}\n", "utf8");
+    const checkpoint = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-one",
+      campaignId: replay.campaignId,
+      checkpointId: "action-1",
+      afterPlayerAction: 1,
+      recordedAt: 1_900,
+      acceptedSnapshotHash: replay.report.acceptedSnapshotHash,
+      worldVersion: replay.report.authority.worldVersion,
+      worldHash: replay.report.authority.worldHash,
+      runtimeRevision: replay.report.authority.runtimeRevision,
+      runtimeHash: replay.report.authority.runtimeHash,
+      publicProjectionHash: replay.report.publicState.hash,
+      protectedAuditHash: replay.report.protectedAudit.hash,
+      eventCursor: replay.report.tables.runtimeEvents.length,
+      sqliteIntegrity: replay.report.integrity,
+      foreignKeyViolations: replay.report.foreignKeyViolations,
+    };
+    fs.writeFileSync(
+      path.join(evidenceRoot, "checkpoints", "action-1.json"),
+      `${JSON.stringify(checkpoint)}\n`,
+      "utf8",
+    );
+    const checkpointHash = crypto.createHash("sha256")
+      .update(JSON.stringify({ ...checkpoint, recordedAt: 0 }))
+      .digest("hex");
+    fs.writeFileSync(path.join(evidenceRoot, "probes", "reload-action-1-proof.json"), `${JSON.stringify({
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-one",
+      campaignId: replay.campaignId,
+      afterPlayerAction: 1,
+      beforePublicStateHash: "d".repeat(64),
+      afterPublicStateHash: "d".repeat(64),
+      beforeReplayHash: replay.replayHash,
+      afterReplayHash: replay.replayHash,
+      beforeCheckpointHash: checkpointHash,
+      afterCheckpointHash: checkpointHash,
+      matches: true,
+    })}\n`, "utf8");
     const quotaSnapshot = (capturedAt: number, percentage: number) => ({
       capturedAt,
       planId: "pro",
@@ -144,10 +184,10 @@ describe("Campaign Play evidence bundle writer", () => {
           quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
         },
         maximumInputTokens: 10_000,
-        maximumOutputTokens: 10_000,
+        maximumOutputTokens: 32_768,
         maximumTurnDurationMs: 120_000,
       },
-      restartAfterPlayerActions: [],
+      restartAfterPlayerActions: [1],
       operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
     };
 
@@ -169,6 +209,10 @@ describe("Campaign Play evidence bundle writer", () => {
     expect(fs.readFileSync(path.join(bundleRoot, "human-notes.md"), "utf8"))
       .toContain("scene remained legible");
     expect(fs.existsSync(path.join(bundleRoot, "screenshots", "ready.png"))).toBe(true);
+    const bundledCheckpoint = JSON.parse(
+      fs.readFileSync(path.join(bundleRoot, "checkpoints", "action-1.json"), "utf8"),
+    ) as { recordedAt: number };
+    expect(bundledCheckpoint.recordedAt).toBe(1_900);
     const budget = JSON.parse(fs.readFileSync(path.join(bundleRoot, "budget.json"), "utf8")) as {
       billingKind: string;
       attributableCostMicros: number | null;
@@ -177,6 +221,19 @@ describe("Campaign Play evidence bundle writer", () => {
     const modelStages = fs.readFileSync(path.join(bundleRoot, "model-stages.jsonl"), "utf8")
       .split("\n").filter(Boolean).map((line) => JSON.parse(line) as { costMicros: number | null });
     expect(modelStages.every((stage) => stage.costMicros === null)).toBe(true);
+
+    const reloadProofPath = path.join(bundleRoot, "probes", "reload-action-1-proof.json");
+    const reloadProof = JSON.parse(fs.readFileSync(reloadProofPath, "utf8")) as { matches: boolean };
+    fs.writeFileSync(reloadProofPath, `${JSON.stringify({ ...reloadProof, matches: false }, null, 2)}\n`, "utf8");
+    fs.writeFileSync(
+      path.join(bundleRoot, "inventory.json"),
+      `${JSON.stringify(createCampaignPlayInventory(bundleRoot, runConfig.runId), null, 2)}\n`,
+      "utf8",
+    );
+    expect(validateCampaignPlayBundle(bundleRoot).issues).toContain(
+      "Reload proof for action 1 is invalid or divergent.",
+    );
+    fs.writeFileSync(reloadProofPath, `${JSON.stringify(reloadProof, null, 2)}\n`, "utf8");
 
     const manifestPath = path.join(bundleRoot, "manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {

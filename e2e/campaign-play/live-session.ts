@@ -8,9 +8,12 @@ import { loadSettings } from "../../backend/src/settings/index.js";
 import { isLocalProvider, type Settings } from "@worldforge/shared";
 import {
   campaignPlayBrowserActionEvidenceSchema,
+  campaignPlayCheckpointSchema,
+  campaignPlayReloadProofSchema,
   campaignPlayRunConfigSchema,
   campaignPlaySubscriptionQuotaSnapshotSchema,
   type CampaignPlayBrowserActionEvidence,
+  type CampaignPlayCheckpoint,
   type CampaignPlayRunConfig,
   type CampaignPlayWorldSource,
 } from "./contracts.js";
@@ -267,7 +270,7 @@ export async function prepareCampaignPlayLiveSession(input: {
     const quotaBefore = config.execution.billing.kind === "subscription"
       ? await requestSubscriptionQuota(config, authority)
       : null;
-    for (const directory of ["build", "probes", "screenshots"]) {
+    for (const directory of ["build", "checkpoints", "probes", "screenshots"]) {
       fs.mkdirSync(path.join(root, directory), { recursive: true });
     }
     writeJson(path.join(root, "build", "run-config.json"), config);
@@ -433,23 +436,132 @@ export function bindCampaignPlayManualDecision(
   }
 }
 
+interface CampaignPlayReloadCapture {
+  capturedAt: number;
+  afterPlayerAction: number;
+  publicStateHash: string;
+  replayHash: string;
+  checkpointHash: string;
+  checkpoint: CampaignPlayCheckpoint;
+  state: Record<string, unknown>;
+}
+
+function checkpointStateHash(checkpoint: CampaignPlayCheckpoint): string {
+  return sha256(JSON.stringify({ ...checkpoint, recordedAt: 0 }));
+}
+
+async function captureReloadState(
+  config: ReturnType<typeof assertLiveConfig>,
+  requestedPlayerAction: number | null,
+): Promise<CampaignPlayReloadCapture> {
+  const state = await loadPublicState(config.campaignId);
+  if (state.phase !== "ready" || typeof state.projectionHash !== "string") {
+    throw new Error("Reload evidence requires the ready player-visible state.");
+  }
+  const handle = openCampaignPlayDatabase(config.campaignId);
+  try {
+    const captured = captureCampaignPlayReplay(handle);
+    const playerTurns = captured.report.tables.turns.filter((row) => row.turn_kind === "player_action");
+    const completedPlayerActions = playerTurns.filter((row) => row.stage === "completed").length;
+    if (playerTurns.length !== completedPlayerActions) {
+      throw new Error("Reload evidence cannot be captured while a player turn is unfinished.");
+    }
+    const afterPlayerAction = requestedPlayerAction ?? completedPlayerActions;
+    if (afterPlayerAction !== completedPlayerActions) {
+      throw new Error(
+        `Reload evidence expected action ${afterPlayerAction}, but the campaign has ${completedPlayerActions} completed actions.`,
+      );
+    }
+    if (state.projectionHash !== captured.report.publicState.hash) {
+      throw new Error("The live API projection hash does not match SQLite public-state authority.");
+    }
+    const recordedAt = Date.now();
+    const checkpoint = campaignPlayCheckpointSchema.parse({
+      evidenceVersion: 2,
+      runId: config.runId,
+      campaignId: config.campaignId,
+      checkpointId: `action-${afterPlayerAction}`,
+      afterPlayerAction,
+      recordedAt,
+      acceptedSnapshotHash: captured.report.acceptedSnapshotHash,
+      worldVersion: captured.report.authority.worldVersion,
+      worldHash: captured.report.authority.worldHash,
+      runtimeRevision: captured.report.authority.runtimeRevision,
+      runtimeHash: captured.report.authority.runtimeHash,
+      publicProjectionHash: captured.report.publicState.hash,
+      protectedAuditHash: captured.report.protectedAudit.hash,
+      eventCursor: captured.report.tables.runtimeEvents.length,
+      sqliteIntegrity: captured.report.integrity,
+      foreignKeyViolations: captured.report.foreignKeyViolations,
+    });
+    return {
+      capturedAt: recordedAt,
+      afterPlayerAction,
+      publicStateHash: sha256(JSON.stringify(state)),
+      replayHash: captured.replayHash,
+      checkpointHash: checkpointStateHash(checkpoint),
+      checkpoint,
+      state,
+    };
+  } finally {
+    handle.close();
+  }
+}
+
 export async function captureCampaignPlayReloadBoundary(
   runConfig: CampaignPlayRunConfig,
   boundary: "before" | "after",
+  afterPlayerAction: number | null = null,
 ): Promise<{ hash: string; matches: boolean | null }> {
   const config = assertLiveConfig(runConfig);
   const root = campaignPlayLiveSessionRoot(config);
   const manifest = sessionManifest(config);
   assertSessionOwnership(config, manifest);
-  const state = await loadPublicState(config.campaignId);
-  const canonicalBytes = JSON.stringify(state);
-  const record = { capturedAt: Date.now(), hash: sha256(canonicalBytes), state };
-  writeJson(path.join(root, "probes", `reload-${boundary}.json`), record);
-  if (boundary === "before") return { hash: record.hash, matches: null };
-  const before = readJson<{ hash: string }>(path.join(root, "probes", "reload-before.json"));
-  const proof = { beforeHash: before.hash, afterHash: record.hash, matches: before.hash === record.hash };
-  writeJson(path.join(root, "probes", "reload-proof.json"), proof);
-  return { hash: record.hash, matches: proof.matches };
+  if (
+    afterPlayerAction !== null
+    && !config.restartAfterPlayerActions.includes(afterPlayerAction)
+  ) {
+    throw new Error(`Action ${afterPlayerAction} is not a declared reload checkpoint.`);
+  }
+  const record = await captureReloadState(config, afterPlayerAction);
+  const checkpointed = afterPlayerAction !== null;
+  const stem = checkpointed ? `reload-action-${record.afterPlayerAction}` : "reload";
+  const boundaryPath = path.join(root, "probes", `${stem}-${boundary}.json`);
+  if (fs.existsSync(boundaryPath)) {
+    throw new Error(`Reload ${boundary} evidence already exists for action ${record.afterPlayerAction}.`);
+  }
+  writeJson(boundaryPath, record);
+  if (boundary === "before") return { hash: record.publicStateHash, matches: null };
+  const beforePath = path.join(root, "probes", `${stem}-before.json`);
+  if (!fs.existsSync(beforePath)) {
+    throw new Error(`Reload before evidence is missing for action ${record.afterPlayerAction}.`);
+  }
+  const before = readJson<CampaignPlayReloadCapture>(beforePath);
+  const proof = campaignPlayReloadProofSchema.parse({
+    evidenceVersion: 2,
+    runId: config.runId,
+    campaignId: config.campaignId,
+    afterPlayerAction: record.afterPlayerAction,
+    beforePublicStateHash: before.publicStateHash,
+    afterPublicStateHash: record.publicStateHash,
+    beforeReplayHash: before.replayHash,
+    afterReplayHash: record.replayHash,
+    beforeCheckpointHash: before.checkpointHash,
+    afterCheckpointHash: record.checkpointHash,
+    matches:
+      before.afterPlayerAction === record.afterPlayerAction
+      && before.publicStateHash === record.publicStateHash
+      && before.replayHash === record.replayHash
+      && before.checkpointHash === record.checkpointHash,
+  });
+  writeJson(path.join(root, "probes", `${stem}-proof.json`), proof);
+  if (checkpointed && proof.matches) {
+    writeJson(
+      path.join(root, "checkpoints", `${record.checkpoint.checkpointId}.json`),
+      record.checkpoint,
+    );
+  }
+  return { hash: record.publicStateHash, matches: proof.matches };
 }
 
 export function loadCampaignPlayLiveSession(input: CampaignPlayRunConfig): {
@@ -468,6 +580,16 @@ export function loadCampaignPlayLiveSession(input: CampaignPlayRunConfig): {
   const browserActions = readJsonLines<CampaignPlayBrowserActionEvidence>(
     path.join(root, "browser-actions.jsonl"),
   ).map((record) => campaignPlayBrowserActionEvidenceSchema.parse(record));
-  const reloadProof = readJson<{ matches: boolean }>(path.join(root, "probes", "reload-proof.json"));
-  return { root, manifest, browserActions, reloadMatches: reloadProof.matches };
+  const reloadMatches = config.restartAfterPlayerActions.length === 0
+    ? readJson<{ matches: boolean }>(path.join(root, "probes", "reload-proof.json")).matches
+    : config.restartAfterPlayerActions.every((afterPlayerAction) => {
+        const proof = campaignPlayReloadProofSchema.parse(readJson(
+          path.join(root, "probes", `reload-action-${afterPlayerAction}-proof.json`),
+        ));
+        campaignPlayCheckpointSchema.parse(readJson(
+          path.join(root, "checkpoints", `action-${afterPlayerAction}.json`),
+        ));
+        return proof.afterPlayerAction === afterPlayerAction && proof.matches;
+      });
+  return { root, manifest, browserActions, reloadMatches };
 }

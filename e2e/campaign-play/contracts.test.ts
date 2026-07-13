@@ -57,7 +57,7 @@ describe("Campaign Play evidence contracts", () => {
         models: { generator: "generator", judge: "judge", storyteller: "storyteller" },
         billing: { kind: "metered", maximumCostMicros: 1_000_000 },
         maximumInputTokens: 10_000,
-        maximumOutputTokens: 10_000,
+        maximumOutputTokens: 32_768,
         maximumTurnDurationMs: 120_000,
       },
       restartAfterPlayerActions: [],
@@ -88,7 +88,7 @@ describe("Campaign Play evidence contracts", () => {
           quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
         },
         maximumInputTokens: 100_000,
-        maximumOutputTokens: 20_000,
+        maximumOutputTokens: 32_768,
         maximumTurnDurationMs: 180_000,
       },
       restartAfterPlayerActions: [],
@@ -99,6 +99,75 @@ describe("Campaign Play evidence contracts", () => {
       providerId: "zai-coding-plan",
       billing: { kind: "subscription", planId: "pro" },
     });
+  });
+
+  it("rejects a live run output ceiling below 32k", () => {
+    expect(() => campaignPlayRunConfigSchema.parse({
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "first-playable-low-output",
+      lane: "first-playable",
+      campaignId: "campaign-one",
+      worldSource: { kind: "generated" },
+      expectedPlayerActions: 1,
+      outputRoot: "output/playtests/campaign-play",
+      execution: {
+        kind: "live",
+        providerId: "zai-coding-plan",
+        models: { generator: "glm-5.2", judge: "glm-5.2", storyteller: "glm-5.2" },
+        billing: {
+          kind: "subscription",
+          providerName: "Z.AI Coding Plan",
+          planId: "pro",
+          currency: "USD",
+          monthlyListPriceMicros: 72_000_000,
+          pricingSourceUrl: "https://z.ai/subscribe",
+          quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
+        },
+        maximumInputTokens: 100_000,
+        maximumOutputTokens: 32_767,
+        maximumTurnDurationMs: 180_000,
+      },
+      restartAfterPlayerActions: [],
+      operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+    })).toThrow();
+  });
+
+  it("pins the causal-20 lane to checkpoints 1, 5, 10, and 20", () => {
+    const base = {
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+      runId: "causal-twenty",
+      lane: "causal-20",
+      campaignId: "campaign-one",
+      worldSource: { kind: "generated" },
+      expectedPlayerActions: 20,
+      outputRoot: "output/playtests/campaign-play",
+      execution: {
+        kind: "live",
+        providerId: "zai-coding-plan",
+        models: { generator: "glm-5.2", judge: "glm-5.2", storyteller: "glm-5.2" },
+        billing: {
+          kind: "subscription",
+          providerName: "Z.AI Coding Plan",
+          planId: "pro",
+          currency: "USD",
+          monthlyListPriceMicros: 72_000_000,
+          pricingSourceUrl: "https://z.ai/subscribe",
+          quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
+        },
+        maximumInputTokens: 100_000,
+        maximumOutputTokens: 32_768,
+        maximumTurnDurationMs: 180_000,
+      },
+      operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
+    } as const;
+    expect(campaignPlayRunConfigSchema.parse({
+      ...base,
+      restartAfterPlayerActions: [1, 5, 10, 20],
+    }).restartAfterPlayerActions).toEqual([1, 5, 10, 20]);
+    expect(() => campaignPlayRunConfigSchema.parse({
+      ...base,
+      restartAfterPlayerActions: [5, 20],
+    })).toThrow("requires exactly 20 actions and reload checkpoints 1, 5, 10, and 20");
   });
 
   it("requires complete manifests to carry a terminal timestamp", () => {

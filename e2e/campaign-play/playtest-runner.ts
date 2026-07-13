@@ -150,7 +150,21 @@ async function runLiveLane(config: CampaignPlayRunConfig, phase: string): Promis
     case "reload-before":
     case "reload-after": {
       const boundary = phase === "reload-before" ? "before" : "after";
-      const result = await captureCampaignPlayReloadBoundary(config, boundary);
+      const checkpointArgument = argumentValue("--after-player-action");
+      const afterPlayerAction = checkpointArgument === null
+        ? null
+        : Number.parseInt(checkpointArgument, 10);
+      if (
+        afterPlayerAction !== null
+        && (!Number.isSafeInteger(afterPlayerAction) || afterPlayerAction < 0)
+      ) {
+        throw new Error("--after-player-action must be a nonnegative integer.");
+      }
+      const result = await captureCampaignPlayReloadBoundary(
+        config,
+        boundary,
+        afterPlayerAction,
+      );
       process.stdout.write(`${JSON.stringify({ phase, ...result })}\n`);
       return;
     }

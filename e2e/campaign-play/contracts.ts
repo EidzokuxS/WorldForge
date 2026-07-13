@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MODEL_OUTPUT_TOKEN_MINIMUM } from "@worldforge/shared";
 
 export const CAMPAIGN_PLAY_EVIDENCE_VERSION = 2 as const;
 
@@ -125,7 +126,7 @@ const liveExecutionSchema = z.object({
   }).strict(),
   billing: z.discriminatedUnion("kind", [meteredBillingSchema, subscriptionBillingSchema]),
   maximumInputTokens: positiveIntegerSchema,
-  maximumOutputTokens: positiveIntegerSchema,
+  maximumOutputTokens: positiveIntegerSchema.min(MODEL_OUTPUT_TOKEN_MINIMUM),
   maximumTurnDurationMs: positiveIntegerSchema,
 }).strict();
 
@@ -179,6 +180,19 @@ export const campaignPlayRunConfigSchema = z.object({
   }
   if (value.restartAfterPlayerActions.some((action) => action > value.expectedPlayerActions)) {
     context.addIssue({ code: "custom", path: ["restartAfterPlayerActions"], message: "Restart checkpoints cannot exceed the action target." });
+  }
+  if (
+    value.lane === "causal-20"
+    && (
+      value.expectedPlayerActions !== 20
+      || JSON.stringify(value.restartAfterPlayerActions) !== JSON.stringify([1, 5, 10, 20])
+    )
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["restartAfterPlayerActions"],
+      message: "The causal-20 lane requires exactly 20 actions and reload checkpoints 1, 5, 10, and 20.",
+    });
   }
   if (value.execution.kind === "deterministic" && value.worldSource.kind !== "fixture") {
     context.addIssue({ code: "custom", path: ["worldSource"], message: "Deterministic runs require fixture world provenance." });
@@ -266,6 +280,20 @@ export const campaignPlayCheckpointSchema = z.object({
   eventCursor: nonnegativeIntegerSchema,
   sqliteIntegrity: z.literal("ok"),
   foreignKeyViolations: z.literal(0),
+}).strict();
+
+export const campaignPlayReloadProofSchema = z.object({
+  evidenceVersion: z.literal(CAMPAIGN_PLAY_EVIDENCE_VERSION),
+  runId: identifierSchema,
+  campaignId: identifierSchema,
+  afterPlayerAction: nonnegativeIntegerSchema,
+  beforePublicStateHash: hashSchema,
+  afterPublicStateHash: hashSchema,
+  beforeReplayHash: hashSchema,
+  afterReplayHash: hashSchema,
+  beforeCheckpointHash: hashSchema,
+  afterCheckpointHash: hashSchema,
+  matches: z.boolean(),
 }).strict();
 
 const campaignPlayBudgetBaseShape = {
@@ -557,6 +585,7 @@ export type CampaignPlayManifest = z.infer<typeof campaignPlayManifestSchema>;
 export type CampaignPlayWorldSource = z.infer<typeof campaignPlayWorldSourceSchema>;
 export type CampaignPlayEligibility = z.infer<typeof campaignPlayEligibilitySchema>;
 export type CampaignPlayCheckpoint = z.infer<typeof campaignPlayCheckpointSchema>;
+export type CampaignPlayReloadProof = z.infer<typeof campaignPlayReloadProofSchema>;
 export type CampaignPlayBudget = z.infer<typeof campaignPlayBudgetSchema>;
 export type CampaignPlayTurnEvidence = z.infer<typeof campaignPlayTurnEvidenceSchema>;
 export type CampaignPlayInputEvidence = z.infer<typeof campaignPlayInputEvidenceSchema>;

@@ -10,12 +10,14 @@ import {
   campaignPlayActorJobEvidenceSchema,
   campaignPlayBrowserActionEvidenceSchema,
   campaignPlayBudgetSchema,
+  campaignPlayCheckpointSchema,
   campaignPlayEligibilitySchema,
   campaignPlayInputEvidenceSchema,
   campaignPlayInventorySchema,
   campaignPlayManifestSchema,
   campaignPlayModelStageEvidenceSchema,
   campaignPlayNetworkEvidenceSchema,
+  campaignPlayReloadProofSchema,
   campaignPlayReceiptEvidenceSchema,
   campaignPlayRunConfigSchema,
   campaignPlayRuntimeEventEvidenceSchema,
@@ -222,6 +224,71 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     const network = ledgers["network-trace.jsonl"] as Array<z.infer<typeof campaignPlayNetworkEvidenceSchema>>;
     const modelStages = ledgers["model-stages.jsonl"] as Array<z.infer<typeof campaignPlayModelStageEvidenceSchema>>;
     const runtimeEvents = ledgers["runtime-events.jsonl"] as Array<z.infer<typeof campaignPlayRuntimeEventEvidenceSchema>>;
+    const liveLane = ["first-playable", "causal-20", "diagnostic-30", "pristine-60", "provenance-60", "soak-300", "longplay-600"].includes(manifest.lane);
+
+    const checkpointFiles = fs.readdirSync(path.join(bundleRoot, "checkpoints"), { withFileTypes: true });
+    const checkpoints = checkpointFiles.map((entry) => {
+      if (!entry.isFile() || path.extname(entry.name) !== ".json") {
+        throw new Error(`Checkpoint directory contains an unsupported entry: ${entry.name}.`);
+      }
+      const checkpoint = campaignPlayCheckpointSchema.parse(
+        readJson(path.join(bundleRoot, "checkpoints", entry.name)),
+      );
+      if (entry.name !== `${checkpoint.checkpointId}.json`) {
+        throw new Error(`Checkpoint file name does not match its ID: ${entry.name}.`);
+      }
+      return checkpoint;
+    });
+    const checkpointActions = checkpoints.map((checkpoint) => checkpoint.afterPlayerAction);
+    if (new Set(checkpointActions).size !== checkpointActions.length) {
+      issues.push("Checkpoint evidence contains a duplicate completed-action number.");
+    }
+    const eligibility = campaignPlayEligibilitySchema.parse(
+      readJson(path.join(bundleRoot, "eligibility.json")),
+    );
+    for (const checkpoint of checkpoints) {
+      if (
+        checkpoint.runId !== manifest.runId
+        || checkpoint.campaignId !== manifest.campaignId
+        || checkpoint.acceptedSnapshotHash !== eligibility.acceptedSnapshotHash
+      ) {
+        issues.push(`Checkpoint ${checkpoint.checkpointId} has invalid ownership or accepted provenance.`);
+      }
+      if (checkpoint.afterPlayerAction > manifest.completedPlayerActions) {
+        issues.push(`Checkpoint ${checkpoint.checkpointId} exceeds the completed action count.`);
+      }
+    }
+    const requiredCheckpointActions = new Set([
+      manifest.completedPlayerActions,
+      ...(liveLane ? runConfig.restartAfterPlayerActions : []),
+    ]);
+    for (const action of requiredCheckpointActions) {
+      if (!checkpointActions.includes(action)) {
+        issues.push(`Required checkpoint action-${action} is missing.`);
+      }
+    }
+    if (liveLane) {
+      if (runConfig.restartAfterPlayerActions.length === 0) {
+        const proof = z.object({ matches: z.boolean() }).passthrough().parse(
+          readJson(path.join(bundleRoot, "probes", "reload-proof.json")),
+        );
+        if (!proof.matches) issues.push("The final live reload proof is divergent.");
+      } else {
+        for (const action of runConfig.restartAfterPlayerActions) {
+          const proof = campaignPlayReloadProofSchema.parse(readJson(
+            path.join(bundleRoot, "probes", `reload-action-${action}-proof.json`),
+          ));
+          if (
+            proof.runId !== manifest.runId
+            || proof.campaignId !== manifest.campaignId
+            || proof.afterPlayerAction !== action
+            || !proof.matches
+          ) {
+            issues.push(`Reload proof for action ${action} is invalid or divergent.`);
+          }
+        }
+      }
+    }
 
     if (runConfig.runId !== manifest.runId || runConfig.campaignId !== manifest.campaignId) {
       issues.push("Run config, manifest, and campaign ownership differ.");
@@ -229,9 +296,6 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     if (JSON.stringify(runConfig.worldSource) !== JSON.stringify(manifest.worldSource)) {
       issues.push("Run config and manifest world provenance differ.");
     }
-    const eligibility = campaignPlayEligibilitySchema.parse(
-      readJson(path.join(bundleRoot, "eligibility.json")),
-    );
     if (
       manifest.worldSource.kind === "template"
       && (
@@ -301,7 +365,6 @@ export function validateCampaignPlayBundle(bundleRoot: string): CampaignPlayBund
     if (new Set(inputs.map((input) => input.idempotencyKey)).size !== inputs.length) {
       issues.push("inputs.jsonl contains a duplicate idempotency key.");
     }
-    const liveLane = ["first-playable", "causal-20", "diagnostic-30", "pristine-60", "provenance-60", "soak-300", "longplay-600"].includes(manifest.lane);
     if (liveLane && !exactActionNumbers(
       browserActions.map((action) => action.playerActionNumber),
       manifest.completedPlayerActions,

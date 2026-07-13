@@ -471,7 +471,7 @@ function openingRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayT
         pricing: PRICING,
       },
       temperature: 0.2,
-      maxOutputTokens: 4_096,
+      maxOutputTokens: 32_768,
     },
     narratorModel: {
       languageModel: {} as LanguageModel,
@@ -484,8 +484,8 @@ function openingRuntime(handle: CampaignPlayDatabaseHandle, clock: CampaignPlayT
       temperature: 0.3,
       maximumDurationMs: 500,
       maximumInputTokens: 1_000,
-      maximumOutputTokens: 2_048,
-      maximumTotalTokens: 3_048,
+      maximumOutputTokens: 32_768,
+      maximumTotalTokens: 33_768,
       maximumCostMicros: 10_000,
     },
     openingPlanner: openingPlannerFixture(),
@@ -509,8 +509,8 @@ function turnRuntime(
     temperature: 0.2,
     maximumDurationMs: 500,
     maximumInputTokens: 1_000,
-    maximumOutputTokens: 2_048,
-    maximumTotalTokens: 3_048,
+    maximumOutputTokens: 32_768,
+    maximumTotalTokens: 33_768,
     maximumCostMicros: 10_000,
   });
   return createCampaignPlayTurnRuntime({

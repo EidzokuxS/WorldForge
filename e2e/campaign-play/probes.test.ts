@@ -58,7 +58,24 @@ function createCompleteBundle(): void {
     restartAfterPlayerActions: [],
     operators: { runner: "vitest", player: null, auditor: "validator" },
   });
-  fs.writeFileSync(path.join(root, "checkpoints", "action-1.json"), "{}", "utf8");
+  writeJson("checkpoints/action-1.json", {
+    evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
+    runId: RUN_ID,
+    campaignId: CAMPAIGN_ID,
+    checkpointId: "action-1",
+    afterPlayerAction: 1,
+    recordedAt: 1_600,
+    acceptedSnapshotHash: HASH_A,
+    worldVersion: 9,
+    worldHash: HASH_B,
+    runtimeRevision: 16,
+    runtimeHash: HASH_C,
+    publicProjectionHash: HASH_A,
+    protectedAuditHash: HASH_B,
+    eventCursor: 2,
+    sqliteIntegrity: "ok",
+    foreignKeyViolations: 0,
+  });
   fs.writeFileSync(path.join(root, "probes", "secrecy.json"), "{}", "utf8");
   fs.writeFileSync(path.join(root, "screenshots", "ready.png"), Buffer.from([1, 2, 3]));
   writeJson("manifest.json", {

@@ -19,6 +19,7 @@ import {
   campaignPlayRuntimeEventEvidenceSchema,
   campaignPlayTurnEvidenceSchema,
   campaignPlayVisibilityEvidenceSchema,
+  type CampaignPlayCheckpoint,
   type CampaignPlayRunConfig,
 } from "./contracts.js";
 import { createCampaignPlayInventory } from "./probes.js";
@@ -81,6 +82,44 @@ function readJson(filePath: string): unknown {
 function copyEvidenceDirectory(source: string, target: string): void {
   if (!fs.existsSync(source)) return;
   fs.cpSync(source, target, { recursive: true });
+}
+
+function copyCheckpointEvidence(
+  source: string,
+  target: string,
+  runId: string,
+  campaignId: string,
+): CampaignPlayCheckpoint[] {
+  if (!fs.existsSync(source)) return [];
+  const checkpoints: CampaignPlayCheckpoint[] = [];
+  const actionNumbers = new Set<number>();
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    if (!entry.isFile() || path.extname(entry.name) !== ".json") {
+      throw new Error(`Checkpoint evidence contains an unsupported entry: ${entry.name}.`);
+    }
+    const checkpoint = campaignPlayCheckpointSchema.parse(
+      readJson(path.join(source, entry.name)),
+    );
+    if (
+      checkpoint.runId !== runId
+      || checkpoint.campaignId !== campaignId
+      || entry.name !== `${checkpoint.checkpointId}.json`
+    ) {
+      throw new Error(`Checkpoint evidence ownership or file name is invalid: ${entry.name}.`);
+    }
+    if (actionNumbers.has(checkpoint.afterPlayerAction)) {
+      throw new Error(`Checkpoint action ${checkpoint.afterPlayerAction} is duplicated.`);
+    }
+    actionNumbers.add(checkpoint.afterPlayerAction);
+    checkpoints.push(checkpoint);
+    writeJson(path.join(target, entry.name), checkpoint);
+  }
+  return checkpoints;
+}
+
+function checkpointState(checkpoint: CampaignPlayCheckpoint): Omit<CampaignPlayCheckpoint, "recordedAt"> {
+  const { recordedAt: _recordedAt, ...state } = checkpoint;
+  return state;
 }
 
 function actionNumberByTurn(turnRows: RawRow[]): Map<string, number> {
@@ -497,7 +536,25 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
     sqliteIntegrity: report.integrity,
     foreignKeyViolations: report.foreignKeyViolations,
   });
-  writeJson(path.join(input.bundleRoot, "checkpoints", `${checkpoint.checkpointId}.json`), checkpoint);
+  const stagedCheckpoints = input.evidenceRoot
+    ? copyCheckpointEvidence(
+        path.join(input.evidenceRoot, "checkpoints"),
+        path.join(input.bundleRoot, "checkpoints"),
+        config.runId,
+        input.replay.campaignId,
+      )
+    : [];
+  const stagedFinalCheckpoint = stagedCheckpoints.find((candidate) =>
+    candidate.afterPlayerAction === input.replay.completedPlayerActions);
+  if (
+    stagedFinalCheckpoint
+    && JSON.stringify(checkpointState(stagedFinalCheckpoint)) !== JSON.stringify(checkpointState(checkpoint))
+  ) {
+    throw new Error("The staged final checkpoint does not match final replay authority.");
+  }
+  if (!stagedFinalCheckpoint) {
+    writeJson(path.join(input.bundleRoot, "checkpoints", `${checkpoint.checkpointId}.json`), checkpoint);
+  }
   writeJson(path.join(input.bundleRoot, "probes", "deterministic-replay.json"), {
     replayHash: input.replay.replayHash,
     canonicalBytes: Buffer.byteLength(input.replay.canonicalBytes, "utf8"),

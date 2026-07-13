@@ -11,6 +11,7 @@ import { CAMPAIGN_PLAY_EVIDENCE_VERSION, type CampaignPlayRunConfig } from "./co
 import { createDefaultSettings } from "@worldforge/shared";
 import {
   bindCampaignPlayManualDecision,
+  captureCampaignPlayReloadBoundary,
   captureCampaignPlaySubscriptionQuota,
   campaignPlayLiveSessionRoot,
   prepareCampaignPlayLiveSession,
@@ -30,7 +31,12 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { force: true, recursive: true });
 });
 
-function liveConfig(outputRoot: string, campaignId: string, expectedPlayerActions: number): CampaignPlayRunConfig {
+function liveConfig(
+  outputRoot: string,
+  campaignId: string,
+  expectedPlayerActions: number,
+  restartAfterPlayerActions: number[] = [],
+): CampaignPlayRunConfig {
   const pricing = {
     currency: "USD" as const,
     tokenUnit: 1_000_000 as const,
@@ -55,10 +61,10 @@ function liveConfig(outputRoot: string, campaignId: string, expectedPlayerAction
         maximumCostMicros: 1_000_000,
       },
       maximumInputTokens: 10_000,
-      maximumOutputTokens: 10_000,
+      maximumOutputTokens: 32_768,
       maximumTurnDurationMs: 120_000,
     },
-    restartAfterPlayerActions: [],
+    restartAfterPlayerActions,
     operators: { runner: "runner", player: "manual-player", auditor: "auditor" },
   };
 }
@@ -86,7 +92,7 @@ function subscriptionConfig(outputRoot: string, campaignId: string): CampaignPla
         quotaEndpoint: "https://api.z.ai/api/monitor/usage/quota/limit",
       },
       maximumInputTokens: 100_000,
-      maximumOutputTokens: 20_000,
+      maximumOutputTokens: 32_768,
       maximumTurnDurationMs: 180_000,
     },
     restartAfterPlayerActions: [],
@@ -166,6 +172,65 @@ describe("Campaign Play live evidence session", () => {
       decisionNote: "This must wait for the first durable turn.",
       signedAt: 1_201,
     })).rejects.toThrow("already awaiting");
+  });
+
+  it("captures a declared completed-action checkpoint across a byte-stable reload", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "worldforge-live-checkpoint-"));
+    roots.push(root);
+    process.env.GSD_CAMPAIGNS_ROOT = root;
+    const campaignId = "d16b0000-0000-4000-8000-000000000004";
+    createSeededAcceptedCampaign(root, campaignId);
+    const handle = openCampaignPlayDatabase(campaignId);
+    try {
+      createCampaignPlayStateRepository(handle).createState({
+        eventId: "checkpoint-session-created",
+        createdAt: 1_000,
+      });
+    } finally {
+      handle.close();
+    }
+    const outputRoot = path.join(root, "evidence");
+    const config = liveConfig(outputRoot, campaignId, 1, [1]);
+    const settings = createDefaultSettings();
+    const pricing = config.execution.kind === "live" && config.execution.billing.kind === "metered"
+      ? config.execution.billing.pricing
+      : null;
+    settings.providers.push({
+      id: "provider",
+      name: "Provider",
+      baseUrl: "http://localhost:1234/v1",
+      apiKey: "",
+      defaultModel: "generator",
+    });
+    settings.generator = { ...settings.generator, providerId: "provider", model: "generator", pricing: pricing?.generator };
+    settings.judge = { ...settings.judge, providerId: "provider", model: "judge", pricing: pricing?.judge };
+    settings.storyteller = { ...settings.storyteller, providerId: "provider", model: "storyteller", pricing: pricing?.storyteller };
+    const sessionRoot = await prepareCampaignPlayLiveSession({
+      runConfig: config,
+      commit: "0000000",
+      dirty: true,
+      startedAt: 1_100,
+      settings,
+    });
+    const replay = await runAcceptedCampaignPlayReplay(campaignId, {
+      playerActions: 1,
+      policy: "peripheral",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      phase: "ready",
+      projectionHash: replay.report.publicState.hash,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await expect(captureCampaignPlayReloadBoundary(config, "before", 1)).resolves.toMatchObject({
+      matches: null,
+    });
+    await expect(captureCampaignPlayReloadBoundary(config, "after", 1)).resolves.toMatchObject({
+      matches: true,
+    });
+    expect(fs.existsSync(path.join(sessionRoot, "checkpoints", "action-1.json"))).toBe(true);
+    expect(fs.existsSync(path.join(sessionRoot, "probes", "reload-action-1-proof.json"))).toBe(true);
+    await expect(captureCampaignPlayReloadBoundary(config, "after", 1))
+      .rejects.toThrow("already exists");
   });
 
   it("captures Coding Plan quota before and after a subscription-backed live session", async () => {
