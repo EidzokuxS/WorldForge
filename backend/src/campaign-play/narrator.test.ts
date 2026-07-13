@@ -288,6 +288,10 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("you may not decide that the ring is hollow or solid");
     expect(prompt).toContain("An action_handoff may combine supported facts but must add no new fact");
+    expect(prompt).toContain("Support is location-scoped");
+    expect(prompt).toContain("remains history at that place");
+    expect(prompt).toContain("never transplant its dust, residue, objects, actors, sound, weather, temperature, or lighting");
+    expect(prompt).toContain("If the packet supplies no current lighting or time-of-day detail, omit lighting entirely");
     expect(prompt).toContain("Preserve epistemic modality and scope exactly");
     expect(prompt).toContain("must not become an unqualified fact");
     expect(prompt).toContain("Never increase certainty, precision, comparison scope, or causal strength");

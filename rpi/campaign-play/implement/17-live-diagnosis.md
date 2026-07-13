@@ -313,3 +313,17 @@ Prompt-craft, humanizer, and deslop review: the modality instruction states one 
 - Focused Game Master verification passed 20/20 tests and backend typecheck passed.
 
 Prompt-craft, humanizer, and deslop review: the discriminant instruction is contract language, not player prose. The closed lists and single valid JSON example remove ambiguity without adding narrative voice, boilerplate phrasing, or backend-authored story text.
+
+### Clean-clone Ashglass r07: discriminant proof and cross-location atmosphere leak
+
+- Run `causal-20-glm52-ashglass-reach-cba83f84-r07` consumed pristine campaign `920af3c4-c234-48ad-9cfb-aadc44d3670e` on commit `cba83f84`. Clone operation `5bd0d81b-5768-4cf0-9c5a-7dcecdfed5f4` preserved zero-turn reserve `c7875ba9-00d5-4403-b537-d22508c43613` before character creation.
+- The generated Eris Vale stayed within the ordinary itinerant-repairer premise. The opening was causally clean with only Torm present, but again used static exposition and a route-list handoff rather than active scene motion.
+- Signed action 1 replayed the exact observation class that failed in r06. Game Master accepted one canonical discovery event; Narrator described fitted blocks, mineral residue, hairline cracks, dust in joints, and absent markings while explicitly preserving unknown builder, date, and purpose. Reload bytes matched at `fbb7c12fd585bcaf2c34c73f932ec3daa1905c1799712614af6e9acceee4de3f`. This is real-provider proof that the closed effect-discriminant instruction resolved the r06 contract failure without retry or fallback.
+- Action 2 freely asked Torm for repair work, authority, and payment. Torm confirmed the cracks warrant attention with use but offered no organized work, funding authority, or instant employment. He named only the public opposing parties and kept specifics bounded by the lack of trust. The outsider did not become central.
+- Action 3 travelled 90 minutes to the shoals. Only Keth and Paska were present. Paska's independent work appeared as several graded-glass baskets stacked near the causeway before Eris arrived; no whole-cast convergence occurred.
+- Action 4 asked Keth about those baskets. Game Master correctly limited him to their visible position and grade, with no claim about who staged them or why. Narrator then added `low light` and `the air carries the grit of fine glass dust over wet stone`. The packet supplied no lighting at all. Its only dust evidence was an older continuity item explicitly located at `causeway-span`; the current `the-shoals` source moment, observations, location, and pressures contained no airborne dust. r07 therefore stopped after four signed actions and is not an acceptance run.
+- Narrator guidance now makes evidence location-scoped: `sourceMoment` governs what is present at `currentLocation`, while continuity from another `whereOrRoute` remains history there. It forbids transplanting dust, residue, objects, actors, sound, weather, temperature, or lighting and requires lighting to be omitted when current packet evidence supplies none.
+- No output validator, prose rewrite, repair, retry, fallback, provider substitution, or model substitution was added.
+- Focused Narrator verification passed 10/10 tests and backend typecheck passed.
+
+Prompt-craft, humanizer, and deslop review: the new instruction names the authority hierarchy, the location mismatch, and the exact atmospheric fact classes that failed. It does not prescribe style or insert reusable prose; it narrows factual permission only.
