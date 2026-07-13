@@ -277,12 +277,60 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("wait uses a base-form verb phrase");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
+    expect(prompt).toContain("Treat visibleActors as present throughout the scene");
+    expect(prompt).toContain("the player is alone in an empty scene");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
     expect(prompt).toContain('"descriptor":"A bell keeper gripping a wet signal ledger."');
     expect(prompt).not.toContain('"accent"');
     expect(prompt).not.toContain('"monogram"');
     expect(prompt).not.toContain("amber-7");
+  });
+
+  it("rejects prose that removes a visible actor without a movement observation", () => {
+    const narrator = createCampaignPlayNarrator();
+    const packet = {
+      ...packetFixture(),
+      turnKind: "player_action" as const,
+      openingContext: null,
+      actionContext: {
+        submittedText: "Ask Mara why she is here.",
+        intentKind: "contact" as const,
+        disposition: "uncertain" as const,
+        result: "setback" as const,
+        clarificationQuestion: null,
+      },
+      elapsedMinutes: 5,
+    };
+    const invalid: CampaignPlayNarratorProposal = {
+      actionDetails: ["the wet signal ledger"],
+      beats: [
+        {
+          purpose: "consequence",
+          text: "Mara Venn pulls away and keeps walking toward the shuttered gate.",
+        },
+        {
+          purpose: "action_handoff",
+          text: "You are left standing alone at the empty bend.",
+        },
+      ],
+    };
+    expect(() => narrator.compile({
+      narrationId: "narration-stationary-actor",
+      packet,
+      proposal: invalid,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
+
+    const localGesture = structuredClone(invalid);
+    localGesture.beats[0]!.text = "Mara Venn takes one step back but remains beside the shuttered gate.";
+    localGesture.beats[1]!.text = "Rain taps the ledger while she waits for your next move.";
+    expect(() => narrator.compile({
+      narrationId: "narration-local-gesture",
+      packet,
+      proposal: localGesture,
+      createdAt: 1_000,
+    })).not.toThrow();
   });
 
   it("budgets visible narration separately from provider reasoning tokens", async () => {

@@ -22,6 +22,15 @@
 - Opening-consequence prose is now used only when actor ID, goal ID, and first settled step all match the frozen seed. Unrelated actor events keep their own plan summary.
 - Directly perceived agent events no longer expose their protected summary or emit the abstract placeholder. Visibility renders a bounded surface from public actor names and event class, for example `Senna Torres is occupied with North Harbor Growers' Council.`
 - Focused verification: `npx vitest run backend/src/campaign-play/actor-proposal-service.test.ts backend/src/campaign-play/visibility-service.test.ts` (9 passed), plus backend typecheck.
+
+### Action 9 narrator continuity finding
+
+- Senna rejected the player's question without leaking motive or hidden state. The prose then said she kept walking, was halfway gone, and left the player alone at an empty bend while the same public packet still kept Senna in `visibleActors` and offered another contact action.
+- The narrator prompt already prohibited movement absent from the packet, so prompt wording alone was not an adequate contract.
+- The prompt now states the visible-actor invariant directly. A semantic validator rejects departure or empty-scene language for any named visible actor unless `newObservations` contains the code-owned `<actor> moved` evidence.
+- Local gestures remain valid when the prose explicitly keeps the actor present.
+- Prompt-craft, humanizer, and deslop review: the added instruction is specific, non-repetitive, and uses plain technical language. It adds no narrative style steering beyond the mechanical continuity rule.
+- Focused verification: `npx vitest run backend/src/campaign-play/narrator.test.ts` (10 passed), plus backend typecheck.
 - `npm --prefix frontend run typecheck`
 - The previously accepted clean-14 first-playable bundle remains valid and promotion-eligible under the updated validator.
 

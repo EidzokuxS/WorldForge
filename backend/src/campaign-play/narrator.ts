@@ -261,6 +261,8 @@ Match the turn disposition:
 
 Use consequence for any visible result or newly observed detail. Use action_handoff for the final beat whenever the scene awaits another action.
 
+Treat visibleActors as present throughout the scene unless newObservations explicitly says that the named actor moved. Without that evidence, do not say or imply that the actor walks away, leaves, disappears, is gone, or that the player is alone in an empty scene. Local gestures are allowed only when the actor remains present.
+
 Keep distant events, hidden actors, private goals, protected state, Judge reasoning, random seeds, internal identifiers, handles, metadata, rules, and system language out of the prose. Do not summarize the world, list the cast, explain lore for its own sake, decide the player's thoughts or actions, resolve a future choice, or imply movement or state changes absent from the packet.`;
 }
 
@@ -309,6 +311,18 @@ function assertProposalForPacket(
     packet.turnKind === "opening" &&
     packet.visibleActors.filter((actor) =>
       proposal.beats.some((beat) => beat.text.includes(actor.name))).length > 2
+  ) {
+    throw new CampaignPlayNarratorError("narration_invalid", null);
+  }
+  const actorsWithoutMovement = packet.visibleActors.filter((actor) =>
+    !packet.newObservations.some((entry) => entry.title === `${actor.name} moved`));
+  const mentionsStationaryActor = actorsWithoutMovement.some((actor) =>
+    proposal.beats.some((beat) => beat.text.includes(actor.name)));
+  const impliesActorDeparture = /\b(?:walks?|walked|keeps? walking|pulls?|pulled|steps?|stepped|heads?|headed)\s+(?:away|off)\b|\b(?:disappears?|vanishes?|halfway gone)\b/i;
+  const impliesEmptyScene = /\b(?:you(?:'re| are)? (?:left )?(?:standing )?alone|left standing alone|empty (?:bend|street|room|yard|terrace|scene))\b/i;
+  if (
+    mentionsStationaryActor &&
+    proposal.beats.some((beat) => impliesActorDeparture.test(beat.text) || impliesEmptyScene.test(beat.text))
   ) {
     throw new CampaignPlayNarratorError("narration_invalid", null);
   }
