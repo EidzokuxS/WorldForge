@@ -228,6 +228,10 @@ describe("Campaign Play Judge", () => {
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
     );
     expect(sentPrompt).toContain("Do not change that detail's origin, age, owner, location, or state");
+    expect(sentPrompt).toContain("stakes ask what the player hopes to learn or accomplish; they are not evidence");
+    expect(sentPrompt).toContain("A clean, empty, missing, or disturbed surface proves only its currently observable state");
+    expect(sentPrompt).toContain("reason field explains feasibility and result bounds");
+    expect(sentPrompt).toContain("must not add world facts beyond the supplied frames");
     expect(sentPrompt).toContain(
       'ACTOR_CONTINUITY=[{"actorHandle":"actor-guard","recentOwnActions":[{"summary":"The guard inspected and locked the reef-road gate before the traveler arrived.","observableTrace":"Fresh oil and a new seal mark the gate latch."}]}]',
     );
