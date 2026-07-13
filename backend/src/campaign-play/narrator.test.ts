@@ -279,6 +279,7 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("never switch to the player character's name");
     expect(prompt).toContain("Treat visibleActors as present throughout the scene");
     expect(prompt).toContain("the player is alone in an empty scene");
+    expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
     expect(prompt).toContain('"descriptor":"A bell keeper gripping a wet signal ledger."');
@@ -319,6 +320,16 @@ describe("Campaign Play narrator", () => {
       narrationId: "narration-stationary-actor",
       packet,
       proposal: invalid,
+      createdAt: 1_000,
+    })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
+
+    const echoedConstraint = structuredClone(invalid);
+    echoedConstraint.beats[0]!.text = "Mara Venn has not moved from her spot beside the gate.";
+    echoedConstraint.beats[1]!.text = "Rain continues to tap against the wet signal ledger.";
+    expect(() => narrator.compile({
+      narrationId: "narration-echoed-continuity",
+      packet,
+      proposal: echoedConstraint,
       createdAt: 1_000,
     })).toThrowError(expect.objectContaining({ code: "narration_invalid" }));
 

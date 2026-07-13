@@ -31,6 +31,10 @@
 - Local gestures remain valid when the prose explicitly keeps the actor present.
 - Prompt-craft, humanizer, and deslop review: the added instruction is specific, non-repetitive, and uses plain technical language. It adds no narrative style steering beyond the mechanical continuity rule.
 - Focused verification: `npx vitest run backend/src/campaign-play/narrator.test.ts` (10 passed), plus backend typecheck.
+
+- Action 12 showed the first continuity guard overcorrecting in prose: `Maren has not moved from her spot.` The fact was mechanically correct but read like a debug assertion.
+- The narrator must apply actor-presence continuity silently. The prompt and semantic validator now reject explicit `has not moved` / `remains present` compliance language while still allowing ordinary local gestures.
+- Prompt-craft, humanizer, and deslop review: the silent-constraint sentence is direct and removes mechanical narration instead of adding stylistic filler. Narrator tests remain 10/10 with backend typecheck passing.
 - `npm --prefix frontend run typecheck`
 - The previously accepted clean-14 first-playable bundle remains valid and promotion-eligible under the updated validator.
 
