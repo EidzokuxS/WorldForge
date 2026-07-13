@@ -1183,15 +1183,28 @@ export const campaignPlayJournalRequestSchema:
 
 const characterListSchema = z.array(labelSchema)
   .max(CAMPAIGN_PLAY_LIMITS.characterList);
+const optionalCharacterLabelSchema = z.string()
+  .max(CAMPAIGN_PLAY_LIMITS.label)
+  .refine((value) => value === value.trim(), {
+    message: "Text must not contain surrounding whitespace.",
+  })
+  .refine((value) => !value.includes("\n") && !value.includes("\r"), {
+    message: "Text must use one line.",
+  });
+const optionalCharacterTextSchema = z.string()
+  .max(CAMPAIGN_PLAY_LIMITS.text)
+  .refine((value) => value === value.trim(), {
+    message: "Text must not contain surrounding whitespace.",
+  });
 
 export const campaignPlayCharacterPersonalitySchema = z.object({
-  summary: textSchema,
-  voice: textSchema,
-  decisionStyle: textSchema,
-  worldview: textSchema,
-  contradictions: characterListSchema,
-  mythology: textSchema,
-  sampleLines: z.array(textSchema).max(CAMPAIGN_PLAY_LIMITS.characterList),
+  summary: optionalCharacterTextSchema,
+  voice: optionalCharacterTextSchema,
+  decisionStyle: optionalCharacterTextSchema,
+  worldview: optionalCharacterTextSchema,
+  contradictions: z.array(shortTextSchema).max(CAMPAIGN_PLAY_LIMITS.characterList),
+  mythology: optionalCharacterTextSchema,
+  sampleLines: z.array(shortTextSchema).max(CAMPAIGN_PLAY_LIMITS.characterList),
 }).strict();
 
 export const campaignPlayCharacterSkillSchema = z.object({
@@ -1203,10 +1216,10 @@ export const campaignPlayCharacterDraftSchema:
   z.ZodType<CampaignPlayCharacterDraft> = z.object({
     name: nameSchema,
     summary: textSchema,
-    species: labelSchema,
-    gender: labelSchema,
-    ageText: labelSchema,
-    appearance: textSchema,
+    species: optionalCharacterLabelSchema,
+    gender: optionalCharacterLabelSchema,
+    ageText: optionalCharacterLabelSchema,
+    appearance: optionalCharacterTextSchema,
     biography: textSchema,
     personality: campaignPlayCharacterPersonalitySchema,
     motives: characterListSchema,

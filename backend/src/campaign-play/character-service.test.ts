@@ -407,6 +407,54 @@ describe("Campaign Play character intake", () => {
     expect(prepared.sourceDigest).toBe(intake.sourceDigest);
   });
 
+  it("preserves unknown optional descriptors without inventing replacements", async () => {
+    const { service, ingest } = makeService();
+    const donor = makeDonorDraft();
+    ingest.mockResolvedValueOnce(makeDonorDraft({
+      identity: {
+        ...donor.identity,
+        personality: {
+          summary: "",
+          voice: "",
+          decisionStyle: "",
+          worldview: "",
+          internalContradictions: [],
+          personalMythology: "",
+          sampleLines: [],
+        },
+      },
+      profile: {
+        ...donor.profile,
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+      },
+    }));
+
+    const result = await service.generatePlayerDraft(
+      CAMPAIGN_ID,
+      { prompt: "An outsider whose age and origin are unspecified.", research: null },
+      context(),
+    );
+
+    expect(result.draft).toMatchObject({
+      species: "",
+      gender: "",
+      ageText: "",
+      appearance: "",
+      personality: {
+        summary: "",
+        voice: "",
+        decisionStyle: "",
+        worldview: "",
+        contradictions: [],
+        mythology: "",
+        sampleLines: [],
+      },
+    });
+  });
+
   it("rejects a donor profile with missing required character fields", async () => {
     const { service, ingest } = makeService();
     ingest.mockResolvedValueOnce(makeDonorDraft({
