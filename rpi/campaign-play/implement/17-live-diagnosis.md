@@ -2,7 +2,7 @@
 
 ## Current-build 20-action rehearsal contract
 
-Decision: determine whether commit `3e609fb3` is ready to spend a newly generated Campaign World on the pristine Task 17 causal proof.
+Decision: determine whether commit `353f2c80` is ready to spend a newly generated Campaign World on the pristine Task 17 causal proof.
 
 Method: one formative manual playtest on an isolated copy of the accepted Brass Orchard template. The main operator reads every rendered scene, chooses one action from player-visible information, signs it before submission, and reads every narration beat afterward. Browser control may enter the chosen action and capture evidence; it does not choose, rewrite, batch, or substitute actions. This single-world rehearsal can reveal failure mechanisms and prose defects, but it cannot establish population prevalence or satisfy Task 17's fresh-world requirement.
 
@@ -32,6 +32,17 @@ Humanizer/deslop review: the contract uses observable criteria and direct techni
 
 - `npx vitest run e2e/campaign-play/contracts.test.ts e2e/campaign-play/live-session.test.ts e2e/campaign-play/bundle-writer.test.ts e2e/campaign-play/probes.test.ts`
 - `npm --prefix backend run typecheck`
+
+### Current-build rehearsals 01-02: evidence reset and freeform movement contract
+
+- `causal-20-glm52-brass-orchard-4a480f18-r01` reached three manual actions on the current build. The first two were signed and bound correctly. The operator submitted action 3 before staging its evidence decision, so the strict runner refused to bind it afterward. No timestamp was fabricated; the clone was discarded as promotion evidence.
+- `causal-20-glm52-brass-orchard-4a480f18-r02` started from the same pristine template. Character synthesis completed on one GLM 5.2 attempt in 47,710 ms and power assessment in 11,139 ms. Opening Planner completed on one attempt in 188,939 ms with 15,378 output tokens; Narrator completed on one attempt in 68,783 ms. No accepted stage used retry, repair, text fallback, provider substitution, or a model deadline.
+- The first signed freeform action left Tibbs and the blight behind and named visible Lower Greyfork as its destination. Judge accepted that interpretation in 34,073 ms, targeting the visible destination and citing its visible route. Game Master then stopped before calling the provider: `canonicalMovement` required the route to be duplicated in `normalizedIntent.targets`, recorded `model_contract_invalid` after 10 ms, and exposed the durable interruption through the visible Resume control.
+- Rulebook now resolves a destination-only move through exactly one compatible visible route, preferring the route cited by Judge. Ambiguous or contradictory movement still stops before mutation. The change adds no model retry, fallback, repair, compatibility path, or hidden provider call.
+- Focused verification passed all 20 Game Master tests and backend typecheck. An explicit diagnostic Resume reused the frozen accepted Judge artifact under the patched backend: Game Master reached GLM 5.2 once and completed in 35,979 ms, Narrator completed once in 51,825 ms, and the atomic result placed Neris in Lower Greyfork.
+- The resumed clone remains diagnostic and cannot satisfy the rehearsal contract. Its four-beat arrival was coherent but slightly repetitive. `Tibbs Mallon and the chalk-blight rings stay where you left them` made the abandoned scene feel static, while the freshly posted parchment scoring `restart` three times was concrete but not yet causally legible. These are prose and actor-agency observations, not grounds to rehabilitate the interrupted run.
+
+Humanizer/deslop review: the note separates observed stage evidence from interpretation, names the operator error directly, and makes no promotional claim from the resumed turn. The prose contains no filler, softened failure language, or repeated conclusion.
 
 ### Actions 7-8 visibility finding
 

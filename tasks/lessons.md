@@ -113,6 +113,7 @@
 - When a prompt requires a strict-enum object for a specific situation, bind that situation to one accepted literal. Naming the object without its permitted vocabulary makes valid intent depend on the model guessing internal terminology.
 - A direct autonomous observation must name the visible actor action, not only its passive environmental result. Otherwise the simulation advances while the prose makes the actor look inert.
 - Re-read browser DOM node IDs after every rendered state change during a manual playtest. React rerenders invalidate prior node ownership even when the same control appears in the same place.
+- Stage and verify the signed evidence decision before every manual browser action. If an action is submitted first, preserve the gap and restart the evidence lane instead of reconstructing a signature afterward.
 
 ## Evidence Handling
 
