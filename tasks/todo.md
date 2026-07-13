@@ -1453,3 +1453,14 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - Verification passed: evidence and replay tests `20/20`, focused Campaign Play/clone/routes `331/331`, frontend `491/491`, the complete backend suite, both typechecks, production build, script syntax, bundle validation, and diff check.
 - GitNexus initially returned its Ladybug WAL `UNREACHABLE_CODE`; a post-commit index refresh recovered the graph. Final impact is LOW: two direct test callers for `runSeededCampaignPlayReplay`, one self-owned runner caller for `runCampaignPlayCommand`, and zero affected execution flows or production modules.
 - Humanizer/deslop review kept the note factual and direct. Deterministic narration is explicitly excluded from prose and playability evidence. Standalone smoke additions: `0`.
+
+## Campaign Play Task 17 Live Diagnosis (2026-07-13)
+
+- [x] Complete one clean 20-action GLM 5.2 lane through the rendered Play UI with a signed decision before every submission.
+- [x] Match full backend restart checkpoints after player actions 1, 5, 10, and 20.
+- [x] Finalize and validate `causal-20-glm52-ashglass-reach-461289b1-r10`; machine invariants and artifact inventory pass.
+- [x] Record the manual prose, causality, agency, continuity, autonomy, and pacing verdict in `rpi/campaign-play/implement/17-live-diagnosis.md`.
+- [ ] Complete the separate 30-action adaptive diagnostic before accepting fixes.
+- [ ] Convert accepted findings into focused regressions, rerun Task 16A, then replace the failed 20-action promotion attempt only if the plan still requires a pristine pass.
+
+Current verdict: automated invariant gate PASS, human promotion gate REVISE. Major findings are multi-minute turn cadence and three inert collective actors with zero plans, schedules, jobs, or proposals. The 30-action diagnosis also owns static opening prose, repeated NPC wording, unchosen follow-up narration, and unsupported vent acoustics.
