@@ -26,6 +26,7 @@ import { createCampaignPlayCharacterService } from "./character-service.js";
 import { bootstrapCampaignPlayPlayer } from "./player-bootstrap.js";
 import {
   createCampaignPlayOpeningPlanner,
+  deriveCampaignPlayOpeningSceneCandidateId,
   type CampaignPlayOpeningModelEvidence,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
@@ -195,15 +196,17 @@ function openingProposal(): CampaignPlayOpeningProposal {
   });
   return {
     start: {
-      locationId: "location-c",
       role: "A visitor on Bell Island",
       arrivalMode: "On foot",
       immediateSituation: "Signal keepers prepare for another route closure.",
     },
     scene: {
-      supportActorId: "actor-c",
-      pressureId: "pressure-b",
-      routeId: "route-c",
+      candidateId: deriveCampaignPlayOpeningSceneCandidateId({
+        locationId: "location-c",
+        supportActorId: "actor-c",
+        pressureId: "pressure-b",
+        routeId: "route-c",
+      }),
     },
     actorPlans,
     hiddenConsequence: {
@@ -282,16 +285,18 @@ function plannerFixture() {
       const proposal = openingProposal();
       if (request.startingConditions.mode === "chosen") {
         proposal.start = {
-          locationId: request.startingConditions.locationId,
           role: request.startingConditions.role,
           arrivalMode: request.startingConditions.arrivalMode,
           immediateSituation: request.startingConditions.immediateSituation,
         };
         if (request.startingConditions.locationId === "location-a") {
           proposal.scene = {
-            supportActorId: "actor-b",
-            pressureId: "pressure-a",
-            routeId: "route-a",
+            candidateId: deriveCampaignPlayOpeningSceneCandidateId({
+              locationId: "location-a",
+              supportActorId: "actor-b",
+              pressureId: "pressure-a",
+              routeId: "route-a",
+            }),
           };
           const hiddenPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-c")!;
           hiddenPlan.steps[0]!.intent.targets.unshift({ kind: "location", id: "location-c" });

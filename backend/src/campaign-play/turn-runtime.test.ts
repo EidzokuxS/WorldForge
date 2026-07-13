@@ -29,6 +29,7 @@ import { createCampaignPlayCharacterService } from "./character-service.js";
 import { bootstrapCampaignPlayPlayer } from "./player-bootstrap.js";
 import {
   createCampaignPlayOpeningPlanner,
+  deriveCampaignPlayOpeningSceneCandidateId,
   type CampaignPlayOpeningModelEvidence,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
@@ -210,12 +211,18 @@ function openingProposal(): CampaignPlayOpeningProposal {
   });
   return {
     start: {
-      locationId: "location-c",
       role: "A visitor on Bell Island",
       arrivalMode: "On foot",
       immediateSituation: "Signal keepers prepare for another route closure.",
     },
-    scene: { supportActorId: "actor-c", pressureId: "pressure-b", routeId: "route-c" },
+    scene: {
+      candidateId: deriveCampaignPlayOpeningSceneCandidateId({
+        locationId: "location-c",
+        supportActorId: "actor-c",
+        pressureId: "pressure-b",
+        routeId: "route-c",
+      }),
+    },
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",

@@ -40,6 +40,7 @@ import { deriveCampaignPlayCommandId } from "./rulebook.js";
 
 const OPENING_MAX_ELIGIBLE_ACTORS = 20;
 const OPENING_MAX_EXPOSURE_ACTIONS = 5;
+const OPENING_MAX_SCENE_CANDIDATES = 24;
 const log = createLogger("campaign-play-opening-planner");
 
 const boundedLine = (maximum: number) => z.string().min(1).max(maximum)
@@ -84,15 +85,12 @@ const openingActorPlanProposalSchema = z.object({
 
 export const campaignPlayOpeningProposalSchema = z.object({
   start: z.object({
-    locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
     arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
     immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
   }).strict(),
   scene: z.object({
-    supportActorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    pressureId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    routeId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+    candidateId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   }).strict(),
   actorPlans: z.array(openingActorPlanProposalSchema)
     .min(1)
@@ -109,6 +107,23 @@ export const campaignPlayOpeningProposalSchema = z.object({
 
 export type CampaignPlayOpeningProposal =
   z.infer<typeof campaignPlayOpeningProposalSchema>;
+
+const campaignPlayOpeningStartSchema = z.object({
+  locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
+  role: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
+  arrivalMode: boundedLine(CAMPAIGN_PLAY_LIMITS.shortText),
+  immediateSituation: boundedText(CAMPAIGN_PLAY_LIMITS.text),
+}).strict();
+
+export type CampaignPlayOpeningStart = z.infer<typeof campaignPlayOpeningStartSchema>;
+
+export interface CampaignPlayOpeningSceneCandidate {
+  candidateId: string;
+  locationId: string;
+  supportActorId: string;
+  pressureId: string;
+  routeId: string;
+}
 
 export type CampaignPlayResolvedStartingConditions =
   | { mode: "delegate" }
@@ -183,7 +198,7 @@ export interface CampaignPlayOpeningArtifact {
   baseWorldVersion: number;
   frameHash: string;
   proposalHash: string;
-  start: CampaignPlayOpeningProposal["start"];
+  start: CampaignPlayOpeningStart;
   bootstrapCommands: CampaignPlayBootstrapCommand[];
   actorPlans: CampaignPlayActorPlan[];
   actorSchedules: CampaignPlayActorSchedule[];
@@ -231,7 +246,7 @@ export const campaignPlayOpeningArtifactSchema: z.ZodType<CampaignPlayOpeningArt
     baseWorldVersion: z.number().int().safe().positive(),
     frameHash: z.string().length(64),
     proposalHash: z.string().length(64),
-    start: campaignPlayOpeningProposalSchema.shape.start,
+    start: campaignPlayOpeningStartSchema,
     bootstrapCommands: z.array(campaignPlayBootstrapCommandSchema)
       .min(1)
       .max(CAMPAIGN_PLAY_LIMITS.commandsPerBatch),
@@ -351,6 +366,12 @@ function unique(values: readonly string[]): boolean {
 
 function stableId(prefix: string, value: unknown): string {
   return `${prefix}:${hashCampaignPlayProjection(value).slice(0, 32)}`;
+}
+
+export function deriveCampaignPlayOpeningSceneCandidateId(
+  candidate: Omit<CampaignPlayOpeningSceneCandidate, "candidateId">,
+): string {
+  return stableId("opening-scene", candidate);
 }
 
 function deepFreeze<T>(value: T, visited = new Set<object>()): T {
@@ -534,6 +555,75 @@ function shortestDirectedDistance(
     }
   }
   return null;
+}
+
+export function buildCampaignPlayOpeningSceneCandidates(
+  frame: CampaignPlayOpeningFrame,
+  startingConditions: CampaignPlayResolvedStartingConditions,
+): CampaignPlayOpeningSceneCandidate[] {
+  const world = frame.acceptedWorld;
+  const canonicalStart = world.locations.find((location) =>
+    location.kind === "macro" && location.isStarting);
+  if (!canonicalStart) return [];
+
+  const locations = world.locations
+    .filter((location) =>
+      location.kind === "macro"
+      && shortestDirectedDistance(world, canonicalStart.id, location.id) !== null
+      && (
+        startingConditions.mode === "delegate"
+        || location.id === startingConditions.locationId
+      ))
+    .sort((left, right) => compareText(left.id, right.id));
+  const candidatesByLocation = locations.map((location) => {
+    const supports = world.actors
+      .filter((actor) =>
+        actor.kind === "person"
+        && actor.role === "support"
+        && isActorPresentInOpeningArea(world, actor.id, location.id))
+      .sort((left, right) => compareText(left.id, right.id));
+    const pressures = world.pressures
+      .filter((pressure) => pressure.locationIds.includes(location.id))
+      .sort((left, right) => compareText(left.id, right.id));
+    const routes = world.routes
+      .filter((route) =>
+        route.fromLocationId === location.id
+        && route.toLocationId !== location.id
+        && world.locations.some((candidate) => candidate.id === route.toLocationId))
+      .sort((left, right) => compareText(left.id, right.id));
+    const candidates: CampaignPlayOpeningSceneCandidate[] = [];
+    for (const support of supports) {
+      for (const pressure of pressures) {
+        for (const route of routes) {
+          const identity = {
+            locationId: location.id,
+            supportActorId: support.id,
+            pressureId: pressure.id,
+            routeId: route.id,
+          };
+          candidates.push({
+            candidateId: deriveCampaignPlayOpeningSceneCandidateId(identity),
+            ...identity,
+          });
+        }
+      }
+    }
+    return candidates;
+  });
+
+  const selected: CampaignPlayOpeningSceneCandidate[] = [];
+  for (let round = 0; selected.length < OPENING_MAX_SCENE_CANDIDATES; round += 1) {
+    let added = false;
+    for (const candidates of candidatesByLocation) {
+      const candidate = candidates[round];
+      if (!candidate) continue;
+      selected.push(candidate);
+      added = true;
+      if (selected.length === OPENING_MAX_SCENE_CANDIDATES) break;
+    }
+    if (!added) break;
+  }
+  return selected;
 }
 
 function routingLocationId(world: CampaignWorldReview, locationId: string): string {
@@ -741,9 +831,16 @@ function compileScene(
   frame: CampaignPlayOpeningFrame,
   startingConditions: CampaignPlayResolvedStartingConditions,
   proposal: CampaignPlayOpeningProposal,
-): CampaignPlayOpeningNarratorFacts {
+  candidates: readonly CampaignPlayOpeningSceneCandidate[],
+): { start: CampaignPlayOpeningStart; narratorFacts: CampaignPlayOpeningNarratorFacts } {
   const world = frame.acceptedWorld;
-  const start = proposal.start;
+  const scene = candidates.find((candidate) =>
+    candidate.candidateId === proposal.scene.candidateId);
+  if (!scene) fail("opening_proposal_invalid");
+  const start = {
+    locationId: scene.locationId,
+    ...proposal.start,
+  };
   if (
     startingConditions.mode === "chosen"
     && (
@@ -757,17 +854,15 @@ function compileScene(
   }
   const location = world.locations.find((value) =>
     value.id === start.locationId && value.kind === "macro");
-  const canonicalStart = world.locations.find((value) =>
-    value.kind === "macro" && value.isStarting);
   const support = world.actors.find((value) =>
-    value.id === proposal.scene.supportActorId
+    value.id === scene.supportActorId
     && value.kind === "person"
     && value.role === "support");
   const pressure = world.pressures.find((value) =>
-    value.id === proposal.scene.pressureId
+    value.id === scene.pressureId
     && value.locationIds.includes(start.locationId));
   const route = world.routes.find((value) =>
-    value.id === proposal.scene.routeId
+    value.id === scene.routeId
     && value.fromLocationId === start.locationId
     && value.toLocationId !== start.locationId);
   const destination = route
@@ -777,8 +872,6 @@ function compileScene(
     && isActorPresentInOpeningArea(world, support.id, start.locationId);
   if (
     !location
-    || !canonicalStart
-    || shortestDirectedDistance(world, canonicalStart.id, location.id) === null
     || !support
     || !supportPresent
     || !pressure
@@ -788,24 +881,27 @@ function compileScene(
     fail("opening_proposal_invalid");
   }
   return {
-    location: { id: location.id, name: location.name, description: location.description },
-    player: {
-      role: start.role,
-      arrivalMode: start.arrivalMode,
-      immediateSituation: start.immediateSituation,
-    },
-    supportActor: { id: support.id, name: support.name, summary: support.summary },
-    pressure: {
-      id: pressure.id,
-      name: pressure.name,
-      description: pressure.description,
-      trajectory: pressure.trajectory,
-    },
-    route: {
-      id: route.id,
-      destinationId: destination.id,
-      destinationName: destination.name,
-      travelCost: route.travelCost,
+    start,
+    narratorFacts: {
+      location: { id: location.id, name: location.name, description: location.description },
+      player: {
+        role: start.role,
+        arrivalMode: start.arrivalMode,
+        immediateSituation: start.immediateSituation,
+      },
+      supportActor: { id: support.id, name: support.name, summary: support.summary },
+      pressure: {
+        id: pressure.id,
+        name: pressure.name,
+        description: pressure.description,
+        trajectory: pressure.trajectory,
+      },
+      route: {
+        id: route.id,
+        destinationId: destination.id,
+        destinationName: destination.name,
+        travelCost: route.travelCost,
+      },
     },
   };
 }
@@ -970,7 +1066,17 @@ export function createCampaignPlayOpeningPlanner(
     const proposalResult = campaignPlayOpeningProposalSchema.safeParse(rawProposal);
     if (!proposalResult.success) fail("opening_proposal_invalid", proposalResult.error);
     const proposal = proposalResult.data;
-    const narratorFacts = compileScene(frame, parsedStartingConditions, proposal);
+    const sceneCandidates = buildCampaignPlayOpeningSceneCandidates(
+      frame,
+      parsedStartingConditions,
+    );
+    if (sceneCandidates.length === 0) fail("opening_frame_invalid");
+    const { start, narratorFacts } = compileScene(
+      frame,
+      parsedStartingConditions,
+      proposal,
+      sceneCandidates,
+    );
     const { plans, schedules } = compilePlans(frame, proposal);
     const exposureSeed = compileExposureSeed(frame, proposal, narratorFacts, plans);
     const frameHash = hashCampaignPlayProjection({
@@ -991,8 +1097,8 @@ export function createCampaignPlayOpeningPlanner(
       baseWorldVersion: frame.baseWorldVersion,
       frameHash,
       proposalHash,
-      start: structuredClone(proposal.start),
-      bootstrapCommands: compileBootstrapCommands(frame, proposal.start.locationId),
+      start: structuredClone(start),
+      bootstrapCommands: compileBootstrapCommands(frame, start.locationId),
       actorPlans: plans,
       actorSchedules: schedules,
       exposureSeed,
@@ -1018,6 +1124,11 @@ export function createCampaignPlayOpeningPlanner(
         fail("opening_proposal_invalid", startingResult.error);
       }
       const startingConditions = startingResult.data;
+      const sceneCandidates = buildCampaignPlayOpeningSceneCandidates(
+        request.frame,
+        startingConditions,
+      );
+      if (sceneCandidates.length === 0) fail("opening_frame_invalid");
       const capability = resolveStructuredOutputCapability({
         metadata: getStructuredOutputModelMetadata(request.model),
         requestedMode: "auto",
@@ -1035,7 +1146,11 @@ export function createCampaignPlayOpeningPlanner(
         generated = await dependencies.generateObject({
           model: request.model,
           schema: campaignPlayOpeningProposalSchema,
-          prompt: buildCampaignPlayOpeningPrompt(request.frame, startingConditions),
+          prompt: buildCampaignPlayOpeningPrompt(
+            request.frame,
+            startingConditions,
+            sceneCandidates,
+          ),
           temperature: request.temperature,
           maxOutputTokens: request.maxOutputTokens,
           abortSignal: request.signal,

@@ -11,8 +11,10 @@ import {
 } from "../ai/generate-object-safe.js";
 import {
   CampaignPlayOpeningPlannerError,
+  buildCampaignPlayOpeningSceneCandidates,
   campaignPlayOpeningProposalSchema,
   createCampaignPlayOpeningPlanner,
+  deriveCampaignPlayOpeningSceneCandidateId,
   type CampaignPlayOpeningFrame,
   type CampaignPlayOpeningProposal,
 } from "./opening-planner.js";
@@ -313,15 +315,17 @@ function actorPlan(
 function proposalFixture(): CampaignPlayOpeningProposal {
   return {
     start: {
-      locationId: "location-harbor",
       role: "A repairer waiting for passage",
       arrivalMode: "On the last permitted ferry",
       immediateSituation: "The harbor gates close as an impossible bell pattern crosses the water.",
     },
     scene: {
-      supportActorId: "actor-courier",
-      pressureId: "pressure-harbor-lock",
-      routeId: "route-harbor-reef",
+      candidateId: deriveCampaignPlayOpeningSceneCandidateId({
+        locationId: "location-harbor",
+        supportActorId: "actor-courier",
+        pressureId: "pressure-harbor-lock",
+        routeId: "route-harbor-reef",
+      }),
     },
     actorPlans: [
       actorPlan(
@@ -585,12 +589,34 @@ describe("Campaign Play opening planner", () => {
     )).toThrow(CampaignPlayOpeningPlannerError);
   });
 
-  it("requires a local support person, pressure, and outgoing route", () => {
+  it("rejects a scene candidate that was not derived from accepted topology", () => {
     const proposal = proposalFixture();
-    proposal.scene.supportActorId = "actor-bell-tender";
+    proposal.scene.candidateId = "opening-scene:unknown";
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
     )).toThrow(CampaignPlayOpeningPlannerError);
+  });
+
+  it("omits a canonical start without support while retaining delegated viable scenes", () => {
+    const world = worldFixture();
+    world.placements = world.placements.filter((placement) =>
+      placement.actorId !== "actor-courier");
+
+    const delegated = buildCampaignPlayOpeningSceneCandidates(
+      frameFixture(world),
+      { mode: "delegate" },
+    );
+    const chosen = buildCampaignPlayOpeningSceneCandidates(
+      frameFixture(world),
+      chosenConditions,
+    );
+
+    expect(chosen).toEqual([]);
+    expect(delegated.length).toBeGreaterThan(0);
+    expect(delegated.every((candidate) =>
+      candidate.locationId === "location-bells"
+      && candidate.supportActorId === "actor-bell-tender"
+    )).toBe(true);
   });
 
   it("accepts a support person present inside a nested place in the opening area", () => {
@@ -830,9 +856,12 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");
     expect(prompt).toContain("observableTrace");
-    expect(prompt).toContain("The hidden location must differ from start.locationId");
-    expect(prompt).toContain("Set routeId to scene.routeId");
-    expect(prompt).toContain("Set witnessActorId to scene.supportActorId");
+    expect(prompt).toContain('"sceneCandidates"');
+    expect(prompt).toContain('"candidateId":"opening-scene:');
+    expect(prompt).toContain("copy only its candidateId into scene.candidateId");
+    expect(prompt).toContain("The hidden location must differ from selectedScene.locationId");
+    expect(prompt).toContain("Set routeId to selectedScene.routeId");
+    expect(prompt).toContain("Set witnessActorId to selectedScene.supportActorId");
     expect(prompt).toContain("Set locationId to hiddenConsequence.locationId");
     expect(prompt).toContain("Set hiddenConsequence.goalId to the primaryGoalId");
     expect(prompt).toContain("route_state, exposure contains exactly channel, routeId, and triggers");
@@ -846,7 +875,7 @@ describe("Campaign Play opening planner", () => {
 
   it("retains successful model evidence when semantic compilation rejects a proposal", async () => {
     const invalidProposal = proposalFixture();
-    invalidProposal.scene.supportActorId = "actor-bell-tender";
+    invalidProposal.scene.candidateId = "opening-scene:unknown";
     const generateObject = vi.fn(async () => ({
       object: invalidProposal,
       trace: trace(),
