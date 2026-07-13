@@ -119,6 +119,7 @@
 - Give Narrator the exact prior public moment and treat connective atmosphere as factual output. Sound quality, temperature, light, weather, and object properties need packet evidence just as plot claims do.
 - Preserve epistemic modality across model stages. `Appears`, `suggests`, `may`, and `likely` are authority bounds; narration cannot promote them to facts, proofs, absolute comparisons, or completed causes.
 - Treat browser node IDs as remount-scoped. After an asynchronous scene replacement, navigate local beats with an exact text control or read accepted narration from state; never let a nominal `Next` node become an unstaged gameplay submission.
+- Enumerate strict-union discriminants in the model instruction even when the native schema carries them. Separate similarly named fields such as effect `kind` and event `eventClass`, and show one valid canonical object for the common path.
 
 ## Evidence Handling
 

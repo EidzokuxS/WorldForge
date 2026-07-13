@@ -244,7 +244,14 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene",
     );
-    expect(String(options.prompt)).toContain("eventClass discovery");
+    expect(String(options.prompt)).toContain('"eventClass":"discovery"');
+    expect(String(options.prompt)).toContain(
+      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, or record_world_event",
+    );
+    expect(String(options.prompt)).toContain("These are eventClass values only and must never appear in kind");
+    expect(String(options.prompt)).toContain(
+      'return exactly one effect shaped as {"kind":"record_world_event","eventClass":"discovery","summary":"grounded observation","affectedHandles":["copied handle"]}',
+    );
     expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
