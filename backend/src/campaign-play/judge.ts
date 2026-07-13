@@ -91,7 +91,6 @@ export interface CampaignPlayJudgeInput {
 }
 
 export interface CampaignPlayModelBudget {
-  maximumDurationMs: number;
   maximumInputTokens: number;
   maximumOutputTokens: number;
   maximumTotalTokens: number;
@@ -208,8 +207,7 @@ function withinBudget(
   const contentTotalTokens = evidence.totalTokens === null
     ? null
     : Math.max(0, evidence.totalTokens - boundedReasoningTokens);
-  return evidence.durationMs <= budget.maximumDurationMs
-    && (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens)
+  return (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens)
     && (contentOutputTokens === null || contentOutputTokens <= budget.maximumOutputTokens)
     && (contentTotalTokens === null || contentTotalTokens <= budget.maximumTotalTokens)
     && (evidence.estimatedCostMicros === null || evidence.estimatedCostMicros <= budget.maximumCostMicros);
@@ -323,10 +321,6 @@ export function createCampaignPlayJudge(
         throw new CampaignPlayJudgeError("structured_output_unavailable", null);
       }
       const started = Date.now();
-      const timeoutSignal = AbortSignal.timeout(request.budget.maximumDurationMs);
-      const executionSignal = request.signal
-        ? AbortSignal.any([request.signal, timeoutSignal])
-        : timeoutSignal;
       let generated;
       try {
         generated = await dependencies.generateObject({
@@ -335,8 +329,7 @@ export function createCampaignPlayJudge(
           prompt: prompt(parsedFrame.data, request.input),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
-          timeout: request.budget.maximumDurationMs,
-          abortSignal: executionSignal,
+          abortSignal: request.signal,
           mode: "auto",
           strictSchema: true,
           allowRepair: false,
@@ -348,9 +341,8 @@ export function createCampaignPlayJudge(
         const durationMs = Date.now() - started;
         const base = trace ? evidenceFromTrace(trace, request.budget, durationMs) : null;
         const safeCode = getSafeGenerateObjectErrorCode(cause);
-        const code: CampaignPlayJudgeErrorCode = timeoutSignal.aborted && !request.signal?.aborted
-          ? "stage_timeout"
-          : safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
+        const code: CampaignPlayJudgeErrorCode =
+          safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
               safeCode === "missing_structured_tool_call"
             ? "model_contract_failed"
             : "transport_interrupted";

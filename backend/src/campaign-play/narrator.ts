@@ -89,7 +89,6 @@ export interface CampaignPlayNarratorRequest {
 }
 
 export interface CampaignPlayNarratorBudget {
-  maximumDurationMs: number;
   maximumInputTokens: number;
   maximumOutputTokens: number;
   maximumTotalTokens: number;
@@ -218,8 +217,7 @@ function withinBudget(
   const totalWithin = evidence.inputTokens === null || evidence.outputTokens === null
     ? true
     : contentTotalTokens !== null && contentTotalTokens <= budget.maximumTotalTokens;
-  return evidence.durationMs <= budget.maximumDurationMs &&
-    (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens) &&
+  return (evidence.inputTokens === null || evidence.inputTokens <= budget.maximumInputTokens) &&
     (contentOutputTokens === null || contentOutputTokens <= budget.maximumOutputTokens) &&
     totalWithin &&
     costWithin;
@@ -420,7 +418,6 @@ export function createCampaignPlayNarrator(
         !Number.isSafeInteger(request.createdAt) || request.createdAt < 0 ||
         Object.values(request.budget).some((value) =>
           !Number.isSafeInteger(value) || value < 0) ||
-        request.budget.maximumDurationMs < 1 ||
         request.budget.maximumOutputTokens < 1 ||
         request.budget.maximumTotalTokens < 1
       ) {
@@ -439,10 +436,6 @@ export function createCampaignPlayNarrator(
         });
       }
       const startedAt = Date.now();
-      const timeoutSignal = AbortSignal.timeout(request.budget.maximumDurationMs);
-      const executionSignal = request.signal
-        ? AbortSignal.any([request.signal, timeoutSignal])
-        : timeoutSignal;
       let generated;
       try {
         generated = await dependencies.generateObject({
@@ -451,8 +444,7 @@ export function createCampaignPlayNarrator(
           prompt: buildPrompt(packet),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
-          timeout: request.budget.maximumDurationMs,
-          abortSignal: executionSignal,
+          abortSignal: request.signal,
           mode: "auto",
           strictSchema: true,
           allowRepair: false,
@@ -467,9 +459,7 @@ export function createCampaignPlayNarrator(
           errorCode: safeCode ?? "narration_invalid",
         } satisfies CampaignPlayNarratorModelEvidence : null;
         const code: CampaignPlayNarratorErrorCode =
-          timeoutSignal.aborted && !request.signal?.aborted
-            ? "stage_timeout"
-            : safeCode === "schema_validation_failed" ||
+          safeCode === "schema_validation_failed" ||
                 safeCode === "invalid_structured_tool_call" ||
                 safeCode === "missing_structured_tool_call"
               ? "model_contract_failed"

@@ -42,7 +42,6 @@ export interface CampaignPlayActorReplanRequest {
   maximumOutputTokens: number;
   maximumTotalTokens: number;
   maximumCostMicros: number;
-  maximumDurationMs: number;
   signal?: AbortSignal;
   createdAt: number;
   injectFault?: (
@@ -93,7 +92,6 @@ export class CampaignPlayActorReplannerError extends Error {
       | "replan_state_invalid"
       | "replan_epoch_lost"
       | "replan_budget_exceeded"
-      | "replan_timeout"
       | "replan_persistence_failed",
     options?: ErrorOptions,
   ) {
@@ -504,8 +502,7 @@ export function createCampaignPlayActorReplanner(
         || !Number.isSafeInteger(request.maximumInputTokens) || request.maximumInputTokens < 1
         || !Number.isSafeInteger(request.maximumOutputTokens) || request.maximumOutputTokens < 1
         || !Number.isSafeInteger(request.maximumTotalTokens) || request.maximumTotalTokens < 1
-        || !Number.isSafeInteger(request.maximumCostMicros) || request.maximumCostMicros < 0
-        || !Number.isSafeInteger(request.maximumDurationMs) || request.maximumDurationMs < 1) {
+        || !Number.isSafeInteger(request.maximumCostMicros) || request.maximumCostMicros < 0) {
         throw new CampaignPlayActorReplannerError("replan_input_invalid");
       }
       const frame = scheduler.buildActorFrame(request.jobId);
@@ -581,9 +578,8 @@ export function createCampaignPlayActorReplanner(
       if (leaseDurationMs <= 0) {
         throw new CampaignPlayActorReplannerError("replan_epoch_lost");
       }
-      const modelDeadline = AbortSignal.timeout(request.maximumDurationMs);
       const leaseDeadline = AbortSignal.timeout(leaseDurationMs);
-      const signals = [modelDeadline, leaseDeadline, request.signal].filter(
+      const signals = [leaseDeadline, request.signal].filter(
         (signal): signal is AbortSignal => signal !== undefined,
       );
       const signal = signals.length === 1 ? signals[0]! : AbortSignal.any(signals);
@@ -601,7 +597,6 @@ export function createCampaignPlayActorReplanner(
           allowRepair: false,
           allowTextFallback: false,
           retries: 1,
-          timeout: Math.min(request.maximumDurationMs, leaseDurationMs),
           abortSignal: signal,
         });
         observedTrace = generated.trace;
@@ -614,9 +609,6 @@ export function createCampaignPlayActorReplanner(
         const providerCompletedAt = dependencies.now();
         if (leaseDeadline.aborted || providerCompletedAt >= request.token.expiresAt) {
           throw new CampaignPlayActorReplannerError("replan_epoch_lost");
-        }
-        if (modelDeadline.aborted || providerCompletedAt - startedAt > request.maximumDurationMs) {
-          throw new CampaignPlayActorReplannerError("replan_timeout");
         }
         const evidence = acceptedTrace(
           generated.trace,
@@ -763,14 +755,11 @@ export function createCampaignPlayActorReplanner(
         const trace = observedTrace ?? getSafeGenerateObjectTrace(error) ?? undefined;
         const epochLost = (error instanceof CampaignPlayActorReplannerError
           && error.code === "replan_epoch_lost") || leaseDeadline.aborted || request.signal?.aborted === true;
-        const timedOut = !epochLost && (modelDeadline.aborted ||
-          error instanceof CampaignPlayActorReplannerError && error.code === "replan_timeout");
         const budgetExceeded = error instanceof CampaignPlayActorReplannerError
           && error.code === "replan_budget_exceeded";
         const persistenceFailed = error instanceof CampaignPlayActorReplannerError
           && error.code === "replan_persistence_failed";
         const errorCode = epochLost ? "worker_lease_lost" as const
-          : timedOut ? "stage_timeout" as const
           : budgetExceeded ? "stage_budget_exceeded" as const
           : persistenceFailed ? "persistence_failed" as const
           : trace === undefined ? "provider_unavailable" as const

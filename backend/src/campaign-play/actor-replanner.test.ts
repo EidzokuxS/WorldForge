@@ -404,7 +404,6 @@ describe("Campaign Play actor replanner", () => {
       maximumOutputTokens: 100,
       maximumTotalTokens: 2_000,
       maximumCostMicros: 10_000,
-      maximumDurationMs: 1_000,
       createdAt: 1_590,
     });
     now += 1;
@@ -417,6 +416,7 @@ describe("Campaign Play actor replanner", () => {
       retries: 1,
       strictSchema: true,
     });
+    expect("timeout" in generateObject.mock.calls[0]![0]).toBe(false);
     expect(createCampaignPlayActorScheduler(handle).listTurnJobs("turn-player")[0])
       .toMatchObject({ stage: "deferred", workerEpoch: 1 });
     expect(handle.sqlite.prepare(`SELECT status, worker_epoch AS workerEpoch,

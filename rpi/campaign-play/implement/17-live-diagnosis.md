@@ -122,3 +122,13 @@ Humanizer and deslop review: the diagnosis uses direct observations, timestamps,
 - Directly perceived autonomous `record_world_event` observations now publish their required `observableTrace`. Missing or blank trace data raises `visibility_projection_invalid`; the former generic actor-activity fallback is gone. Offscreen events remain protected behind their existing aftermath, route, or witness predicates.
 - No prompt or authored narrative copy changed. The fix exposes the already-reviewed public-safe trace field instead of synthesizing new prose in code.
 - Focused verification: `npm --prefix backend test -- src/campaign-play/visibility-service.test.ts` (5 passed), plus backend typecheck.
+
+### Clone rehearsal 04: actions 5-7 and model-stage deadlines
+
+- The action-5 reload checkpoint matched byte-for-byte at public-state hash `b7b6ca5b885d745399438cdde3eb4b4af4393a1126325cf54f305edb548a02c0`.
+- Action 6 advanced another full shift. Four actor replans completed in 74,110-113,053 ms each. Ordunn then moved autonomously to `weather-watch-ridge`; public state removed him from the player's location and exposed the grounded departure. This is the first run-04 result in which an NPC visibly changed the local situation without the player directing that NPC.
+- Action 7 followed Ordunn toward the ridge. Judge accepted the action in 59,158 ms. Game Master attempt 1 returned after 78,997 ms but failed its strict contract. Explicit Resume started attempt 2, which the remaining 120-second Game Master deadline interrupted at 120,053 ms while the provider was still working.
+- The opening-only correction was incomplete. Judge, Game Master, Narrator, and actor-replanner provider calls now have no application wall-clock timeout. Judge, Game Master, and Narrator receive the exact worker cancellation signal. Actor replanning remains bounded by actual job lease authority, not a separate model deadline.
+- Token, cost, and output budgets remain enforced. No fallback provider, model substitution, or automatic retry was introduced. An interrupted durable turn still resumes only through the explicit Resume action.
+- Prompt-craft, humanizer, and deslop review: this note distinguishes measured evidence from interpretation, keeps the worker-lease caveat explicit, and does not treat one successful autonomous movement as proof that the full 20-action playtest has passed.
+- Verification: backend typecheck passed; focused Judge, Game Master, Narrator, opening, actor-replanner, and turn-runtime selection passed 121 tests. Provider-option assertions require the original worker signal and the absence of `timeout`.

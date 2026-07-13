@@ -253,7 +253,6 @@ export interface CampaignPlayTurnRuntimeStageModel {
   languageModel: LanguageModel;
   requested: CampaignPlayRequestedModel;
   temperature: number;
-  maximumDurationMs: number;
   maximumInputTokens: number;
   maximumOutputTokens: number;
   maximumTotalTokens: number;
@@ -352,7 +351,6 @@ function referenceKey(reference: CampaignPlayEntityRef): string {
 
 function assertRuntimeModel(model: CampaignPlayTurnRuntimeStageModel): void {
   const integers = [
-    model.maximumDurationMs,
     model.maximumInputTokens,
     model.maximumOutputTokens,
     model.maximumTotalTokens,
@@ -372,7 +370,6 @@ function assertRuntimeModel(model: CampaignPlayTurnRuntimeStageModel): void {
 
 function modelBudget(model: CampaignPlayTurnRuntimeStageModel): CampaignPlayModelBudget {
   return {
-    maximumDurationMs: model.maximumDurationMs,
     maximumInputTokens: model.maximumInputTokens,
     maximumOutputTokens: model.maximumOutputTokens,
     maximumTotalTokens: model.maximumTotalTokens,
@@ -1148,9 +1145,7 @@ export function createCampaignPlayTurnRuntime(
   assertRuntimeModel(input.narratorModel);
   if (
     input.uncertaintySeedKey.length < 32 || input.uncertaintySeedKey.length > 512 ||
-    input.uncertaintySeedKey !== input.uncertaintySeedKey.trim() ||
-    input.actorReplannerModel.maximumDurationMs >= input.leaseDurationMs ||
-    input.narratorModel.maximumDurationMs >= input.leaseDurationMs
+    input.uncertaintySeedKey !== input.uncertaintySeedKey.trim()
   ) {
     throw new CampaignPlayTurnRuntimeError(
       "turn_state_invalid",
@@ -1689,7 +1684,6 @@ export function createCampaignPlayTurnRuntime(
                 maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
                 maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
                 maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
-                maximumDurationMs: input.actorReplannerModel.maximumDurationMs,
                 createdAt: now(),
               });
               releaseActorBoundary(context.token, outcome.jobId, replanned.kind);
@@ -1927,7 +1921,6 @@ export function createCampaignPlayTurnRuntime(
         maximumOutputTokens: input.actorReplannerModel.maximumOutputTokens,
         maximumTotalTokens: input.actorReplannerModel.maximumTotalTokens,
         maximumCostMicros: input.actorReplannerModel.maximumCostMicros,
-        maximumDurationMs: input.actorReplannerModel.maximumDurationMs,
         createdAt: now(),
       });
       releaseActorBoundary(token, interruptedJob.jobId, outcome.kind);

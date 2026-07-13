@@ -357,7 +357,6 @@ function runtimeModels() {
       languageModel: {} as LanguageModel,
       requested: { providerId: "test", model: "test-narrator", strategy: "strict_object" as const, pricing: TEST_MODEL_PRICING },
       temperature: 0.3,
-      maximumDurationMs: 500,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 2_048,
       maximumTotalTokens: 3_048,

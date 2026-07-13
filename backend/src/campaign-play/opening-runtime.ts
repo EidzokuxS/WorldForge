@@ -131,7 +131,6 @@ export interface CampaignPlayOpeningNarratorRuntimeModel {
   languageModel: LanguageModel;
   requested: CampaignPlayRequestedModel;
   temperature: number;
-  maximumDurationMs: number;
   maximumInputTokens: number;
   maximumOutputTokens: number;
   maximumTotalTokens: number;
@@ -210,7 +209,6 @@ function assertModel(model: CampaignPlayOpeningRuntimeModel): void {
 
 function assertNarratorModel(model: CampaignPlayOpeningNarratorRuntimeModel): void {
   const limits = [
-    model.maximumDurationMs,
     model.maximumInputTokens,
     model.maximumOutputTokens,
     model.maximumTotalTokens,
@@ -232,7 +230,6 @@ function narratorBudget(
   model: CampaignPlayOpeningNarratorRuntimeModel,
 ): CampaignPlayNarratorBudget {
   return {
-    maximumDurationMs: model.maximumDurationMs,
     maximumInputTokens: model.maximumInputTokens,
     maximumOutputTokens: model.maximumOutputTokens,
     maximumTotalTokens: model.maximumTotalTokens,

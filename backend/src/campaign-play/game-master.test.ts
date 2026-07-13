@@ -162,7 +162,7 @@ function trace(
 }
 
 const budget: CampaignPlayModelBudget = {
-  maximumDurationMs: 10_000, maximumInputTokens: 1_000, maximumOutputTokens: 1_000,
+  maximumInputTokens: 1_000, maximumOutputTokens: 1_000,
   maximumTotalTokens: 2_000, maximumCostMicros: 10_000,
   inputCostMicrosPerMillionTokens: 1_000_000, outputCostMicrosPerMillionTokens: 2_000_000,
 };
@@ -184,15 +184,17 @@ describe("Campaign Play Game Master", () => {
   });
 
   it("uses one strict provider/model call and keeps canonical bindings out of its prompt", async () => {
+    const workerController = new AbortController();
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({ object: proposal, trace: trace() }));
     const gameMaster = createCampaignPlayGameMaster({ generateObject: generateObject as unknown as typeof safeGenerateObject });
     const result = await gameMaster.plan({ frame: frame(), ruling: ruling(), resolution, uncertaintyAuthority: null,
-      model: model(), temperature: 0.2, budget });
+      model: model(), temperature: 0.2, budget, signal: workerController.signal });
     expect(result.preflight.accepted).toBe(true);
     expect(generateObject).toHaveBeenCalledOnce();
     const options = generateObject.mock.calls[0]![0];
     expect(options).toMatchObject({ strictSchema: true, allowRepair: false, allowTextFallback: false,
-      retries: 1, timeout: budget.maximumDurationMs, abortSignal: expect.any(AbortSignal) });
+      retries: 1, abortSignal: workerController.signal });
+    expect("timeout" in options).toBe(false);
     expect(String(options.prompt)).toContain("opaque handles");
     expect(String(options.prompt)).toContain(
       'ALLOWED_HANDLES=["you","guard","here","south","passage","delay","trust","guard-goal"]',
@@ -250,28 +252,6 @@ describe("Campaign Play Game Master", () => {
         { kind: "actor", id: PLAYER_ID },
       ],
     });
-  });
-
-  it("aborts one provider attempt at the admitted Game Master deadline", async () => {
-    const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
-      new Promise((_resolve, reject) => {
-        options.abortSignal?.addEventListener("abort", () => reject(new Error("deadline")), {
-          once: true,
-        });
-      }));
-    const gameMaster = createCampaignPlayGameMaster({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-    });
-    await expect(gameMaster.plan({
-      frame: frame(),
-      ruling: ruling(),
-      resolution,
-      uncertaintyAuthority: null,
-      model: model(),
-      temperature: 0.2,
-      budget: { ...budget, maximumDurationMs: 5 },
-    })).rejects.toMatchObject({ code: "stage_timeout" });
-    expect(generateObject).toHaveBeenCalledOnce();
   });
 
   it("rejects impossible and clarification rulings before any GM model call", async () => {

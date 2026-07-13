@@ -81,7 +81,6 @@ import {
 
 const LEASE_DURATION_MS = 150_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
-const MAXIMUM_STAGE_DURATION_MS = 120_000;
 const MAXIMUM_INPUT_TOKENS = 64_000;
 export const CAMPAIGN_PLAY_MINIMUM_OUTPUT_TOKENS = 32_768;
 const MAXIMUM_COST_MICROS = Number.MAX_SAFE_INTEGER;
@@ -274,7 +273,6 @@ function stageModel(
     languageModel,
     requested,
     temperature: role.temperature,
-    maximumDurationMs: MAXIMUM_STAGE_DURATION_MS,
     maximumInputTokens: MAXIMUM_INPUT_TOKENS,
     maximumOutputTokens,
     maximumTotalTokens: MAXIMUM_INPUT_TOKENS + maximumOutputTokens,
@@ -445,7 +443,6 @@ export function createCampaignPlayApplication(
         languageModel: dependencies.createModel(storyteller.provider, { role: "storyteller" }),
         requested: narratorRequested,
         temperature: storyteller.temperature,
-        maximumDurationMs: MAXIMUM_STAGE_DURATION_MS,
         maximumInputTokens: MAXIMUM_INPUT_TOKENS,
         maximumOutputTokens: narratorMaximumOutputTokens,
         maximumTotalTokens: MAXIMUM_INPUT_TOKENS + narratorMaximumOutputTokens,

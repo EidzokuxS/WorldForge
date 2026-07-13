@@ -435,7 +435,6 @@ async function createReadyCampaignWithOpening() {
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.3,
-      maximumDurationMs: 500,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 2_048,
       maximumTotalTokens: 3_048,
@@ -566,7 +565,6 @@ function turnRuntime(
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.2,
-      maximumDurationMs: 10_000,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
       maximumTotalTokens: 2_000,
@@ -581,7 +579,6 @@ function turnRuntime(
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.2,
-      maximumDurationMs: 10_000,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
       maximumTotalTokens: 2_000,
@@ -596,7 +593,6 @@ function turnRuntime(
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.2,
-      maximumDurationMs: 500,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 1_000,
       maximumTotalTokens: 2_000,
@@ -611,7 +607,6 @@ function turnRuntime(
         pricing: TEST_MODEL_PRICING,
       },
       temperature: 0.3,
-      maximumDurationMs: 500,
       maximumInputTokens: 1_000,
       maximumOutputTokens: 2_048,
       maximumTotalTokens: 3_048,
@@ -1765,7 +1760,6 @@ describe("Campaign Play player-action turn runtime", () => {
   it.each([
     ["schema", "model_contract_invalid"],
     ["budget", "stage_budget_exceeded"],
-    ["timeout", "stage_timeout"],
     ["persistence", "persistence_failed"],
   ] as const)(
     "persists actor replanner %s failure as an explicit interruption",
@@ -1778,7 +1772,6 @@ describe("Campaign Play player-action turn runtime", () => {
         generateObject: (async (request: { prompt: string }) => {
           providerCalls += 1;
           const trace = actorReplanTrace();
-          if (providerCalls === 1 && failure === "timeout") time.advanceBy(600);
           if (providerCalls === 1 && failure === "budget") {
             trace.usage = { inputTokens: 1_001, outputTokens: 25, totalTokens: 1_026 };
           }

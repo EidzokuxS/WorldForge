@@ -201,8 +201,7 @@ function overBudget(
   const contentTotalTokens = value.inputTokens === null || contentOutputTokens === null
     ? null
     : value.inputTokens + contentOutputTokens;
-  return value.durationMs > budget.maximumDurationMs
-    || (value.inputTokens !== null && value.inputTokens > budget.maximumInputTokens)
+  return (value.inputTokens !== null && value.inputTokens > budget.maximumInputTokens)
     || (contentOutputTokens !== null && contentOutputTokens > budget.maximumOutputTokens)
     || (contentTotalTokens !== null && contentTotalTokens > budget.maximumTotalTokens)
     || (value.estimatedCostMicros !== null && value.estimatedCostMicros > budget.maximumCostMicros);
@@ -574,10 +573,6 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         throw new CampaignPlayGameMasterError("structured_output_unavailable", null);
       }
       const started = Date.now();
-      const timeoutSignal = AbortSignal.timeout(request.budget.maximumDurationMs);
-      const executionSignal = request.signal
-        ? AbortSignal.any([request.signal, timeoutSignal])
-        : timeoutSignal;
       const promptText = prompt(request.frame, request.ruling, request.resolution);
       let generated;
       try {
@@ -587,8 +582,7 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
           prompt: promptText,
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,
-          timeout: request.budget.maximumDurationMs,
-          abortSignal: executionSignal,
+          abortSignal: request.signal,
           mode: "auto",
           strictSchema: true,
           allowRepair: false,
@@ -599,9 +593,8 @@ export function createCampaignPlayGameMaster(overrides: Partial<Dependencies> = 
         const safeCode = getSafeGenerateObjectErrorCode(cause);
         const trace = getSafeGenerateObjectTrace(cause);
         const value = trace ? evidence(trace, request.budget, Date.now() - started) : null;
-        const code: CampaignPlayGameMasterErrorCode = timeoutSignal.aborted && !request.signal?.aborted
-          ? "stage_timeout"
-          : safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
+        const code: CampaignPlayGameMasterErrorCode =
+          safeCode === "schema_validation_failed" || safeCode === "invalid_structured_tool_call" ||
               safeCode === "missing_structured_tool_call"
             ? "model_contract_failed"
             : "transport_interrupted";

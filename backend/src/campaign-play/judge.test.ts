@@ -50,7 +50,6 @@ function trace(strategy: SafeGenerateTrace["strategy"] = "native_schema"): SafeG
 }
 
 const budget: CampaignPlayModelBudget = {
-  maximumDurationMs: 10_000,
   maximumInputTokens: 1_000,
   maximumOutputTokens: 1_000,
   maximumTotalTokens: 2_000,
@@ -95,6 +94,7 @@ function proposal(overrides: Record<string, unknown> = {}) {
 
 describe("Campaign Play Judge", () => {
   it("normalizes one freeform action while code preserves its original authority fields", async () => {
+    const workerController = new AbortController();
     const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => (
       { object: proposal(), trace: trace() }
     ));
@@ -104,7 +104,14 @@ describe("Campaign Play Judge", () => {
       source: "freeform" as const,
       choiceHandle: null,
     };
-    const result = await judge.judge({ frame: frame(), input, model: model(), temperature: 0.2, budget });
+    const result = await judge.judge({
+      frame: frame(),
+      input,
+      model: model(),
+      temperature: 0.2,
+      budget,
+      signal: workerController.signal,
+    });
     expect(result.ruling.normalizedIntent).toMatchObject(input);
     expect(result.rulingHash).toHaveLength(64);
     expect(result.modelEvidence).toMatchObject({
@@ -122,9 +129,9 @@ describe("Campaign Play Judge", () => {
       allowRepair: false,
       allowTextFallback: false,
       retries: 1,
-      timeout: budget.maximumDurationMs,
-      abortSignal: expect.any(AbortSignal),
+      abortSignal: workerController.signal,
     });
+    expect("timeout" in options).toBe(false);
   });
 
   it("keeps reasoning tokens in evidence without charging them to the ruling output budget", async () => {
@@ -152,26 +159,6 @@ describe("Campaign Play Judge", () => {
     });
 
     expect(result.modelEvidence.outputTokens).toBe(800);
-  });
-
-  it("aborts one provider attempt at the admitted Judge deadline", async () => {
-    const generateObject = vi.fn((options: Parameters<typeof safeGenerateObject>[0]) =>
-      new Promise((_resolve, reject) => {
-        options.abortSignal?.addEventListener("abort", () => reject(new Error("deadline")), {
-          once: true,
-        });
-      }));
-    const judge = createCampaignPlayJudge({
-      generateObject: generateObject as unknown as typeof safeGenerateObject,
-    });
-    await expect(judge.judge({
-      frame: frame(),
-      input: { originalText: "I wait.", source: "freeform", choiceHandle: null },
-      model: model(),
-      temperature: 0.2,
-      budget: { ...budget, maximumDurationMs: 5 },
-    })).rejects.toMatchObject({ code: "stage_timeout" });
-    expect(generateObject).toHaveBeenCalledOnce();
   });
 
   it("treats prompt injection as inert player input", async () => {
