@@ -116,6 +116,8 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Do not introduce an absent handle, identifier, state, or fact");
     expect(prompt).toContain("If the actor removes or carries away an object");
     expect(prompt).toContain("the trace must not leave that object at the location");
+    expect(prompt).toContain("do not label the trace by an administrative meaning");
+    expect(prompt).toContain("hidden category, or inferred function");
     expect(prompt).toContain("Code owns canonical identifiers");
   });
 });

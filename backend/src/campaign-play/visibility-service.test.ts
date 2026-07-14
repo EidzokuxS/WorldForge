@@ -910,6 +910,8 @@ describe("Campaign Play visibility service", () => {
       locationId: seed.predicate.channel === "local_aftermath" ? seed.predicate.locationId : null,
       routeId: null,
       witnessActorId: null,
+      commandKind: "record_world_event",
+      observableTrace: seed.observableTrace,
     } as const;
     expect(resolveCampaignPlayOpeningObservableTrace(seed, matching)).toBe(
       "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
@@ -921,6 +923,10 @@ describe("Campaign Play visibility service", () => {
     expect(resolveCampaignPlayOpeningObservableTrace(seed, {
       ...matching,
       locationId: "location-b",
+    })).toBeNull();
+    expect(resolveCampaignPlayOpeningObservableTrace(seed, {
+      ...matching,
+      observableTrace: "Fresh muster sheets lie open beside a capped ink pot.",
     })).toBeNull();
   });
 

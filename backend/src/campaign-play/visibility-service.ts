@@ -471,9 +471,18 @@ export function resolveCampaignPlayOpeningObservableTrace(
     locationId: string | null;
     routeId: string | null;
     witnessActorId: string | null;
+    commandKind: string | null;
+    observableTrace: unknown;
   },
 ): string | null {
   if (exposure.sourceActorId !== seed.sourceActorId || exposure.channel !== seed.predicate.channel) {
+    return null;
+  }
+  if (
+    exposure.commandKind === "record_world_event" &&
+    typeof exposure.observableTrace === "string" &&
+    exposure.observableTrace !== seed.observableTrace
+  ) {
     return null;
   }
   switch (seed.predicate.channel) {
@@ -592,6 +601,8 @@ function publicEntry(
     locationId: exposure.locationId,
     routeId: exposure.routeId,
     witnessActorId: exposure.witnessActorId,
+    commandKind: exposure.commandKind,
+    observableTrace: commandPayload.observableTrace,
   });
   const playerCaused = eventSourceActorId(exposure) === humanActorId || (
     playerParticipated && eventSource.kind === "system" && eventSource.system === "game_master"

@@ -893,6 +893,8 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");
     expect(prompt).toContain("observableTrace");
+    expect(prompt).toContain("do not label the trace by an administrative meaning");
+    expect(prompt).toContain("hidden category, or inferred function");
     expect(prompt).toContain('"sceneCandidates"');
     expect(prompt).toContain('"candidateId":"opening-scene:');
     expect(prompt).toContain("copy only its candidateId into scene.candidateId");

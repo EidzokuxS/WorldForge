@@ -329,6 +329,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("natural scene prose rather than copying audit-like qualifications");
     expect(prompt).toContain("Unknowns are boundaries on what you may claim, not a checklist to recite");
     expect(prompt).toContain("Do not enumerate every unsupported alternative");
+    expect(prompt).toContain("Show a person's reserve, refusal, or impatience");
+    expect(prompt).toContain('Do not editorialize that a tone is "unrevealing"');
+    expect(prompt).toContain("do not paraphrase its description as a standalone tour");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
