@@ -12,7 +12,7 @@
 - Once Judge normalizes a movement route and destination, code owns the player actor, origin, route, and destination handles; the model must not reconstruct mechanical movement authority.
 - Record isolated mixed-language tail tokens as cosmetic prose findings when the response remains coherent; reject a playtest for overall meaning, causality, continuity, or readability failures instead.
 - For strict discriminated unions, tell the model the complete field set for every variant and name fields that belong to only one variant. A schema alone may not stop a reasoning model from copying a plausible field across variants.
-- A move choice needs only a route handle when accepted topology owns its endpoints. Derive the destination from the frozen route instead of requiring Judge or the model to restate it.
+- Movement authority needs only one visible route handle when accepted topology owns its endpoints. Derive the destination from that route instead of requiring move choices or compound freeform actions to repeat the route in semantic targets.
 - Build and validate local prompt/frame contracts outside provider transport catches. Otherwise a synchronous contract exception is misreported as provider unavailability and invites useless retries.
 - Keep UI presentation metadata such as card colors and monograms out of model-facing narrative packets. A model can turn any visible token into fictional prose, even when the token is harmless to the frontend.
 

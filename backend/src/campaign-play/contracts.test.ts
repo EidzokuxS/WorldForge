@@ -1775,7 +1775,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     }).success).toBe(false);
   });
 
-  it("binds pure and compound movement to an explicit route target", () => {
+  it("binds pure and compound movement to an explicit route handle", () => {
     const baseRuling = {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
@@ -1815,7 +1815,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     expect(campaignPlayJudgeRulingSchema.safeParse({
       ...baseRuling,
       movementRouteHandle: routeTarget.handle,
-    }).success).toBe(false);
+    }).success).toBe(true);
   });
 
   it("binds the persisted Judge artifact to its public result and code-owned primary plan", () => {

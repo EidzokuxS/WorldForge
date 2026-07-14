@@ -249,7 +249,7 @@ function prompt(frame: CampaignPlayJudgeFrame, input: CampaignPlayJudgeInput): s
     "clarificationQuestion must be non-null only for clarification_required and null for every other disposition.",
     "For uncertain rulings, uncertainty.kind must be check and must include dieSides=20, difficulty, modifierMinimum, and modifierMaximum. The modifier range must contain zero. Code performs the roll; never claim a roll result.",
     "For suggested input, copy FROZEN_CHOICE kind and targets exactly. Judge feasibility and outcome without reinterpreting the selected action.",
-    "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route target when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone, and never use a route that is absent from targets.",
+    "movementRouteHandle is a separate mechanical decision from the primary kind. Set it to the exact visible route when the action includes travel before or during its primary action, including compound requests such as travel then contact. Otherwise set it to null. A move kind always requires a non-null movementRouteHandle. Never infer travel from a cited route alone. The route does not need to be repeated in targets; targets describe the action's semantic subjects or destination.",
     "For suggested input, a move choice must use its exact frozen route target as movementRouteHandle. Every suggested non-move choice must set movementRouteHandle to null; never add travel that the frozen choice did not authorize.",
     "PLAYER_INPUT stakes ask what the player hopes to learn or accomplish; they are not evidence and do not authorize an answer. For observation, authorize only conclusions supported by SOURCE_MOMENT, VISIBLE_FRAME, or ACTOR_CONTINUITY. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface proves only its currently observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away.",
     "The reason field explains feasibility and result bounds. It must not add world facts beyond the supplied frames or resolve an uncertainty that the visible evidence leaves open.",
@@ -304,10 +304,7 @@ function compile(
   if (!targetsAreVisible || !citationsAreVisible) throw new CampaignPlayJudgeError("model_contract_failed", null);
   const movementRouteIsVisible = proposal.movementRouteHandle === null
     || visible.get(proposal.movementRouteHandle) === "route";
-  const movementRouteIsTarget = proposal.movementRouteHandle === null
-    || proposal.targets.some((target) =>
-      target.kind === "route" && target.handle === proposal.movementRouteHandle);
-  if (!movementRouteIsVisible || !movementRouteIsTarget) {
+  if (!movementRouteIsVisible) {
     throw new CampaignPlayJudgeError("model_contract_failed", null);
   }
   if (proposal.kind === "move" && proposal.movementRouteHandle === null) {

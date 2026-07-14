@@ -152,7 +152,6 @@ describe("Campaign Play Judge", () => {
     }, proposal({
       kind: "contact",
       targets: [
-        { handle: "route-reef", kind: "route" },
         { handle: "actor-guard", kind: "actor" },
       ],
       method: "Cross the road, then ask the guard",
@@ -350,9 +349,6 @@ describe("Campaign Play Judge", () => {
     expect(() => judge.compile(frame(), input, proposal({
       targets: [{ handle: "route-reef", kind: "route" }],
       movementRouteHandle: "route-hidden",
-    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
-    expect(() => judge.compile(frame(), input, proposal({
-      movementRouteHandle: "route-reef",
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => judge.compile(frame(), input, proposal({
       kind: "move",
