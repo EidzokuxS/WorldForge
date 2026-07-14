@@ -162,6 +162,7 @@ export interface CampaignPlayActorScheduler {
   validateOpeningActors(
     input: ValidateCampaignPlayOpeningActorsInput,
   ): CampaignPlayOpeningActorRuntime;
+  freezeOpeningDueSet(input: FreezeCampaignPlayActorDueSetInput): CampaignPlayActorDueSet;
   freezeDueSet(input: FreezeCampaignPlayActorDueSetInput): CampaignPlayActorDueSet;
   admitDueSet(input: AdmitCampaignPlayActorDueSetInput): CampaignPlayActorJob[];
   loadDueSet(turnId: string): CampaignPlayActorDueSet | null;
@@ -538,6 +539,55 @@ export function createCampaignPlayActorScheduler(
   handle: CampaignPlayDatabaseHandle,
 ): CampaignPlayActorScheduler {
   const stateRepository = createCampaignPlayStateRepository(handle);
+  const freezeActorDueSet = (
+    input: FreezeCampaignPlayActorDueSetInput,
+    requiredTurnKind: "opening" | "player_action",
+  ): CampaignPlayActorDueSet => {
+    const state = stateRepository.loadState();
+    if (!state || state.authority.setupPhase !== "ready"
+      || state.authority.worldTimeMinutes === null) {
+      throw new CampaignPlayActorSchedulerError("scheduler_state_invalid");
+    }
+    if (state.authority.worldVersion !== input.expectedWorldVersion
+      || state.authority.runtimeRevision !== input.expectedRuntimeRevision) {
+      throw new CampaignPlayActorSchedulerError("scheduler_due_set_stale");
+    }
+    const turn = handle.sqlite.prepare(`SELECT stage, turn_kind AS turnKind
+      FROM campaign_play_turns WHERE id = ? AND campaign_id = ?`).get(
+        input.turnId,
+        handle.campaignId,
+      ) as { stage: string; turnKind: string } | undefined;
+    if (turn?.stage !== "primary_settled" || turn.turnKind !== requiredTurnKind) {
+      throw new CampaignPlayActorSchedulerError("scheduler_turn_invalid");
+    }
+    let actorOpportunities = 0;
+    const decisions = dueRows(
+      handle,
+      input.turnId,
+      state.authority.worldTimeMinutes,
+    ).map((row, dueOrder) => {
+      const decision = makeDecision(
+        handle.campaignId,
+        input.turnId,
+        state.authority.worldTimeMinutes!,
+        row,
+        dueOrder,
+        actorOpportunities < CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn,
+      );
+      if (decision.disposition === "wake") actorOpportunities += 1;
+      return decision;
+    });
+    const dueSet = campaignPlayActorDueSetSchema.parse({
+      campaignId: handle.campaignId,
+      turnId: input.turnId,
+      settledWorldTimeMinutes: state.authority.worldTimeMinutes,
+      baseWorldVersion: state.authority.worldVersion,
+      baseRuntimeRevision: state.authority.runtimeRevision,
+      decisions,
+    });
+    dueSetSeals.set(dueSet, dueSetSeal(dueSet));
+    return freeze(dueSet);
+  };
 
   return {
     initializeOpeningActors(input) {
@@ -700,50 +750,12 @@ export function createCampaignPlayActorScheduler(
       return freeze({ plans: storedPlans, schedules: storedSchedules });
     },
 
+    freezeOpeningDueSet(input) {
+      return freezeActorDueSet(input, "opening");
+    },
+
     freezeDueSet(input) {
-      const state = stateRepository.loadState();
-      if (!state || state.authority.setupPhase !== "ready"
-        || state.authority.worldTimeMinutes === null) {
-        throw new CampaignPlayActorSchedulerError("scheduler_state_invalid");
-      }
-      if (state.authority.worldVersion !== input.expectedWorldVersion
-        || state.authority.runtimeRevision !== input.expectedRuntimeRevision) {
-        throw new CampaignPlayActorSchedulerError("scheduler_due_set_stale");
-      }
-      const turn = handle.sqlite.prepare(`SELECT stage FROM campaign_play_turns
-        WHERE id = ? AND campaign_id = ?`).get(input.turnId, handle.campaignId) as {
-        stage: string;
-      } | undefined;
-      if (turn?.stage !== "primary_settled") {
-        throw new CampaignPlayActorSchedulerError("scheduler_turn_invalid");
-      }
-      let actorOpportunities = 0;
-      const decisions = dueRows(
-        handle,
-        input.turnId,
-        state.authority.worldTimeMinutes,
-      ).map((row, dueOrder) => {
-        const decision = makeDecision(
-          handle.campaignId,
-          input.turnId,
-          state.authority.worldTimeMinutes!,
-          row,
-          dueOrder,
-          actorOpportunities < CAMPAIGN_PLAY_LIMITS.actorOpportunitiesPerTurn,
-        );
-        if (decision.disposition === "wake") actorOpportunities += 1;
-        return decision;
-      });
-      const dueSet = campaignPlayActorDueSetSchema.parse({
-        campaignId: handle.campaignId,
-        turnId: input.turnId,
-        settledWorldTimeMinutes: state.authority.worldTimeMinutes,
-        baseWorldVersion: state.authority.worldVersion,
-        baseRuntimeRevision: state.authority.runtimeRevision,
-        decisions,
-      });
-      dueSetSeals.set(dueSet, dueSetSeal(dueSet));
-      return freeze(dueSet);
+      return freezeActorDueSet(input, "player_action");
     },
 
     admitDueSet(input) {

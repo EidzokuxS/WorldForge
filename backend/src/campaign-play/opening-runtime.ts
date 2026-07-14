@@ -41,6 +41,10 @@ import {
   type CampaignPlayActorScheduler,
 } from "./actor-scheduler.js";
 import {
+  createCampaignPlayActorProposalService,
+  type CampaignPlayActorProposalService,
+} from "./actor-proposal-service.js";
+import {
   executeCampaignPlayRulebookBatch,
   preflightCampaignPlayRulebook,
   type CampaignPlayRulebookAuthority,
@@ -149,6 +153,7 @@ export interface CreateCampaignPlayOpeningRuntimeInput {
   narrator?: CampaignPlayNarrator;
   visibility?: CampaignPlayVisibilityService;
   actorScheduler?: CampaignPlayActorScheduler;
+  actorProposalService?: CampaignPlayActorProposalService;
 }
 
 export interface AdmitCampaignPlayOpeningInput {
@@ -514,6 +519,28 @@ export function createCampaignPlayOpeningRuntime(
     }
     return value;
   };
+  const actorProposalService = input.actorProposalService ??
+    createCampaignPlayActorProposalService(input.handle, { now });
+
+  const releaseActorBoundary = (
+    token: CampaignPlayWorkerLeaseToken,
+    jobId: string,
+    outcome: string,
+  ): void => {
+    const committedAt = now();
+    repository.commitDeterministic({
+      token,
+      transition: "actor_job_transitioned",
+      worldVersionAdvance: 0,
+      committedAt,
+      mutationId: runtimeId("opening-actor-boundary-released", {
+        turnId: token.turnId,
+        epoch: token.epoch,
+        jobId,
+        outcome,
+      }),
+    });
+  };
 
   const loadAdmissionFrame = (turn: LoadedCampaignPlayTurn): CampaignPlayOpeningAdmissionFrame => {
     if (turn.turnKind !== "opening" || turn.document.turnKind !== "opening") {
@@ -701,6 +728,19 @@ export function createCampaignPlayOpeningRuntime(
                     context: mutationContext,
                     createdAt: committedAt,
                   });
+                  const stateUpdate = mutationContext.sqlite.prepare(`UPDATE campaign_play_states
+                    SET setup_phase = 'ready', opened_at = ?
+                    WHERE campaign_id = ? AND setup_phase = 'opening_required'
+                      AND world_time_minutes = 0 AND opened_at IS NULL`).run(
+                        committedAt,
+                        input.handle.campaignId,
+                      );
+                  if (stateUpdate.changes !== 1) {
+                    throw new CampaignPlayOpeningRuntimeError(
+                      "opening_state_invalid",
+                      "Campaign Play opening lost its mechanical-ready boundary.",
+                    );
+                  }
                 },
               });
             } catch (cause) {
@@ -732,28 +772,99 @@ export function createCampaignPlayOpeningRuntime(
       if (stage === "primary_settled") {
         return {
           kind: "deterministic",
-          ready: () => artifacts.load("opening_planner") !== null,
+          ready: ({ turn: currentTurn }) => {
+            if (artifacts.load("opening_planner") === null) return false;
+            const dueSet = scheduler.loadDueSet(currentTurn.turnId);
+            if (!dueSet) return true;
+            const jobs = scheduler.listTurnJobs(currentTurn.turnId);
+            if (jobs.some((job) => job.stage === "interrupted")) return false;
+            if (jobs.some((job) =>
+              ["queued", "claimed", "proposed"].includes(job.stage))) return true;
+            scheduler.validateTurnSettlement(currentTurn.turnId);
+            return true;
+          },
           execute(context) {
             const artifact = campaignPlayOpeningArtifactSchema.parse(
               context.artifacts.load("opening_planner")?.artifact,
             );
-            const committedAt = now();
+            const dueSet = scheduler.loadDueSet(context.turn.turnId);
+            if (!dueSet) {
+              const state = stateRepository.loadState();
+              if (!state || state.authority.worldTimeMinutes === null) {
+                throw new CampaignPlayOpeningRuntimeError(
+                  "opening_state_invalid",
+                  "Campaign Play opening actor scheduling requires settled world time.",
+                );
+              }
+              const frozen = scheduler.freezeOpeningDueSet({
+                turnId: context.turn.turnId,
+                expectedWorldVersion: state.authority.worldVersion,
+                expectedRuntimeRevision: state.authority.runtimeRevision,
+              });
+              const committedAt = now();
+              repository.commitDeterministic({
+                token: context.token,
+                transition: "actor_job_transitioned",
+                worldVersionAdvance: 0,
+                committedAt,
+                mutationId: runtimeId("opening-actor-due-set-admitted", {
+                  turnId: context.turn.turnId,
+                  epoch: context.token.epoch,
+                  dueSetHash: hashCampaignPlayProjection(frozen),
+                }),
+                mutate(mutationContext) {
+                  scheduler.validateOpeningActors({
+                    plans: artifact.actorPlans,
+                    schedules: artifact.actorSchedules,
+                    turnId: context.turn.turnId,
+                    context: mutationContext,
+                  });
+                  scheduler.admitDueSet({
+                    dueSet: frozen,
+                    context: mutationContext,
+                    createdAt: committedAt,
+                  });
+                },
+              });
+              return;
+            }
+            const next = scheduler.listTurnJobs(context.turn.turnId).find((job) =>
+              ["queued", "claimed", "proposed"].includes(job.stage));
+            if (next) {
+              const outcome = actorProposalService.processNext({
+                turnId: context.turn.turnId,
+                token: context.token,
+                createdAt: now(),
+                openingExposureSeed: artifact.exposureSeed,
+              });
+              if (!outcome || outcome.kind === "replan_required") {
+                throw new CampaignPlayOpeningRuntimeError(
+                  "opening_artifact_invalid",
+                  "Campaign Play opening actor plan requires an unplanned replacement.",
+                );
+              }
+              releaseActorBoundary(context.token, outcome.jobId, outcome.kind);
+              return;
+            }
+            const jobs = scheduler.validateTurnSettlement(context.turn.turnId);
+            if (jobs.some((job) => job.stage !== "settled")) {
+              throw new CampaignPlayOpeningRuntimeError(
+                "opening_artifact_invalid",
+                "Campaign Play opening requires every admitted actor action to settle.",
+              );
+            }
             repository.commitDeterministic({
               token: context.token,
               transition: "actors_settled",
               worldVersionAdvance: 0,
-              committedAt,
+              committedAt: now(),
               mutationId: runtimeId("opening-actors-settled", {
                 turnId: context.turn.turnId,
                 epoch: context.token.epoch,
+                dueSetHash: hashCampaignPlayProjection(dueSet),
               }),
               mutate(mutationContext) {
-                scheduler.validateOpeningActors({
-                  plans: artifact.actorPlans,
-                  schedules: artifact.actorSchedules,
-                  turnId: context.turn.turnId,
-                  context: mutationContext,
-                });
+                scheduler.validateTurnSettlement(context.turn.turnId, mutationContext);
               },
             });
           },
@@ -831,11 +942,7 @@ export function createCampaignPlayOpeningRuntime(
                           pending.packetHash,
                           pending.packetJson,
                         );
-                      const stateUpdate = mutationContext.sqlite.prepare(`UPDATE campaign_play_states
-                        SET setup_phase = 'ready', opened_at = ?
-                        WHERE campaign_id = ? AND setup_phase = 'opening_required'
-                          AND opened_at IS NULL`).run(completedAt, input.handle.campaignId);
-                      if (narrationUpdate.changes !== 1 || stateUpdate.changes !== 1) {
+                      if (narrationUpdate.changes !== 1) {
                         throw new CampaignPlayOpeningRuntimeError(
                           "opening_narration_invalid",
                           "Campaign Play opening narration lost its atomic completion boundary.",

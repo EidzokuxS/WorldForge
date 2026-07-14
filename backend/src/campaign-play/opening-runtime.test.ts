@@ -279,6 +279,21 @@ function count(handle: CampaignPlayDatabaseHandle, table: string): number {
     WHERE campaign_id = ?`).get(CAMPAIGN_ID) as { value: number }).value;
 }
 
+async function runOpeningUntil(
+  runtime: ReturnType<typeof createCampaignPlayOpeningRuntime>,
+  time: ReturnType<typeof fixedClock>,
+  turnId: string,
+  predicate: (turn: NonNullable<ReturnType<typeof runtime.loadTurn>>) => boolean,
+): Promise<void> {
+  for (let step = 0; step < 16; step += 1) {
+    const turn = runtime.loadTurn(turnId);
+    if (turn && predicate(turn)) return;
+    time.advance();
+    await runtime.runNextStage(turnId);
+  }
+  throw new Error("Opening runtime did not reach the expected durable state.");
+}
+
 function plannerFixture() {
   const compiler = createCampaignPlayOpeningPlanner();
   return {
@@ -415,10 +430,12 @@ describe("Campaign Play opening runtime", () => {
         startingConditions: mode === "chosen" ? chosen : { mode: "delegate" as const },
       };
       const admission = runtime.admitOpening({ request, submittedAt: 1_500 });
-      for (let stage = 0; stage < 5; stage += 1) {
-        time.advance();
-        await runtime.runNextStage(admission.turnId);
-      }
+      await runOpeningUntil(
+        runtime,
+        time,
+        admission.turnId,
+        (turn) => turn.stage === "completed",
+      );
 
       const completed = runtime.loadTurn(admission.turnId)!;
       const finalState = createCampaignPlayStateRepository(handle).loadState()!;
@@ -430,12 +447,36 @@ describe("Campaign Play opening runtime", () => {
       expect(narrator.narrate).toHaveBeenCalledTimes(1);
       expect(count(handle, "campaign_play_actor_plans")).toBe(6);
       expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
-      expect(count(handle, "campaign_play_actor_jobs")).toBe(0);
-      expect(count(handle, "campaign_play_actor_proposals")).toBe(0);
+      expect(count(handle, "campaign_play_actor_jobs")).toBe(2);
+      expect(count(handle, "campaign_play_actor_proposals")).toBe(2);
+      expect(handle.sqlite.prepare(`SELECT actor_id AS actorId, stage
+        FROM campaign_play_actor_jobs WHERE campaign_id = ? AND turn_id = ?
+        ORDER BY actor_id`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+          { actorId: "actor-b", stage: "settled" },
+          { actorId: "actor-c", stage: "settled" },
+        ]);
+      expect((handle.sqlite.prepare(`SELECT count(*) AS value
+        FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
+          AND json_extract(causal_parent_json, '$.kind') = 'actor_job'`).get(
+            CAMPAIGN_ID,
+            admission.turnId,
+          ) as { value: number }).value).toBe(2);
       expect(count(handle, "campaign_play_narrations")).toBe(1);
       expect(handle.sqlite.prepare(`SELECT status FROM campaign_play_narrations
         WHERE campaign_id = ? AND turn_id = ?`).get(CAMPAIGN_ID, admission.turnId))
         .toEqual({ status: "complete" });
+      const openingPacket = JSON.parse((handle.sqlite.prepare(`SELECT packet_json AS packetJson
+        FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`).get(
+          CAMPAIGN_ID,
+          admission.turnId,
+        ) as { packetJson: string }).packetJson) as CampaignPlayNarratorPacket;
+      const localTrace = "Fresh work marks show that someone acted here recently.";
+      const hiddenTrace = "Fresh sealing wax and torn binding thread mark a ledger removed in haste.";
+      expect(openingPacket.turnKind).toBe("opening");
+      expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
+        .toContain(localTrace);
+      expect(openingPacket.consequences.map((consequence) => consequence.whatChanged))
+        .not.toContain(hiddenTrace);
 
       const beforeReplay = {
         commands: count(handle, "campaign_play_commands"),
@@ -520,10 +561,12 @@ describe("Campaign Play opening runtime", () => {
         startingConditions: { mode: "delegate" },
       },
     });
-    for (let stage = 0; stage < 5; stage += 1) {
-      time.advance();
-      await runtime.runNextStage(admission.turnId);
-    }
+    await runOpeningUntil(
+      runtime,
+      time,
+      admission.turnId,
+      (turn) => turn.stage === "interrupted",
+    );
 
     expect(runtime.loadTurn(admission.turnId)).toMatchObject({
       stage: "interrupted",
@@ -585,10 +628,12 @@ describe("Campaign Play opening runtime", () => {
         startingConditions: { mode: "delegate" },
       },
     });
-    for (let stage = 0; stage < 5; stage += 1) {
-      time.advance();
-      await runtime.runNextStage(admission.turnId);
-    }
+    await runOpeningUntil(
+      runtime,
+      time,
+      admission.turnId,
+      (turn) => turn.stage === "interrupted",
+    );
 
     expect(handle.sqlite.prepare(`SELECT actual_provider_id AS actualProviderId,
         actual_model AS actualModel, duration_ms AS durationMs, status
@@ -652,10 +697,13 @@ describe("Campaign Play opening runtime", () => {
           startingConditions: { mode: "delegate" },
         },
       });
-      const stagesBeforeFailure = failedStage === "planner" ? 0 : 4;
-      for (let stage = 0; stage < stagesBeforeFailure; stage += 1) {
-        time.advance();
-        await runtime.runNextStage(admission.turnId);
+      if (failedStage === "narrator") {
+        await runOpeningUntil(
+          runtime,
+          time,
+          admission.turnId,
+          (turn) => turn.stage === "visibility_projected",
+        );
       }
       time.advance();
       const interruptedResult = await runtime.runNextStage(admission.turnId);
@@ -678,11 +726,12 @@ describe("Campaign Play opening runtime", () => {
         interruptedStage: interrupted.interruptedStage!,
         observedEpoch: interrupted.workerEpoch,
       });
-      const remainingStages = failedStage === "planner" ? 4 : 0;
-      for (let stage = 0; stage < remainingStages; stage += 1) {
-        time.advance();
-        await runtime.runNextStage(admission.turnId);
-      }
+      await runOpeningUntil(
+        runtime,
+        time,
+        admission.turnId,
+        (turn) => turn.stage === "completed",
+      );
 
       expect(runtime.loadTurn(admission.turnId)).toMatchObject({
         turnId: admission.turnId,
@@ -732,10 +781,11 @@ describe("Campaign Play opening runtime", () => {
       },
     });
     let packetBytes: string | null = null;
-    for (let stage = 0; stage < 5; stage += 1) {
+    for (let stage = 0; stage < 16; stage += 1) {
+      if (buildRuntime(stage).loadTurn(admission.turnId)?.stage === "completed") break;
       time.advance();
       await buildRuntime(stage).runNextStage(admission.turnId);
-      if (stage === 3) {
+      if (buildRuntime(stage).loadTurn(admission.turnId)?.stage === "visibility_projected") {
         packetBytes = (handle.sqlite.prepare(`SELECT packet_json AS packetJson
           FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`)
           .get(CAMPAIGN_ID, admission.turnId) as { packetJson: string }).packetJson;
@@ -802,10 +852,18 @@ describe("Campaign Play opening runtime", () => {
           startingConditions: { mode: "delegate" },
         },
       });
-      const stagesBeforeDefect = failurePoint === "actor_validation" ? 2 : 3;
-      for (let stage = 0; stage < stagesBeforeDefect; stage += 1) {
-        time.advance();
-        await broken.runNextStage(admission.turnId);
+      if (failurePoint === "actor_validation") {
+        for (let stage = 0; stage < 2; stage += 1) {
+          time.advance();
+          await broken.runNextStage(admission.turnId);
+        }
+      } else {
+        await runOpeningUntil(
+          broken,
+          time,
+          admission.turnId,
+          (turn) => turn.stage === "actors_settled",
+        );
       }
       const stageBefore = broken.loadTurn(admission.turnId)!.stage;
       const schedulesBefore = count(handle, "campaign_play_actor_schedules");
@@ -826,11 +884,12 @@ describe("Campaign Play opening runtime", () => {
         narrator,
       });
       await recovered.recoverActiveTurn();
-      const remainingStages = failurePoint === "actor_validation" ? 2 : 1;
-      for (let stage = 0; stage < remainingStages; stage += 1) {
-        time.advance();
-        await recovered.runNextStage(admission.turnId);
-      }
+      await runOpeningUntil(
+        recovered,
+        time,
+        admission.turnId,
+        (turn) => turn.stage === "completed",
+      );
       expect(recovered.loadTurn(admission.turnId)).toMatchObject({
         turnId: admission.turnId,
         stage: "completed",

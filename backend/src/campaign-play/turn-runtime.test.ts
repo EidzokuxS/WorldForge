@@ -462,7 +462,8 @@ async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
     },
     submittedAt: 1_500,
   });
-  for (let stage = 0; stage < 5; stage += 1) {
+  for (let stage = 0; stage < 16; stage += 1) {
+    if (opening.loadTurn(admitted.turnId)?.stage === "completed") break;
     time.advance();
     await opening.runNextStage(admitted.turnId);
   }
@@ -590,6 +591,13 @@ function turnRuntime(
   gameMaster: NonNullable<Parameters<typeof createCampaignPlayTurnRuntime>[0]["gameMaster"]>,
   overrides: Partial<Parameters<typeof createCampaignPlayTurnRuntime>[0]> = {},
 ) {
+  const actorReplanner = createCampaignPlayActorReplanner(handle, {
+    now: time.clock.now,
+    generateObject: (async (request: { prompt: string }) => ({
+      object: actorReplanProposalFromPrompt(request.prompt),
+      trace: actorReplanTrace(),
+    })) as unknown as typeof safeGenerateObject,
+  });
   return createCampaignPlayTurnRuntime({
     handle,
     owner: "turn-runtime-worker",
@@ -655,6 +663,7 @@ function turnRuntime(
     },
     judge,
     gameMaster,
+    actorReplanner,
     narrator: playerNarratorFixture(),
     ...overrides,
   });
@@ -1411,7 +1420,9 @@ describe("Campaign Play player-action turn runtime", () => {
       expect(schedule.agencyDebt).toBe(1);
       expect(schedule.nextDue).toBeGreaterThan(dueSet!.settledWorldTimeMinutes);
     }
-    expect(actorBoundaries).toBe(expectedJobs.filter((decision) => decision.disposition === "wake").length + 1);
+    expect(actorBoundaries).toBe(
+      expectedJobs.filter((decision) => decision.disposition === "wake").length + 2,
+    );
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_actor_proposals proposal
       JOIN campaign_play_actor_jobs job ON job.job_id = proposal.job_id
       WHERE proposal.campaign_id = ? AND job.turn_id = ? AND proposal.status = 'pending'`).get(
@@ -1437,12 +1448,12 @@ describe("Campaign Play player-action turn runtime", () => {
           {
             channel: "local_aftermath",
             locationId: "location-a",
-            validUntilWorldTimeMinutes: 4,
+            validUntilWorldTimeMinutes: 1_441,
           },
           {
             channel: "local_aftermath",
             locationId: "location-a",
-            validUntilWorldTimeMinutes: 1_441,
+            validUntilWorldTimeMinutes: 4,
           },
         ]);
   });
@@ -1518,12 +1529,13 @@ describe("Campaign Play player-action turn runtime", () => {
     expect(telemetry).toMatchObject({
       terminalReason: "action_resolved",
       costComplete: true,
-      inputTokens: 55,
-      outputTokens: 85,
-      totalTokens: 140,
-      estimatedCostMicros: 6,
+      inputTokens: 95,
+      outputTokens: 110,
+      totalTokens: 205,
+      estimatedCostMicros: 8,
     });
     expect(telemetry.modelAttempts.map((attempt) => attempt.kind).sort()).toEqual([
+      "actor_replanner",
       "game_master",
       "judge",
       "narrator",

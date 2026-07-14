@@ -128,6 +128,7 @@
 - Treat unknowns as output constraints, not prose requirements. Public summaries should lead with concrete evidence and use at most one decision-relevant uncertainty instead of reciting every unsupported interpretation.
 - Keep public aftermath sensory and deduplicated. Do not expose a hidden semantic classification through an observable-trace label, and do not project the same unchanged trace again under a new timestamp.
 - Commit one model-planned local actor action before Opening narration. A location card plus visible cast cannot produce an inciting moment by itself.
+- A world-time-zero actor schedule is only intent. Opening acceptance must prove the due set was admitted, its actor jobs settled through Rulebook, and the local receipt reached visibility before Narrator runs.
 - Judge ordinary contact by whether the exchange can occur, then let the Game Master simulate the reply from protected actor truth. Uncertain willingness or knowledge alone is not a dice check.
 
 ## Evidence Handling
