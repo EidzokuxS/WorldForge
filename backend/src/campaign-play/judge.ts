@@ -97,6 +97,34 @@ const judgeProposalSchema = z.object({
     .transform((value) => value || null),
 }).strict();
 
+function visibleHandleSchema(handles: readonly string[]) {
+  const [first, ...rest] = handles;
+  if (first === undefined) {
+    throw new CampaignPlayJudgeError("judge_frame_invalid", null);
+  }
+  return z.enum([first, ...rest]);
+}
+
+function judgeProposalSchemaForFrame(frame: CampaignPlayJudgeFrame) {
+  const visibleHandles = frame.visibleFacts.map((fact) => fact.handle);
+  const targetHandles = frame.visibleFacts
+    .filter((fact) => fact.kind !== "observation" && fact.kind !== "choice")
+    .map((fact) => fact.handle);
+  const routeHandles = frame.visibleFacts
+    .filter((fact) => fact.kind === "route")
+    .map((fact) => fact.handle);
+  return judgeProposalSchema.extend({
+    targets: z.array(campaignPlayVisibleTargetSchema.extend({
+      handle: visibleHandleSchema(targetHandles),
+    })).max(CAMPAIGN_PLAY_LIMITS.targets),
+    movementRouteHandle: routeHandles.length > 0
+      ? visibleHandleSchema(routeHandles).nullable()
+      : z.null(),
+    citedVisibleFactHandles: z.array(visibleHandleSchema(visibleHandles))
+      .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
+  });
+}
+
 export interface CampaignPlayJudgeFrame extends z.infer<typeof campaignPlayJudgeFrameSchema> {}
 export interface CampaignPlayJudgeInput {
   originalText: string;
@@ -382,7 +410,7 @@ export function createCampaignPlayJudge(
       try {
         generated = await dependencies.generateObject({
           model: request.model,
-          schema: judgeProposalSchema,
+          schema: judgeProposalSchemaForFrame(parsedFrame.data),
           prompt: prompt(parsedFrame.data, request.input),
           temperature: request.temperature,
           maxOutputTokens: request.budget.maximumOutputTokens,

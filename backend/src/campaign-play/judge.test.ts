@@ -142,6 +142,16 @@ describe("Campaign Play Judge", () => {
       abortSignal: workerController.signal,
     });
     expect("timeout" in options).toBe(false);
+    expect(options.schema.safeParse(proposal()).success).toBe(true);
+    expect(options.schema.safeParse(proposal({
+      targets: [{ handle: "actor-hidden", kind: "actor" }],
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      citedVisibleFactHandles: ["fact-hidden"],
+    })).success).toBe(false);
+    expect(options.schema.safeParse(proposal({
+      movementRouteHandle: "route-hidden",
+    })).success).toBe(false);
   });
 
   it("keeps a compound action's primary intent while authorizing its explicit route movement", () => {
