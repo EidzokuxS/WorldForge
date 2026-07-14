@@ -660,6 +660,69 @@ describe("Campaign Play actor scheduler", () => {
     });
   });
 
+  it("defers an inactive plan beyond actor capacity and advances its retry schedule", () => {
+    const { handle, states, settledClock } = createReadyFixture();
+    states.commitRuntime({
+      event: {
+        eventId: "inactive-capacity-fixture",
+        turnId: "turn-player",
+        kind: "actor_job_transitioned",
+        workerEpoch: 3,
+        protectedPayloadHash: HASH_A,
+        createdAt: 1_570,
+      },
+      mutate(context) {
+        context.sqlite.prepare(`UPDATE campaign_play_actor_schedules
+          SET next_act_at_world_time_minutes = ?, updated_at = 1570
+          WHERE campaign_id = ? AND actor_id = 'actor-c' AND plan_id = 'plan-actor-c'`)
+          .run(settledClock - 4, context.campaignId);
+        context.sqlite.prepare(`UPDATE campaign_play_actor_plans
+          SET status = 'blocked', updated_at = 1571
+          WHERE campaign_id = ? AND actor_id = 'actor-c' AND plan_id = 'plan-actor-c'`)
+          .run(context.campaignId);
+      },
+    });
+
+    const scheduler = createCampaignPlayActorScheduler(handle);
+    const dueSet = freezeCurrent(handle);
+    expect(dueSet.decisions.find((decision) => decision.actorId === "actor-c"))
+      .toMatchObject({
+        disposition: "defer",
+        dueReason: "plan_retry",
+        reason: "actor_capacity",
+        nextDueAtWorldTimeMinutes: settledClock + 25,
+        resultAgencyDebt: 1,
+      });
+
+    let jobs = scheduler.listTurnJobs("turn-player");
+    states.commitRuntime({
+      event: {
+        eventId: "inactive-capacity-admitted",
+        turnId: "turn-player",
+        kind: "actor_job_transitioned",
+        workerEpoch: 3,
+        protectedPayloadHash: hashCampaignPlayProjection(dueSet),
+        createdAt: 1_580,
+      },
+      mutate(context) {
+        jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_580 });
+      },
+    });
+
+    expect(jobs.find((job) => job.actorId === "actor-c")).toMatchObject({
+      stage: "deferred",
+      dueReason: "plan_retry",
+      deferReason: "actor_capacity",
+      completedAt: 1_580,
+    });
+    expect(handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextAt,
+      agency_debt AS agencyDebt FROM campaign_play_actor_schedules
+      WHERE campaign_id = ? AND actor_id = 'actor-c'`).get(handle.campaignId)).toEqual({
+      nextAt: settledClock + 25,
+      agencyDebt: 1,
+    });
+  });
+
   it("rejects cloned and stale due sets with zero admitted jobs", () => {
     const { handle, states } = createReadyFixture();
     const scheduler = createCampaignPlayActorScheduler(handle);

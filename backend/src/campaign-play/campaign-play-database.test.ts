@@ -492,6 +492,33 @@ describe("Campaign Play core and Rulebook storage", () => {
     }
   });
 
+  it("applies pending migrations when a managed campaign database opens directly", () => {
+    const directory = path.join(root, CAMPAIGN_A);
+    const databasePath = path.join(directory, "state.db");
+    fs.mkdirSync(directory, { recursive: true });
+    const sqlite = new Database(databasePath);
+    try {
+      migrate(drizzle(sqlite, { schema }), { migrationsFolder: migrationFolderThrough(33) });
+      sqlite.prepare(`INSERT INTO campaigns (
+        id, name, premise, created_at, updated_at
+      ) VALUES (?, 'Pending Migration', 'Premise', 1, 1)`).run(CAMPAIGN_A);
+      const before = sqlite.prepare(`SELECT sql FROM sqlite_master
+        WHERE type = 'trigger' AND name = 'campaign_play_actor_schedules_update_guard'`)
+        .get() as { sql: string };
+      expect(before.sql).not.toContain("job.defer_reason = 'actor_capacity'");
+    } finally {
+      sqlite.close();
+    }
+
+    const opened = track(openCampaignWorldDatabase(CAMPAIGN_A));
+    const after = opened.sqlite.prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'campaign_play_actor_schedules_update_guard'`)
+      .get() as { sql: string };
+    expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
+    expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_016_300_000 });
+  });
+
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {
     const databasePath = path.join(root, "accepted-before-play.db");
     const sqlite = new Database(databasePath);

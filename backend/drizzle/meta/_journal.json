@@ -239,6 +239,13 @@
       "when": 1784006037142,
       "tag": "0033_campaign_play_actor_opportunities",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1784016300000,
+      "tag": "0034_campaign_play_actor_capacity",
+      "breakpoints": true
     }
   ]
 }
