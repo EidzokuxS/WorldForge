@@ -30,10 +30,10 @@ export class CampaignWorldValidationError extends Error {
 }
 
 const locationKinds = new Set(["macro", "persistent_sublocation"]);
-const actorKinds = new Set(["person", "collective"]);
+const actorKinds = new Set(["person"]);
 const actorRoles = new Set(["key", "support", "background"]);
 const goalHorizons = new Set(["immediate", "ongoing"]);
-const placementKinds = new Set(["present", "home", "base", "influence"]);
+const placementKinds = new Set(["present", "home"]);
 const relationTypes = new Set([
   "alliance",
   "rivalry",
@@ -53,7 +53,7 @@ function worldActorControlIssue(
     actor.role === "player";
   const validAgent =
     actor.controller === "agent" &&
-    (actor.kind === "person" || actor.kind === "collective") &&
+    actor.kind === "person" &&
     actorRoles.has(actor.role);
   return validHuman || validAgent
     ? null
@@ -166,10 +166,10 @@ export function validateCampaignWorldDraft(
   validateText(draft.worldSummary, 1_200, "worldSummary", issues);
   validateBounds(draft.locations, 3, 10, "locations", issues);
   validateBounds(draft.routes, 2, 30, "routes", issues);
-  validateBounds(draft.actors, 4, 16, "actors", issues);
-  validateBounds(draft.goals, 4, 32, "goals", issues);
+  validateBounds(draft.actors, 6, 16, "actors", issues);
+  validateBounds(draft.goals, 6, 48, "goals", issues);
   validateBounds(draft.relations, 3, 32, "relations", issues);
-  validateBounds(draft.placements, 4, 32, "placements", issues);
+  validateBounds(draft.placements, 6, 32, "placements", issues);
   validateBounds(draft.pressures, 2, 6, "pressures", issues);
 
   const locationIds = validateUniqueIds(draft.locations, "location", issues);
@@ -243,7 +243,7 @@ export function validateCampaignWorldDraft(
 
   let keyPeople = 0;
   let supportPeople = 0;
-  let collectiveActors = 0;
+  let backgroundPeople = 0;
   for (const actor of draft.actors) {
     validateText(actor.name, 120, `actor ${actor.id} name`, issues);
     validateText(actor.summary, 1_200, `actor ${actor.id} summary`, issues);
@@ -260,13 +260,13 @@ export function validateCampaignWorldDraft(
     if (actor.controller !== "agent") {
       issues.push(`generated actor ${actor.id} must use the agent controller`);
     }
-    if (actor.kind === "person" && actor.role === "key") keyPeople += 1;
-    if (actor.kind === "person" && actor.role === "support") supportPeople += 1;
-    if (actor.kind === "collective") collectiveActors += 1;
+    if (actor.role === "key") keyPeople += 1;
+    if (actor.role === "support") supportPeople += 1;
+    if (actor.role === "background") backgroundPeople += 1;
   }
   if (keyPeople < 1) issues.push("cast requires at least one key person");
   if (supportPeople < 2) issues.push("cast requires at least two support people");
-  if (collectiveActors < 1) issues.push("cast requires at least one collective actor");
+  if (backgroundPeople < 2) issues.push("cast requires at least two background people");
 
   for (const goal of draft.goals) {
     if (!actorIds.has(goal.actorId)) issues.push(`goal ${goal.id} references an unknown actor`);
@@ -299,41 +299,19 @@ export function validateCampaignWorldDraft(
     const placements = draft.placements.filter((placement) =>
       placement.actorId === actor.id
     );
-    const requiresGoals =
-      actor.kind === "collective" || actor.role === "key" || actor.role === "support";
-    if (requiresGoals && (goals.length < 1 || goals.length > 3)) {
+    if (goals.length < 1 || goals.length > 3) {
       issues.push(`actor ${actor.id} requires one to three active goals`);
     }
-    if (actor.role === "background" && goals.length > 1) {
-      issues.push(`background actor ${actor.id} may have at most one goal`);
-    }
-    if (actor.kind === "person") {
-      const present = placements.filter((placement) => placement.placementKind === "present");
-      const home = placements.filter((placement) => placement.placementKind === "home");
-      const incompatible = placements.some((placement) =>
-        placement.placementKind === "base" || placement.placementKind === "influence"
-      );
-      if (present.length !== 1 || home.length > 1 || incompatible) {
-        issues.push(`person ${actor.id} has invalid placement semantics`);
-      }
-    } else {
-      const anchored = placements.some((placement) =>
-        placement.placementKind === "base" || placement.placementKind === "influence"
-      );
-      const incompatible = placements.some((placement) =>
-        placement.placementKind === "present" || placement.placementKind === "home"
-      );
-      if (!anchored || incompatible) {
-        issues.push(`collective ${actor.id} has invalid placement semantics`);
-      }
+    const present = placements.filter((placement) => placement.placementKind === "present");
+    const home = placements.filter((placement) => placement.placementKind === "home");
+    if (present.length !== 1 || home.length > 1) {
+      issues.push(`person ${actor.id} has invalid placement semantics`);
     }
   }
 
   const activePersonIds = new Set(
     draft.actors
-      .filter((actor) =>
-        actor.kind === "person" && (actor.role === "key" || actor.role === "support")
-      )
+      .filter((actor) => actor.controller === "agent")
       .map((actor) => actor.id),
   );
   const activeLocations = new Set(
@@ -344,7 +322,7 @@ export function validateCampaignWorldDraft(
       .map((placement) => placement.locationId),
   );
   if (activeLocations.size < 2) {
-    issues.push("key and support people require present placements across two locations");
+    issues.push("cast requires present placements across at least two locations");
   }
   for (const locationId of activeLocations) {
     if (!reachable.has(locationId)) {
@@ -375,10 +353,7 @@ export function validateCampaignWorldDraft(
     relationParticipants.add(relation.targetActorId);
   }
   for (const actor of draft.actors) {
-    if (
-      (actor.kind === "collective" || actor.role === "key") &&
-      !relationParticipants.has(actor.id)
-    ) {
+    if (!relationParticipants.has(actor.id)) {
       issues.push(`actor ${actor.id} must participate in a relation`);
     }
   }
@@ -394,8 +369,8 @@ export function validateCampaignWorldDraft(
     if (pressure.actorIds.length > 8 || pressure.locationIds.length > 8) {
       issues.push(`pressure ${pressure.id} exceeds anchor limits`);
     }
-    if (pressure.actorIds.length + pressure.locationIds.length === 0) {
-      issues.push(`pressure ${pressure.id} requires an actor or location anchor`);
+    if (pressure.actorIds.length === 0 || pressure.locationIds.length === 0) {
+      issues.push(`pressure ${pressure.id} requires both person and location anchors`);
     }
     const uniqueActorAnchors = new Set(pressure.actorIds);
     const uniqueLocationAnchors = new Set(pressure.locationIds);

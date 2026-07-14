@@ -115,14 +115,16 @@ function castPacket(): WorldCastPacket {
       },
       {
         actorRef: "actor:lantern-council",
-        kind: "collective",
+        kind: "person",
         controller: "agent",
-        role: "key",
-        name: "Lantern Council",
-        summary: "Harbor delegates who allocate safe passage windows.",
-        traits: ["procedural"],
-        tags: ["civic"],
+        role: "background",
+        name: "Ilya Venn",
+        summary: "A harbor clerk who tracks denied passage windows.",
+        traits: ["precise"],
+        tags: ["clerk"],
       },
+      { actorRef: "actor:niko-salt", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears crews' private fears.", traits: ["steady"], tags: ["medic"] },
+      { actorRef: "actor:rhea-quill", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
     ],
     goals: [
       {
@@ -151,12 +153,14 @@ function castPacket(): WorldCastPacket {
       },
       {
         actorRef: "actor:lantern-council",
-        objective: "Retain control of safe passage windows.",
-        motivation: "Preserve the harbor compact.",
+        objective: "Recover the missing passage register.",
+        motivation: "Prove the harbor records were altered.",
         horizon: "ongoing",
         priority: 4,
         status: "active",
       },
+      { actorRef: "actor:niko-salt", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
+      { actorRef: "actor:rhea-quill", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
     ],
     placements: [
       {
@@ -177,8 +181,10 @@ function castPacket(): WorldCastPacket {
       {
         actorRef: "actor:lantern-council",
         locationRef: "location:north-harbor",
-        placementKind: "base",
+        placementKind: "present",
       },
+      { actorRef: "actor:niko-salt", locationRef: "location:glass-reef", placementKind: "present" },
+      { actorRef: "actor:rhea-quill", locationRef: "location:bell-island", placementKind: "present" },
     ],
   };
 }
@@ -190,7 +196,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         sourceActorRef: "actor:mara-venn",
         targetActorRef: "actor:lantern-council",
         relationType: "authority",
-        summary: "The council controls Mara's signal archive access.",
+        summary: "Ilya controls Mara's signal archive access.",
         intensity: 4,
       },
       {
@@ -204,9 +210,11 @@ function connectionsPacket(): WorldConnectionsPacket {
         sourceActorRef: "actor:sel-bell",
         targetActorRef: "actor:lantern-council",
         relationType: "rivalry",
-        summary: "Sel disputes the council's storm forecasts.",
+        summary: "Sel disputes Ilya's storm records.",
         intensity: 2,
       },
+      { sourceActorRef: "actor:lantern-council", targetActorRef: "actor:niko-salt", relationType: "association", summary: "Ilya trusts Niko with copied records.", intensity: 3 },
+      { sourceActorRef: "actor:niko-salt", targetActorRef: "actor:rhea-quill", relationType: "dependency", summary: "Niko needs Rhea to keep relief routes open.", intensity: 4 },
     ],
     pressures: [
       {
@@ -214,7 +222,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:lantern-council"],
+        actorRefs: ["actor:mara-venn", "actor:lantern-council", "actor:rhea-quill"],
         locationRefs: ["location:north-harbor"],
       },
       {
@@ -222,7 +230,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Bell Island signals storms that never arrive.",
         trajectory: "Couriers stop trusting Bell Island's warnings.",
         urgency: 3,
-        actorRefs: ["actor:sel-bell"],
+        actorRefs: ["actor:sel-bell", "actor:niko-salt"],
         locationRefs: ["location:bell-island"],
       },
     ],

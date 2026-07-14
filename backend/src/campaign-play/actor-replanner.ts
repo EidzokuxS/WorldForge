@@ -321,9 +321,7 @@ function compilePlan(
     { kind: "actor_condition", actorId: frame.actorId, condition: "incapacitated", present: false },
   ];
   const operative = frame.placements.find((placement) =>
-    frame.actor.kind === "person"
-      ? placement.placementKind === "present"
-      : placement.placementKind === "base" || placement.placementKind === "influence");
+    placement.placementKind === "present");
   if (operative) preconditions.push({
     kind: "actor_at_location",
     actorId: frame.actorId,

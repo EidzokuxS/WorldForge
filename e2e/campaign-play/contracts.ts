@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MODEL_OUTPUT_TOKEN_MINIMUM } from "@worldforge/shared";
 
-export const CAMPAIGN_PLAY_EVIDENCE_VERSION = 2 as const;
+export const CAMPAIGN_PLAY_EVIDENCE_VERSION = 3 as const;
 
 export const CAMPAIGN_PLAY_LANES = [
   "deterministic-10",
@@ -229,10 +229,12 @@ export const campaignPlayManifestSchema = z.object({
 
 const actorEligibilitySchema = z.object({
   actorId: identifierSchema,
-  kind: z.enum(["person", "collective"]),
-  role: z.enum(["key", "support"]),
+  kind: z.literal("person"),
+  role: z.enum(["key", "support", "background"]),
   placementId: identifierSchema,
   goalIds: z.array(identifierSchema).min(1),
+  planId: identifierSchema,
+  scheduleId: identifierSchema,
 }).strict();
 
 export const campaignPlayEligibilitySchema = z.object({
@@ -244,22 +246,34 @@ export const campaignPlayEligibilitySchema = z.object({
   acceptedContentHash: hashSchema,
   topologyHash: hashSchema,
   reachableLocationIds: z.array(identifierSchema).min(3),
-  activeActors: z.array(actorEligibilitySchema).min(4),
+  activeActors: z.array(actorEligibilitySchema).min(6),
   pressureAnchorIds: z.array(identifierSchema).min(2),
   openingCandidateIds: z.array(identifierSchema).min(1),
   exposurePathIds: z.array(identifierSchema).min(1),
-  planIds: z.array(identifierSchema).min(4),
-  scheduleIds: z.array(identifierSchema).min(4),
+  planIds: z.array(identifierSchema).min(6),
+  scheduleIds: z.array(identifierSchema).min(6),
 }).strict().superRefine((value, context) => {
   const roleCounts = value.activeActors.reduce((counts, actor) => {
     counts[actor.role] += 1;
     return counts;
-  }, { key: 0, support: 0 });
-  if (roleCounts.key < 1 || roleCounts.support < 2) {
-    context.addIssue({ code: "custom", path: ["activeActors"], message: "Eligibility requires at least one key and two support actors." });
+  }, { key: 0, support: 0, background: 0 });
+  if (roleCounts.key < 1 || roleCounts.support < 2 || roleCounts.background < 2) {
+    context.addIssue({ code: "custom", path: ["activeActors"], message: "Eligibility requires at least one key, two support, and two background people." });
   }
-  if (!value.activeActors.some((actor) => actor.kind === "collective")) {
-    context.addIssue({ code: "custom", path: ["activeActors"], message: "Eligibility requires one collective actor." });
+  if (new Set(value.activeActors.map((actor) => actor.actorId)).size !== value.activeActors.length) {
+    context.addIssue({ code: "custom", path: ["activeActors"], message: "Eligibility requires one entry per person." });
+  }
+  value.activeActors.forEach((actor, index) => {
+    if (!value.planIds.includes(actor.planId) || !value.scheduleIds.includes(actor.scheduleId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["activeActors", index],
+        message: "Every person requires a persisted plan and schedule.",
+      });
+    }
+  });
+  if (new Set(value.scheduleIds).size !== value.scheduleIds.length) {
+    context.addIssue({ code: "custom", path: ["scheduleIds"], message: "Schedule IDs must be unique." });
   }
 });
 

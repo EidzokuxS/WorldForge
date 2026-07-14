@@ -10,7 +10,7 @@ function promptData(
   sceneCandidates: readonly CampaignPlayOpeningSceneCandidate[],
 ): string {
   const plannedActors = frame.acceptedWorld.actors
-    .filter((actor) => actor.controller === "agent" && actor.kind === "person")
+    .filter((actor) => actor.controller === "agent")
     .map((actor) => ({
       actorId: actor.id,
       actorKind: actor.kind,
@@ -82,7 +82,7 @@ Return one object matching the supplied schema.
 
 Choose one complete entry from openingConstraints.sceneCandidates and copy only its candidateId into scene.candidateId. The selected entry already binds a grounded location, a visibly present support person, a local pressure, and a directed route. Do not combine fields from different entries. With chosen starting conditions, copy the role, arrival mode, and immediate situation exactly. With delegated conditions, write all three values to suit the selected scene.
 
-Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. Every agent-controlled person is planned regardless of role. Do not create a plan for a collective. Each actor proposal selects one active goal as primary and gives that actor exactly one concrete next step. Actor replanning owns later steps after the world changes. For the step, write observableTrace as one concrete sensory result that could remain at the action location for another person to discover. State only visible or audible evidence. Do not name the acting person, reveal a goal or motive, assert an unseen cause, or address the player. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
+Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. Every listed person receives a plan regardless of role. Each actor proposal selects one active goal as primary and gives that person exactly one concrete next step. Actor replanning owns later steps after the world changes. For the step, write observableTrace as one concrete sensory result that could remain at the action location for another person to discover. State only visible or audible evidence. Do not name the acting person, reveal a goal or motive, assert an unseen cause, or address the player. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
 
 Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId and one actorLocationId from that entry. Set hiddenConsequence.goalId to the primaryGoalId of that actor's actorPlans item. Copy that plan's first step observableTrace exactly into hiddenConsequence.observableTrace. Do not use another active goal. Call the chosen scene candidate selectedScene. The hidden location must differ from selectedScene.locationId. Bind the hidden actor's first step to the exposure with one exact target:
 - For route_state, exposure contains exactly channel, routeId, and triggers. Set routeId to selectedScene.routeId and include {"kind":"route","id":selectedScene.routeId} in the first step targets.

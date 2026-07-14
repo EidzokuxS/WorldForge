@@ -225,6 +225,13 @@
       "when": 1783791666944,
       "tag": "0031_campaign_play_turn_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1784002437142,
+      "tag": "0032_campaign_world_people",
+      "breakpoints": true
     }
   ]
 }

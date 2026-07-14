@@ -7,6 +7,7 @@ import { resolveRoleModel } from "../../backend/src/ai/resolve-role-model.js";
 import { loadSettings } from "../../backend/src/settings/index.js";
 import { isLocalProvider, type Settings } from "@worldforge/shared";
 import {
+  CAMPAIGN_PLAY_EVIDENCE_VERSION,
   campaignPlayBrowserActionEvidenceSchema,
   campaignPlayCheckpointSchema,
   campaignPlayReloadProofSchema,
@@ -20,7 +21,7 @@ import {
 import { captureCampaignPlayReplay } from "./replay-report.js";
 
 export interface CampaignPlayLiveSessionManifest {
-  evidenceVersion: 2;
+  evidenceVersion: typeof CAMPAIGN_PLAY_EVIDENCE_VERSION;
   runId: string;
   campaignId: string;
   worldSource: CampaignPlayWorldSource;
@@ -275,7 +276,7 @@ export async function prepareCampaignPlayLiveSession(input: {
     }
     writeJson(path.join(root, "build", "run-config.json"), config);
     writeJson(path.join(root, "manifest.json"), {
-      evidenceVersion: 2,
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
       runId: config.runId,
       campaignId: config.campaignId,
       worldSource: config.worldSource,
@@ -477,7 +478,7 @@ async function captureReloadState(
     }
     const recordedAt = Date.now();
     const checkpoint = campaignPlayCheckpointSchema.parse({
-      evidenceVersion: 2,
+      evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
       runId: config.runId,
       campaignId: config.campaignId,
       checkpointId: `action-${afterPlayerAction}`,
@@ -538,7 +539,7 @@ export async function captureCampaignPlayReloadBoundary(
   }
   const before = readJson<CampaignPlayReloadCapture>(beforePath);
   const proof = campaignPlayReloadProofSchema.parse({
-    evidenceVersion: 2,
+    evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     runId: config.runId,
     campaignId: config.campaignId,
     afterPlayerAction: record.afterPlayerAction,

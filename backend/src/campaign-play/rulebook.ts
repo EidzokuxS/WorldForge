@@ -262,14 +262,9 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && row.lastAdvancedWorldTimeMinutes <= frame.worldTimeMinutes)
     && frame.placements.every((row) => {
       const accepted = acceptedPlacementById.get(row.placementId);
-      const actorKind = world.actors.find((candidate) => candidate.id === row.actorId)?.kind
-        ?? (row.actorId === frame.human?.actorId ? "person" : null);
-      const kindValid = actorKind === "person"
-        ? row.placementKind === "present" || row.placementKind === "home"
-        : row.placementKind === "base" || row.placementKind === "influence";
       return actorIds.has(row.actorId)
         && locationIds.has(row.locationId)
-        && kindValid
+        && (row.placementKind === "present" || row.placementKind === "home")
         && (accepted
           ? accepted.actorId === row.actorId
             && accepted.placementKind === row.placementKind
@@ -343,7 +338,7 @@ function validateAuthority(
     || !authority.witnessActorIds.every((actorId) =>
       authority.authorizedRefs.some((reference) =>
         reference.kind === "actor" && reference.id === actorId)
-      && (frame.acceptedWorld.actors.find((candidate) => candidate.id === actorId)?.kind === "person"
+      && (frame.acceptedWorld.actors.some((candidate) => candidate.id === actorId)
         || actorId === frame.human?.actorId))
   ) {
     deny("invalid_authority", "Rulebook authority does not match its purpose.");
@@ -360,7 +355,6 @@ function validateAuthority(
       || frame.worldTimeMinutes === null
       || !actor
       || actor.controller !== "agent"
-      || actor.kind !== "person"
     ) {
       deny("invalid_authority", "Actor jobs require one schedulable agent actor.");
     }
@@ -501,14 +495,9 @@ function operativeActorLocations(
   state: CampaignPlayRulebookSimulation,
   actorId: string,
 ): string[] {
-  const actorKind = frame.acceptedWorld.actors.find((candidate) => candidate.id === actorId)?.kind
-    ?? (actorId === state.human?.actorId ? "person" : null);
-  const allowedKinds = actorKind === "person"
-    ? new Set(["present"])
-    : new Set(["base", "influence"]);
   return state.placements
     .filter((placement) =>
-      placement.actorId === actorId && allowedKinds.has(placement.placementKind))
+      placement.actorId === actorId && placement.placementKind === "present")
     .map((placement) => placement.locationId);
 }
 

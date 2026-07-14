@@ -153,9 +153,9 @@ describe("Campaign World player actor migration", () => {
       const acceptedSnapshotHashBefore = snapshotHash(
         acceptedSnapshotBefore.acceptedSnapshotJson,
       );
-      expect(acceptedSnapshotBefore.acceptedSnapshotJson).toHaveLength(4_277);
+      expect(acceptedSnapshotBefore.acceptedSnapshotJson).toHaveLength(5_633);
       expect(acceptedSnapshotHashBefore).toBe(
-        "146e21381a48bd36907a219068586708949d6ed73c49f5ea7dadbf4cf9c1693c",
+        "c34e1d8a334b6a5048d42ae6d06831c520ab5832b5338a143dbee15b53bc082e",
       );
       const dependentRowsBefore = actorDependentRows(sqlite);
 

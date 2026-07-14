@@ -175,7 +175,7 @@ function playerDraft(): CampaignPlayCharacterDraft {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c"].map((suffix) => {
+  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -434,7 +434,7 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
       if (!locationHandle) throw new Error("Deterministic Game Master requires the current location binding.");
       const pressureHandle = request.frame.visibleFacts.find((fact) => fact.kind === "pressure")?.handle;
       if (!pressureHandle) throw new Error("Deterministic Game Master requires one visible pressure binding.");
-      const effects = policy === "intervene"
+      const consequenceEffects = policy === "intervene"
         ? [{
             kind: "advance_pressure" as const,
             pressureHandle,
@@ -451,9 +451,9 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
             summary: `Mara waits and records the visible signal pattern for ${request.ruling.normalizedIntent.originalText}.`,
             affectedHandles: [playerHandle, locationHandle],
           }];
-      if (request.ruling.movementRouteHandle !== null) {
-        effects.unshift({ kind: "move_actor" as const });
-      }
+      const effects = request.ruling.movementRouteHandle === null
+        ? consequenceEffects
+        : [{ kind: "move_actor" as const }, ...consequenceEffects];
       return {
         ...compiler.compile(
           request.frame,

@@ -403,7 +403,7 @@ function selectMechanicalProjection(
     placementId: string;
     actorId: string;
     locationId: string;
-    placementKind: "present" | "home" | "base" | "influence";
+    placementKind: "present" | "home";
   }>;
   const relations = sqlite.prepare(`
     SELECT id AS relationId, source_actor_id AS sourceActorId,

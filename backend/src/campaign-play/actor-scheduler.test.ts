@@ -399,12 +399,11 @@ describe("Campaign Play actor scheduler", () => {
         "actor-b", "actor-a", "actor-d",
       ]);
       expect(dueSet.decisions.map((decision) => decision.disposition)).toEqual([
-        "wake", "wake", "skip",
+        "wake", "wake", "wake",
       ]);
-      expect(dueSet.decisions[2]).toMatchObject({ reason: "actor_ineligible" });
       expect(dueSet.decisions.some((decision) => decision.actorId === "actor-c")).toBe(false);
       expect(dueSet.decisions.some((decision) =>
-        decision.actorId === "actor-d" && decision.disposition === "skip")).toBe(true);
+        decision.actorId === "actor-d" && decision.disposition === "wake")).toBe(true);
     },
   );
 
@@ -422,8 +421,8 @@ describe("Campaign Play actor scheduler", () => {
         admitted = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 });
       },
     });
-    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a"]);
-    expect(new Set(admitted.map((job) => job.jobId)).size).toBe(2);
+    expect(admitted.map((job) => job.actorId)).toEqual(["actor-b", "actor-a", "actor-d"]);
+    expect(new Set(admitted.map((job) => job.jobId)).size).toBe(3);
     expect(admitted.every((job) => job.stage === "queued" && job.workerEpoch === 0)).toBe(true);
     expect(scheduler.loadDueSet("turn-player")).toEqual(dueSet);
     expect(() => handle.sqlite.prepare(`UPDATE campaign_play_actor_due_sets
@@ -435,7 +434,7 @@ describe("Campaign Play actor scheduler", () => {
         "reason" in decision ? decision.reason : null])).toEqual([
       ["actor-b", "skip", "already_considered_this_turn"],
       ["actor-a", "skip", "already_considered_this_turn"],
-      ["actor-d", "skip", "actor_ineligible"],
+      ["actor-d", "skip", "already_considered_this_turn"],
     ]);
 
     const before = structuredClone(admitted);
@@ -650,7 +649,7 @@ describe("Campaign Play actor scheduler", () => {
       mutate(context) { jobs = scheduler.admitDueSet({ dueSet, context, createdAt: 1_600 }); },
     });
     expect(jobs.map((job) => [job.actorId, job.stage])).toEqual([
-      ["actor-b", "queued"], ["actor-a", "deferred"],
+      ["actor-b", "queued"], ["actor-a", "deferred"], ["actor-d", "queued"],
     ]);
     expect(jobs.find((job) => job.actorId === "actor-a")?.completedAt).toBe(1_600);
     expect(handle.sqlite.prepare(`SELECT next_act_at_world_time_minutes AS nextAt,

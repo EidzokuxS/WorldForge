@@ -75,7 +75,7 @@ const acceptedReviewSchema: z.ZodType<CampaignWorldReview> = z.object({
   }).strict()),
   actors: z.array(z.object({
     id: z.string().min(1),
-    kind: z.enum(["person", "collective"]),
+    kind: z.literal("person"),
     controller: z.literal("agent"),
     role: z.enum(["key", "support", "background"]),
     name: z.string().min(1),
@@ -112,7 +112,7 @@ const acceptedReviewSchema: z.ZodType<CampaignWorldReview> = z.object({
     id: z.string().min(1),
     actorId: z.string().min(1),
     locationId: z.string().min(1),
-    placementKind: z.enum(["present", "home", "base", "influence"]),
+    placementKind: z.enum(["present", "home"]),
   }).strict()),
   pressures: z.array(z.object({
     id: z.string().min(1),

@@ -115,7 +115,7 @@ export const campaignWorldBuildEventTypeValues = [
   "build_failed",
 ] as const;
 
-export const worldActorKindValues = ["person", "collective"] as const;
+export const worldActorKindValues = ["person"] as const;
 export const worldActorControllerValues = ["human", "agent"] as const;
 export const worldActorRoleValues = [
   "key",
@@ -137,8 +137,6 @@ export const actorRelationTypeValues = [
 export const actorPlacementKindValues = [
   "present",
   "home",
-  "base",
-  "influence",
 ] as const;
 
 export const campaignPlaySetupPhaseValues = [

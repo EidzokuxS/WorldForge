@@ -113,13 +113,13 @@ function worldFixture(): CampaignWorldReview {
       },
       {
         id: "actor-council",
-        kind: "collective",
+        kind: "person",
         controller: "agent",
-        role: "key",
-        name: "Lantern Council",
-        summary: "Harbor delegates allocate safe passage windows.",
-        traits: ["procedural"],
-        tags: ["civic"],
+        role: "background",
+        name: "Ilya Venn",
+        summary: "A harbor clerk who tracks the denied passage windows.",
+        traits: ["precise"],
+        tags: ["clerk"],
       },
       {
         id: "actor-background",
@@ -130,6 +130,16 @@ function worldFixture(): CampaignWorldReview {
         summary: "A worker clearing storm debris.",
         traits: ["quiet"],
         tags: ["worker"],
+      },
+      {
+        id: "actor-scout",
+        kind: "person",
+        controller: "agent",
+        role: "key",
+        name: "Rhea Quill",
+        summary: "A route assessor who suspects the storms are directed.",
+        traits: ["skeptical"],
+        tags: ["assessor"],
       },
     ],
     goals: [
@@ -187,6 +197,15 @@ function worldFixture(): CampaignWorldReview {
         priority: 2,
         status: "active",
       },
+      {
+        id: "goal-scout-chart",
+        actorId: "actor-scout",
+        objective: "Find the altered storm chart.",
+        motivation: "Restore a safe crossing before eclipse.",
+        horizon: "ongoing",
+        priority: 5,
+        status: "active",
+      },
     ],
     relations: [
       {
@@ -197,6 +216,10 @@ function worldFixture(): CampaignWorldReview {
         summary: "The council controls archive access.",
         intensity: 4,
       },
+      { id: "relation-courier-bells", sourceActorId: "actor-courier", targetActorId: "actor-bell-tender", relationType: "association", summary: "Oren brings Sel reports from the harbor.", intensity: 3 },
+      { id: "relation-bells-council", sourceActorId: "actor-bell-tender", targetActorId: "actor-council", relationType: "rivalry", summary: "Sel disputes Ilya's official storm record.", intensity: 2 },
+      { id: "relation-council-background", sourceActorId: "actor-council", targetActorId: "actor-background", relationType: "association", summary: "Ilya trusts the dock worker with copied ledgers.", intensity: 3 },
+      { id: "relation-background-scout", sourceActorId: "actor-background", targetActorId: "actor-scout", relationType: "dependency", summary: "The sweeper needs Rhea to keep relief routes open.", intensity: 4 },
     ],
     placements: [
       {
@@ -221,7 +244,7 @@ function worldFixture(): CampaignWorldReview {
         id: "placement-council",
         actorId: "actor-council",
         locationId: "location-reef",
-        placementKind: "base",
+        placementKind: "present",
       },
       {
         id: "placement-background",
@@ -229,6 +252,7 @@ function worldFixture(): CampaignWorldReview {
         locationId: "location-harbor",
         placementKind: "present",
       },
+      { id: "placement-scout", actorId: "actor-scout", locationId: "location-bells", placementKind: "present" },
     ],
     pressures: [
       {
@@ -342,6 +366,8 @@ function proposalFixture(): CampaignPlayOpeningProposal {
         "The storm bell's fresh strike pattern conflicts with the clear horizon.",
       ),
       actorPlan("actor-background", "goal-background-clear", ["goal-background-clear"]),
+      actorPlan("actor-council", "goal-council-control", ["goal-council-control"]),
+      actorPlan("actor-scout", "goal-scout-chart", ["goal-scout-chart"]),
     ],
     hiddenConsequence: {
       actorId: "actor-bell-tender",
@@ -416,12 +442,12 @@ describe("Campaign Play opening planner", () => {
     expect(first.canonicalBytes).toBe(second.canonicalBytes);
     expect(first.hash).toBe(second.hash);
     expect(first.artifact).toEqual(second.artifact);
-    expect(first.artifact.actorPlans).toHaveLength(4);
-    expect(first.artifact.actorSchedules).toHaveLength(4);
+    expect(first.artifact.actorPlans).toHaveLength(6);
+    expect(first.artifact.actorSchedules).toHaveLength(6);
     expect(first.artifact.actorPlans.some((plan) =>
       plan.actorId === "actor-background")).toBe(true);
     expect(first.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-council")).toBe(false);
+      plan.actorId === "actor-council")).toBe(true);
     expect(first.artifact.actorSchedules.find((schedule) =>
       schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
     expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(3);
@@ -521,7 +547,7 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("requires one plan for every agent person and excludes collectives", () => {
+  it("requires one plan for every agent person", () => {
     const missing = proposalFixture();
     missing.actorPlans.pop();
     expect(() => createCampaignPlayOpeningPlanner().compile(
@@ -529,9 +555,7 @@ describe("Campaign Play opening planner", () => {
     )).toThrow(CampaignPlayOpeningPlannerError);
 
     const extra = proposalFixture();
-    extra.actorPlans.push(actorPlan(
-      "actor-council", "goal-council-control", ["goal-council-control"],
-    ));
+    extra.actorPlans.push(actorPlan("actor-council", "goal-council-control", ["goal-council-control"]));
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, extra,
     )).toThrow(CampaignPlayOpeningPlannerError);
@@ -710,13 +734,13 @@ describe("Campaign Play opening planner", () => {
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("keeps collectives in world topology without creating collective plans", () => {
+  it("keeps a person's home placement without changing their present plan", () => {
     const world = worldFixture();
     world.placements.push({
       id: "placement-council-influence",
       actorId: "actor-council",
       locationId: "location-bells",
-      placementKind: "influence",
+      placementKind: "home",
     });
     world.routes = world.routes.filter((route) => route.id !== "route-bells-harbor");
     const proposal = proposalFixture();
@@ -724,7 +748,7 @@ describe("Campaign Play opening planner", () => {
       frameFixture(world), chosenConditions, proposal,
     );
     expect(result.artifact.actorPlans.some((plan) =>
-      plan.actorId === "actor-council")).toBe(false);
+      plan.actorId === "actor-council")).toBe(true);
   });
 
   it("accepts a route-state exposure tied to the hidden actor's first step", () => {
@@ -851,8 +875,7 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"activeGoalIds":["goal-bells-explain"]');
     expect(prompt).toContain('"actorLocationIds":["location-bells"]');
     expect(prompt).toContain("exactly openingConstraints.plannedActors.length items");
-    expect(prompt).toContain("Every agent-controlled person is planned regardless of role");
-    expect(prompt).toContain("Do not create a plan for a collective");
+    expect(prompt).toContain("Every listed person receives a plan regardless of role");
     expect(prompt).toContain("exactly one concrete next step");
     expect(prompt).toContain("Actor replanning owns later steps after the world changes");
     expect(prompt).toContain("observableTrace");

@@ -445,12 +445,9 @@ function actorLocations(
 ): string[] {
   const actor = world.actors.find((candidate) => candidate.id === actorId);
   if (!actor) return [];
-  const allowedKinds = actor.kind === "person"
-    ? new Set(["present"])
-    : new Set(["base", "influence"]);
   const locations = world.placements
     .filter((placement) =>
-      placement.actorId === actorId && allowedKinds.has(placement.placementKind))
+      placement.actorId === actorId && placement.placementKind === "present")
     .map((placement) => placement.locationId)
     .sort(compareText);
   return [...new Set(locations)];
@@ -458,7 +455,7 @@ function actorLocations(
 
 function eligibleActors(world: CampaignWorldReview) {
   return world.actors
-    .filter((actor) => actor.controller === "agent" && actor.kind === "person")
+    .filter((actor) => actor.controller === "agent")
     .sort((left, right) => compareText(left.id, right.id));
 }
 
@@ -718,9 +715,7 @@ function compilePlans(
     });
     const preconditions: CampaignPlayActorPlan["preconditions"] = [
       { kind: "goal_status", goalId: primaryGoal.id, status: "active" },
-      ...(actor.kind === "person"
-        ? [{ kind: "actor_at_location" as const, actorId: actor.id, locationId: locationIds[0]! }]
-        : []),
+      { kind: "actor_at_location" as const, actorId: actor.id, locationId: locationIds[0]! },
     ];
     const plan = campaignPlayActorPlanSchema.parse({
       planId,

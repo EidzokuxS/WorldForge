@@ -21,10 +21,10 @@ describe("ConnectionsSection", () => {
       />,
     );
 
-    expect(screen.getByText("Intensity 4 of 5")).toBeInTheDocument();
+    expect(screen.getAllByText("Intensity 4 of 5")).toHaveLength(2);
     const pressure = screen.getByRole("heading", { name: "Closing Route" }).closest("article");
     expect(pressure).toHaveAttribute("data-urgency", "high");
-    fireEvent.click(within(pressure!).getByRole("button", { name: "The Signal Guild" }));
+    fireEvent.click(within(pressure!).getByRole("button", { name: "Oren Tide" }));
     fireEvent.click(within(pressure!).getByRole("button", { name: "Bell Platform" }));
     expect(selectActor).toHaveBeenCalledWith("actor-b");
     expect(selectLocation).toHaveBeenCalledWith("location-b");

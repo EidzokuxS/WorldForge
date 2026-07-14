@@ -1084,7 +1084,7 @@ export function createCampaignPlayActorScheduler(
       }
       const plan = planFromRow(planRow);
       const actor = state.acceptedReview.actors.find((candidate) => candidate.id === job.actorId);
-      if (!actor || actor.controller !== "agent" || actor.kind !== "person") {
+      if (!actor || actor.controller !== "agent") {
         throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
       }
       const placements = handle.sqlite.prepare(`SELECT id, actor_id AS actorId,
@@ -1093,11 +1093,8 @@ export function createCampaignPlayActorScheduler(
         handle.campaignId,
         actor.id,
       ) as CampaignWorldReview["placements"];
-      const operativeKinds = actor.kind === "person"
-        ? new Set(["present"])
-        : new Set(["base", "influence"]);
       const operativeLocations = new Set(
-        placements.filter((placement) => operativeKinds.has(placement.placementKind))
+        placements.filter((placement) => placement.placementKind === "present")
           .map((placement) => placement.locationId),
       );
       const goals = state.acceptedReview.goals.filter((goal) => goal.actorId === actor.id)

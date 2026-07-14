@@ -94,15 +94,17 @@ function castFixture(): WorldCastPacket {
         tags: ["weather"],
       },
       {
-        actorRef: "actor:lantern-council",
-        kind: "collective",
+        actorRef: "actor:ilya-venn",
+        kind: "person",
         controller: "agent",
-        role: "key",
-        name: "Lantern Council",
-        summary: "Harbor delegates who allocate safe passage windows.",
-        traits: ["procedural"],
-        tags: ["civic"],
+        role: "background",
+        name: "Ilya Venn",
+        summary: "A harbor clerk who keeps copies of denied passage records.",
+        traits: ["precise"],
+        tags: ["clerk"],
       },
+      { actorRef: "actor:niko-salt", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears the crews' private fears.", traits: ["steady"], tags: ["medic"] },
+      { actorRef: "actor:rhea-quill", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
     ],
     goals: [
       {
@@ -130,13 +132,15 @@ function castFixture(): WorldCastPacket {
         status: "active",
       },
       {
-        actorRef: "actor:lantern-council",
-        objective: "Retain control of safe passage windows.",
-        motivation: "Preserve the harbor compact.",
+        actorRef: "actor:ilya-venn",
+        objective: "Recover the missing passage register.",
+        motivation: "Prove the harbor records were altered.",
         horizon: "ongoing",
         priority: 4,
         status: "active",
       },
+      { actorRef: "actor:niko-salt", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
+      { actorRef: "actor:rhea-quill", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
     ],
     placements: [
       {
@@ -155,10 +159,12 @@ function castFixture(): WorldCastPacket {
         placementKind: "present",
       },
       {
-        actorRef: "actor:lantern-council",
+        actorRef: "actor:ilya-venn",
         locationRef: "location:north-harbor",
-        placementKind: "base",
+        placementKind: "present",
       },
+      { actorRef: "actor:niko-salt", locationRef: "location:glass-reef", placementKind: "present" },
+      { actorRef: "actor:rhea-quill", locationRef: "location:bell-island", placementKind: "present" },
     ],
   };
 }
@@ -168,9 +174,9 @@ function connectionsFixture(): WorldConnectionsPacket {
     relations: [
       {
         sourceActorRef: "actor:mara-venn",
-        targetActorRef: "actor:lantern-council",
+        targetActorRef: "actor:ilya-venn",
         relationType: "authority",
-        summary: "The council controls Mara's access to signal archives.",
+        summary: "Ilya controls Mara's access to signal archives.",
         intensity: 4,
       },
       {
@@ -182,11 +188,13 @@ function connectionsFixture(): WorldConnectionsPacket {
       },
       {
         sourceActorRef: "actor:sel-bell",
-        targetActorRef: "actor:lantern-council",
+        targetActorRef: "actor:ilya-venn",
         relationType: "rivalry",
-        summary: "Sel disputes the council's storm forecasts.",
+        summary: "Sel disputes Ilya's storm records.",
         intensity: 2,
       },
+      { sourceActorRef: "actor:ilya-venn", targetActorRef: "actor:niko-salt", relationType: "association", summary: "Ilya trusts Niko with the copied records.", intensity: 3 },
+      { sourceActorRef: "actor:niko-salt", targetActorRef: "actor:rhea-quill", relationType: "dependency", summary: "Niko needs Rhea to keep the relief route open.", intensity: 4 },
     ],
     pressures: [
       {
@@ -194,7 +202,7 @@ function connectionsFixture(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:lantern-council"],
+        actorRefs: ["actor:mara-venn", "actor:ilya-venn", "actor:rhea-quill"],
         locationRefs: ["location:north-harbor"],
       },
       {
@@ -202,7 +210,7 @@ function connectionsFixture(): WorldConnectionsPacket {
         description: "Bell Island signals storms that never arrive.",
         trajectory: "Couriers stop trusting Bell Island's warnings.",
         urgency: 3,
-        actorRefs: ["actor:sel-bell"],
+        actorRefs: ["actor:sel-bell", "actor:niko-salt"],
         locationRefs: ["location:bell-island"],
       },
     ],
@@ -230,7 +238,7 @@ describe("Campaign World model contracts", () => {
     );
 
     expect(frame.locations).toHaveLength(3);
-    expect(cast.actors).toHaveLength(4);
+    expect(cast.actors).toHaveLength(6);
     expect(connections.pressures).toHaveLength(2);
   });
 
@@ -491,7 +499,7 @@ describe("Campaign World model contracts", () => {
     }).success).toBe(false);
   });
 
-  it("rejects invented relation references and a missing required collective", () => {
+  it("rejects invented relation references and missing person participation", () => {
     const frame = frameFixture();
     const cast = castFixture();
     const connections = connectionsFixture();
@@ -499,10 +507,10 @@ describe("Campaign World model contracts", () => {
       ...connections,
       relations: connections.relations.map((relation) => ({
         ...relation,
-        sourceActorRef: relation.sourceActorRef === "actor:lantern-council"
+        sourceActorRef: relation.sourceActorRef === "actor:ilya-venn"
           ? "actor:lantern-guild"
           : relation.sourceActorRef,
-        targetActorRef: relation.targetActorRef === "actor:lantern-council"
+        targetActorRef: relation.targetActorRef === "actor:ilya-venn"
           ? "actor:lantern-guild"
           : relation.targetActorRef,
       })),
@@ -516,7 +524,7 @@ describe("Campaign World model contracts", () => {
       }));
       expect(result.error.issues).toContainEqual(expect.objectContaining({
         path: ["relations"],
-        message: "actor:lantern-council must participate in a relation.",
+        message: "actor:ilya-venn must participate in a relation.",
       }));
     }
   });

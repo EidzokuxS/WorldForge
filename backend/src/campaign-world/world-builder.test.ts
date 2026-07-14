@@ -114,27 +114,33 @@ function castPacket(): WorldCastPacket {
         tags: ["weather"],
       },
       {
-        actorRef: "actor:lantern-council",
-        kind: "collective",
+        actorRef: "actor:ilya-venn",
+        kind: "person",
         controller: "agent",
-        role: "key",
-        name: "Lantern Council",
-        summary: "Harbor delegates who allocate safe passage windows.",
-        traits: ["procedural"],
-        tags: ["civic"],
+        role: "background",
+        name: "Ilya Venn",
+        summary: "A harbor clerk who keeps copies of denied passage records.",
+        traits: ["precise"],
+        tags: ["clerk"],
       },
+      { actorRef: "actor:niko-salt", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears the crews' private fears.", traits: ["steady"], tags: ["medic"] },
+      { actorRef: "actor:rhea-quill", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
     ],
     goals: [
       { actorRef: "actor:mara-venn", objective: "Map the next route change.", motivation: "Keep North Harbor supplied.", horizon: "immediate", priority: 5, status: "active" },
       { actorRef: "actor:oren-tide", objective: "Deliver a sealed route ledger.", motivation: "Clear an old family debt.", horizon: "immediate", priority: 4, status: "active" },
       { actorRef: "actor:sel-bell", objective: "Explain the false storm signal.", motivation: "Protect Bell Island from panic.", horizon: "ongoing", priority: 3, status: "active" },
-      { actorRef: "actor:lantern-council", objective: "Retain control of safe passage windows.", motivation: "Preserve the harbor compact.", horizon: "ongoing", priority: 4, status: "active" },
+      { actorRef: "actor:ilya-venn", objective: "Recover the missing passage register.", motivation: "Prove the harbor records were altered.", horizon: "ongoing", priority: 4, status: "active" },
+      { actorRef: "actor:niko-salt", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
+      { actorRef: "actor:rhea-quill", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
     ],
     placements: [
       { actorRef: "actor:mara-venn", locationRef: "location:north-harbor", placementKind: "present" },
       { actorRef: "actor:oren-tide", locationRef: "location:glass-reef", placementKind: "present" },
       { actorRef: "actor:sel-bell", locationRef: "location:bell-island", placementKind: "present" },
-      { actorRef: "actor:lantern-council", locationRef: "location:north-harbor", placementKind: "base" },
+      { actorRef: "actor:ilya-venn", locationRef: "location:north-harbor", placementKind: "present" },
+      { actorRef: "actor:niko-salt", locationRef: "location:glass-reef", placementKind: "present" },
+      { actorRef: "actor:rhea-quill", locationRef: "location:bell-island", placementKind: "present" },
     ],
   };
 }
@@ -142,9 +148,11 @@ function castPacket(): WorldCastPacket {
 function connectionsPacket(): WorldConnectionsPacket {
   return {
     relations: [
-      { sourceActorRef: "actor:mara-venn", targetActorRef: "actor:lantern-council", relationType: "authority", summary: "The council controls Mara's signal archive access.", intensity: 4 },
+      { sourceActorRef: "actor:mara-venn", targetActorRef: "actor:ilya-venn", relationType: "authority", summary: "Ilya controls Mara's signal archive access.", intensity: 4 },
       { sourceActorRef: "actor:oren-tide", targetActorRef: "actor:mara-venn", relationType: "dependency", summary: "Oren needs Mara to validate the route ledger.", intensity: 3 },
-      { sourceActorRef: "actor:sel-bell", targetActorRef: "actor:lantern-council", relationType: "rivalry", summary: "Sel disputes the council's storm forecasts.", intensity: 2 },
+      { sourceActorRef: "actor:sel-bell", targetActorRef: "actor:ilya-venn", relationType: "rivalry", summary: "Sel disputes Ilya's storm records.", intensity: 2 },
+      { sourceActorRef: "actor:ilya-venn", targetActorRef: "actor:niko-salt", relationType: "association", summary: "Ilya trusts Niko with copied records.", intensity: 3 },
+      { sourceActorRef: "actor:niko-salt", targetActorRef: "actor:rhea-quill", relationType: "dependency", summary: "Niko needs Rhea to keep relief crossings open.", intensity: 4 },
     ],
     pressures: [
       {
@@ -152,7 +160,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorRefs: ["actor:mara-venn", "actor:lantern-council"],
+        actorRefs: ["actor:mara-venn", "actor:ilya-venn", "actor:rhea-quill"],
         locationRefs: ["location:north-harbor"],
       },
       {
@@ -160,7 +168,7 @@ function connectionsPacket(): WorldConnectionsPacket {
         description: "Bell Island signals storms that never arrive.",
         trajectory: "Couriers stop trusting Bell Island's warnings.",
         urgency: 3,
-        actorRefs: ["actor:sel-bell"],
+        actorRefs: ["actor:sel-bell", "actor:niko-salt"],
         locationRefs: ["location:bell-island"],
       },
     ],
@@ -290,7 +298,6 @@ describe("Campaign World staged builder", () => {
     expect(prompts[2]).toContain([
       "REQUIRED_RELATION_ACTOR_REFS",
       JSON.stringify(castPacket().actors
-        .filter((actor) => actor.kind === "collective" || actor.role === "key")
         .map((actor) => actor.actorRef)),
       "END_REQUIRED_RELATION_ACTOR_REFS",
     ].join("\n"));
@@ -325,10 +332,8 @@ describe("Campaign World staged builder", () => {
     expect(observer.onStageCompleted).toHaveBeenCalledTimes(3);
     expect(candidate.stageEvidence).toHaveLength(3);
     expect(candidate.contentHash).toHaveLength(64);
-    expect(candidate.draft.actors.find((actor) => actor.kind === "collective")).toMatchObject({
-      controller: "agent",
-      name: "Lantern Council",
-    });
+    expect(candidate.draft.actors).toHaveLength(6);
+    expect(candidate.draft.actors.every((actor) => actor.kind === "person")).toBe(true);
     expect(candidate.draft.actors.every((actor) =>
       actor.controller === "agent" && String(actor.role) !== "player"
     )).toBe(true);
@@ -338,6 +343,7 @@ describe("Campaign World staged builder", () => {
     expect(candidate.draft.pressures[0].actorIds).toEqual([
       candidate.draft.actors[0].id,
       candidate.draft.actors[3].id,
+      candidate.draft.actors[5].id,
     ]);
 
     const evidenceJson = JSON.stringify(candidate.stageEvidence);

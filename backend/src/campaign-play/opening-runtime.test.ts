@@ -165,7 +165,7 @@ function createPlayableCampaign() {
 }
 
 function openingProposal(): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c"].map((suffix) => {
+  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -429,8 +429,8 @@ describe("Campaign Play opening runtime", () => {
       expect(finalState.authority.openedAt).not.toBeNull();
       expect(planner.plan).toHaveBeenCalledTimes(1);
       expect(narrator.narrate).toHaveBeenCalledTimes(1);
-      expect(count(handle, "campaign_play_actor_plans")).toBe(3);
-      expect(count(handle, "campaign_play_actor_schedules")).toBe(3);
+      expect(count(handle, "campaign_play_actor_plans")).toBe(6);
+      expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
       expect(count(handle, "campaign_play_actor_jobs")).toBe(0);
       expect(count(handle, "campaign_play_actor_proposals")).toBe(0);
       expect(count(handle, "campaign_play_narrations")).toBe(1);
@@ -749,8 +749,8 @@ describe("Campaign Play opening runtime", () => {
     expect(buildRuntime(6).loadTurn(admission.turnId)).toMatchObject({ stage: "completed" });
     expect(planner.plan).toHaveBeenCalledTimes(1);
     expect(narrator.narrate).toHaveBeenCalledTimes(1);
-    expect(count(handle, "campaign_play_actor_plans")).toBe(3);
-    expect(count(handle, "campaign_play_actor_schedules")).toBe(3);
+    expect(count(handle, "campaign_play_actor_plans")).toBe(6);
+    expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
     expect(count(handle, "campaign_play_narrations")).toBe(1);
     expect((handle.sqlite.prepare(`SELECT packet_json AS packetJson
       FROM campaign_play_narrations WHERE campaign_id = ? AND turn_id = ?`)
@@ -838,7 +838,7 @@ describe("Campaign Play opening runtime", () => {
       });
       expect(planner.plan).toHaveBeenCalledTimes(1);
       expect(narrator.narrate).toHaveBeenCalledTimes(1);
-      expect(count(handle, "campaign_play_actor_schedules")).toBe(3);
+      expect(count(handle, "campaign_play_actor_schedules")).toBe(6);
       expect(count(handle, "campaign_play_narrations")).toBe(1);
     },
   );

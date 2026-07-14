@@ -329,7 +329,7 @@ describe("Campaign Play live evidence session", () => {
     fs.mkdirSync(sessionRoot, { recursive: true });
     fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
     fs.writeFileSync(path.join(sessionRoot, "manifest.json"), JSON.stringify({
-      evidenceVersion: 2,
+      evidenceVersion: 3,
       runId: config.runId,
       campaignId,
       worldSource: config.worldSource,
@@ -380,7 +380,7 @@ describe("Campaign Play live evidence session", () => {
     fs.mkdirSync(sessionRoot, { recursive: true });
     fs.writeFileSync(path.join(sessionRoot, "browser-actions.jsonl"), "", "utf8");
     fs.writeFileSync(path.join(sessionRoot, "manifest.json"), JSON.stringify({
-      evidenceVersion: 2,
+      evidenceVersion: 3,
       runId: config.runId,
       campaignId,
       worldSource: config.worldSource,

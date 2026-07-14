@@ -7,11 +7,11 @@ export type CampaignWorldStatus =
   | "accepted"
   | "failed";
 
-export type WorldActorKind = "person" | "collective";
+export type WorldActorKind = "person";
 export type WorldActorController = "human" | "agent";
 export type GeneratedWorldActorRole = "key" | "support" | "background";
 export type WorldActorRole = GeneratedWorldActorRole | "player";
-export type ActorPlacementKind = "present" | "home" | "base" | "influence";
+export type ActorPlacementKind = "present" | "home";
 export type ActorGoalHorizon = "immediate" | "ongoing";
 export type GoalPriority = 1 | 2 | 3 | 4 | 5;
 export type RelationIntensity = 1 | 2 | 3 | 4 | 5;

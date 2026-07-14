@@ -181,7 +181,7 @@ function acceptWorld(): void {
 }
 
 function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
-  const actorPlans = ["a", "b", "c"].map((suffix) => {
+  const actorPlans = ["a", "b", "c", "d", "e", "f"].map((suffix) => {
     const actorId = `actor-${suffix}`;
     const goalId = `goal-${suffix}`;
     const targets = suffix === "b"
@@ -1408,6 +1408,11 @@ describe("Campaign Play player-action turn runtime", () => {
             validUntilWorldTimeMinutes: null,
           },
           {
+            channel: "direct_perception",
+            locationId: "location-c",
+            validUntilWorldTimeMinutes: null,
+          },
+          {
             channel: "local_aftermath",
             locationId: "location-a",
             validUntilWorldTimeMinutes: 4,
@@ -1415,6 +1420,16 @@ describe("Campaign Play player-action turn runtime", () => {
           {
             channel: "local_aftermath",
             locationId: "location-a",
+            validUntilWorldTimeMinutes: 1_441,
+          },
+          {
+            channel: "local_aftermath",
+            locationId: "location-a",
+            validUntilWorldTimeMinutes: 1_441,
+          },
+          {
+            channel: "local_aftermath",
+            locationId: "location-b",
             validUntilWorldTimeMinutes: 1_441,
           },
         ]);

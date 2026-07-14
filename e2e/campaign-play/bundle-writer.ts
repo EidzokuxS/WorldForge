@@ -230,7 +230,7 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
 
   const accepted = JSON.parse(report.acceptedSnapshotJson) as {
     locations: Array<{ id: string; kind: string }>;
-    actors: Array<{ id: string; kind: "person" | "collective"; role: "key" | "support" | "background" }>;
+    actors: Array<{ id: string; kind: "person"; role: "key" | "support" | "background" }>;
     goals: Array<{ id: string; actorId: string }>;
     placements: Array<{ id: string; actorId: string }>;
     pressures: Array<{ id: string }>;
@@ -240,15 +240,26 @@ export function writeCampaignPlayBundle(input: WriteCampaignPlayBundleInput): vo
   for (const goal of accepted.goals) {
     goalsByActor.set(goal.actorId, [...(goalsByActor.get(goal.actorId) ?? []), goal.id]);
   }
+  const scheduleByActor = new Map(report.tables.schedules.map((row) => [
+    value<string>(row, "actor_id"),
+    {
+      scheduleId: value<string>(row, "schedule_id"),
+      planId: value<string>(row, "plan_id"),
+    },
+  ]));
   const activeActors = accepted.actors
-    .filter((actor): actor is typeof actor & { role: "key" | "support" } => actor.role !== "background")
-    .map((actor) => ({
-      actorId: actor.id,
-      kind: actor.kind,
-      role: actor.role,
-      placementId: placementByActor.get(actor.id) ?? `missing:${actor.id}`,
-      goalIds: goalsByActor.get(actor.id) ?? [],
-    }));
+    .map((actor) => {
+      const schedule = scheduleByActor.get(actor.id);
+      return {
+        actorId: actor.id,
+        kind: actor.kind,
+        role: actor.role,
+        placementId: placementByActor.get(actor.id) ?? `missing:${actor.id}`,
+        goalIds: goalsByActor.get(actor.id) ?? [],
+        planId: schedule?.planId ?? `missing:${actor.id}`,
+        scheduleId: schedule?.scheduleId ?? `missing:${actor.id}`,
+      };
+    });
   const eligibility = campaignPlayEligibilitySchema.parse({
     evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
     campaignId: input.replay.campaignId,

@@ -6,7 +6,7 @@ import { ActorsSection } from "./actors-section";
 import { campaignWorldReviewFixture } from "./world-review.test-support";
 
 describe("ActorsSection", () => {
-  it("renders a collective through the ordinary actor contract and keeps ID navigation", () => {
+  it("renders a person through the ordinary actor contract and keeps ID navigation", () => {
     const world = campaignWorldReviewFixture();
     const selectActor = vi.fn();
     const selectLocation = vi.fn();
@@ -23,11 +23,11 @@ describe("ActorsSection", () => {
       />,
     );
 
-    const details = screen.getByLabelText("The Signal Guild details");
+    const details = screen.getByLabelText("Oren Tide details");
     expect(screen.queryByRole("heading", { name: "player actors" })).not.toBeInTheDocument();
-    expect(details).toHaveTextContent("collective · agent");
-    expect(details).toHaveTextContent("Preserve authority over the signal network.");
-    fireEvent.click(within(details).getByRole("button", { name: "base · Bell Platform" }));
+    expect(details).toHaveTextContent("person · agent");
+    expect(details).toHaveTextContent("Keep the signal network legible for the night trains.");
+    fireEvent.click(within(details).getByRole("button", { name: "present · Bell Platform" }));
     expect(selectLocation).toHaveBeenCalledWith("location-b");
     fireEvent.click(within(details).getByRole("button", { name: "Mara Venn" }));
     expect(selectActor).toHaveBeenCalledWith("actor-a");

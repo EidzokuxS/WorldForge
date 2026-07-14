@@ -190,7 +190,7 @@ describe("Campaign Play evidence contracts", () => {
     })).toThrow("A complete run requires a completion timestamp");
   });
 
-  it("requires the first acceptance actor envelope before opening", () => {
+  it("accepts the person-only first acceptance actor envelope before opening", () => {
     const base = {
       evidenceVersion: CAMPAIGN_PLAY_EVIDENCE_VERSION,
       campaignId: "campaign-one",
@@ -203,18 +203,20 @@ describe("Campaign Play evidence contracts", () => {
       pressureAnchorIds: ["pressure-a", "pressure-b"],
       openingCandidateIds: ["location-a"],
       exposurePathIds: ["path-a"],
-      planIds: ["plan-a", "plan-b", "plan-c", "plan-d"],
-      scheduleIds: ["schedule-a", "schedule-b", "schedule-c", "schedule-d"],
+      planIds: ["plan-a", "plan-b", "plan-c", "plan-d", "plan-e", "plan-f"],
+      scheduleIds: ["schedule-a", "schedule-b", "schedule-c", "schedule-d", "schedule-e", "schedule-f"],
     };
     expect(() => campaignPlayEligibilitySchema.parse({
       ...base,
       activeActors: [
-        { actorId: "actor-a", kind: "person", role: "key", placementId: "placement-a", goalIds: ["goal-a"] },
-        { actorId: "actor-b", kind: "person", role: "support", placementId: "placement-b", goalIds: ["goal-b"] },
-        { actorId: "actor-c", kind: "person", role: "support", placementId: "placement-c", goalIds: ["goal-c"] },
-        { actorId: "actor-d", kind: "person", role: "key", placementId: "placement-d", goalIds: ["goal-d"] },
+        { actorId: "actor-a", kind: "person", role: "key", placementId: "placement-a", goalIds: ["goal-a"], planId: "plan-a", scheduleId: "schedule-a" },
+        { actorId: "actor-b", kind: "person", role: "support", placementId: "placement-b", goalIds: ["goal-b"], planId: "plan-b", scheduleId: "schedule-b" },
+        { actorId: "actor-c", kind: "person", role: "support", placementId: "placement-c", goalIds: ["goal-c"], planId: "plan-c", scheduleId: "schedule-c" },
+        { actorId: "actor-d", kind: "person", role: "background", placementId: "placement-d", goalIds: ["goal-d"], planId: "plan-d", scheduleId: "schedule-d" },
+        { actorId: "actor-e", kind: "person", role: "background", placementId: "placement-e", goalIds: ["goal-e"], planId: "plan-e", scheduleId: "schedule-e" },
+        { actorId: "actor-f", kind: "person", role: "key", placementId: "placement-f", goalIds: ["goal-f"], planId: "plan-f", scheduleId: "schedule-f" },
       ],
-    })).toThrow("Eligibility requires one collective actor");
+    })).not.toThrow();
   });
 
   it("rejects a scorecard that claims promotion with a hard failure", () => {

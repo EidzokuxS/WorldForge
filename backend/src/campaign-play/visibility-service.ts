@@ -49,7 +49,7 @@ interface VisibilityStateRow {
 
 interface ActorRow {
   id: string;
-  kind: "person" | "collective";
+  kind: "person";
   controller: "human" | "agent";
   name: string;
 }

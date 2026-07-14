@@ -92,14 +92,16 @@ function worldDraftFixture(): CampaignWorldDraft {
       },
       {
         id: "actor-d",
-        kind: "collective",
+        kind: "person",
         controller: "agent",
-        role: "key",
-        name: "Lantern Council",
-        summary: "Harbor delegates who allocate safe passage windows.",
-        traits: ["procedural"],
-        tags: ["civic"],
+        role: "background",
+        name: "Ilya Venn",
+        summary: "A harbor clerk who tracks each denied passage.",
+        traits: ["precise"],
+        tags: ["clerk"],
       },
+      { id: "actor-e", kind: "person", controller: "agent", role: "background", name: "Niko Salt", summary: "A dock medic who hears the crews' private fears.", traits: ["steady"], tags: ["medic"] },
+      { id: "actor-f", kind: "person", controller: "agent", role: "key", name: "Rhea Quill", summary: "A route assessor who suspects the storms are directed.", traits: ["skeptical"], tags: ["assessor"] },
     ],
     goals: [
       {
@@ -132,12 +134,14 @@ function worldDraftFixture(): CampaignWorldDraft {
       {
         id: "goal-d",
         actorId: "actor-d",
-        objective: "Retain control of safe passage windows.",
-        motivation: "Preserve the harbor compact.",
+        objective: "Recover the missing passage register.",
+        motivation: "Prove the harbor records were altered.",
         horizon: "ongoing",
         priority: 4,
         status: "active",
       },
+      { id: "goal-e", actorId: "actor-e", objective: "Keep exhausted crews working.", motivation: "Prevent another dockside death.", horizon: "immediate", priority: 3, status: "active" },
+      { id: "goal-f", actorId: "actor-f", objective: "Identify who redirects storm signals.", motivation: "Restore safe crossings before eclipse.", horizon: "ongoing", priority: 5, status: "active" },
     ],
     relations: [
       {
@@ -145,7 +149,7 @@ function worldDraftFixture(): CampaignWorldDraft {
         sourceActorId: "actor-a",
         targetActorId: "actor-d",
         relationType: "authority",
-        summary: "The council controls Mara's access to signal archives.",
+        summary: "Ilya controls Mara's access to signal archives.",
         intensity: 4,
       },
       {
@@ -161,9 +165,11 @@ function worldDraftFixture(): CampaignWorldDraft {
         sourceActorId: "actor-c",
         targetActorId: "actor-d",
         relationType: "rivalry",
-        summary: "Sel disputes the council's storm forecasts.",
+        summary: "Sel disputes Ilya's storm records.",
         intensity: 2,
       },
+      { id: "relation-d", sourceActorId: "actor-d", targetActorId: "actor-e", relationType: "association", summary: "Ilya trusts Niko with copied records.", intensity: 3 },
+      { id: "relation-e", sourceActorId: "actor-e", targetActorId: "actor-f", relationType: "dependency", summary: "Niko needs Rhea to keep relief routes open.", intensity: 4 },
     ],
     placements: [
       {
@@ -188,8 +194,10 @@ function worldDraftFixture(): CampaignWorldDraft {
         id: "placement-d",
         actorId: "actor-d",
         locationId: "location-a",
-        placementKind: "base",
+        placementKind: "present",
       },
+      { id: "placement-e", actorId: "actor-e", locationId: "location-b", placementKind: "present" },
+      { id: "placement-f", actorId: "actor-f", locationId: "location-c", placementKind: "present" },
     ],
     pressures: [
       {
@@ -198,7 +206,7 @@ function worldDraftFixture(): CampaignWorldDraft {
         description: "Safe sea lanes close earlier after every eclipse.",
         trajectory: "North Harbor loses supply access within two route cycles.",
         urgency: 5,
-        actorIds: ["actor-a", "actor-d"],
+        actorIds: ["actor-a", "actor-d", "actor-f"],
         locationIds: ["location-a"],
       },
       {
@@ -207,7 +215,7 @@ function worldDraftFixture(): CampaignWorldDraft {
         description: "Bell Island signals storms that never arrive.",
         trajectory: "Couriers stop trusting Bell Island's warnings.",
         urgency: 3,
-        actorIds: ["actor-c"],
+        actorIds: ["actor-c", "actor-e"],
         locationIds: ["location-c"],
       },
     ],
@@ -230,14 +238,14 @@ describe("Campaign World deterministic validator", () => {
     })).not.toThrow();
     expect(() => validateWorldActorControl({
       id: "actor-agent",
-      kind: "collective",
+      kind: "person",
       controller: "agent",
       role: "key",
     })).not.toThrow();
 
     for (const actor of [
       { id: "human-key", kind: "person", controller: "human", role: "key" },
-      { id: "human-collective", kind: "collective", controller: "human", role: "player" },
+      { id: "human-background", kind: "person", controller: "human", role: "background" },
       { id: "agent-player", kind: "person", controller: "agent", role: "player" },
       { id: "agent-unknown", kind: "person", controller: "agent", role: "wanderer" },
     ] as const) {
@@ -249,14 +257,11 @@ describe("Campaign World deterministic validator", () => {
     }
   });
 
-  it("accepts a distributed world with a collective actor", () => {
+  it("accepts a distributed world with person actors", () => {
     const draft = worldDraftFixture();
 
     expect(validateCampaignWorldDraft(draft)).toBe(draft);
-    expect(draft.actors.find((actor) => actor.kind === "collective")).toMatchObject({
-      id: "actor-d",
-      controller: "agent",
-    });
+    expect(draft.actors.every((actor) => actor.kind === "person")).toBe(true);
   });
 
   it("rejects a player actor from the generated world draft", () => {
@@ -299,19 +304,18 @@ describe("Campaign World deterministic validator", () => {
     expectInvalid(draft);
   });
 
-  it("applies the one-goal background limit to collective actors", () => {
+  it("rejects more than three active goals for a person", () => {
     const draft = worldDraftFixture();
-    const collective = draft.actors.find((actor) => actor.id === "actor-d")!;
-    collective.role = "background";
+    const person = draft.actors.find((actor) => actor.id === "actor-d")!;
     draft.goals.push({
-      ...draft.goals.find((goal) => goal.actorId === collective.id)!,
+      ...draft.goals.find((goal) => goal.actorId === person.id)!,
       id: "goal-d-second",
       objective: "Open a second route compact.",
     });
 
-    expect(() => validateCampaignWorldDraft(draft)).toThrow(
-      "background actor actor-d may have at most one goal",
-    );
+    draft.goals.push({ ...draft.goals.find((goal) => goal.actorId === person.id)!, id: "goal-d-third" });
+    draft.goals.push({ ...draft.goals.find((goal) => goal.actorId === person.id)!, id: "goal-d-fourth" });
+    expect(() => validateCampaignWorldDraft(draft)).toThrow("actor actor-d requires one to three active goals");
   });
 
   it.each([

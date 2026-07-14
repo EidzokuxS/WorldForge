@@ -83,7 +83,7 @@ export function ActorsSection({
                       onClick={() => onSelectActor(actor.id)}
                     >
                       <span className="wf-world-actor-sigil" aria-hidden="true">
-                        {actor.kind === "collective" ? "◇" : initials(actor.name)}
+                        {initials(actor.name)}
                       </span>
                       <span className="wf-world-actor-card-body">
                         <span className="wf-world-actor-kind">{actorLabel(actor)}</span>

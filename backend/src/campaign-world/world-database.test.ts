@@ -194,6 +194,37 @@ describe("Campaign World database handle", () => {
     expect(campaign.sqlite.pragma("foreign_key_check")).toEqual([]);
   });
 
+  it("enforces the 0032 person and placement trigger contract", () => {
+    createMigratedCampaign(root, CAMPAIGN_A);
+    const campaign = open(CAMPAIGN_A);
+    const insertActor = campaign.sqlite.prepare(`
+      INSERT INTO actors (id, campaign_id, kind, controller, role, name, summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertPlacement = campaign.sqlite.prepare(`
+      INSERT INTO actor_placements (id, campaign_id, actor_id, location_id, placement_kind)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    insertActor.run("agent-person", CAMPAIGN_A, "person", "agent", "support", "Oren Tide", "A person fixture.");
+    expect(() => insertActor.run(
+      "agent-collective", CAMPAIGN_A, "collective", "agent", "support", "Harbor Council", "An invalid collective fixture.",
+    )).toThrow("actors_controller_kind_role_inconsistent");
+    campaign.sqlite.prepare(`
+      INSERT INTO locations (id, campaign_id, name, description)
+      VALUES ('location-0032', ?, 'Trigger Pier', 'A migration contract location.')
+    `).run(CAMPAIGN_A);
+
+    insertPlacement.run("placement-present-0032", CAMPAIGN_A, "agent-person", "location-0032", "present");
+    insertPlacement.run("placement-home-0032", CAMPAIGN_A, "agent-person", "location-0032", "home");
+    expect(() => insertPlacement.run(
+      "placement-base-0032", CAMPAIGN_A, "agent-person", "location-0032", "base",
+    )).toThrow("actor_placements_kind_invalid");
+    expect(() => insertPlacement.run(
+      "placement-influence-0032", CAMPAIGN_A, "agent-person", "location-0032", "influence",
+    )).toThrow("actor_placements_kind_invalid");
+  });
+
   it("reports an unavailable campaign database", () => {
     expect(() => openCampaignWorldDatabase(CAMPAIGN_A)).toThrowError(
       expect.objectContaining<Partial<CampaignWorldDatabaseError>>({

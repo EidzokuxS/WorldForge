@@ -89,7 +89,7 @@ function worldFixture(): CampaignWorldReview {
       },
       {
         id: "actor-council",
-        kind: "collective",
+        kind: "person",
         controller: "agent",
         role: "key",
         name: "Lantern Council",
@@ -136,7 +136,7 @@ function worldFixture(): CampaignWorldReview {
         id: "placement-council",
         actorId: "actor-council",
         locationId: "location-a",
-        placementKind: "base",
+        placementKind: "present",
       },
     ],
     pressures: [
@@ -611,20 +611,20 @@ describe("Campaign Play Rulebook preflight", () => {
     expect(frame.routeStates).toEqual([]);
   });
 
-  it("rejects collective movement through the person-only route command", () => {
+  it("rejects movement for an actor outside the accepted world", () => {
     const batch = ordinaryBatch();
     const move = {
       ...batch.commands[1]!,
       ...commandBase(0, READY_VERSION),
-      actorId: "actor-council",
+      actorId: "actor-missing",
       readScope: [
-        { kind: "actor", id: "actor-council" },
+        { kind: "actor", id: "actor-missing" },
         { kind: "route", id: "route-a-b" },
         { kind: "location", id: "location-a" },
         { kind: "location", id: "location-b" },
       ],
       writeScope: [
-        { kind: "actor", id: "actor-council" },
+        { kind: "actor", id: "actor-missing" },
         { kind: "location", id: "location-a" },
         { kind: "location", id: "location-b" },
       ],
@@ -634,7 +634,7 @@ describe("Campaign Play Rulebook preflight", () => {
       authority: playerAuthority(),
       batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [move] },
     });
-    expect(result).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
+    expect(result).toMatchObject({ accepted: false, denial: { code: "unauthorized_reference" } });
   });
 
   it("rejects an actor job mutating another actor's goal or movement", () => {
@@ -705,7 +705,7 @@ describe("Campaign Play Rulebook preflight", () => {
     expect(result).toMatchObject({ accepted: false, denial: { code: "precondition_failed" } });
   });
 
-  it("rejects expired aftermath and collective witness exposure", () => {
+  it("rejects expired aftermath and unknown witness exposure", () => {
     const expired = {
       ...ordinaryBatch().commands[2]!,
       ...commandBase(0, READY_VERSION),
@@ -723,15 +723,15 @@ describe("Campaign Play Rulebook preflight", () => {
       batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [expired] },
     })).toMatchObject({ accepted: false, denial: { code: "invalid_exposure" } });
 
-    const collectiveWitness = structuredClone(expired);
-    collectiveWitness.exposure.predicates = [{
+    const unknownWitness = structuredClone(expired);
+    unknownWitness.exposure.predicates = [{
       channel: "witness_report",
-      witnessActorId: "actor-council",
+      witnessActorId: "actor-missing",
     }] as never;
     expect(preflightCampaignPlayRulebook({
       frame: frameFixture(), authority: playerAuthority(),
-      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [collectiveWitness] },
-    })).toMatchObject({ accepted: false, denial: { code: "invalid_exposure" } });
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [unknownWitness] },
+    })).toMatchObject({ accepted: false, denial: { code: "unauthorized_reference" } });
 
     const durableWitness = structuredClone(expired);
     durableWitness.exposure.predicates = [{

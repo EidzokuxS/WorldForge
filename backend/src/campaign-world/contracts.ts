@@ -7,10 +7,9 @@ const TEXT_MAX = 1_200;
 const TAG_MAX = 80;
 const TAG_COUNT_MAX = 20;
 
-const actorKindValues = ["person", "collective"] as const;
 const actorRoleValues = ["key", "support", "background"] as const;
 const goalHorizonValues = ["immediate", "ongoing"] as const;
-const placementKindValues = ["present", "home", "base", "influence"] as const;
+const placementKindValues = ["present", "home"] as const;
 const relationTypeValues = [
   "alliance",
   "rivalry",
@@ -231,7 +230,7 @@ export const worldFramePacketSchema = worldFramePacketBaseSchema.superRefine(
 
 const worldCastActorSchema = z.object({
   actorRef: actorReferenceSchema,
-  kind: z.enum(actorKindValues),
+  kind: z.literal("person"),
   controller: z.literal("agent"),
   role: z.enum(actorRoleValues),
   name: nameSchema,
@@ -256,9 +255,9 @@ const worldCastPlacementSchema = z.object({
 }).strict();
 
 const worldCastPacketBaseSchema = z.object({
-  actors: z.array(worldCastActorSchema).min(4).max(16),
-  goals: z.array(worldCastGoalSchema).min(4).max(32),
-  placements: z.array(worldCastPlacementSchema).min(4).max(32),
+  actors: z.array(worldCastActorSchema).min(6).max(16),
+  goals: z.array(worldCastGoalSchema).min(6).max(48),
+  placements: z.array(worldCastPlacementSchema).min(6).max(32),
 }).strict();
 
 export type WorldFramePacket = z.infer<typeof worldFramePacketBaseSchema>;
@@ -307,13 +306,9 @@ export function createWorldCastPacketSchema(
       "Actor references",
     );
 
-    const keyPeople = packet.actors.filter((actor) =>
-      actor.kind === "person" && actor.role === "key"
-    );
-    const supportPeople = packet.actors.filter((actor) =>
-      actor.kind === "person" && actor.role === "support"
-    );
-    const collectives = packet.actors.filter((actor) => actor.kind === "collective");
+    const keyPeople = packet.actors.filter((actor) => actor.role === "key");
+    const supportPeople = packet.actors.filter((actor) => actor.role === "support");
+    const backgroundPeople = packet.actors.filter((actor) => actor.role === "background");
     if (keyPeople.length < 1) {
       context.addIssue({
         code: "custom",
@@ -328,11 +323,11 @@ export function createWorldCastPacketSchema(
         message: "The cast requires at least two support people.",
       });
     }
-    if (collectives.length < 1) {
+    if (backgroundPeople.length < 2) {
       context.addIssue({
         code: "custom",
         path: ["actors"],
-        message: "The cast requires at least one collective actor.",
+        message: "The cast requires at least two background people.",
       });
     }
 
@@ -380,62 +375,30 @@ export function createWorldCastPacketSchema(
       const placements = packet.placements.filter((placement) =>
         placement.actorRef === actor.actorRef
       );
-      const requiresActiveGoal =
-        actor.kind === "collective" || actor.role === "key" || actor.role === "support";
-      if (requiresActiveGoal && (goals.length < 1 || goals.length > 3)) {
+      if (goals.length < 1 || goals.length > 3) {
         context.addIssue({
           code: "custom",
           path: ["goals"],
           message: `${actor.actorRef} requires one to three goals.`,
         });
       }
-      if (actor.role === "background" && goals.length > 1) {
+      const present = placements.filter((placement) =>
+        placement.placementKind === "present"
+      );
+      const home = placements.filter((placement) =>
+        placement.placementKind === "home"
+      );
+      if (present.length !== 1 || home.length > 1) {
         context.addIssue({
           code: "custom",
-          path: ["goals"],
-          message: `${actor.actorRef} may have at most one background goal.`,
+          path: ["placements"],
+          message: `${actor.actorRef} requires one present placement and at most one home placement.`,
         });
-      }
-
-      if (actor.kind === "person") {
-        const present = placements.filter((placement) =>
-          placement.placementKind === "present"
-        );
-        const home = placements.filter((placement) =>
-          placement.placementKind === "home"
-        );
-        const incompatible = placements.find((placement) =>
-          placement.placementKind === "base" ||
-          placement.placementKind === "influence"
-        );
-        if (present.length !== 1 || home.length > 1 || incompatible) {
-          context.addIssue({
-            code: "custom",
-            path: ["placements"],
-            message: `${actor.actorRef} requires one present placement and at most one home placement.`,
-          });
-        }
-      } else {
-        const anchored = placements.filter((placement) =>
-          placement.placementKind === "base" ||
-          placement.placementKind === "influence"
-        );
-        const incompatible = placements.find((placement) =>
-          placement.placementKind === "present" ||
-          placement.placementKind === "home"
-        );
-        if (anchored.length < 1 || incompatible) {
-          context.addIssue({
-            code: "custom",
-            path: ["placements"],
-            message: `${actor.actorRef} requires a base or influence placement.`,
-          });
-        }
       }
     }
 
     const activePersonRefs = new Set(
-      [...keyPeople, ...supportPeople].map((actor) => actor.actorRef),
+      packet.actors.map((actor) => actor.actorRef),
     );
     const activeLocations = new Set(
       packet.placements
@@ -454,14 +417,14 @@ export function createWorldCastPacketSchema(
       context.addIssue({
         code: "custom",
         path: ["placements"],
-        message: "Key and support people require reachable present placements.",
+        message: "Every person requires a reachable present placement.",
       });
     }
     if (activeLocations.size < 2) {
       context.addIssue({
         code: "custom",
         path: ["placements"],
-        message: "Key and support people require present placements across two locations.",
+        message: "The cast requires present placements across at least two locations.",
       });
     }
   });
@@ -480,8 +443,8 @@ const worldConnectionPressureSchema = z.object({
   description: textSchema,
   trajectory: textSchema,
   urgency: z.number().int().min(1).max(5),
-  actorRefs: z.array(actorReferenceSchema).max(8),
-  locationRefs: z.array(locationReferenceSchema).max(8),
+  actorRefs: z.array(actorReferenceSchema).min(1).max(8),
+  locationRefs: z.array(locationReferenceSchema).min(1).max(8),
 }).strict();
 
 const worldConnectionsPacketBaseSchema = z.object({
@@ -541,10 +504,7 @@ export function createWorldConnectionsPacketSchema(
     );
 
     for (const actor of cast.actors) {
-      if (
-        (actor.kind === "collective" || actor.role === "key") &&
-        !participatingActors.has(actor.actorRef)
-      ) {
+      if (!participatingActors.has(actor.actorRef)) {
         context.addIssue({
           code: "custom",
           path: ["relations"],
@@ -585,13 +545,6 @@ export function createWorldConnectionsPacketSchema(
           });
         }
       });
-      if (pressure.actorRefs.length + pressure.locationRefs.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["pressures", index],
-          message: "A pressure requires at least one actor or location anchor.",
-        });
-      }
       anchorSets.add(JSON.stringify({
         actorRefs: [...pressure.actorRefs].sort(),
         locationRefs: [...pressure.locationRefs].sort(),

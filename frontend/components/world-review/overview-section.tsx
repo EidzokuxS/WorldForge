@@ -22,16 +22,15 @@ export function OverviewSection({
   onOpenActors,
   onOpenConnections,
 }: OverviewSectionProps) {
-  const people = world.actors.filter((actor) => actor.kind === "person").length;
-  const collectives = world.actors.length - people;
+  const backgroundPeople = world.actors.filter((actor) => actor.role === "background").length;
 
   return (
     <div className="wf-world-overview">
       <div className="wf-world-overview-stats" aria-label="World totals">
         <Stat value={world.locations.length} label="Locations" />
         <Stat value={world.routes.length} label="Routes" />
-        <Stat value={people} label="People" />
-        <Stat value={collectives} label="Collectives" />
+        <Stat value={world.actors.length} label="People" />
+        <Stat value={backgroundPeople} label="Background" />
         <Stat value={world.pressures.length} label="Pressures" />
       </div>
 

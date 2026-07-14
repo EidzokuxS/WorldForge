@@ -19,7 +19,7 @@ describe("OverviewSection", () => {
       />,
     );
 
-    expect(screen.getByLabelText("World totals")).toHaveTextContent("2Locations1Routes1People1Collectives1Pressures");
+    expect(screen.getByLabelText("World totals")).toHaveTextContent("2Locations1Routes6People2Background1Pressures");
     expect(screen.getByText("0123456789ab")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Inspect Locations" }));
     fireEvent.click(screen.getByRole("button", { name: "Inspect Actors" }));

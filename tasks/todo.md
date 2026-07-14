@@ -1478,6 +1478,14 @@ Root-fix progress:
 
 - [x] Retrieve input-relevant, player-authored history from the current location into the frozen Judge authority without exceeding the existing observation budget.
 - [x] Settle compound freeform movement before resolving the co-located action.
-- [ ] Replace inert collective actor shells with person/job/world-state behavior.
+- [x] Replace inert collective actor shells with person/job/world-state behavior.
 - [ ] Remove serial actor-replan work from the player's critical-path cadence without hiding world mutation.
 - [ ] Prove all four roots through a fresh manual UI campaign before promotion.
+
+Person/job/world-state cutover:
+
+- Campaign World now creates 6–16 concrete people only: at least one key, two support, and two background people. Every person owns one to three active goals, one present placement, at most one home placement, and participates in a directed relation.
+- Institutions, crews, families, councils, movements, shortages, and conflicts are represented through pressure trajectories, person anchors, location anchors, relations, events, and actor jobs. They are not actor rows and receive no special scheduler path.
+- Accepted snapshots, shared types, Review UI, Rulebook frames, opening plans, replanning, scheduling, visibility, and evidence v3 use the same person-only contract. Every accepted person must have a persisted plan and schedule in playtest eligibility evidence, including background people.
+- Migration `0032_campaign_world_people.sql` rejects new collective actors and base/influence placements. Old collective snapshots are intentionally rejected by the current parser; there is no conversion, compatibility adapter, fallback, or hidden retry.
+- Verification passes the broad Campaign World + Campaign Play backend selection, backend/frontend typechecks, 33 Campaign Play E2E tests, 14 World Review tests, scoped Review lint, and diff check. The fresh GLM 5.2 world and manual UI proof remain deferred until the scheduler root is fixed.

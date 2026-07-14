@@ -82,7 +82,7 @@ export interface CampaignPlayLivePlacement {
   placementId: string;
   actorId: string;
   locationId: string;
-  placementKind: "present" | "home" | "base" | "influence";
+  placementKind: "present" | "home";
 }
 
 export interface CampaignPlayLiveRelation {
@@ -320,7 +320,7 @@ function publicJournalEntry(entry: CampaignPlayJournalEntry): CampaignPlayJourna
 
 function activeAcceptedActors(review: CampaignWorldReview) {
   return review.actors.filter((actor) =>
-    actor.controller === "agent" && actor.kind === "person"
+    actor.controller === "agent"
   );
 }
 
@@ -449,12 +449,8 @@ export function projectAcceptedTopologyEligibility(
   }
   if (review.routes.length === 0) unmet.add("directed_routes_missing");
 
-  const keyPeople = review.actors.filter((actor) =>
-    actor.kind === "person" && actor.role === "key"
-  );
-  const supportPeople = review.actors.filter((actor) =>
-    actor.kind === "person" && actor.role === "support"
-  );
+  const keyPeople = review.actors.filter((actor) => actor.role === "key");
+  const supportPeople = review.actors.filter((actor) => actor.role === "support");
   if (keyPeople.length < 1) unmet.add("key_person_missing");
   if (supportPeople.length < 2) unmet.add("support_people_below_minimum");
 
@@ -479,17 +475,11 @@ export function projectAcceptedTopologyEligibility(
       unmet.add("active_actor_goal_missing");
     }
     const placements = review.placements.filter((placement) => placement.actorId === actor.id);
-    const valid = actor.kind === "person"
-      ? placements.filter((placement) =>
-        placement.placementKind === "present" &&
-        locationIds.has(placement.locationId) &&
-        playablePlacementLocationIds.has(placement.locationId)
-      ).length === 1
-      : placements.some((placement) =>
-        (placement.placementKind === "base" || placement.placementKind === "influence") &&
-        locationIds.has(placement.locationId) &&
-        playablePlacementLocationIds.has(placement.locationId)
-      );
+    const valid = placements.filter((placement) =>
+      placement.placementKind === "present" &&
+      locationIds.has(placement.locationId) &&
+      playablePlacementLocationIds.has(placement.locationId)
+    ).length === 1;
     if (!valid) unmet.add("active_actor_placement_invalid");
   }
 
