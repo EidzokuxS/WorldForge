@@ -1477,7 +1477,7 @@ Final 30/30 verdict: FAIL. One-unit travel still costs 47 events; compound freef
 Root-fix progress:
 
 - [x] Retrieve input-relevant, player-authored history from the current location into the frozen Judge authority without exceeding the existing observation budget.
-- [ ] Settle compound freeform movement before resolving the co-located action.
+- [x] Settle compound freeform movement before resolving the co-located action.
 - [ ] Replace inert collective actor shells with person/job/world-state behavior.
 - [ ] Remove serial actor-replan work from the player's critical-path cadence without hiding world mutation.
 - [ ] Prove all four roots through a fresh manual UI campaign before promotion.

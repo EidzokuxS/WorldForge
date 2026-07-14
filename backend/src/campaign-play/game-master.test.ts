@@ -124,6 +124,7 @@ function ruling(overrides: Partial<CampaignPlayJudgeRuling> = {}): CampaignPlayJ
       originalText: "I ask the guard why the road is closed.", source: "freeform", choiceHandle: null,
       kind: "contact", targets: [{ handle: "guard", kind: "actor" }], method: "Ask calmly", stakes: "Learn the reason",
     },
+    movementRouteHandle: null,
     citedVisibleFactHandles: ["guard", "passage"],
     resultBounds: { minimum: "success", maximum: "success" },
     elapsedBounds: { minimumMinutes: 1, maximumMinutes: 3 },
@@ -369,6 +370,7 @@ describe("Campaign Play Game Master", () => {
       exposure: { mode: "projectable", predicates: [{ channel: "local_aftermath", anchorHandle: "here", visibleForMinutes: 15 }] } },
   ])("compiles the supported $kind effect through Rulebook", (effect) => {
     const effectRuling = effect.kind === "move_actor" ? ruling({
+      movementRouteHandle: "passage",
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }],
@@ -384,6 +386,7 @@ describe("Campaign Play Game Master", () => {
 
   it("binds movement mechanics from Judge targets and current placement instead of model-authored handles", async () => {
     const moveRuling = ruling({
+      movementRouteHandle: "passage",
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }, { handle: "south", kind: "location" }],
@@ -437,7 +440,7 @@ describe("Campaign Play Game Master", () => {
     );
   });
 
-  it("resolves a freeform destination through its cited visible route before asking the model", async () => {
+  it("requires the Judge's explicit route instead of inferring movement from citations", async () => {
     const moveRuling = ruling({
       normalizedIntent: {
         originalText: "I take the open path to South Harbor.", source: "freeform", choiceHandle: null,
@@ -446,30 +449,18 @@ describe("Campaign Play Game Master", () => {
       },
       citedVisibleFactHandles: ["passage", "south"],
     });
-    const generateObject = vi.fn(async (_options: Parameters<typeof safeGenerateObject>[0]) => ({
-      object: { elapsedMinutes: 1, effects: [{ kind: "move_actor" as const }] },
-      trace: trace(),
-    }));
+    const generateObject = vi.fn();
 
-    const result = await createCampaignPlayGameMaster({
+    await expect(createCampaignPlayGameMaster({
       generateObject: generateObject as unknown as typeof safeGenerateObject,
     }).plan({ frame: frame(), ruling: moveRuling, resolution, uncertaintyAuthority: null,
-      model: model(), temperature: 0.2, budget });
-
-    expect(generateObject).toHaveBeenCalledTimes(1);
-    expect(result.batch.commands[1]).toMatchObject({
-      kind: "move_actor",
-      routeId: "route-a-b",
-      fromLocationId: "location-a",
-      toLocationId: "location-b",
-    });
-    expect(String(generateObject.mock.calls[0]![0].prompt)).toContain(
-      'PLAYER_MOVEMENT={"actorHandle":"you","routeHandle":"passage","fromLocationHandle":"here","toLocationHandle":"south"}',
-    );
+      model: model(), temperature: 0.2, budget })).rejects.toMatchObject({ code: "ruling_invalid" });
+    expect(generateObject).not.toHaveBeenCalled();
   });
 
   it("binds a movement result event to the destination after the move command", () => {
     const moveRuling = ruling({
+      movementRouteHandle: "passage",
       normalizedIntent: {
         originalText: "I cross to South Harbor.", source: "freeform", choiceHandle: null,
         kind: "move", targets: [{ handle: "passage", kind: "route" }],
@@ -508,6 +499,51 @@ describe("Campaign Play Game Master", () => {
         { kind: "move_actor" },
       ],
     })).toThrow(expect.objectContaining({ code: "model_contract_failed" }));
+  });
+
+  it("settles compound travel before the local contact event", () => {
+    const compoundRuling = ruling({
+      movementRouteHandle: "passage",
+      normalizedIntent: {
+        originalText: "I cross to South Harbor and ask the guard about passage delays.",
+        source: "freeform",
+        choiceHandle: null,
+        kind: "contact",
+        targets: [
+          { handle: "passage", kind: "route" },
+          { handle: "south", kind: "location" },
+          { handle: "guard", kind: "actor" },
+        ],
+        method: "Cross the passage, then ask the guard",
+        stakes: "Learn why crossings are delayed",
+      },
+    });
+    const result = createCampaignPlayGameMaster().compile(frame(), compoundRuling, resolution, null, {
+      elapsedMinutes: 1,
+      effects: [
+        { kind: "move_actor" },
+        {
+          kind: "record_world_event",
+          eventClass: "dialogue",
+          summary: "At South Harbor, the player asks the guard about passage delays.",
+          affectedHandles: ["you", "guard", "south"],
+        },
+      ],
+    });
+
+    expect(result.batch.commands[1]).toMatchObject({
+      kind: "move_actor",
+      actorId: PLAYER_ID,
+      fromLocationId: "location-a",
+      toLocationId: "location-b",
+    });
+    expect(result.batch.commands[2]).toMatchObject({
+      kind: "record_world_event",
+      exposure: {
+        mode: "projectable",
+        predicates: [{ channel: "direct_perception", locationId: "location-b" }],
+      },
+    });
   });
 
   it.each(["repair", "full_retry", "text_fallback"] as const)("rejects %s output strategy", async (strategy) => {

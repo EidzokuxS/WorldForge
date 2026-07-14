@@ -385,6 +385,7 @@ function judgeFixture() {
         targets: target ? [{ handle: target.handle, kind: "actor" }] : [],
         method: target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
+        movementRouteHandle: null,
         disposition: "deterministic",
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: { minimum: "success", maximum: "success" },

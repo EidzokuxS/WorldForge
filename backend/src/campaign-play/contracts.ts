@@ -1616,6 +1616,7 @@ export const campaignPlayUncertaintySpecSchema = z.discriminatedUnion("kind", [
 const campaignPlayJudgeRulingBaseSchema = z.object({
   disposition: campaignPlayJudgmentDispositionSchema,
   normalizedIntent: playerIntentSchema,
+  movementRouteHandle: handleSchema.nullable(),
   citedVisibleFactHandles: z.array(handleSchema)
     .max(CAMPAIGN_PLAY_LIMITS.citedFacts),
   resultBounds: campaignPlayResultBoundsSchema,
@@ -1627,6 +1628,23 @@ const campaignPlayJudgeRulingBaseSchema = z.object({
 
 export const campaignPlayJudgeRulingSchema =
   campaignPlayJudgeRulingBaseSchema.superRefine((ruling, context) => {
+    const movementRouteIsTarget = ruling.movementRouteHandle === null
+      || ruling.normalizedIntent.targets.some((target) =>
+        target.kind === "route" && target.handle === ruling.movementRouteHandle);
+    if (ruling.normalizedIntent.kind === "move" && ruling.movementRouteHandle === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["movementRouteHandle"],
+        message: "Move intent requires an explicit movement route handle.",
+      });
+    }
+    if (!movementRouteIsTarget) {
+      context.addIssue({
+        code: "custom",
+        path: ["movementRouteHandle"],
+        message: "Movement route handle must identify an explicit route target.",
+      });
+    }
     addDuplicateIssue(
       ruling.citedVisibleFactHandles,
       context,

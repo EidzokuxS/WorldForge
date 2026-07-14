@@ -1675,6 +1675,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
       const ruling = {
         disposition,
         normalizedIntent: intentFixture(),
+        movementRouteHandle: null,
         citedVisibleFactHandles: ["fact_bridge"],
         resultBounds: disposition === "impossible" || disposition === "clarification_required"
           ? { minimum: "no_effect", maximum: "no_effect" }
@@ -1736,6 +1737,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     const actionableRuling = {
       disposition: "deterministic" as const,
       normalizedIntent: intentFixture(),
+      movementRouteHandle: null,
       citedVisibleFactHandles: [],
       resultBounds: { minimum: "limited" as const, maximum: "success" as const },
       elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
@@ -1773,11 +1775,55 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     }).success).toBe(false);
   });
 
+  it("binds pure and compound movement to an explicit route target", () => {
+    const baseRuling = {
+      disposition: "deterministic" as const,
+      normalizedIntent: intentFixture(),
+      movementRouteHandle: null,
+      citedVisibleFactHandles: [],
+      resultBounds: { minimum: "success" as const, maximum: "success" as const },
+      elapsedBounds: { minimumMinutes: 1, maximumMinutes: 5 },
+      uncertainty: { kind: "none" as const },
+      reason: "The visible route supports the action.",
+      clarificationQuestion: null,
+    };
+    const routeTarget = { handle: "route_bridge", kind: "route" as const };
+    const moveIntent = {
+      ...intentFixture(),
+      kind: "move" as const,
+      targets: [routeTarget],
+    };
+
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...baseRuling,
+      normalizedIntent: moveIntent,
+    }).success).toBe(false);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...baseRuling,
+      normalizedIntent: moveIntent,
+      movementRouteHandle: routeTarget.handle,
+    }).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...baseRuling,
+      normalizedIntent: {
+        ...intentFixture(),
+        kind: "contact",
+        targets: [routeTarget, { handle: "actor_guard", kind: "actor" }],
+      },
+      movementRouteHandle: routeTarget.handle,
+    }).success).toBe(true);
+    expect(campaignPlayJudgeRulingSchema.safeParse({
+      ...baseRuling,
+      movementRouteHandle: routeTarget.handle,
+    }).success).toBe(false);
+  });
+
   it("binds the persisted Judge artifact to its public result and code-owned primary plan", () => {
     const artifact = {
       ruling: {
         disposition: "deterministic" as const,
         normalizedIntent: intentFixture(),
+        movementRouteHandle: null,
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "limited" as const, maximum: "success" as const },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },
@@ -1957,6 +2003,7 @@ describe("Campaign Play Judge and Rulebook contracts", () => {
     const ruling = {
       disposition: "deterministic",
       normalizedIntent: intentFixture(),
+      movementRouteHandle: null,
       citedVisibleFactHandles: Array.from(
         { length: CAMPAIGN_PLAY_LIMITS.citedFacts },
         (_, index) => `fact_${index}`,

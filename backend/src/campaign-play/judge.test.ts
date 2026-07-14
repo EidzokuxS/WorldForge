@@ -72,6 +72,7 @@ function frame(): CampaignPlayJudgeFrame {
       { handle: "route-reef", kind: "route", summary: "The reef road is guarded." },
       { handle: "actor-guard", kind: "actor", summary: "A tired guard watches the road." },
       { handle: "choice-ask", kind: "choice", summary: "Ask the guard why the road is closed." },
+      { handle: "choice-cross", kind: "choice", summary: "Cross the reef road." },
     ],
     actorContinuity: [{
       actorHandle: "actor-guard",
@@ -89,6 +90,7 @@ function proposal(overrides: Record<string, unknown> = {}) {
     targets: [{ handle: "actor-guard", kind: "actor" }],
     method: "Ask calmly",
     stakes: "Learn why the road is closed",
+    movementRouteHandle: null,
     disposition: "deterministic",
     citedVisibleFactHandles: ["actor-guard", "route-reef"],
     resultBounds: { minimum: "success", maximum: "success" },
@@ -140,6 +142,25 @@ describe("Campaign Play Judge", () => {
       abortSignal: workerController.signal,
     });
     expect("timeout" in options).toBe(false);
+  });
+
+  it("keeps a compound action's primary intent while authorizing its explicit route movement", () => {
+    const ruling = createCampaignPlayJudge().compile(frame(), {
+      originalText: "I cross the reef road and ask the guard what happened.",
+      source: "freeform",
+      choiceHandle: null,
+    }, proposal({
+      kind: "contact",
+      targets: [
+        { handle: "route-reef", kind: "route" },
+        { handle: "actor-guard", kind: "actor" },
+      ],
+      method: "Cross the road, then ask the guard",
+      movementRouteHandle: "route-reef",
+    }));
+
+    expect(ruling.normalizedIntent.kind).toBe("contact");
+    expect(ruling.movementRouteHandle).toBe("route-reef");
   });
 
   it("accepts a substantive rationale without retry, repair, or fallback", async () => {
@@ -223,6 +244,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
+    expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
+    expect(sentPrompt).toContain("compound requests such as travel then contact");
+    expect(sentPrompt).toContain("Every suggested non-move choice must set movementRouteHandle to null");
     expect(sentPrompt).toContain("SOURCE_MOMENT is the exact accepted player-visible scene");
     expect(sentPrompt).toContain(
       'SOURCE_MOMENT="The guard finishes painting a fresh white line across the gate latch."',
@@ -276,6 +300,26 @@ describe("Campaign Play Judge", () => {
       ...suggestedInput,
       choiceHandle: "choice-hidden",
     }, proposal())).toThrowError(expect.objectContaining({ code: "judge_input_invalid" }));
+
+    const suggestedMove = {
+      originalText: "Cross the reef road.",
+      source: "suggested" as const,
+      choiceHandle: "choice-cross",
+      frozenChoice: {
+        kind: "move" as const,
+        targets: [{ handle: "route-reef", kind: "route" as const }],
+      },
+    };
+    expect(judge.compile(frame(), suggestedMove, proposal({
+      kind: "move",
+      targets: suggestedMove.frozenChoice.targets,
+      movementRouteHandle: "route-reef",
+    })).movementRouteHandle).toBe("route-reef");
+    expect(() => judge.compile(frame(), suggestedMove, proposal({
+      kind: "move",
+      targets: suggestedMove.frozenChoice.targets,
+      movementRouteHandle: null,
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 
   it.each([
@@ -302,6 +346,18 @@ describe("Campaign Play Judge", () => {
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
     expect(() => judge.compile(frame(), input, proposal({
       resultBounds: { minimum: "limited", maximum: "success" },
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, proposal({
+      targets: [{ handle: "route-reef", kind: "route" }],
+      movementRouteHandle: "route-hidden",
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, proposal({
+      movementRouteHandle: "route-reef",
+    }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
+    expect(() => judge.compile(frame(), input, proposal({
+      kind: "move",
+      targets: [{ handle: "route-reef", kind: "route" }],
+      movementRouteHandle: null,
     }))).toThrowError(expect.objectContaining({ code: "model_contract_failed" }));
   });
 

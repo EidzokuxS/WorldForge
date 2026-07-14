@@ -230,6 +230,7 @@ function createReadyFixture(completedActions: 30 | 60 = 30) {
           method: null,
           stakes: null,
         },
+        movementRouteHandle: null,
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "limited", maximum: "success" },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 10 },

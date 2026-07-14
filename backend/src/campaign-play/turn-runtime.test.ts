@@ -474,7 +474,7 @@ async function createReadyCampaignWithOpening(actorCadenceMinutes = 1) {
 
 type Disposition = "deterministic" | "uncertain" | "impossible" | "clarification_required";
 
-function judgeFixture(disposition: Disposition) {
+function judgeFixture(disposition: Disposition, compoundMovement = false) {
   const compiler = createCampaignPlayJudge();
   let selectedChoice: {
     kind: "observe" | "move" | "contact" | "wait" | "attempt";
@@ -490,13 +490,32 @@ function judgeFixture(disposition: Disposition) {
         : request.frame.visibleFacts.find((fact) => fact.handle === request.input.choiceHandle);
       const target = request.frame.visibleFacts.find((fact) =>
         fact.kind === "actor" && fact.handle !== request.frame.playerActorHandle);
+      const route = request.frame.visibleFacts.find((fact) => fact.kind === "route");
+      const destination = request.frame.visibleFacts.find((fact) =>
+        fact.kind === "location" && fact.handle !== request.frame.locationHandle);
       const useChoice = choice !== null && choice !== undefined;
+      const useCompoundMovement = !useChoice && compoundMovement
+        && route !== undefined && destination !== undefined;
       const noEffect = disposition === "impossible" || disposition === "clarification_required";
+      const movementRouteHandle = useChoice && selectedChoice!.kind === "move"
+        ? selectedChoice!.targets.find((candidate) => candidate.kind === "route")?.handle ?? null
+        : useCompoundMovement ? route.handle : null;
       const ruling = compiler.compile(request.frame, request.input, {
-        kind: useChoice ? selectedChoice!.kind : target ? "contact" : "wait",
-        targets: useChoice ? selectedChoice!.targets : !target ? [] : [{ handle: target.handle, kind: "actor" }],
-        method: useChoice ? "Follow the selected opportunity" : target ? "Ask calmly" : "Wait and watch",
+        kind: useChoice ? selectedChoice!.kind : useCompoundMovement || target ? "contact" : "wait",
+        targets: useChoice
+          ? selectedChoice!.targets
+          : useCompoundMovement
+            ? [
+                { handle: route.handle, kind: "route" },
+                { handle: destination.handle, kind: "location" },
+              ]
+            : !target ? [] : [{ handle: target.handle, kind: "actor" }],
+        method: useChoice
+          ? "Follow the selected opportunity"
+          : useCompoundMovement ? "Take the route, then ask whoever is organizing crossings"
+          : target ? "Ask calmly" : "Wait and watch",
         stakes: "Learn what changes at the signal gate",
+        movementRouteHandle,
         disposition,
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: noEffect
@@ -528,6 +547,9 @@ function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
         binding.reference.kind === "location" &&
         binding.handle === request.frame.visibleFacts.find((fact) =>
           fact.kind === "location")?.handle)!.handle;
+      const movementEffects = request.ruling.movementRouteHandle === null
+        ? []
+        : [{ kind: "move_actor" as const }];
       return {
         ...compiler.compile(
           request.frame,
@@ -536,16 +558,21 @@ function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
           request.uncertaintyAuthority,
           {
             elapsedMinutes: 1,
-            effects: Array.from({ length: worldEventCount }, (_, index) => ({
-              kind: "record_world_event",
-              eventClass: "dialogue",
-              summary: includeSubmittedText
-                ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
-                : worldEventCount === 1
-                ? "Mara tests the signal keepers' account against the ringing tower."
-                : `Mara tests signal account ${index + 1} against the ringing tower.`,
-              affectedHandles: [playerHandle, locationHandle],
-            })),
+            effects: [
+              ...movementEffects,
+              ...Array.from({ length: worldEventCount }, (_, index) => ({
+                kind: "record_world_event" as const,
+                eventClass: "dialogue" as const,
+                summary: includeSubmittedText
+                  ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
+                  : worldEventCount === 1
+                  ? "Mara tests the signal keepers' account against the ringing tower."
+                  : `Mara tests signal account ${index + 1} against the ringing tower.`,
+                affectedHandles: request.ruling.movementRouteHandle === null
+                  ? [playerHandle, locationHandle]
+                  : [playerHandle],
+              })),
+            ],
           },
         ),
         modelEvidence: acceptedEvidence("test-game-master"),
@@ -925,6 +952,65 @@ describe("Campaign Play player-action turn runtime", () => {
       }
     },
   );
+
+  it("settles compound travel before contact and narrates from the destination", async () => {
+    const { handle, state } = await createReadyCampaignWithOpening();
+    const time = fixedClock(2_250);
+    const narrator = playerNarratorFixture();
+    const runtime = turnRuntime(
+      handle,
+      time,
+      judgeFixture("deterministic", true),
+      gameMasterFixture(),
+      { narrator },
+    );
+    const admission = runtime.admitAction({
+      request: {
+        ...admissionRequest(state, "compound-travel-contact"),
+        text: "I take the route to North Harbor and ask who is organizing crossings today.",
+      },
+      submittedAt: 2_250,
+    });
+
+    await advanceUntilStage(runtime, time, admission.turnId, "completed");
+
+    const acceptedJudge = handle.sqlite.prepare(`SELECT artifact_json AS artifactJson
+      FROM campaign_play_model_stages
+      WHERE campaign_id = ? AND turn_id = ? AND kind = 'judge' AND status = 'accepted'`)
+      .get(CAMPAIGN_ID, admission.turnId) as { artifactJson: string };
+    expect(JSON.parse(acceptedJudge.artifactJson).ruling).toMatchObject({
+      movementRouteHandle: expect.any(String),
+      normalizedIntent: { kind: "contact" },
+    });
+    expect(handle.sqlite.prepare(`SELECT command_kind AS commandKind
+      FROM campaign_play_commands WHERE campaign_id = ? AND turn_id = ?
+        AND json_extract(source_json, '$.system') = 'game_master'
+      ORDER BY command_order`).all(CAMPAIGN_ID, admission.turnId)).toEqual([
+      { commandKind: "advance_world_time" },
+      { commandKind: "move_actor" },
+      { commandKind: "record_world_event" },
+    ]);
+    expect(handle.sqlite.prepare(`SELECT location_id AS locationId
+      FROM actor_placements
+      WHERE campaign_id = ? AND actor_id = ? AND placement_kind = 'present'`)
+      .get(CAMPAIGN_ID, PLAYER_ID)).toEqual({ locationId: "location-a" });
+    expect(handle.sqlite.prepare(`SELECT exposure.location_id AS locationId
+      FROM campaign_play_event_exposures exposure
+      JOIN campaign_play_events event ON event.event_id = exposure.event_id
+      JOIN campaign_play_commands command ON command.command_id = event.command_id
+      WHERE exposure.campaign_id = ? AND event.turn_id = ?
+        AND exposure.channel = 'direct_perception'
+        AND json_extract(command.source_json, '$.system') = 'game_master'
+      ORDER BY event.created_at DESC LIMIT 1`)
+      .get(CAMPAIGN_ID, admission.turnId)).toEqual({ locationId: "location-a" });
+    const narration = handle.sqlite.prepare(`SELECT packet_json AS packetJson
+      FROM campaign_play_narrations
+      WHERE campaign_id = ? AND turn_id = ? AND status = 'complete'`)
+      .get(CAMPAIGN_ID, admission.turnId) as { packetJson: string };
+    expect(JSON.parse(narration.packetJson).currentLocation).toMatchObject({
+      name: "North Harbor",
+    });
+  });
 
   it("settles the exact current suggested action without Judge reinterpretation", async () => {
     const { handle, state } = await createReadyCampaignWithOpening();

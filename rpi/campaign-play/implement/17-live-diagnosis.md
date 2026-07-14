@@ -112,6 +112,16 @@ Humanizer and deslop review: the diagnosis uses direct observations, timestamps,
 - Prompt-craft review: the Game Master instruction now states one ordering invariant next to the existing code-authoritative movement rule. Humanizer and deslop review found no repeated rule or narrative-style steering; `post-effect location` names the mechanical ownership boundary directly.
 - Focused verification: `npx vitest run backend/src/campaign-play/game-master.test.ts` (20 passed), plus backend typecheck.
 
+### Compound movement settlement
+
+- Diagnostic action 21 asked to travel to Ferry Steps and then contact whoever was organizing crossings. Judge preserved the compound method and cited the visible route, but its single primary kind was `contact`. Game Master therefore omitted `move_actor`, recorded a local dialogue at the old Thray-Hold placement, and Narrator described an arrival that never became canonical.
+- Judge rulings now carry a required `movementRouteHandle` independently of the primary intent kind. `move` requires one exact visible route target; a freeform `contact`, `attempt`, `observe`, or `wait` may carry one when travel is an explicit part of the same action. Suggested non-move actions cannot acquire travel, and suggested move actions must reuse their exact frozen route target.
+- Game Master no longer derives movement from intent kind, citations, the only visible route, or player-input text. A non-null accepted route produces one code-bound player `move_actor` before the action's local effect. Rulebook settles the placement atomically, and the following event receives direct perception at the destination.
+- The hard cutover adds no optional field, default, compatibility parser, prompt-only inference, regex heuristic, retry, repair, fallback, or provider switch. Existing stored and test artifacts must satisfy the new ruling contract.
+- A full turn-runtime regression admits `contact + route movement`, persists that exact Judge artifact, commits `advance_world_time -> move_actor -> record_world_event`, places the human actor at North Harbor, anchors the event there, and gives Narrator the destination as `currentLocation`.
+- Humanizer and deslop review: the two Judge instructions state the mechanical decision and frozen-choice restriction once, use concrete field names, and contain no narrative voice steering, ornamental framing, repeated conclusion, or fallback language.
+- Verification: Campaign Play `353/353`, mounted Campaign Play route `1/1`, provenance/live evidence `6/6`, deterministic seeded replay `2/2`, and backend typecheck. A fresh manual GLM 5.2 campaign still owns the prose and live-world acceptance proof after the remaining root fixes.
+
 ### Autonomous-person agency correction
 
 - Opening planning, scheduling, actor-job authority, and topology eligibility now use one roster rule: every agent-controlled person participates regardless of `key`, `support`, or `background` role. Collectives remain world topology and narrative context, but they do not receive player-like plans or turns.

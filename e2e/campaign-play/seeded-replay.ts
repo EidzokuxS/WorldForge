@@ -397,11 +397,15 @@ function judgeFixture() {
   return {
     async judge(request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) {
       const frozenChoice = request.input.frozenChoice;
+      const movementRouteHandle = frozenChoice?.kind === "move"
+        ? frozenChoice.targets.find((target) => target.kind === "route")?.handle ?? null
+        : null;
       const ruling = compiler.compile(request.frame, request.input, {
         kind: frozenChoice?.kind ?? "wait",
         targets: frozenChoice?.targets ?? [],
         method: "Wait and watch the visible situation",
         stakes: "Learn what changes at the signal gate",
+        movementRouteHandle,
         disposition: "deterministic",
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: { minimum: "success", maximum: "success" },
@@ -447,6 +451,9 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
             summary: `Mara waits and records the visible signal pattern for ${request.ruling.normalizedIntent.originalText}.`,
             affectedHandles: [playerHandle, locationHandle],
           }];
+      if (request.ruling.movementRouteHandle !== null) {
+        effects.unshift({ kind: "move_actor" as const });
+      }
       return {
         ...compiler.compile(
           request.frame,

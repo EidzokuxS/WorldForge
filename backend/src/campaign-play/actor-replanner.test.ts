@@ -289,6 +289,7 @@ function createReplanFixture(): {
           method: null,
           stakes: null,
         },
+        movementRouteHandle: null,
         citedVisibleFactHandles: [],
         resultBounds: { minimum: "no_effect", maximum: "no_effect" },
         elapsedBounds: { minimumMinutes: 0, maximumMinutes: 0 },

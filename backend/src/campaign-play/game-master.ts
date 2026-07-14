@@ -340,7 +340,7 @@ function canonicalMovement(
   ruling: CampaignPlayJudgeRuling,
   map: ReadonlyMap<string, CampaignPlayEntityRef>,
 ): CanonicalMovement | null {
-  if (ruling.normalizedIntent.kind !== "move") return null;
+  if (ruling.movementRouteHandle === null) return null;
   const actorId = frame.authority.actorId;
   const placement = frame.rulebookFrame.placements.find((row) =>
     row.actorId === actorId && row.placementKind === "present");
@@ -352,20 +352,15 @@ function canonicalMovement(
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
 
-  const targetRouteHandles = ruling.normalizedIntent.targets
-    .filter((target) => target.kind === "route")
-    .map((target) => target.handle);
   const targetLocationHandles = ruling.normalizedIntent.targets
     .filter((target) => target.kind === "location")
     .map((target) => target.handle);
-  if (targetRouteHandles.length > 1 || targetLocationHandles.length > 1) {
+  if (targetLocationHandles.length > 1) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   const destination = targetLocationHandles[0] === undefined
     ? null
     : requireRef(map, targetLocationHandles[0], "location");
-  const visibleRouteBindings = frame.handleBindings.filter((binding) =>
-    binding.reference.kind === "route");
   const routeMatchesMovement = (handle: string): boolean => {
     const reference = map.get(handle);
     if (reference?.kind !== "route") return false;
@@ -374,18 +369,8 @@ function canonicalMovement(
     return record?.fromLocationId === placement.locationId
       && (destination === null || record.toLocationId === destination.id);
   };
-  let routeHandle = targetRouteHandles[0] ?? null;
-  if (routeHandle === null) {
-    const citedRouteHandles = ruling.citedVisibleFactHandles.filter(routeMatchesMovement);
-    const matchingHandles = citedRouteHandles.length > 0
-      ? citedRouteHandles
-      : visibleRouteBindings.map((binding) => binding.handle).filter(routeMatchesMovement);
-    if (matchingHandles.length !== 1) {
-      throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
-    }
-    routeHandle = matchingHandles[0]!;
-  }
-  if (!routeHandle || !routeMatchesMovement(routeHandle)) {
+  const routeHandle = ruling.movementRouteHandle;
+  if (!routeMatchesMovement(routeHandle)) {
     throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
   }
   const route = requireRef(map, routeHandle, "route");
