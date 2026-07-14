@@ -1480,6 +1480,7 @@ Root-fix progress:
 - [x] Settle compound freeform movement before resolving the co-located action.
 - [x] Replace inert collective actor shells with person/job/world-state behavior.
 - [x] Bound serial actor work to three admitted opportunities and one accepted replan per player turn without hiding world mutation.
+- [x] Complete a fresh GLM 5.2 DNA/world build, repair child-before-parent location persistence, accept the reviewed world, and create clean playtest/reserve clones.
 - [ ] Prove all four roots through a fresh manual UI campaign before promotion.
 
 Person/job/world-state cutover:
@@ -1498,3 +1499,12 @@ Scheduler cadence cutover:
 - Proposals still settle serially against the latest committed world version. The runtime does not mutate the world in the background and adds no retry, repair, provider switch, parser fallback, or backend-authored narrative prose.
 - Focused Campaign Play verification passes 101/101. The broad Campaign Play and mounted-route selection passes after updating the person-only opening fixture, and all 33 Campaign Play E2E tests plus backend, frontend, and E2E typechecks pass. Standalone smoke additions: `0`.
 - The next formative manual run tests whether the cap improves waiting time while keeping autonomous consequences legible. One fresh UI campaign can expose mechanisms and prose defects; it cannot establish prevalence.
+
+Fresh Lowwater Ledger campaign:
+
+- GLM 5.2 produced coherent editable DNA, seven locations, fifteen directed routes, nine concrete people, twenty-two directed relations, and five connected pressures. Manual World Review found a causally connected light/debt/blockade/storm system with no collective actor rows.
+- The first live build exposed an order-sensitive SQLite foreign key: a valid sublocation could precede its parent in model output. Campaign World persistence now writes parent locations before children without changing the canonical draft or content hash.
+- Verification passes the focused repository suite 23/23, the broad Campaign World suite 128/128, backend typecheck, and a live rebuild through Review. GitNexus impact for `insertDraft` is LOW with no indexed callers or affected flows.
+- Accepted source campaign `600bb10e-5497-4eba-949f-7a289ae2227e` and clean clones `26191149-983c-4893-ae21-5dfd8e589115` (Playtest A) and `b012e168-f333-4f82-b52c-5c686383b499` (Reserve) share content hash `a6272027f23d32e562eac9c1c562274999e2b5b07f160ab22a4b45cb7b6fb060`; both clones began with zero Campaign Play rows.
+- Playtest A owns the ongoing manual character, opening, and multi-action lane. Character generation preserved an ordinary outsider; the opening planner is one live GLM 5.2 attempt with a renewed worker lease and no retry or fallback.
+- Humanizer and deslop review kept this evidence note direct and specific; no rewrite was needed.

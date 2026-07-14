@@ -838,7 +838,26 @@ export function createCampaignWorldRepository(
         id, campaign_id, name, description, kind, parent_location_id, tags, is_starting
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    for (const location of draft.locations) {
+    const pendingLocations = [...draft.locations];
+    const insertedLocationIds = new Set<string>();
+    while (pendingLocations.length > 0) {
+      const nextIndex = pendingLocations.findIndex((location) =>
+        location.parentLocationId === null ||
+        insertedLocationIds.has(location.parentLocationId)
+      );
+      if (nextIndex < 0) {
+        throw repositoryError(
+          "world_state_corrupt",
+          "Campaign World locations cannot be ordered parent before child.",
+        );
+      }
+      const [location] = pendingLocations.splice(nextIndex, 1);
+      if (!location) {
+        throw repositoryError(
+          "world_state_corrupt",
+          "Campaign World location ordering lost an entry.",
+        );
+      }
       insertLocation.run(
         location.id,
         campaignId,
@@ -849,6 +868,7 @@ export function createCampaignWorldRepository(
         JSON.stringify(location.tags),
         location.isStarting ? 1 : 0,
       );
+      insertedLocationIds.add(location.id);
     }
     const insertRoute = sqlite.prepare(`
       INSERT INTO location_edges (

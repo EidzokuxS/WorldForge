@@ -16,7 +16,10 @@ import {
   createCampaignWorldRepository,
   type CampaignWorldRepository,
 } from "./world-repository.js";
-import { serializeAcceptedCampaignWorldReview } from "./world-snapshot.js";
+import {
+  calculateCampaignWorldContentHash,
+  serializeAcceptedCampaignWorldReview,
+} from "./world-snapshot.js";
 import { calculateCampaignWorldSourceDigest } from "./world-source.js";
 import {
   advanceBuildToPersistence,
@@ -105,6 +108,43 @@ function completeAndAcceptWorld(): CampaignWorldReview {
 }
 
 describe("Campaign World repository", () => {
+  it("persists a sublocation when its parent appears later in the generated draft", () => {
+    const source = sourceFixture();
+    acquire(repository, BUILD_ID, source);
+    advanceBuildToPersistence(repository, BUILD_ID);
+
+    const candidate = candidateFixture(source);
+    const [startingLocation, parentLocation, childLocation] = candidate.draft.locations;
+    if (!startingLocation || !parentLocation || !childLocation) {
+      throw new Error("Campaign World location fixture is incomplete.");
+    }
+    candidate.draft.locations = [
+      {
+        ...childLocation,
+        kind: "persistent_sublocation",
+        parentLocationId: parentLocation.id,
+      },
+      startingLocation,
+      parentLocation,
+    ];
+    candidate.contentHash = calculateCampaignWorldContentHash(
+      source.sourceDigest,
+      candidate.draft,
+    );
+
+    const review = repository.completeBuild({
+      buildId: BUILD_ID,
+      candidate,
+      completedAt: 1_100,
+    });
+
+    expect(review.locations.find((location) => location.id === childLocation.id))
+      .toMatchObject({
+        kind: "persistent_sublocation",
+        parentLocationId: parentLocation.id,
+      });
+  });
+
   it("persists one replayable build and accepts the reviewed world", () => {
     const source = sourceFixture();
     expect(repository.loadSourceStatus()).toBe("unbuilt");

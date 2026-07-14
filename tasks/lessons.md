@@ -6,6 +6,7 @@
 - Inspect configuration schemas or selected non-secret fields instead of printing whole settings files; provider settings can contain live API keys and must stay out of tool logs.
 - Keep secret-bearing configuration reads side-effect free. Only an explicit save may rewrite `settings.json`, and every rewrite must preserve rotating recovery generations.
 - Treat long reasoning-model latency as normal until a configured timeout, transport error, or terminal event proves failure; elapsed time alone is not a hang diagnosis.
+- Before repeating an expensive live run after a backend edit, verify the process serving the API actually reloaded; restart a stable process with the same campaign root and configuration first.
 - Give every thinking-model gameplay stage at least a 32k provider output window. Apply visible-content limits after subtracting reported reasoning tokens, while retaining full provider usage for billing and evidence.
 - Size aggregate playtest token budgets from measured per-action usage with headroom. A per-call 32k output floor and a whole-run evidence budget are different limits.
 - Once Judge normalizes a movement route and destination, code owns the player actor, origin, route, and destination handles; the model must not reconstruct mechanical movement authority.
