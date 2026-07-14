@@ -248,8 +248,8 @@ function compilationFrame(
     handle: bind({ kind: "world_event", id: known.eventId }),
     kind: "world_event",
     name: known.event.kind,
-    summary: `Known at world time ${known.learnedAtWorldTimeMinutes}`,
-    state: null,
+    summary: known.summary ?? `Known ${known.event.kind}`,
+    state: `occurred at world time ${known.event.worldTimeMinutes}; learned at world time ${known.learnedAtWorldTimeMinutes}`,
   });
   const toPromptIntent = (intent: CampaignPlayActorIntent) => ({
     kind: intent.kind,

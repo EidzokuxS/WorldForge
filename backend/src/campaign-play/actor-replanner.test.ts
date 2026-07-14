@@ -332,6 +332,10 @@ function createReplanFixture(): {
     committedAt: 1_540,
     mutationId: "actor-replanner-primary-settled",
   });
+  persistKnownScene(
+    handle,
+    "Magda promised to stay through second bell and change the patients' dressings.",
+  );
   const settled = repository.loadTurn("turn-player")!;
   const token = repository.claimStage({
     turnId: "turn-player",
@@ -382,9 +386,120 @@ function createReplanFixture(): {
   return { handle, token, jobId: job.jobId };
 }
 
+function persistKnownScene(
+  handle: CampaignPlayDatabaseHandle,
+  summary: string,
+): void {
+  const state = handle.sqlite.prepare(`SELECT world_version AS worldVersion,
+    world_hash AS worldHash, world_time_minutes AS worldTimeMinutes
+    FROM campaign_play_states WHERE campaign_id = ?`).get(handle.campaignId) as {
+    worldVersion: number;
+    worldHash: string;
+    worldTimeMinutes: number;
+  };
+  const source = { kind: "system", system: "game_master" };
+  const affectedRefs = [
+    { kind: "actor", id: "actor-b" },
+    { kind: "location", id: "location-a" },
+  ];
+  const payload = { eventClass: "scene", summary };
+  const sourceJson = canonicalizeCampaignPlayProjection(source);
+  const affectedRefsJson = canonicalizeCampaignPlayProjection(affectedRefs);
+  const payloadJson = canonicalizeCampaignPlayProjection(payload);
+  const payloadHash = hashCampaignPlayProjection(payload);
+
+  createCampaignPlayStateRepository(handle).commitRuntime({
+    event: {
+      eventId: "known-scene-runtime-event",
+      turnId: null,
+      kind: "character_created",
+      workerEpoch: null,
+      protectedPayloadHash: payloadHash,
+      createdAt: 1_571,
+    },
+    mutate(context) {
+      context.sqlite.prepare(`INSERT INTO campaign_play_commands (
+        command_id, campaign_id, turn_id, batch_id, command_order, command_kind,
+        causal_parent_json, source_json, expected_world_version, read_scope_json,
+        write_scope_json, exposure_policy_json, arguments_hash,
+        protected_payload_json, protected_payload_hash, created_at
+      ) VALUES ('known-scene-command', ?, 'turn-player', 'known-scene-batch', 0,
+        'record_world_event', '{"kind":"turn","turnId":"turn-player"}', ?, ?, ?,
+        '[]', ?, ?, ?, ?, 1571)`).run(
+        context.campaignId,
+        sourceJson,
+        state.worldVersion,
+        affectedRefsJson,
+        canonicalizeCampaignPlayProjection({
+          mode: "projectable",
+          predicates: [{ channel: "direct_perception", locationId: "location-a" }],
+        }),
+        payloadHash,
+        payloadJson,
+        payloadHash,
+      );
+      context.sqlite.prepare(`INSERT INTO campaign_play_receipts (
+        receipt_id, campaign_id, turn_id, command_id, command_kind, outcome,
+        applied_world_mutation, prior_world_version, result_world_version,
+        prior_world_hash, result_world_hash, causal_event_ids_json,
+        protected_payload_json, protected_payload_hash, created_at
+      ) VALUES ('known-scene-receipt', ?, 'turn-player', 'known-scene-command',
+        'record_world_event', 'applied', 0, ?, ?, ?, ?, '["known-scene-event"]',
+        ?, ?, 1572)`).run(
+        context.campaignId,
+        state.worldVersion,
+        state.worldVersion,
+        state.worldHash,
+        state.worldHash,
+        payloadJson,
+        payloadHash,
+      );
+      context.sqlite.prepare(`INSERT INTO campaign_play_events (
+        event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
+        event_kind, source_json, world_time_minutes, world_version,
+        affected_refs_json, before_payload_json, after_payload_json,
+        payload_hash, created_at
+      ) VALUES ('known-scene-event', ?, 'turn-player', 'known-scene-command',
+        'known-scene-receipt', NULL, 'scene_recorded', ?, ?, ?, ?, '{}', ?, ?, 1573)`)
+        .run(
+          context.campaignId,
+          sourceJson,
+          state.worldTimeMinutes,
+          state.worldVersion,
+          affectedRefsJson,
+          payloadJson,
+          payloadHash,
+        );
+      context.sqlite.prepare(`INSERT INTO campaign_play_event_exposures (
+        exposure_id, campaign_id, event_id, channel, location_id, route_id,
+        witness_actor_id, valid_until_world_time_minutes, route_triggers_json, created_at
+      ) VALUES ('known-scene-exposure', ?, 'known-scene-event', 'direct_perception',
+        'location-a', NULL, NULL, NULL, NULL, 1574)`).run(context.campaignId);
+      const epistemicSource = {
+        channel: "direct_perception",
+        locationId: "location-a",
+        perceivedActorId: null,
+      };
+      context.sqlite.prepare(`INSERT INTO campaign_play_actor_knowledge (
+        knowledge_id, campaign_id, actor_id, event_id, exposure_id, channel,
+        source_location_id, source_route_id, source_trigger, source_witness_actor_id,
+        perceived_actor_id, source_json, source_hash, learned_at_world_time_minutes, created_at
+      ) VALUES ('known-scene-knowledge', ?, 'actor-b', 'known-scene-event',
+        'known-scene-exposure', 'direct_perception', 'location-a', NULL, NULL, NULL,
+        NULL, ?, ?, ?, 1575)`).run(
+        context.campaignId,
+        canonicalizeCampaignPlayProjection(epistemicSource),
+        hashCampaignPlayProjection(epistemicSource),
+        state.worldTimeMinutes,
+      );
+    },
+  });
+}
+
 describe("Campaign Play actor replanner", () => {
   it("accepts one strict job-owned attempt and atomically replaces its completed plan", async () => {
     const { handle, token, jobId } = createReplanFixture();
+    const knownScene = "Magda promised to stay through second bell and change the patients' dressings.";
     let now = 1_600;
     const generateObject = vi.fn(async (request: {
       prompt: string;
@@ -416,6 +531,10 @@ describe("Campaign Play actor replanner", () => {
 
     expect(outcome).toMatchObject({ kind: "replanned", jobId, workerEpoch: 1 });
     expect(generateObject).toHaveBeenCalledTimes(1);
+    expect(generateObject.mock.calls[0]![0].prompt).toContain(knownScene);
+    expect(generateObject.mock.calls[0]![0].prompt).toContain(
+      "occurred at world time 0; learned at world time 0",
+    );
     expect(generateObject.mock.calls[0]![0]).toMatchObject({
       allowRepair: false,
       allowTextFallback: false,

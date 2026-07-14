@@ -85,3 +85,13 @@ Disposition: `CLEAR_WITH_CONDITIONS` for this expert formative pass. Before acti
 The pristine lanes report the natural action mix. They do not force fixed counts of freeform, impossible, adversarial, or secrecy-probe actions. Missing boundary evidence is collected afterward on a disposable clone with a separate diagnostic label, so stress behavior cannot masquerade as ordinary play or contaminate the sixty-action history.
 
 Humanizer and deslop review: the contract uses direct player language, separates observation from inference, and avoids treating completion counts as evidence of engagement.
+
+## Frozen Lane A diagnosis: actor commitment continuity
+
+The first `Lowwater Ledger` sitting stopped after action 10. Mara Venn had accepted shelter in exchange for writing patient labels at Cable Span. Magda Sprat remained visibly present at second bell and called for the dressings, while the same settled turn moved her to Glasswater Terrace. Reload reproduced the exact canonical hash, so the lane remains frozen as failed evidence rather than being repaired in place.
+
+SQLite inspection showed that Magda's knowledge contained the accepted bargain, the completed labels, their review, and the second-bell dressing scene. The scheduler loaded those event rows, but the replanner converted each one to only its event kind and learned-at timestamp. The model therefore received `scene_recorded` without the scene and could not preserve the immediate obligation.
+
+The minimal repair keeps truth ownership and data flow unchanged. The actor frame now carries the bounded summary of the latest accepted `record_world_event` rows known to that actor. The replanner receives the exact summary and its occurred/learned times. Its instruction permits changing course, but requires an immediate witnessed commitment to be completed, handed off, postponed, or abandoned for a grounded frame-supported reason instead of being silently forgotten. No retry, fallback, provider switch, semantic regex, or code-authored narrative outcome was added.
+
+Humanizer review: the instruction names the actor's decision in concrete verbs and preserves agency instead of forcing obedience. Deslop review: removed abstract continuity rhetoric and avoided repeated warnings, faux quotations, grading language, and prose-policing rules. Verdict: acceptable as a compact behavioral contract; the live disposable-clone retest still owns the experiential decision.

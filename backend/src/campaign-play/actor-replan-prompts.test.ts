@@ -55,6 +55,24 @@ describe("campaign play actor replan prompt", () => {
     expect(prompt).toContain("Code owns canonical identifiers");
   });
 
+  it("treats known recent scenes as binding continuity without forcing one outcome", () => {
+    const prompt = buildCampaignPlayActorReplanPrompt({
+      ...frame,
+      entities: [...frame.entities, {
+        handle: "world_event:dressings-due",
+        kind: "world_event",
+        name: "scene_recorded",
+        summary: "The keeper promised to change the dressings at second bell.",
+        state: "occurred at world time 175; learned at world time 175",
+      }],
+    });
+
+    expect(prompt).toContain("not optional flavor");
+    expect(prompt).toContain("complete it, hand it off, postpone it, or abandon it");
+    expect(prompt).toContain("for a grounded reason represented in ACTOR_FRAME");
+    expect(prompt).toContain("Do not silently contradict or forget it");
+  });
+
   it("accepts bounded handle-only plans and rejects invented output fields", () => {
     const proposal = {
       goalHandle: "goal:keep-gate-open",

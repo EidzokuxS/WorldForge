@@ -109,6 +109,7 @@ export interface CampaignPlayActorKnownEvent {
   exposureId: string;
   source: CampaignPlayEpistemicSource;
   learnedAtWorldTimeMinutes: number;
+  summary: string | null;
   event: {
     kind: string;
     worldTimeMinutes: number;
@@ -269,6 +270,24 @@ function parseJson(value: string, label: string): unknown {
   } catch (cause) {
     throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid", { cause: new Error(label, { cause }) });
   }
+}
+
+function knownEventSummary(row: Record<string, unknown>): string | null {
+  if (row.commandKind !== "record_world_event") return null;
+  const payload = parseJson(
+    row.protectedPayloadJson as string,
+    "Known event protected payload",
+  ) as Record<string, unknown>;
+  const summary = payload.summary;
+  if (
+    typeof summary !== "string"
+    || summary.length === 0
+    || summary !== summary.trim()
+    || summary.length > CAMPAIGN_PLAY_LIMITS.text
+  ) {
+    throw new CampaignPlayActorSchedulerError("scheduler_frame_invalid");
+  }
+  return summary;
 }
 
 function refKey(reference: CampaignPlayEntityRef): string {
@@ -1222,18 +1241,26 @@ export function createCampaignPlayActorScheduler(
           k.learned_at_world_time_minutes AS learnedAtWorldTimeMinutes,
           e.event_kind AS eventKind, e.world_time_minutes AS eventWorldTimeMinutes,
           e.world_version AS eventWorldVersion, e.affected_refs_json AS affectedRefsJson,
-          e.before_payload_json AS beforePayloadJson, e.after_payload_json AS afterPayloadJson
+          e.before_payload_json AS beforePayloadJson, e.after_payload_json AS afterPayloadJson,
+          c.command_kind AS commandKind, c.protected_payload_json AS protectedPayloadJson
         FROM campaign_play_actor_knowledge k
         JOIN campaign_play_events e ON e.event_id = k.event_id
+        JOIN campaign_play_commands c ON c.command_id = e.command_id
         WHERE k.campaign_id = ? AND k.actor_id = ?
-        ORDER BY k.learned_at_world_time_minutes, k.knowledge_id
-      `).all(handle.campaignId, actor.id) as Array<Record<string, unknown>>;
+        ORDER BY k.learned_at_world_time_minutes DESC, k.knowledge_id DESC
+        LIMIT ?
+      `).all(
+        handle.campaignId,
+        actor.id,
+        CAMPAIGN_PLAY_LIMITS.continuityEntries,
+      ).reverse() as Array<Record<string, unknown>>;
       const knownEvents = knowledgeRows.map((row): CampaignPlayActorKnownEvent => ({
         knowledgeId: row.knowledgeId as string,
         eventId: row.eventId as string,
         exposureId: row.exposureId as string,
         source: parseKnowledgeSource(row),
         learnedAtWorldTimeMinutes: row.learnedAtWorldTimeMinutes as number,
+        summary: knownEventSummary(row),
         event: {
           kind: row.eventKind as string,
           worldTimeMinutes: row.eventWorldTimeMinutes as number,
