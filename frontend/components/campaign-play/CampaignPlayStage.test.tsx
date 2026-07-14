@@ -20,6 +20,7 @@ function readyState(
     visibleActors: [],
     visibleRoutes: [],
     visiblePressures: [],
+    possessions: [],
     narration: {
       narrationId,
       turnId: `turn-${narrationId}`,

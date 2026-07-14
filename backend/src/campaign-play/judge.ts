@@ -39,7 +39,7 @@ const text = (maximum: number) => z.string().min(1).max(maximum)
 
 export const campaignPlayJudgeVisibleFactSchema = z.object({
   handle: line(CAMPAIGN_PLAY_LIMITS.handle),
-  kind: z.enum(["actor", "location", "route", "pressure", "observation", "choice"]),
+  kind: z.enum(["actor", "location", "route", "pressure", "possession", "observation", "choice"]),
   summary: text(CAMPAIGN_PLAY_LIMITS.text),
 }).strict();
 

@@ -4,6 +4,7 @@ import type {
   CampaignPlayJournalEntry,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
+  CampaignPlayVisiblePossession,
   CampaignPlayVisiblePressure,
   CampaignPlayVisibleRoute,
   CampaignWorldReview,
@@ -103,6 +104,14 @@ export interface CampaignPlayLiveGoal {
   motivation: string;
 }
 
+export interface CampaignPlayLiveActorPossession {
+  possessionId: string;
+  actorId: string;
+  possessionKey: string;
+  name: string;
+  quantity: number;
+}
+
 export interface CampaignPlayHumanMechanicalIdentity {
   actorId: string;
   recordHash: string;
@@ -118,6 +127,7 @@ export interface CampaignPlayMechanicalProjectionInput {
   placements: readonly CampaignPlayLivePlacement[];
   relations: readonly CampaignPlayLiveRelation[];
   goals: readonly CampaignPlayLiveGoal[];
+  possessions: readonly CampaignPlayLiveActorPossession[];
 }
 
 export interface CampaignPlayRuntimeProjectionInput {
@@ -162,6 +172,7 @@ export interface CampaignPlayPublicProjectionInput {
   visibleActors: readonly CampaignPlayVisibleActor[];
   visibleRoutes: readonly CampaignPlayVisibleRoute[];
   visiblePressures: readonly CampaignPlayVisiblePressure[];
+  possessions: readonly CampaignPlayVisiblePossession[];
   consequences: readonly CampaignPlayConsequence[];
   journal: readonly CampaignPlayPublicJournalEntry[];
   narration: CampaignPlayProjectionRecord | null;
@@ -244,6 +255,38 @@ export function deriveCampaignPlayPublicHandle(
     kind,
     id,
   }).slice(0, 24)}`;
+}
+
+export function deriveCampaignPlayPossessionKey(name: string): string {
+  const normalized = name
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/gu, " ");
+  if (normalized.length === 0) {
+    throw new TypeError("Campaign Play possession key requires a name.");
+  }
+  if (normalized.length <= 240) return normalized;
+  return `possession_${hashCampaignPlayProjection({
+    domain: "campaign_play_possession_key",
+    normalized,
+  }).slice(0, 56)}`;
+}
+
+export function deriveCampaignPlayPossessionId(
+  campaignId: string,
+  actorId: string,
+  possessionKey: string,
+): string {
+  if (campaignId.length === 0 || actorId.length === 0 || possessionKey.length === 0) {
+    throw new TypeError("Campaign Play possession ID requires campaign, actor, and key.");
+  }
+  return `possession:${hashCampaignPlayProjection({
+    domain: "campaign_play_actor_possession",
+    campaignId,
+    actorId,
+    possessionKey,
+  }).slice(0, 48)}`;
 }
 
 function wrapProjection<T>(projection: T): CampaignPlayProjection<T> {
@@ -523,7 +566,8 @@ function isAcceptedMechanicalBase(input: CampaignPlayMechanicalProjectionInput):
     input.pressureStates.length === 0 &&
     input.placements.length === 0 &&
     input.relations.length === 0 &&
-    input.goals.length === 0;
+    input.goals.length === 0 &&
+    input.possessions.length === 0;
 }
 
 export function projectCampaignPlayMechanicalTruth(
@@ -566,6 +610,10 @@ export function projectCampaignPlayMechanicalTruth(
     placements: sortByText(input.placements, (row) => row.placementId),
     relations: sortByText(input.relations, (row) => row.relationId),
     goals: sortByText(input.goals, (row) => row.goalId),
+    possessions: sortByText(
+      input.possessions,
+      (row) => `${row.actorId}\u0000${row.possessionKey}\u0000${row.possessionId}`,
+    ),
   });
 }
 
@@ -702,6 +750,11 @@ export function projectCampaignPlayPublicState(
       handle: row.handle,
       label: row.label,
       summary: row.summary,
+    })), (row) => row.handle),
+    possessions: sortByText(input.possessions.map((row) => ({
+      handle: row.handle,
+      name: row.name,
+      quantity: row.quantity,
     })), (row) => row.handle),
     consequences: sortByText(
       input.consequences.map(publicConsequence),

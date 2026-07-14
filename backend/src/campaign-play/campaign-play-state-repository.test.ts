@@ -22,6 +22,7 @@ import {
 import {
   CampaignPlayStateRepositoryError,
   createCampaignPlayStateRepository,
+  loadCampaignPlayRulebookFrame,
   type LoadedCampaignPlayState,
 } from "./campaign-play-state-repository.js";
 import {
@@ -33,6 +34,8 @@ import {
 import { createCampaignPlayTurnRepository } from "./campaign-play-turn-repository.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   type CampaignPlayProjectionRecord,
 } from "./campaign-play-projection.js";
 
@@ -213,6 +216,7 @@ function characterBootstrapFrame(
     acceptedWorld: world,
     routeStates: [],
     actorConditions: [],
+    possessions: [],
     pressureStates: [],
     placements: world.placements.map((row) => ({
       placementId: row.id,
@@ -740,6 +744,12 @@ describe("Campaign Play atomic Rulebook execution", () => {
     const pressure = ordinaryFrame.pressureStates[0]!;
     const ordinaryBatchId = "batch-ordinary-command-matrix";
     const ordinaryRoot = { kind: "turn" as const, turnId: "turn-opening" };
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const possessionId = deriveCampaignPlayPossessionId(
+      ordinaryFrame.campaignId,
+      "actor-player",
+      possessionKey,
+    );
     const ordinaryInputs = [
       {
         kind: "advance_world_time" as const,
@@ -814,6 +824,21 @@ describe("Campaign Play atomic Rulebook execution", () => {
         writeScope: [{ kind: "pressure" as const, id: pressure.pressureId }],
       },
       {
+        kind: "adjust_actor_possession" as const,
+        actorId: "actor-player",
+        possessionId,
+        possessionKey,
+        name: "Copper chit",
+        quantityDelta: 2,
+        summary: "The harbor clerk pays the traveler two copper chits.",
+        affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
+        readScope: [
+          { kind: "actor" as const, id: "actor-player" },
+          { kind: "possession" as const, id: possessionId },
+        ],
+        writeScope: [{ kind: "possession" as const, id: possessionId }],
+      },
+      {
         kind: "record_world_event" as const,
         eventClass: "scene" as const,
         summary: "The traveler crosses as passage controls tighten.",
@@ -844,6 +869,7 @@ describe("Campaign Play atomic Rulebook execution", () => {
         source: { kind: "actor" as const, actorId: "actor-player" },
         expectedWorldVersion: nextExpectedVersion,
         exposure: commandInput.kind === "record_world_event"
+          || commandInput.kind === "adjust_actor_possession"
           ? {
             mode: "projectable" as const,
             predicates: [{ channel: "direct_perception" as const, locationId: route.toLocationId }],
@@ -911,15 +937,20 @@ describe("Campaign Play atomic Rulebook execution", () => {
       (SELECT count(*) FROM campaign_play_events WHERE campaign_id = ?) AS events,
       (SELECT count(*) FROM campaign_play_route_states WHERE campaign_id = ?) AS routeStates,
       (SELECT count(*) FROM campaign_play_actor_conditions WHERE campaign_id = ?) AS conditions,
+      (SELECT count(*) FROM campaign_play_actor_possessions WHERE campaign_id = ?) AS possessions,
       (SELECT count(*) FROM campaign_play_event_exposures WHERE campaign_id = ?) AS exposures`
-    ).get(CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A)).toEqual({
+    ).get(CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A, CAMPAIGN_A)).toEqual({
       commands: 1 + commands.length + ordinaryCommands.length,
       receipts: 1 + commands.length + ordinaryCommands.length,
       events: 1 + commands.length + ordinaryCommands.length,
       routeStates: 1,
       conditions: 1,
-      exposures: 1,
+      possessions: 1,
+      exposures: 2,
     });
+    expect(handle.sqlite.prepare(`SELECT name, quantity FROM campaign_play_actor_possessions
+      WHERE campaign_id = ? AND actor_id = ?`).get(CAMPAIGN_A, "actor-player"))
+      .toEqual({ name: "Copper chit", quantity: 2 });
 
     const completedCommandCount = 1 + commands.length + ordinaryCommands.length;
     expect(() => repository.commitMechanicalAndRuntime({
@@ -1011,6 +1042,90 @@ describe("Campaign Play atomic Rulebook execution", () => {
     })).toThrow();
     expect(handle.sqlite.prepare(`SELECT count(*) AS count FROM campaign_play_commands
       WHERE campaign_id = ?`).get(CAMPAIGN_A)).toEqual({ count: completedCommandCount });
+
+    const spendFrame = {
+      ...loadCampaignPlayRulebookFrame(handle),
+      setupPhase: "ready" as const,
+    };
+    expect(spendFrame).toEqual(duplicateFrame);
+    const spendBatchId = "batch-spend-possession";
+    const spendCommand = {
+      commandId: deriveCampaignPlayCommandId(
+        spendFrame.campaignId, "turn-opening", spendBatchId, 0,
+      ),
+      batchId: spendBatchId,
+      order: 0,
+      kind: "adjust_actor_possession" as const,
+      causalParent: ordinaryRoot,
+      source: { kind: "actor" as const, actorId: "actor-player" },
+      expectedWorldVersion: spendFrame.worldVersion,
+      readScope: [
+        { kind: "actor" as const, id: "actor-player" },
+        { kind: "possession" as const, id: possessionId },
+      ],
+      writeScope: [{ kind: "possession" as const, id: possessionId }],
+      exposure: {
+        mode: "projectable" as const,
+        predicates: [{ channel: "direct_perception" as const, locationId: route.toLocationId }],
+      },
+      actorId: "actor-player",
+      possessionId,
+      possessionKey,
+      name: "Copper chit",
+      quantityDelta: -1,
+      summary: "The traveler pays one copper chit for a dry cot.",
+      affectedRefs: [{ kind: "actor" as const, id: "actor-player" }],
+    };
+    const spendPreflight = preflightCampaignPlayRulebook({
+      frame: spendFrame,
+      authority: {
+        purpose: "player_action",
+        turnId: "turn-opening",
+        actorId: "actor-player",
+        rootParent: ordinaryRoot,
+        authorizedRefs: [
+          { kind: "actor", id: "actor-player" },
+          { kind: "possession", id: possessionId },
+          { kind: "location", id: route.toLocationId },
+        ],
+        witnessActorIds: [],
+        knownWorldEventIds: [],
+      },
+      batch: { batchId: spendBatchId, baseWorldVersion: spendFrame.worldVersion, commands: [spendCommand] },
+    });
+    if (!spendPreflight.accepted) {
+      throw new Error(`Spend preflight failed: ${spendPreflight.denial.code}`);
+    }
+    repository.commitMechanicalAndRuntime({
+      worldVersionAdvance: 1,
+      event: {
+        eventId: "runtime-spend-possession",
+        turnId: "turn-opening",
+        kind: "actor_job_transitioned",
+        workerEpoch: settlementToken.epoch,
+        protectedPayloadHash: HASH_C,
+        createdAt: 1_730,
+      },
+      mutate(context) {
+        executeCampaignPlayRulebookBatch({
+          frame: spendFrame,
+          accepted: spendPreflight,
+          context,
+          turnId: "turn-opening",
+          createdAt: 1_730,
+        });
+      },
+    });
+    expect(handle.sqlite.prepare(`SELECT quantity FROM campaign_play_actor_possessions
+      WHERE possession_id = ? AND campaign_id = ?`).get(possessionId, CAMPAIGN_A))
+      .toEqual({ quantity: 1 });
+    expect(handle.sqlite.prepare(`SELECT affected_refs_json FROM campaign_play_events
+      WHERE command_id = ?`).get(spendCommand.commandId)).toEqual({
+      affected_refs_json: canonicalizeCampaignPlayProjection([
+        { kind: "actor", id: "actor-player" },
+        { kind: "possession", id: possessionId },
+      ]),
+    });
   });
 
   it("rolls back every ledger and authority write at each injected transaction boundary", () => {
@@ -1383,6 +1498,7 @@ describe("Campaign Play state repository transactions", () => {
       visibleActors: [],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [],
       newObservations: [],
       consequences: [],
       continuity: [],

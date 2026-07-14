@@ -26,7 +26,11 @@ import {
   type CampaignPlayUncertaintyResolution,
   type RulebookCommandBatch,
 } from "./contracts.js";
-import { hashCampaignPlayProjection } from "./campaign-play-projection.js";
+import {
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
+  hashCampaignPlayProjection,
+} from "./campaign-play-projection.js";
 import type { CampaignPlayActorContinuity } from "./actor-continuity.js";
 import {
   deriveCampaignPlayCommandId,
@@ -89,6 +93,13 @@ const effectProposalSchema = z.discriminatedUnion("kind", [
   z.object({ ...effectBase, kind: z.literal("advance_pressure"), pressureHandle: handle,
     amount: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.pressureAdvance),
     resultStatus: campaignPlayPressureStatusSchema }).strict(),
+  z.object({ kind: z.literal("adjust_actor_possession"),
+    operation: z.enum(["acquire", "spend"]), actorHandle: handle,
+    possessionHandle: handle.nullable(), name: line(CAMPAIGN_PLAY_LIMITS.name).nullable(),
+    quantity: z.number().int().min(1).max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+    summary: text(CAMPAIGN_PLAY_LIMITS.text),
+    affectedHandles: z.array(handle).max(CAMPAIGN_PLAY_LIMITS.affectedRefs)
+      .refine((values) => new Set(values).size === values.length) }).strict(),
   z.object({ kind: z.literal("record_world_event"),
     eventClass: z.enum(["dialogue", "interaction", "discovery", "scene"]),
     summary: text(CAMPAIGN_PLAY_LIMITS.text),
@@ -504,6 +515,66 @@ function compileEffect(
       return { kind: effect.kind, pressureId: pressure.id, amount: effect.amount, resultStatus: effect.resultStatus,
         readScope: [pressure], writeScope: [pressure], exposure: exposurePolicy };
     }
+    case "adjust_actor_possession": {
+      const owner = requireRef(map, effect.actorHandle, "actor");
+      if (owner.id !== frame.authority.actorId) {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      const existingRef = effect.possessionHandle === null
+        ? null
+        : requireRef(map, effect.possessionHandle, "possession");
+      const existing = existingRef === null
+        ? null
+        : frame.rulebookFrame.possessions.find((row) =>
+          row.possessionId === existingRef.id && row.actorId === owner.id) ?? null;
+      const creates = effect.operation === "acquire" && existingRef === null;
+      if (
+        (creates && effect.name === null)
+        || (!creates && effect.name !== null)
+        || (!creates && existing === null)
+        || (effect.operation === "spend" && existingRef === null)
+      ) {
+        throw new CampaignPlayGameMasterError("model_contract_failed", null);
+      }
+      const name = creates ? effect.name! : existing!.name;
+      const possessionKey = creates
+        ? deriveCampaignPlayPossessionKey(name)
+        : existing!.possessionKey;
+      const possessionId = creates
+        ? deriveCampaignPlayPossessionId(frame.rulebookFrame.campaignId, owner.id, possessionKey)
+        : existing!.possessionId;
+      const possessionRef = { kind: "possession" as const, id: possessionId };
+      const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
+      if (!affectedRefs.some((reference) => referenceKey(reference) === referenceKey(owner))) {
+        affectedRefs.push(owner);
+      }
+      const refs = [owner, possessionRef, ...affectedRefs].filter((reference, index, values) =>
+        values.findIndex((candidate) => referenceKey(candidate) === referenceKey(reference)) === index);
+      const playerPlacement = frame.rulebookFrame.placements.find((placement) =>
+        placement.actorId === owner.id && placement.placementKind === "present");
+      if (!playerPlacement) {
+        throw new CampaignPlayGameMasterError("game_master_frame_invalid", null);
+      }
+      return {
+        kind: effect.kind,
+        actorId: owner.id,
+        possessionId,
+        possessionKey,
+        name,
+        quantityDelta: effect.operation === "acquire" ? effect.quantity : -effect.quantity,
+        summary: effect.summary,
+        affectedRefs,
+        readScope: refs,
+        writeScope: [possessionRef],
+        exposure: {
+          mode: "projectable",
+          predicates: [{
+            channel: "direct_perception",
+            locationId: movement?.to.id ?? playerPlacement.locationId,
+          }],
+        },
+      };
+    }
     case "record_world_event": {
       const affectedRefs = effect.affectedHandles.map((value) => requireRef(map, value));
       const playerActorId = frame.authority.actorId;
@@ -631,7 +702,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "Copy every handle-valued field character-for-character from ALLOWED_HANDLES. This includes affectedHandles and every model-authored exposure predicate anchorHandle. affectedHandles must not repeat a handle. Never put a name, ID, description, or newly invented token in a handle field.",
     "Match each handle to the field's required kind in HANDLES_BY_KIND. direct_perception and local_aftermath anchorHandle require location; route_state anchorHandle requires route; witness_report anchorHandle requires actor. actorHandle requires actor, routeHandle requires route, fromLocationHandle and toLocationHandle require location, relationHandle requires relation, goalHandle requires goal, and pressureHandle requires pressure.",
     "Use the exact exposure predicate fields for its channel: direct_perception has only channel and anchorHandle; local_aftermath has exactly channel, anchorHandle, and the required integer visibleForMinutes; route_state has exactly channel, anchorHandle, and the required non-empty triggers array; witness_report has only channel and anchorHandle. Never omit a required field or add one from another channel.",
-    "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
+    "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event. Never return inspect, observe, discover, discovery, reveal, describe, dialogue, interaction, scene, or any other token as an effect kind. Code owns IDs, scopes, versions, causal links, rolls, and Rulebook authority.",
     "Resolve only the exact PLAYER_INTENT. Result tiers change the degree of success inside that scope; they never create trust, permission, leverage, knowledge, or access. Do not volunteer protected assets, secret routes or caches, unrelated motives, or risky admissions unless VISIBLE_FACTS justify disclosure and PLAYER_INTENT specifically seeks that information. strong_success makes the scoped result more useful; it does not turn an unfamiliar actor into a fully cooperative informant.",
     "RULING defines feasibility, result bounds, and elapsed bounds; its model-authored reason, method, and stakes are not a new source of world facts. Ground every factual effect in SOURCE_MOMENT, VISIBLE_FACTS, ACTOR_CONTINUITY, or ACTOR_DIRECTIVES.",
     "For observation and discovery effects, report concrete sensory properties and only cautious conclusions that those properties support. Keep conclusions within comparisons an ordinary observer can make from supplied facts: wear or corrosion may suggest age, but cannot establish an absolute chronology, provenance, or comparison with every structure without supplied expertise and reference evidence. Preserve unknown authorship, motive, provenance, prior contents, and hidden causes. A clean, empty, missing, or disturbed surface establishes only its current observable state; it does not prove that something existed, was found, removed, stolen, concealed, or carried away. Unknowns are constraints, not a checklist for the public summary: lead with concrete sensory evidence, express at most one useful uncertainty, and do not enumerate every interpretation the evidence fails to prove. Do not expose protected truth by guessing the most convenient explanation or echo Judge diagnostic language into the scene.",
@@ -640,6 +711,7 @@ function prompt(frame: CampaignPlayGameMasterFrame, ruling: CampaignPlayJudgeRul
     "For contact, write the person's actual spoken reply, silence, gesture, or action in the record_world_event summary. Do not replace the exchange with audit labels such as common knowledge, offers no interpretation, nothing further, or has nothing to share. If the person withholds something, show the words or action used to withhold it. A concrete deflection, counterquestion, or condition is useful when ACTOR_DIRECTIVES support one.",
     "PLAYER_MOVEMENT is code-authoritative. When it is non-null, return exactly one move_actor effect containing only kind and put it first in effects; code binds the player actor, route, endpoints, and direct perception at the destination. Put any record_world_event describing the arrival after move_actor and use eventClass scene for that arrival. When PLAYER_MOVEMENT is null, never return move_actor. Do not copy PLAYER_MOVEMENT fields or exposure into the effect.",
     "record_world_event accepts exactly four eventClass values: dialogue, interaction, discovery, or scene. These are eventClass values only and must never appear in kind. For an observe result that changes no durable entity, return exactly one effect shaped as {\"kind\":\"record_world_event\",\"eventClass\":\"discovery\",\"summary\":\"grounded observation\",\"affectedHandles\":[\"copied handle\"]}; do not add a second inspect, observe, discover, reveal, or describe effect. For contact, use eventClass dialogue or interaction. Use eventClass scene for an arrival or other directly perceived situation that is neither observation nor contact. Return a grounded summary and grounded affectedHandles. Omit exposure from record_world_event; code attaches direct perception at the player's post-effect location.",
+    "Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one. For a new possession, return operation acquire, the player actor handle, null possessionHandle, its concrete name, positive quantity, a player-visible summary, and grounded affectedHandles. For more of an existing possession, use its visible possessionHandle and null name. To consume one, return operation spend, its visible possessionHandle, null name, and a positive quantity. Do not add record_world_event for the same gain or spend: this typed effect is the public consequence and Rulebook truth.",
     "Return at least one effect. Never return an empty effects array.",
     "Return one strict schema object and no prose.",
     `SOURCE_MOMENT=${JSON.stringify(frame.sourceMoment)}`,

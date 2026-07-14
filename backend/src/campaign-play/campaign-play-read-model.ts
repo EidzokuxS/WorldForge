@@ -209,6 +209,7 @@ export function createCampaignPlayReadModel(
         visibleActors: projection.visibleActors,
         visibleRoutes: projection.visibleRoutes,
         visiblePressures: projection.visiblePressures,
+        possessions: projection.possessions,
         narration: projection.narration,
         consequences: projection.consequences,
         activeTurn,

@@ -8,6 +8,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "../db/schema.js";
 import { closeDb, connectDb } from "../db/index.js";
+import { runForeignKeySafeMigrations } from "../db/migrate.js";
 import {
   openCampaignWorldDatabase,
   type CampaignWorldDatabaseHandle,
@@ -403,7 +404,7 @@ function settleRulebookCommand(
 }
 
 describe("Campaign Play core and Rulebook storage", () => {
-  it("migrates fresh campaign databases with the twenty-two Campaign Play tables", () => {
+  it("migrates fresh campaign databases with the twenty-three Campaign Play tables", () => {
     const databasePath = createMigratedCampaign(root, CAMPAIGN_A);
     const sqlite = new Database(databasePath);
     try {
@@ -418,6 +419,7 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "campaign_play_actor_jobs" },
         { name: "campaign_play_actor_knowledge" },
         { name: "campaign_play_actor_plans" },
+        { name: "campaign_play_actor_possessions" },
         { name: "campaign_play_actor_proposals" },
         { name: "campaign_play_actor_schedules" },
         { name: "campaign_play_characters" },
@@ -454,6 +456,31 @@ describe("Campaign Play core and Rulebook storage", () => {
         { name: "idx_campaign_play_events_campaign_parent" },
         { name: "idx_campaign_play_events_campaign_world_version" },
       ]);
+      const possessionIndexes = sqlite.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name IN (
+          'campaign_play_actor_possessions_actor_key_unique',
+          'campaign_play_actor_possessions_receipt_unique',
+          'idx_campaign_play_actor_possessions_campaign_actor',
+          'idx_campaign_play_actor_possessions_campaign_version'
+        )
+        ORDER BY name
+      `).all();
+      expect(possessionIndexes).toEqual([
+        { name: "campaign_play_actor_possessions_actor_key_unique" },
+        { name: "campaign_play_actor_possessions_receipt_unique" },
+        { name: "idx_campaign_play_actor_possessions_campaign_actor" },
+        { name: "idx_campaign_play_actor_possessions_campaign_version" },
+      ]);
+      expect(sqlite.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'trigger' AND name LIKE 'campaign_play_actor_possessions_%'
+        ORDER BY name
+      `).all()).toEqual([
+        { name: "campaign_play_actor_possessions_delete_immutable" },
+        { name: "campaign_play_actor_possessions_insert_guard" },
+        { name: "campaign_play_actor_possessions_update_guard" },
+      ]);
       const runtimeTriggers = sqlite.prepare(`SELECT name FROM sqlite_master
         WHERE type = 'trigger' AND (
           name LIKE 'campaign_play_actor_due_sets_%'
@@ -485,8 +512,118 @@ describe("Campaign Play core and Rulebook storage", () => {
         "campaign_play_states",
         "campaign_play_turns",
       ]);
+      expect((sqlite.pragma("foreign_key_list('campaign_play_actor_possessions')") as Array<{ table: string }>)
+        .map((foreignKey) => foreignKey.table).sort()).toEqual([
+        "actors",
+        "campaign_play_receipts",
+        "campaigns",
+      ]);
       expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
       expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("widens a populated Rulebook ledger without rewriting its evidence", () => {
+    const databasePath = path.join(root, "populated-before-possessions.db");
+    const sqlite = new Database(databasePath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: migrationFolderThrough(34) });
+      sqlite.prepare(`INSERT INTO campaigns (id, name, premise, created_at, updated_at)
+        VALUES (?, 'Before Possessions', 'Premise', 1, 1)`).run(CAMPAIGN_A);
+      const repository = createCampaignWorldRepository({
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      });
+      const source = sourceFixture(CAMPAIGN_A);
+      repository.acquireBuild({
+        buildId: "build-before-possessions",
+        source,
+        expectedSourceDigest: source.sourceDigest,
+        providerId: "test-provider",
+        model: "test-model",
+        startedAt: 1_000,
+      });
+      advanceBuildToPersistence(repository, "build-before-possessions");
+      const review = repository.completeBuild({
+        buildId: "build-before-possessions",
+        candidate: candidateFixture(source),
+        completedAt: 1_100,
+      });
+      repository.acceptWorld({
+        expectedVersion: review.version,
+        expectedContentHash: review.contentHash,
+        acceptedAt: 1_200,
+      });
+      const handle = {
+        campaignId: CAMPAIGN_A,
+        databasePath,
+        sqlite,
+        db,
+        close() {},
+      } satisfies CampaignPlayDatabaseHandle;
+      insertPlayState(handle);
+      insertPlayerActor(handle);
+      insertTurn(handle);
+      const locationId = review.locations[0]!.id;
+      const settlement = settleRulebookCommand(handle, {
+        id: "before-possessions",
+        commandKind: "record_world_event",
+        eventKind: "scene_recorded",
+        payload: {
+          eventClass: "discovery",
+          summary: "Rain beads on the harbor rail.",
+          affectedRefs: [{ kind: "location", id: locationId }],
+        },
+        affectedRef: { kind: "location", id: locationId },
+        exposureMode: "projectable",
+        exposurePredicates: [{ channel: "direct_perception", locationId }],
+      });
+      sqlite.prepare(`INSERT INTO campaign_play_event_exposures (
+        exposure_id, campaign_id, event_id, channel, location_id, route_id,
+        witness_actor_id, valid_until_world_time_minutes, route_triggers_json, created_at
+      ) VALUES ('exposure-before-possessions', ?, ?, 'direct_perception', ?,
+        NULL, NULL, NULL, NULL, 1800)`).run(CAMPAIGN_A, settlement.eventId, locationId);
+      const ledgerBefore = JSON.stringify({
+        commands: sqlite.prepare(`SELECT * FROM campaign_play_commands ORDER BY command_id`).all(),
+        receipts: sqlite.prepare(`SELECT * FROM campaign_play_receipts ORDER BY receipt_id`).all(),
+        events: sqlite.prepare(`SELECT * FROM campaign_play_events ORDER BY event_id`).all(),
+        exposures: sqlite.prepare(`SELECT * FROM campaign_play_event_exposures ORDER BY exposure_id`).all(),
+      });
+
+      runForeignKeySafeMigrations(db, sqlite, migrationFolderThrough(35));
+
+      expect(JSON.stringify({
+        commands: sqlite.prepare(`SELECT * FROM campaign_play_commands ORDER BY command_id`).all(),
+        receipts: sqlite.prepare(`SELECT * FROM campaign_play_receipts ORDER BY receipt_id`).all(),
+        events: sqlite.prepare(`SELECT * FROM campaign_play_events ORDER BY event_id`).all(),
+        exposures: sqlite.prepare(`SELECT * FROM campaign_play_event_exposures ORDER BY exposure_id`).all(),
+      })).toBe(ledgerBefore);
+      const definitions = sqlite.prepare(`SELECT name, sql FROM sqlite_schema
+        WHERE type='table' AND name IN (
+          'campaign_play_commands', 'campaign_play_receipts', 'campaign_play_events'
+        ) ORDER BY name`).all() as Array<{ name: string; sql: string }>;
+      expect(definitions.find((row) => row.name === "campaign_play_commands")?.sql)
+        .toContain("'adjust_actor_possession'");
+      expect(definitions.find((row) => row.name === "campaign_play_receipts")?.sql)
+        .toContain("'adjust_actor_possession'");
+      expect(definitions.find((row) => row.name === "campaign_play_events")?.sql)
+        .toContain("'actor_possession_adjusted'");
+      expect(() => sqlite.prepare(`INSERT INTO campaign_play_commands
+        SELECT 'command-invalid-kind', campaign_id, turn_id, 'batch-invalid-kind', 0,
+          'invalid_kind', causal_parent_json, source_json, expected_world_version,
+          read_scope_json, write_scope_json, exposure_policy_json, arguments_hash,
+          protected_payload_json, protected_payload_hash, created_at
+        FROM campaign_play_commands LIMIT 1`).run()).toThrow();
+      expect(sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+      expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+      expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
     } finally {
       sqlite.close();
     }
@@ -516,7 +653,7 @@ describe("Campaign Play core and Rulebook storage", () => {
       .get() as { sql: string };
     expect(after.sql).toContain("job.defer_reason = 'actor_capacity'");
     expect(opened.sqlite.prepare(`SELECT max(created_at) AS latest
-      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_016_300_000 });
+      FROM __drizzle_migrations`).get()).toEqual({ latest: 1_784_016_300_001 });
   });
 
   it("adds core play storage to an accepted Campaign World without changing provenance", () => {

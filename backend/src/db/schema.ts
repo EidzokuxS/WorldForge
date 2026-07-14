@@ -3103,6 +3103,54 @@ export const campaignPlayActorConditions = sqliteTable(
   ],
 );
 
+export const campaignPlayActorPossessions = sqliteTable(
+  "campaign_play_actor_possessions",
+  {
+    possessionId: text("possession_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => actors.id, { onDelete: "cascade" }),
+    possessionKey: text("possession_key").notNull(),
+    name: text("name").notNull(),
+    quantity: integer("quantity").notNull().default(0),
+    causalReceiptId: text("causal_receipt_id")
+      .notNull()
+      .references(() => campaignPlayReceipts.receiptId, { onDelete: "restrict" }),
+    worldVersion: integer("world_version").notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("campaign_play_actor_possessions_actor_key_unique").on(
+      table.actorId,
+      table.possessionKey,
+    ),
+    uniqueIndex("campaign_play_actor_possessions_receipt_unique").on(
+      table.causalReceiptId,
+    ),
+    index("idx_campaign_play_actor_possessions_campaign_actor").on(
+      table.campaignId,
+      table.actorId,
+    ),
+    index("idx_campaign_play_actor_possessions_campaign_version").on(
+      table.campaignId,
+      table.worldVersion,
+    ),
+    check(
+      "campaign_play_actor_possessions_valid",
+      sql`length(${table.possessionId}) BETWEEN 1 AND 128
+        AND length(${table.campaignId}) BETWEEN 1 AND 128
+        AND length(${table.actorId}) BETWEEN 1 AND 128
+        AND length(${table.possessionKey}) BETWEEN 1 AND 240
+        AND length(${table.name}) BETWEEN 1 AND 120
+        AND ${table.quantity} BETWEEN 0 AND 1000000
+        AND ${table.worldVersion} >= 1`,
+    ),
+  ],
+);
+
 export const campaignPlayPressureStates = sqliteTable(
   "campaign_play_pressure_states",
   {

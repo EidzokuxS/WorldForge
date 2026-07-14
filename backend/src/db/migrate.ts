@@ -1,12 +1,43 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { getDb } from "./index.js";
+import { getDb, getSqliteConnection } from "./index.js";
 import { locationEdges, locations } from "./schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export function runForeignKeySafeMigrations(
+  db: Parameters<typeof migrate>[0],
+  sqlite: Database.Database,
+  migrationsFolder: string,
+): void {
+  const foreignKeysEnabled = sqlite.pragma("foreign_keys", { simple: true }) === 1;
+  if (foreignKeysEnabled) sqlite.pragma("foreign_keys = OFF");
+  try {
+    sqlite.unsafeMode(true);
+    try {
+      migrate(db, { migrationsFolder });
+    } finally {
+      sqlite.unsafeMode(false);
+    }
+    const violations = sqlite.pragma("foreign_key_check") as Array<{
+      table: string;
+      rowid: number | null;
+      parent: string;
+      fkid: number;
+    }>;
+    if (violations.length > 0) {
+      throw new Error(
+        `Database migration left ${violations.length} foreign-key violation(s).`,
+      );
+    }
+  } finally {
+    if (foreignKeysEnabled) sqlite.pragma("foreign_keys = ON");
+  }
+}
 
 function parseLegacyConnectedTo(
   raw: string,
@@ -127,8 +158,10 @@ function syncLocationCompatibilityBackfill() {
 }
 
 export function runMigrations() {
-  migrate(getDb(), {
-    migrationsFolder: path.resolve(__dirname, "../../drizzle"),
-  });
+  runForeignKeySafeMigrations(
+    getDb(),
+    getSqliteConnection(),
+    path.resolve(__dirname, "../../drizzle"),
+  );
   syncLocationCompatibilityBackfill();
 }

@@ -516,6 +516,7 @@ export const CAMPAIGN_PLAY_SQLITE_TABLES = [
   "campaign_play_event_exposures",
   "campaign_play_route_states",
   "campaign_play_actor_conditions",
+  "campaign_play_actor_possessions",
   "campaign_play_pressure_states",
   "campaign_play_actor_plans",
   "campaign_play_actor_schedules",

@@ -27,6 +27,11 @@ describe("SceneCard", () => {
           label: "The late train",
           summary: "Its lamps are visible beyond the rain.",
         }]}
+        possessions={[{
+          handle: "possession-secret",
+          name: "Brass signal key",
+          quantity: 2,
+        }]}
         consequences={[{
           observationHandle: "observation-secret",
           whatChanged: "The North Cut is now restricted.",
@@ -44,6 +49,7 @@ describe("SceneCard", () => {
     expect(within(routes).getByText("North Cut")).toBeInTheDocument();
     expect(within(routes).getByText("Restricted")).toBeInTheDocument();
     expect(screen.getByText("The late train")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Carrying" })).toHaveTextContent("Brass signal key×2");
     expect(screen.getByRole("region", { name: "What changed" })).toHaveTextContent("Route changed");
     expect(document.body.textContent?.includes("secret")).toBe(false);
   });
@@ -61,6 +67,7 @@ describe("SceneCard", () => {
         }]}
         routes={[]}
         pressures={[]}
+        possessions={[]}
       />,
     )).toThrow("Unsupported Campaign Play actor accent");
   });

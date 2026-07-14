@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { calculateCampaignWorldContentHash } from "../campaign-world/world-snapshot.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
   projectAcceptedTopologyEligibility,
   projectCampaignPlayMechanicalTruth,
@@ -182,10 +184,19 @@ function initialMechanicalInput(review: CampaignWorldReview): CampaignPlayMechan
     placements: [],
     relations: [],
     goals: [],
+    possessions: [],
   };
 }
 
 describe("Campaign Play canonical projections", () => {
+  it("derives stable possession identity from a normalized visible name", () => {
+    const key = deriveCampaignPlayPossessionKey("  Brass\u00a0Signal   Key  ");
+    expect(key).toBe("brass signal key");
+    expect(deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor:player", key)).toBe(
+      deriveCampaignPlayPossessionId(CAMPAIGN_ID, "actor:player", "brass signal key"),
+    );
+  });
+
   it("produces stable bytes and SHA-256 values independent of object key order", () => {
     const left = { z: [3, { b: true, a: null }], a: "value" };
     const right = { a: "value", z: [3, { a: null, b: true }] };
@@ -367,6 +378,27 @@ describe("mechanical and runtime truth", () => {
     expect(second.hash).not.toBe(first.hash);
   });
 
+  it("includes possession rows in mechanical truth regardless read order", () => {
+    const review = acceptedReviewFixture();
+    const base = initialMechanicalInput(review);
+    const possessions = [
+      { possessionId: "possession:b", actorId: "actor:player", possessionKey: "zinc token", name: "Zinc token", quantity: 2 },
+      { possessionId: "possession:a", actorId: "actor:player", possessionKey: "brass key", name: "Brass key", quantity: 1 },
+    ];
+    const left = projectCampaignPlayMechanicalTruth({
+      ...base,
+      worldTimeMinutes: 1,
+      possessions,
+    });
+    const right = projectCampaignPlayMechanicalTruth({
+      ...base,
+      worldTimeMinutes: 1,
+      possessions: [...possessions].reverse(),
+    });
+    expect(left).toEqual(right);
+    expect(left.canonicalBytes).toContain("possession:a");
+  });
+
   it("keeps runtime, protected-audit, and player-public hash domains separate", () => {
     const eligibility = projectAcceptedTopologyEligibility(acceptedReviewFixture());
     const common: CampaignPlayProjectionRecord = { id: "same", value: 1 };
@@ -410,6 +442,10 @@ describe("mechanical and runtime truth", () => {
       visibleActors: [],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [
+        { handle: "possession-z", name: "Zinc token", quantity: 2 },
+        { handle: "possession-a", name: "Brass key", quantity: 1 },
+      ],
       consequences: [],
       journal: [],
       narration: null,
@@ -578,6 +614,10 @@ describe("mechanical and runtime truth", () => {
       visibleActors: [],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [
+        { handle: "possession-a", name: "Brass key", quantity: 1 },
+        { handle: "possession-z", name: "Zinc token", quantity: 2 },
+      ],
       consequences: [],
       journal,
       narration: null,
@@ -593,18 +633,27 @@ describe("mechanical and runtime truth", () => {
       visibleActors: [],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [
+        { handle: "possession-z", name: "Zinc token", quantity: 2 },
+        { handle: "possession-a", name: "Brass key", quantity: 1 },
+      ],
       consequences: [],
       journal: [...journal].reverse(),
       narration: null,
     });
     const publicProjection = publicState.projection as {
       journal: CampaignPlayProjectionRecord[];
+      possessions: Array<{ handle: string }>;
     };
 
     expect(publicProjection.journal.map((row) => row.observationHandle)).toEqual([
       "journal-2a",
       "journal-2b",
       "journal-10",
+    ]);
+    expect(publicProjection.possessions.map((row) => row.handle)).toEqual([
+      "possession-a",
+      "possession-z",
     ]);
     expect(publicReordered.canonicalBytes).toBe(publicState.canonicalBytes);
     expect(publicReordered.hash).toBe(publicState.hash);
@@ -706,6 +755,7 @@ describe("mechanical and runtime truth", () => {
       visibleActors: [actor],
       visibleRoutes: [],
       visiblePressures: [],
+      possessions: [],
       consequences: [],
       journal: [{ observationId: "stored-observation", worldTimeMinutes: 1, entry }],
       narration: null,

@@ -99,6 +99,7 @@ export const CAMPAIGN_PLAY_COMMAND_KIND_VALUES = [
   "update_actor_relation",
   "update_actor_goal",
   "advance_pressure",
+  "adjust_actor_possession",
   "record_world_event",
 ] as const;
 
@@ -121,6 +122,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES = [
   "actor_relation_changed",
   "actor_goal_changed",
   "pressure_advanced",
+  "actor_possession_adjusted",
   "scene_recorded",
 ] as const;
 
@@ -157,6 +159,7 @@ export const CAMPAIGN_PLAY_ENTITY_REF_KIND_VALUES = [
   "relation",
   "goal",
   "pressure",
+  "possession",
   "world_event",
 ] as const;
 
@@ -435,6 +438,12 @@ export const campaignPlayVisiblePressureSchema = z.object({
   summary: textSchema,
 }).strict();
 
+export const campaignPlayVisiblePossessionSchema = z.object({
+  handle: handleSchema,
+  name: nameSchema,
+  quantity: positiveIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+}).strict();
+
 export const campaignPlayConsequenceSchema = z.object({
   observationHandle: handleSchema,
   whatChanged: textSchema,
@@ -520,6 +529,8 @@ const campaignPlayNarratorPacketBaseSchema =
       .max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
     visiblePressures: z.array(campaignPlayVisiblePressureSchema)
       .max(CAMPAIGN_PLAY_LIMITS.visiblePressures),
+    possessions: z.array(campaignPlayVisiblePossessionSchema)
+      .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
     newObservations: z.array(campaignPlayJournalEntrySchema)
       .max(CAMPAIGN_PLAY_LIMITS.newObservations),
     consequences: z.array(campaignPlayConsequenceSchema)
@@ -899,6 +910,8 @@ const campaignPlayStateBaseSchema = campaignPlayPublicVersionsBaseSchema.extend(
     .max(CAMPAIGN_PLAY_LIMITS.visibleRoutes),
   visiblePressures: z.array(campaignPlayVisiblePressureSchema)
     .max(CAMPAIGN_PLAY_LIMITS.visiblePressures),
+  possessions: z.array(campaignPlayVisiblePossessionSchema)
+    .max(CAMPAIGN_PLAY_LIMITS.visiblePossessions),
   narration: campaignPlayNarrationSchema.nullable(),
   consequences: z.array(campaignPlayConsequenceSchema)
     .max(CAMPAIGN_PLAY_LIMITS.newObservations),
@@ -938,6 +951,7 @@ export const campaignPlayStateSchema: z.ZodType<CampaignPlayState> =
         state.visibleActors.length > 0 ||
         state.visibleRoutes.length > 0 ||
         state.visiblePressures.length > 0 ||
+        state.possessions.length > 0 ||
         state.consequences.length > 0
       ) {
         context.addIssue({
@@ -1831,6 +1845,7 @@ export const campaignPlayEntityRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("relation"), id: idSchema }).strict(),
   z.object({ kind: z.literal("goal"), id: idSchema }).strict(),
   z.object({ kind: z.literal("pressure"), id: idSchema }).strict(),
+  z.object({ kind: z.literal("possession"), id: idSchema }).strict(),
   z.object({ kind: z.literal("world_event"), id: idSchema }).strict(),
 ]);
 
@@ -2028,6 +2043,25 @@ export const advancePressureCommandSchema = z.object({
   resultStatus: campaignPlayPressureStatusSchema,
 }).strict();
 
+export const adjustActorPossessionCommandSchema = z.object({
+  ...campaignPlayCommandBaseShape,
+  kind: z.literal("adjust_actor_possession"),
+  actorId: idSchema,
+  possessionId: idSchema,
+  possessionKey: labelSchema,
+  name: nameSchema,
+  quantityDelta: z.number().int()
+    .min(-CAMPAIGN_PLAY_LIMITS.possessionQuantity)
+    .max(CAMPAIGN_PLAY_LIMITS.possessionQuantity)
+    .refine((value) => value !== 0, {
+      message: "Possession adjustment must be nonzero.",
+    }),
+  summary: textSchema,
+  affectedRefs: z.array(campaignPlayEntityRefSchema)
+    .min(1)
+    .max(CAMPAIGN_PLAY_LIMITS.affectedRefs),
+}).strict();
+
 export const recordWorldEventCommandSchema = z.object({
   ...campaignPlayCommandBaseShape,
   kind: z.literal("record_world_event"),
@@ -2079,6 +2113,7 @@ export const campaignPlayCommandSchema = z.discriminatedUnion("kind", [
   updateActorRelationCommandSchema,
   updateActorGoalCommandSchema,
   advancePressureCommandSchema,
+  adjustActorPossessionCommandSchema,
   recordWorldEventCommandSchema,
 ]);
 
@@ -2097,6 +2132,7 @@ export const rulebookBatchCommandSchema = z.discriminatedUnion("kind", [
   updateActorRelationCommandSchema,
   updateActorGoalCommandSchema,
   advancePressureCommandSchema,
+  adjustActorPossessionCommandSchema,
   recordWorldEventCommandSchema,
   createPlayerActorCommandSchema,
   initializePlayerPlacementCommandSchema,
@@ -2364,6 +2400,30 @@ export const pressureAdvancedEventSchema = z.object({
   }
 });
 
+export const actorPossessionAdjustedEventSchema = z.object({
+  ...campaignPlayWorldEventBaseShape,
+  kind: z.literal("actor_possession_adjusted"),
+  actorId: idSchema,
+  possessionId: idSchema,
+  possessionKey: labelSchema,
+  name: nameSchema,
+  quantityDelta: z.number().int()
+    .min(-CAMPAIGN_PLAY_LIMITS.possessionQuantity)
+    .max(CAMPAIGN_PLAY_LIMITS.possessionQuantity)
+    .refine((value) => value !== 0),
+  priorQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  resultQuantity: nonnegativeIntegerSchema.max(CAMPAIGN_PLAY_LIMITS.possessionQuantity),
+  summary: textSchema,
+}).strict().superRefine((event, context) => {
+  if (event.resultQuantity !== event.priorQuantity + event.quantityDelta) {
+    context.addIssue({
+      code: "custom",
+      path: ["resultQuantity"],
+      message: "Possession result must equal its prior quantity plus the accepted delta.",
+    });
+  }
+});
+
 export const sceneRecordedEventSchema = z.object({
   ...campaignPlayWorldEventBaseShape,
   kind: z.literal("scene_recorded"),
@@ -2383,6 +2443,7 @@ const campaignPlayWorldEventUnionSchema = z.union([
   actorRelationChangedEventSchema,
   actorGoalChangedEventSchema,
   pressureAdvancedEventSchema,
+  actorPossessionAdjustedEventSchema,
   sceneRecordedEventSchema,
 ]);
 
@@ -3143,6 +3204,7 @@ export const CAMPAIGN_PLAY_WORLD_EVENT_METADATA = {
   actor_relation_changed: { commandKind: "update_actor_relation" },
   actor_goal_changed: { commandKind: "update_actor_goal" },
   pressure_advanced: { commandKind: "advance_pressure" },
+  actor_possession_adjusted: { commandKind: "adjust_actor_possession" },
   scene_recorded: { commandKind: "record_world_event" },
 } as const satisfies Record<
   CampaignPlayWorldEventKind,
@@ -3479,6 +3541,7 @@ export const CAMPAIGN_PLAY_COMMAND_METADATA = {
   update_actor_relation: { modelVisible: true, mechanicalMutation: true },
   update_actor_goal: { modelVisible: true, mechanicalMutation: true },
   advance_pressure: { modelVisible: true, mechanicalMutation: true },
+  adjust_actor_possession: { modelVisible: true, mechanicalMutation: true },
   record_world_event: { modelVisible: true, mechanicalMutation: false },
   create_player_actor: { modelVisible: false, mechanicalMutation: true },
   initialize_player_placement: { modelVisible: false, mechanicalMutation: true },

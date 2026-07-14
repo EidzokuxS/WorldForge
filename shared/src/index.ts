@@ -225,6 +225,7 @@ export type {
   CampaignPlayVisibleActor,
   CampaignPlayVisibleRoute,
   CampaignPlayVisiblePressure,
+  CampaignPlayVisiblePossession,
   CampaignPlayConsequence,
   CampaignPlayJournalEntry,
   CampaignPlayAvailableIntent,

@@ -40,6 +40,7 @@ import {
   type CampaignPlayTurnPublicResult,
   type CampaignPlayVisibleActor,
   type CampaignPlayVisibleLocation,
+  type CampaignPlayVisiblePossession,
   type CampaignPlayVisiblePressure,
   type CampaignPlayVisibleRoute,
 } from "@worldforge/shared";
@@ -340,6 +341,20 @@ function parseVisiblePressure(value: unknown): CampaignPlayVisiblePressure | nul
   return asParsed<CampaignPlayVisiblePressure>(value);
 }
 
+function parseVisiblePossession(value: unknown): CampaignPlayVisiblePossession | null {
+  if (
+    !isObject(value) ||
+    !hasExactKeys(value, ["handle", "name", "quantity"]) ||
+    !isHandle(value.handle) ||
+    !isName(value.name) ||
+    !isPositiveInteger(value.quantity) ||
+    value.quantity > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+  ) {
+    return null;
+  }
+  return asParsed<CampaignPlayVisiblePossession>(value);
+}
+
 function parseConsequence(value: unknown): CampaignPlayConsequence | null {
   if (
     !isObject(value) ||
@@ -581,6 +596,7 @@ function parseState(value: unknown): CampaignPlayState | null {
       "visibleActors",
       "visibleRoutes",
       "visiblePressures",
+      "possessions",
       "narration",
       "consequences",
       "activeTurn",
@@ -620,6 +636,11 @@ function parseState(value: unknown): CampaignPlayState | null {
     parseVisiblePressure,
     CAMPAIGN_PLAY_LIMITS.visiblePressures,
   );
+  const possessions = parseArray(
+    value.possessions,
+    parseVisiblePossession,
+    CAMPAIGN_PLAY_LIMITS.visiblePossessions,
+  );
   const narration = value.narration === null ? null : parseNarration(value.narration);
   const consequences = parseArray(
     value.consequences,
@@ -634,6 +655,7 @@ function parseState(value: unknown): CampaignPlayState | null {
     visibleActors === null ||
     visibleRoutes === null ||
     visiblePressures === null ||
+    possessions === null ||
     (narration === null && value.narration !== null) ||
     consequences === null ||
     (activeTurn === null && value.activeTurn !== null) ||
@@ -643,7 +665,7 @@ function parseState(value: unknown): CampaignPlayState | null {
   }
   const emptyScene = currentLocation === null && narration === null &&
     visibleActors.length === 0 && visibleRoutes.length === 0 &&
-    visiblePressures.length === 0 && consequences.length === 0;
+    visiblePressures.length === 0 && possessions.length === 0 && consequences.length === 0;
   if ((value.phase === "opening_required") !== (openingOptions.length > 0)) return null;
   if (value.phase === "character_required") {
     if (character !== null || activeTurn !== null || !emptyScene) return null;

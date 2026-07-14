@@ -1,13 +1,15 @@
-import type {
-  CampaignPlayActionContext,
-  CampaignPlayAvailableIntent,
-  CampaignPlayConsequence,
-  CampaignPlayJournalEntry,
-  CampaignPlayNarratorPacket,
-  CampaignPlayVisibleActor,
-  CampaignPlayVisibleLocation,
-  CampaignPlayVisiblePressure,
-  CampaignPlayVisibleRoute,
+import {
+  CAMPAIGN_PLAY_LIMITS,
+  type CampaignPlayActionContext,
+  type CampaignPlayAvailableIntent,
+  type CampaignPlayConsequence,
+  type CampaignPlayJournalEntry,
+  type CampaignPlayNarratorPacket,
+  type CampaignPlayVisibleActor,
+  type CampaignPlayVisibleLocation,
+  type CampaignPlayVisiblePossession,
+  type CampaignPlayVisiblePressure,
+  type CampaignPlayVisibleRoute,
 } from "@worldforge/shared";
 import {
   campaignPlayActionContextSchema,
@@ -613,7 +615,9 @@ function publicEntry(
   if (
     exposure.channel === "direct_perception" && playerParticipated &&
     eventSource.kind === "system" && eventSource.system === "game_master" &&
-    exposure.commandKind === "record_world_event" && typeof commandPayload.summary === "string"
+    (exposure.commandKind === "record_world_event"
+      || exposure.commandKind === "adjust_actor_possession")
+    && typeof commandPayload.summary === "string"
   ) {
     title = "Your action";
     text = commandPayload.summary;
@@ -694,6 +698,7 @@ function visibleScene(
   visibleActors: CampaignPlayVisibleActor[];
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
+  possessions: CampaignPlayVisiblePossession[];
 } {
   const location = handle.sqlite.prepare(`SELECT l.id, l.name, l.description
     FROM actor_placements placement JOIN locations l ON l.id = placement.location_id
@@ -766,6 +771,14 @@ function visibleScene(
       handle.campaignId,
       location.id,
     ) as Array<{ id: string; name: string; summary: string }>;
+  const possessions = handle.sqlite.prepare(`SELECT possession_id AS possessionId,
+      name, quantity FROM campaign_play_actor_possessions
+    WHERE campaign_id = ? AND actor_id = ? AND quantity > 0
+    ORDER BY name, possession_id LIMIT ?`).all(
+      handle.campaignId,
+      humanActorId,
+      CAMPAIGN_PLAY_LIMITS.visiblePossessions,
+    ) as Array<{ possessionId: string; name: string; quantity: number }>;
   return {
     currentLocation: {
       handle: publicHandle("location", handle.campaignId, location.id),
@@ -790,6 +803,11 @@ function visibleScene(
       handle: publicHandle("pressure", handle.campaignId, pressure.id),
       label: pressure.name,
       summary: pressure.summary,
+    })),
+    possessions: possessions.map((possession) => ({
+      handle: publicHandle("possession", handle.campaignId, possession.possessionId),
+      name: possession.name,
+      quantity: possession.quantity,
     })),
   };
 }

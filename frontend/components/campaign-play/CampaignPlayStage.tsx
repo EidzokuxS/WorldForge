@@ -112,6 +112,7 @@ export function CampaignPlayStage({
               actors={state.visibleActors}
               consequences={state.consequences}
               location={state.currentLocation}
+              possessions={state.possessions}
               pressures={state.visiblePressures}
               routes={state.visibleRoutes}
             />

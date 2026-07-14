@@ -13,6 +13,8 @@ import {
 } from "./contracts.js";
 import {
   canonicalizeCampaignPlayProjection,
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
   hashCampaignPlayProjection,
   projectCampaignPlayMechanicalTruth,
 } from "./campaign-play-projection.js";
@@ -20,6 +22,7 @@ import type { CampaignPlayMutationContext } from "./campaign-play-state-reposito
 import type {
   CampaignPlayHumanMechanicalIdentity,
   CampaignPlayLiveActorCondition,
+  CampaignPlayLiveActorPossession,
   CampaignPlayLiveGoal,
   CampaignPlayLivePlacement,
   CampaignPlayLivePressureState,
@@ -44,6 +47,7 @@ export interface CampaignPlayRulebookFrame {
   acceptedWorld: CampaignWorldReview;
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
+  possessions: CampaignPlayLiveActorPossession[];
   pressureStates: CampaignPlayLivePressureState[];
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
@@ -95,6 +99,7 @@ export interface CampaignPlayRulebookSimulation {
   human: CampaignPlayHumanMechanicalIdentity | null;
   routeStates: CampaignPlayLiveRouteState[];
   actorConditions: CampaignPlayLiveActorCondition[];
+  possessions: CampaignPlayLiveActorPossession[];
   pressureStates: CampaignPlayLivePressureState[];
   placements: CampaignPlayLivePlacement[];
   relations: CampaignPlayLiveRelation[];
@@ -202,6 +207,8 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
   const idsUnique = [
     frame.routeStates.map((row) => row.routeId),
     frame.actorConditions.map((row) => `${row.actorId}\u0000${row.condition}`),
+    frame.possessions.map((row) => row.possessionId),
+    frame.possessions.map((row) => `${row.actorId}\u0000${row.possessionKey}`),
     frame.pressureStates.map((row) => row.pressureId),
     frame.placements.map((row) => row.placementId),
     frame.relations.map((row) => row.relationId),
@@ -250,6 +257,19 @@ function validFrame(frame: CampaignPlayRulebookFrame): boolean {
       && row.summary.length > 0
       && row.summary.length <= CAMPAIGN_PLAY_LIMITS.shortText
       && row.summary === row.summary.trim())
+    && frame.possessions.every((row) => actorIds.has(row.actorId)
+      && row.name.length > 0
+      && row.name.length <= CAMPAIGN_PLAY_LIMITS.name
+      && row.name === row.name.trim()
+      && row.possessionKey === deriveCampaignPlayPossessionKey(row.name)
+      && row.possessionId === deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        row.actorId,
+        row.possessionKey,
+      )
+      && Number.isInteger(row.quantity)
+      && row.quantity >= 0
+      && row.quantity <= CAMPAIGN_PLAY_LIMITS.possessionQuantity)
     && frame.pressureStates.every((row) =>
       world.pressures.some((pressure) => pressure.id === row.pressureId)
       && Number.isInteger(row.progress)
@@ -369,6 +389,7 @@ function cloneSimulation(frame: CampaignPlayRulebookFrame): CampaignPlayRulebook
     human: frame.human ? { ...frame.human } : null,
     routeStates: structuredClone(frame.routeStates),
     actorConditions: structuredClone(frame.actorConditions),
+    possessions: structuredClone(frame.possessions),
     pressureStates: structuredClone(frame.pressureStates),
     placements: structuredClone(frame.placements),
     relations: structuredClone(frame.relations),
@@ -407,6 +428,7 @@ function entityExists(
     case "relation": return state.relations.some((row) => row.relationId === reference.id);
     case "goal": return state.goals.some((row) => row.goalId === reference.id);
     case "pressure": return frame.acceptedWorld.pressures.some((row) => row.id === reference.id);
+    case "possession": return state.possessions.some((row) => row.possessionId === reference.id);
     case "world_event": return knownWorldEventIds.has(reference.id);
   }
 }
@@ -445,6 +467,13 @@ function commandEntityRefs(
         : [ref("goal", command.goalId)];
     }
     case "advance_pressure": return [ref("pressure", command.pressureId)];
+    case "adjust_actor_possession": return [
+      ref("actor", command.actorId),
+      ref("possession", command.possessionId),
+      ...command.affectedRefs.filter((reference) =>
+        reference.kind !== "actor" || reference.id !== command.actorId),
+    ].filter((reference, index, values) =>
+      values.findIndex((candidate) => refKey(candidate) === refKey(reference)) === index);
     case "record_world_event": return command.affectedRefs;
     case "create_player_actor": return [ref("actor", command.actorId)];
     case "initialize_player_placement": return [
@@ -473,6 +502,7 @@ function expectedScopes(
     case "initialize_pressure_state": return { read: command.kind === "create_player_actor" ? [] : refs, write: [refs[0]!] };
     case "update_actor_relation":
     case "update_actor_goal": return { read: refs, write: [refs[0]!] };
+    case "adjust_actor_possession": return { read: refs, write: [refs[1]!] };
     case "record_world_event": return { read: refs, write: [] };
     case "initialize_player_placement": return { read: refs, write: refs };
   }
@@ -546,6 +576,12 @@ function exposureGrounding(
         break;
       }
       case "pressure": addPressure(reference.id); break;
+      case "possession": {
+        const possession = state.possessions.find((candidate) =>
+          candidate.possessionId === reference.id);
+        if (possession) addActor(possession.actorId);
+        break;
+      }
       case "world_event": break;
     }
   };
@@ -562,6 +598,7 @@ function exposureGrounding(
     case "update_actor_relation": addReference(ref("relation", command.relationId)); break;
     case "update_actor_goal": addReference(ref("goal", command.goalId)); break;
     case "advance_pressure": addPressure(command.pressureId); break;
+    case "adjust_actor_possession": addActor(command.actorId); break;
     case "record_world_event": command.affectedRefs.forEach(addReference); break;
     case "create_player_actor": addActor(command.actorId); break;
     case "initialize_player_placement": locationIds.add(command.locationId); addActor(command.actorId); break;
@@ -625,12 +662,28 @@ function validateRefsAndScopes(
 ): void {
   const entityRefs = commandEntityRefs(frame, state, command);
   const allRefs = [...entityRefs, ...command.readScope, ...command.writeScope, ...exposureRefs(command)];
-  if (!allRefs.every((reference) => authorized.has(refKey(reference)))) {
+  const existingPossession = command.kind === "adjust_actor_possession"
+    ? state.possessions.find((row) => row.possessionId === command.possessionId)
+    : undefined;
+  const grantedPossessionRef = command.kind === "adjust_actor_possession"
+    && command.quantityDelta > 0
+    && command.possessionKey === deriveCampaignPlayPossessionKey(command.name)
+    && command.possessionId === deriveCampaignPlayPossessionId(
+      frame.campaignId,
+      command.actorId,
+      command.possessionKey,
+    )
+    ? refKey(ref("possession", command.possessionId))
+    : null;
+  if (!allRefs.every((reference) =>
+    refKey(reference) === grantedPossessionRef || authorized.has(refKey(reference)))) {
     deny("unauthorized_reference", "Command references an entity outside its frozen frame.", command, index);
   }
   const newPlayerRef = command.kind === "create_player_actor" ? refKey(ref("actor", command.actorId)) : null;
   if (!allRefs.every((reference) =>
-    refKey(reference) === newPlayerRef || entityExists(frame, state, knownEvents, reference))) {
+    refKey(reference) === newPlayerRef
+    || (existingPossession === undefined && refKey(reference) === grantedPossessionRef)
+    || entityExists(frame, state, knownEvents, reference))) {
     deny("invalid_reference", "Command references an entity that does not exist.", command, index);
   }
   const scopes = expectedScopes(frame, state, command);
@@ -723,6 +776,7 @@ function actorJobOwns(
       return !!pressure && (pressure.actorIds.includes(actorId)
         || pressure.locationIds.some((locationId) => actorLocations.has(locationId)));
     }
+    case "adjust_actor_possession": return command.actorId === actorId;
     case "record_world_event": return command.affectedRefs.some((reference) =>
       reference.kind === "actor" && reference.id === actorId);
     case "create_player_actor":
@@ -847,6 +901,48 @@ function applyCommand(
       stateRow.lastAdvancedWorldTimeMinutes = state.worldTimeMinutes!;
       break;
     }
+    case "adjust_actor_possession": {
+      if (!actor(frame, state, command.actorId)) {
+        deny("invalid_reference", "Possession owner does not exist.", command, index);
+      }
+      const expectedKey = deriveCampaignPlayPossessionKey(command.name);
+      const expectedId = deriveCampaignPlayPossessionId(
+        frame.campaignId,
+        command.actorId,
+        expectedKey,
+      );
+      const row = state.possessions.find((candidate) =>
+        candidate.possessionId === command.possessionId);
+      if (
+        command.possessionKey !== expectedKey
+        || command.possessionId !== expectedId
+        || (row !== undefined && (
+          row.actorId !== command.actorId
+          || row.possessionKey !== command.possessionKey
+          || row.name !== command.name
+        ))
+      ) {
+        deny("precondition_failed", "Possession identity does not match its owner and name.", command, index);
+      }
+      const priorQuantity = row?.quantity ?? 0;
+      const resultQuantity = priorQuantity + command.quantityDelta;
+      if (
+        resultQuantity < 0
+        || resultQuantity > CAMPAIGN_PLAY_LIMITS.possessionQuantity
+        || (!row && command.quantityDelta <= 0)
+      ) {
+        deny("precondition_failed", "Possession quantity transition is unavailable.", command, index);
+      }
+      if (row) row.quantity = resultQuantity;
+      else state.possessions.push({
+        possessionId: command.possessionId,
+        actorId: command.actorId,
+        possessionKey: command.possessionKey,
+        name: command.name,
+        quantity: resultQuantity,
+      });
+      break;
+    }
     case "record_world_event": {
       if (!unique(command.affectedRefs.map(refKey))) {
         deny("precondition_failed", "World event affected references must be unique.", command, index);
@@ -942,6 +1038,7 @@ function sortSimulation(state: CampaignPlayRulebookSimulation): void {
   state.routeStates.sort((left, right) => compareText(left.routeId, right.routeId));
   state.actorConditions.sort((left, right) =>
     compareText(`${left.actorId}\u0000${left.condition}`, `${right.actorId}\u0000${right.condition}`));
+  state.possessions.sort((left, right) => compareText(left.possessionId, right.possessionId));
   state.pressureStates.sort((left, right) => compareText(left.pressureId, right.pressureId));
   state.placements.sort((left, right) => compareText(left.placementId, right.placementId));
   state.relations.sort((left, right) => compareText(left.relationId, right.relationId));
@@ -957,6 +1054,7 @@ function snapshotSimulation(
     human: state.human === null ? null : { ...state.human },
     routeStates: state.routeStates.map((row) => ({ ...row })),
     actorConditions: state.actorConditions.map((row) => ({ ...row })),
+    possessions: state.possessions.map((row) => ({ ...row })),
     pressureStates: state.pressureStates.map((row) => ({ ...row })),
     placements: state.placements.map((row) => ({ ...row })),
     relations: state.relations.map((row) => ({ ...row })),
@@ -1131,6 +1229,7 @@ function mechanicalHash(
     human: state.human,
     routeStates: state.routeStates,
     actorConditions: state.actorConditions,
+    possessions: state.possessions,
     pressureStates: state.pressureStates,
     placements: acceptedBaseRowsUnchanged ? [] : state.placements,
     relations: acceptedBaseRowsUnchanged ? [] : state.relations,
@@ -1147,6 +1246,7 @@ function eventKind(command: RulebookBatchCommand): string {
     case "update_actor_relation": return "actor_relation_changed";
     case "update_actor_goal": return "actor_goal_changed";
     case "advance_pressure": return "pressure_advanced";
+    case "adjust_actor_possession": return "actor_possession_adjusted";
     case "record_world_event": return "scene_recorded";
     case "create_player_actor": return "player_actor_created";
     case "initialize_player_placement": return "player_placement_initialized";
@@ -1156,11 +1256,13 @@ function eventKind(command: RulebookBatchCommand): string {
 }
 
 function eventAffectedRefs(
+  frame: CampaignPlayRulebookFrame,
   command: RulebookBatchCommand,
   before: CampaignPlayRulebookSimulation,
   after: CampaignPlayRulebookSimulation,
 ): CampaignPlayEntityRef[] {
   if (command.kind === "record_world_event") return command.affectedRefs;
+  if (command.kind === "adjust_actor_possession") return commandEntityRefs(frame, after, command);
   const refs = command.writeScope.length > 0 ? command.writeScope : command.readScope;
   if (refs.length > 0) return refs;
   if (command.source.kind === "actor") return [ref("actor", command.source.actorId)];
@@ -1221,6 +1323,25 @@ function applyStoredMutation(
         WHERE pressure_id = ? AND campaign_id = ?`)
         .run(command.amount, command.resultStatus, campaignId, receiptId, resultWorldVersion,
           input.createdAt, command.pressureId, campaignId);
+      return;
+    }
+    case "adjust_actor_possession": {
+      const exists = sqlite.prepare(`SELECT 1 FROM campaign_play_actor_possessions
+        WHERE possession_id = ? AND campaign_id = ?`).get(command.possessionId, campaignId);
+      if (exists) {
+        sqlite.prepare(`UPDATE campaign_play_actor_possessions SET
+          quantity = quantity + ?, causal_receipt_id = ?, world_version = ?, updated_at = ?
+          WHERE possession_id = ? AND campaign_id = ?`)
+          .run(command.quantityDelta, receiptId, resultWorldVersion, input.createdAt,
+            command.possessionId, campaignId);
+      } else {
+        sqlite.prepare(`INSERT INTO campaign_play_actor_possessions
+          (possession_id, campaign_id, actor_id, possession_key, name, quantity,
+            causal_receipt_id, world_version, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(command.possessionId, campaignId, command.actorId, command.possessionKey,
+            command.name, command.quantityDelta, receiptId, resultWorldVersion, input.createdAt);
+      }
       return;
     }
     case "record_world_event": return;
@@ -1360,7 +1481,11 @@ export function executeCampaignPlayRulebookBatch(
         hashCampaignPlayProjection(argumentsPayload),
         createdAt);
 
-    const affectedRefs = eventAffectedRefs(command, before, after);
+    if (command.kind === "adjust_actor_possession") {
+      applyStoredMutation(input, command, receiptId, after.worldVersion);
+    }
+
+    const affectedRefs = eventAffectedRefs(input.frame, command, before, after);
     context.sqlite.prepare(`INSERT INTO campaign_play_events
       (event_id, campaign_id, turn_id, command_id, receipt_id, parent_event_id,
         event_kind, source_json, world_time_minutes, world_version, affected_refs_json,
@@ -1395,7 +1520,7 @@ export function executeCampaignPlayRulebookBatch(
             createdAt);
       }
     }
-    if (command.kind !== "create_player_actor") {
+    if (command.kind !== "create_player_actor" && command.kind !== "adjust_actor_possession") {
       applyStoredMutation(input, command, receiptId, after.worldVersion);
     }
     const observedHash = context.mechanicalHash();

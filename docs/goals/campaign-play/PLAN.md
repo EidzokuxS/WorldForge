@@ -180,6 +180,7 @@ type CampaignPlayCommand =
   | UpdateActorRelationCommand
   | UpdateActorGoalCommand
   | AdvancePressureCommand
+  | AdjustActorPossessionCommand
   | RecordWorldEventCommand;
 
 type CampaignPlayBootstrapCommand =
@@ -208,6 +209,7 @@ Each command carries command ID, causal parent, actor/system source, expected me
 - The batch updates mechanical `worldVersion/worldHash` once from its final state and advances `runtimeRevision/runtimeHash` when it also changes the turn stage.
 - Validation failure produces zero domain writes and a typed denial record.
 - The player and agent actors use the same command schemas and executor.
+- Actor possessions are current Rulebook state. Acquisition and spending use one typed quantity adjustment; prose-only possession claims carry no mechanical authority.
 - Narrator, frontend, and SSE delivery possess zero mutation authority.
 
 ### Model boundary
@@ -234,11 +236,13 @@ Campaign Play DTOs keep `acceptedWorldVersion`, mechanical `worldVersion`, and `
 
 ### Campaign Play schema
 
-Three Campaign Play migrations follow the two Campaign World handoff migrations:
+The foundational Campaign Play migrations follow the two Campaign World handoff migrations:
 
 - `0027_campaign_play_core.sql`: state, character, campaign runtime event, turn, turn event, model stage, and narration; opening exists only as `campaign_play_turns.turn_kind = 'opening'`;
 - `0028_campaign_play_rulebook.sql`: command, receipt, causal event, exposure, route state, actor condition, and pressure state;
 - `0029_campaign_play_actors_visibility.sql`: plan, schedule, job, proposal, actor knowledge, and player observation.
+
+Later current-contract migrations extend these same owners. `0035_campaign_play_actor_possessions.sql` adds actor-owned fungible quantities; it does not reuse the immutable CharacterRecord inventory or the displaced gameplay item/resource stores.
 
 | Table | Required contract |
 |---|---|
@@ -254,6 +258,7 @@ Three Campaign Play migrations follow the two Campaign World handoff migrations:
 | `campaign_play_event_exposures` | executable channel and typed location/route/witness/aftermath predicate |
 | `campaign_play_route_states` | current open/restricted/blocked state and causal receipt |
 | `campaign_play_actor_conditions` | typed current actor condition/status and causal receipt |
+| `campaign_play_actor_possessions` | current nonnegative actor-owned quantity by deterministic possession key, with causal receipt and world version |
 | `campaign_play_pressure_states` | progress, status, last advanced time, causal receipt |
 | `campaign_play_actor_plans` | goal ref, typed intent, target refs, preconditions, cadence, bounded steps, status/version |
 | `campaign_play_actor_schedules` | next/last act time, priority, agency debt, plan ref |
@@ -273,12 +278,13 @@ Database constraints enforce:
 - positive unique campaign runtime-event sequences allocated from the play-state row;
 - positive unique per-turn event sequences allocated from the turn row;
 - unique campaign/idempotency key;
+- unique possession key per actor, nonnegative quantity, and one current-state mutation per causal receipt;
 - unique actor/event knowledge and player/event/exposure/source observations;
 - foreign keys from play state to the accepted Campaign World and from runtime rows to canonical entities.
 
 ### Mechanical and runtime hashes
 
-Mechanical `worldHash` covers current world truth: world time; human actor identity and CharacterRecord digest; live route, actor condition, pressure state, placement, relation, and goal status. Only receipt-bearing character bootstrap, opening bootstrap, and Rulebook command batches advance `worldVersion/worldHash`.
+Mechanical `worldHash` covers current world truth: world time; human actor identity and CharacterRecord digest; live route, actor condition, actor possession quantity, pressure state, placement, relation, and goal status. Only receipt-bearing character bootstrap, opening bootstrap, and Rulebook command batches advance `worldVersion/worldHash`.
 
 Operational `runtimeHash` covers current simulation/control truth: setup phase; the uniquely active turn and stage derived from `campaign_play_turns`; typed actor plans and schedules; pending jobs/proposals; actor knowledge; player observations/consequences; narrator packet/status; worker lease epoch; next campaign runtime-event sequence; and next turn-event sequence. Play-state creation, character/bootstrap setup, turn admission, worker claims, fenced artifact acceptance, actor job transitions, visibility projection, interruption, explicit resume, and terminalization each advance `runtimeRevision/runtimeHash` and append a campaign runtime event in their transaction.
 

@@ -12,6 +12,10 @@ import {
 } from "./game-master.js";
 import type { CampaignPlayJudgeRuling, CampaignPlayUncertaintyResolution } from "./contracts.js";
 import { resolveCampaignPlayUncertainty, type CampaignPlayModelBudget } from "./judge.js";
+import {
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
+} from "./campaign-play-projection.js";
 
 const CAMPAIGN_ID = "campaign-game-master";
 const TURN_ID = "turn-action";
@@ -90,6 +94,7 @@ function frame(): CampaignPlayGameMasterFrame {
       acceptedWorld: world(),
       routeStates: [],
       actorConditions: [],
+      possessions: [],
       pressureStates: [{ pressureId: "pressure-passage", progress: 40, status: "active", lastAdvancedWorldTimeMinutes: 0 }],
       placements: [
         { placementId: "placement-player", actorId: PLAYER_ID, locationId: "location-a", placementKind: "present" },
@@ -257,7 +262,7 @@ describe("Campaign Play Game Master", () => {
     );
     expect(String(options.prompt)).toContain('"eventClass":"discovery"');
     expect(String(options.prompt)).toContain(
-      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, or record_world_event",
+      "effects[].kind accepts exactly: move_actor, set_route_state, set_actor_condition, update_actor_relation, update_actor_goal, advance_pressure, adjust_actor_possession, or record_world_event",
     );
     expect(String(options.prompt)).toContain("These are eventClass values only and must never appear in kind");
     expect(String(options.prompt)).toContain(
@@ -266,6 +271,8 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain("cannot establish an absolute chronology");
     expect(String(options.prompt)).toContain("without supplied expertise and reference evidence");
     expect(String(options.prompt)).toContain("Omit exposure from record_world_event");
+    expect(String(options.prompt)).toContain("Use adjust_actor_possession whenever the resolved action gives the player a countable possession or consumes one");
+    expect(String(options.prompt)).toContain("Do not add record_world_event for the same gain or spend");
     expect(String(options.prompt)).not.toContain("actor-player");
     expect(String(options.prompt)).not.toContain("actor-guard");
   });
@@ -296,6 +303,92 @@ describe("Campaign Play Game Master", () => {
         { kind: "actor", id: PLAYER_ID },
       ],
     });
+  });
+
+  it("compiles acquisition and spending into the typed Rulebook possession effect", () => {
+    const acquisition = createCampaignPlayGameMaster().compile(
+      frame(),
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "acquire",
+          actorHandle: "you",
+          possessionHandle: null,
+          name: "Copper chit",
+          quantity: 2,
+          summary: "The clerk pays you two copper chits for the copied manifests.",
+          affectedHandles: ["guard"],
+        }],
+      },
+    );
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const possessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      possessionKey,
+    );
+    expect(acquisition.batch.commands[1]).toMatchObject({
+      kind: "adjust_actor_possession",
+      actorId: PLAYER_ID,
+      possessionId,
+      possessionKey,
+      name: "Copper chit",
+      quantityDelta: 2,
+      affectedRefs: [
+        { kind: "actor", id: "actor-guard" },
+        { kind: "actor", id: PLAYER_ID },
+      ],
+      writeScope: [{ kind: "possession", id: possessionId }],
+    });
+    expect(acquisition.preflight.accepted).toBe(true);
+
+    const spendingFrame = frame();
+    spendingFrame.visibleFacts.push({
+      handle: "copper-chit",
+      kind: "possession",
+      summary: "Copper chit: 2",
+    });
+    spendingFrame.handleBindings.push({
+      handle: "copper-chit",
+      reference: { kind: "possession", id: possessionId },
+    });
+    spendingFrame.authority.authorizedRefs.push({ kind: "possession", id: possessionId });
+    spendingFrame.rulebookFrame.possessions.push({
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Copper chit",
+      quantity: 2,
+    });
+    const spending = createCampaignPlayGameMaster().compile(
+      spendingFrame,
+      ruling(),
+      resolution,
+      null,
+      {
+        elapsedMinutes: 1,
+        effects: [{
+          kind: "adjust_actor_possession",
+          operation: "spend",
+          actorHandle: "you",
+          possessionHandle: "copper-chit",
+          name: null,
+          quantity: 1,
+          summary: "You pay one copper chit for a cot until afternoon.",
+          affectedHandles: [],
+        }],
+      },
+    );
+    expect(spending.batch.commands[1]).toMatchObject({
+      kind: "adjust_actor_possession",
+      possessionId,
+      quantityDelta: -1,
+    });
+    expect(spending.preflight.accepted).toBe(true);
   });
 
   it("rejects impossible and clarification rulings before any GM model call", async () => {

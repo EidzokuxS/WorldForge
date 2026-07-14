@@ -56,6 +56,7 @@ function packetFixture(): CampaignPlayNarratorPacket {
       label: "Closing gates",
       summary: "Harbor wardens are sealing the last passage inland.",
     }],
+    possessions: [],
     newObservations: [],
     consequences: [],
     continuity: [],

@@ -33,6 +33,8 @@ export const CAMPAIGN_PLAY_LIMITS = {
   visibleActors: 8,
   visibleRoutes: 8,
   visiblePressures: 4,
+  visiblePossessions: 32,
+  possessionQuantity: 1_000_000,
   openingLocations: 12,
   openingDetails: 8,
   newObservations: 8,
@@ -103,6 +105,7 @@ export const CAMPAIGN_PLAY_VISIBLE_TARGET_KIND_VALUES = [
   "location",
   "route",
   "pressure",
+  "possession",
 ] as const;
 
 export const CAMPAIGN_PLAY_PUBLIC_PROGRESS_VALUES = [
@@ -237,6 +240,12 @@ export interface CampaignPlayVisiblePressure {
   summary: string;
 }
 
+export interface CampaignPlayVisiblePossession {
+  handle: string;
+  name: string;
+  quantity: number;
+}
+
 export interface CampaignPlayConsequence {
   observationHandle: string;
   whatChanged: string;
@@ -295,6 +304,7 @@ export interface CampaignPlayNarratorPacket extends CampaignPlayPublicVersions {
   visibleActors: CampaignPlayVisibleActor[];
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
+  possessions: CampaignPlayVisiblePossession[];
   newObservations: CampaignPlayJournalEntry[];
   consequences: CampaignPlayConsequence[];
   continuity: CampaignPlayJournalEntry[];
@@ -368,6 +378,7 @@ export interface CampaignPlayState extends CampaignPlayPublicVersions {
   visibleActors: CampaignPlayVisibleActor[];
   visibleRoutes: CampaignPlayVisibleRoute[];
   visiblePressures: CampaignPlayVisiblePressure[];
+  possessions: CampaignPlayVisiblePossession[];
   narration: CampaignPlayNarration | null;
   consequences: CampaignPlayConsequence[];
   activeTurn: CampaignPlayPublicTurn | null;

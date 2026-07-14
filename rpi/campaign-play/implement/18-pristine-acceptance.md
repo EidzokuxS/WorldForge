@@ -95,3 +95,42 @@ SQLite inspection showed that Magda's knowledge contained the accepted bargain, 
 The minimal repair keeps truth ownership and data flow unchanged. The actor frame now carries the bounded summary of the latest accepted `record_world_event` rows known to that actor. The replanner receives the exact summary and its occurred/learned times. Its instruction permits changing course, but requires an immediate witnessed commitment to be completed, handed off, postponed, or abandoned for a grounded frame-supported reason instead of being silently forgotten. No retry, fallback, provider switch, semantic regex, or code-authored narrative outcome was added.
 
 Humanizer review: the instruction names the actor's decision in concrete verbs and preserves agency instead of forcing obedience. Deslop review: removed abstract continuity rhetoric and avoided repeated warnings, faux quotations, grading language, and prose-policing rules. Verdict: acceptable as a compact behavioral contract; the live disposable-clone retest still owns the experiential decision.
+
+## Action-10 diagnosis: prose-only possessions
+
+The replacement `Lowwater Ledger` sitting completed ten signed actions without a visible contradiction. Mara Venn earned two copper chits for each of two copied manifests, kept all four when no shared cot was available, and voluntarily followed a separate dock trace. The public projection survived a backend restart byte-for-byte. Human checkpoint scores were comprehension `5`, prose readability `4`, agency `5`, world aliveness `4`, and desire to continue `4`.
+
+The protected audit confirmed three real autonomous causes: Harriet sealed debt writs, Vittorio inspected unmetered glow at the cable anchor, and Piero inspected the lift winch. Actor knowledge contained full accepted scene summaries before live replanning, so the commitment-continuity repair held. Every model stage used Z.AI `glm-5.2` on attempt one.
+
+The same audit found that both payments and Mara's retained four chits existed only in `record_world_event` summaries. No Rulebook command changed an item, currency, resource, or actor holding; the displaced `items` table remained empty. The lane pauses before action 11 because spending a prose-only resource would make later interpretation untrustworthy.
+
+### Frozen repair contract
+
+Outcome: ordinary possessions acquired or spent during Campaign Play become canonical Rulebook truth, remain stable across reload, and are visible to the human player.
+
+Acceptance criteria and provenance:
+
+1. A positive acquisition and a permitted spend change actor possession quantity in mechanical state. This is required by the user's Rulebook outcome.
+2. Each adjustment passes frozen preflight, exact authority/scope, receipt/event, world-version/hash, idempotency, clone/store coverage, and reload invariants. Insufficient quantity produces zero writes. These are affected pre-existing Rulebook and store contracts.
+3. Only positive holdings of the human actor enter the narrator packet, frozen action authority, public state, and rendered Play UI. This is required to let the player verify a consequence; NPC and zero holdings remain protected.
+4. The GM proposes a typed acquire or spend effect that compiles to one `adjust_actor_possession` command. That command's typed event owns the public possession consequence; a freeform `record_world_event` does not mutate holdings. No retry, fallback, prose parser, semantic regex, or backend rewrite is added. This prevents recurrence of the task-caused prose-only resource defect while preserving model authorship.
+
+Included scope: a dedicated current-contract possession table; strict command/event/entity contracts; Rulebook preflight, simulation, execution, receipts, events, exposure, sorted mechanical hashing, and durable loading; canonical store registration; human-only public projection and a compact `Carrying` UI region; focused tests; one disposable-clone GLM 5.2 acquire/restart/spend playtest.
+
+Non-goals: economy, shops, pricing, weight, equipment, crafting, transfers or conservation between counterparties, NPC inventory UI, legacy compatibility, smoke tests, and reuse of CharacterRecord inventory, old `items`, or faction resources.
+
+Architecture delta: `campaign_play_actor_possessions` becomes the current truth owner. A deterministic actor/name key identifies one retained row; quantity may reach zero but never become negative. The GM emits a structured acquire/spend proposal, code binds or derives the possession ID and exact scopes, Rulebook applies the delta transactionally, and visibility derives the public holding and consequence from the typed event's before/after state. The displaced path is a possession change narrated only by `record_world_event`.
+
+Alternatives rejected: CharacterRecord inventory is immutable profile data; actor conditions are boolean closed-enum state; pressures are global bounded progress; observations and knowledge are derived epistemic records; old item and faction-resource stores belong to the displaced gameplay path.
+
+Validation budget: targeted contract, migration/store, Rulebook, GM, state/hash/reload, read-model/API, and SceneCard tests; at most two evidence-based repair cycles; one expensive live disposable-clone playtest and one rerun only after an in-scope repair. No full suite or smoke run unless a targeted failure proves a named shared invariant otherwise lacks evidence.
+
+Independent plan review returned `REVISE`. The accepted corrections register the table in the canonical store manifest, carry holdings through the frozen narrator/admission packet, and make the typed possession event—not a neighboring freeform scene record—the source of public mechanical consequence.
+
+### Possession implementation evidence
+
+Migration `0035` widens the immutable command, receipt, event, and affected-reference contracts without rewriting existing ledger rows. `campaign_play_actor_possessions` owns actor-scoped quantity, deterministic identity, causal receipt, world version, and guarded insert/update transitions. Rulebook simulation and the mechanical hash include the sorted possession state. A typed adjustment event cites both the human actor and the possession, so the visibility layer can identify it as the player's action instead of publishing a generic nearby change.
+
+The targeted gate passed `192` backend tests across contracts, migration/store, Rulebook, GM, state/reload/hash, projection, visibility, narration, turn runtime, route API, and store manifest. The targeted frontend gate passed `15` API/Stage/SceneCard tests; the affected page fixture passed another `24`. Shared build and backend/frontend typechecks passed. The populated-ledger migration test preserves command, receipt, event, and exposure bytes and returns clean SQLite integrity and foreign-key checks. The atomic repository test executes both acquisition and a later negative delta, verifies quantity `2 → 1`, and verifies the event's actor-plus-possession references.
+
+Humanizer/deslop semantic review: the player-facing label `Carrying` and compact `name × quantity` rendering are ordinary interface language with no audit jargon or decorative prose. The GM instruction is necessarily strict technical language, but assigns model authorship in direct verbs, states one authority boundary once, and adds no fallback, retry, semantic parser, or backend-authored outcome. Verdict: land unchanged and let the live playtest decide whether the resulting prose makes the exchange intelligible and worth continuing.

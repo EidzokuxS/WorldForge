@@ -5,6 +5,10 @@ import {
   type CampaignPlayRulebookAuthority,
   type CampaignPlayRulebookFrame,
 } from "./rulebook.js";
+import {
+  deriveCampaignPlayPossessionId,
+  deriveCampaignPlayPossessionKey,
+} from "./campaign-play-projection.js";
 
 const CAMPAIGN_ID = "campaign-rulebook";
 const PLAYER_ID = "actor-player";
@@ -181,6 +185,7 @@ function frameFixture(
     acceptedWorld: world,
     routeStates: [],
     actorConditions: [],
+    possessions: [],
     pressureStates: setupPhase === "ready" ? [{
       pressureId: "pressure-passage",
       progress: 80,
@@ -269,6 +274,12 @@ function commandBase(
 }
 
 function ordinaryBatch() {
+  const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+  const possessionId = deriveCampaignPlayPossessionId(
+    CAMPAIGN_ID,
+    PLAYER_ID,
+    possessionKey,
+  );
   const commands = [
     {
       ...commandBase(0, READY_VERSION),
@@ -351,6 +362,26 @@ function ordinaryBatch() {
     },
     {
       ...commandBase(7, READY_VERSION + 7),
+      kind: "adjust_actor_possession",
+      readScope: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "possession", id: possessionId },
+        { kind: "location", id: "location-b" },
+      ],
+      writeScope: [{ kind: "possession", id: possessionId }],
+      actorId: PLAYER_ID,
+      possessionId,
+      possessionKey,
+      name: "Copper chit",
+      quantityDelta: 2,
+      summary: "The clerk pays the traveler two copper chits.",
+      affectedRefs: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "location", id: "location-b" },
+      ],
+    },
+    {
+      ...commandBase(8, READY_VERSION + 8),
       kind: "record_world_event",
       readScope: [
         { kind: "actor", id: PLAYER_ID },
@@ -423,7 +454,7 @@ describe("Campaign Play Rulebook preflight", () => {
     });
     expect(result.accepted).toBe(true);
     if (!result.accepted) return;
-    expect(result.simulation.worldVersion).toBe(READY_VERSION + 7);
+    expect(result.simulation.worldVersion).toBe(READY_VERSION + 8);
     expect(result.simulation.worldTimeMinutes).toBe(15);
     expect(result.simulation.placements.find((row) => row.actorId === PLAYER_ID)?.locationId)
       .toBe("location-b");
@@ -438,7 +469,75 @@ describe("Campaign Play Rulebook preflight", () => {
     expect(result.simulation.relations[0]?.intensity).toBe(3);
     expect(result.simulation.goals[0]?.status).toBe("completed");
     expect(result.simulation.pressureStates[0]).toMatchObject({ progress: 100, status: "resolved" });
+    expect(result.simulation.possessions).toEqual([{
+      possessionId: deriveCampaignPlayPossessionId(
+        CAMPAIGN_ID,
+        PLAYER_ID,
+        deriveCampaignPlayPossessionKey("Copper chit"),
+      ),
+      actorId: PLAYER_ID,
+      possessionKey: deriveCampaignPlayPossessionKey("Copper chit"),
+      name: "Copper chit",
+      quantity: 2,
+    }]);
     expect(frame).toEqual(before);
+  });
+
+  it("spends only an authorized holding with sufficient quantity", () => {
+    const frame = frameFixture();
+    const possessionKey = deriveCampaignPlayPossessionKey("Copper chit");
+    const possessionId = deriveCampaignPlayPossessionId(
+      CAMPAIGN_ID,
+      PLAYER_ID,
+      possessionKey,
+    );
+    frame.possessions.push({
+      possessionId,
+      actorId: PLAYER_ID,
+      possessionKey,
+      name: "Copper chit",
+      quantity: 2,
+    });
+    const authority = playerAuthority();
+    authority.authorizedRefs.push({ kind: "possession", id: possessionId });
+    const command = {
+      ...commandBase(0, READY_VERSION),
+      kind: "adjust_actor_possession",
+      readScope: [
+        { kind: "actor", id: PLAYER_ID },
+        { kind: "possession", id: possessionId },
+      ],
+      writeScope: [{ kind: "possession", id: possessionId }],
+      actorId: PLAYER_ID,
+      possessionId,
+      possessionKey,
+      name: "Copper chit",
+      quantityDelta: -1,
+      summary: "The traveler pays one copper chit for the cot.",
+      affectedRefs: [{ kind: "actor", id: PLAYER_ID }],
+    };
+    const accepted = preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: { batchId: BATCH_ID, baseWorldVersion: READY_VERSION, commands: [command] },
+    });
+    expect(accepted.accepted).toBe(true);
+    if (accepted.accepted) expect(accepted.simulation.possessions[0]?.quantity).toBe(1);
+
+    const denied = preflightCampaignPlayRulebook({
+      frame,
+      authority,
+      batch: {
+        batchId: BATCH_ID,
+        baseWorldVersion: READY_VERSION,
+        commands: [{ ...command, quantityDelta: -3 }],
+      },
+    });
+    expect(denied).toMatchObject({
+      accepted: false,
+      denial: { code: "precondition_failed" },
+    });
+    expect(frame.possessions[0]?.quantity).toBe(2);
   });
 
   it("accepts the complete opening bootstrap and simulates earlier outputs", () => {
@@ -525,7 +624,7 @@ describe("Campaign Play Rulebook preflight", () => {
     const batch = ordinaryBatch();
     batch.baseWorldVersion = 4;
     batch.commands.forEach((command, index) => {
-      command.expectedWorldVersion = 4 + Math.min(index, 7);
+      command.expectedWorldVersion = 4 + index;
     });
     const result = preflightCampaignPlayRulebook({
       frame: frameFixture(), authority: playerAuthority(), batch,

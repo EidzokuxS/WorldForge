@@ -139,7 +139,7 @@ const choiceBindingSchema = z.object({
   kind: z.enum(["observe", "move", "contact", "wait", "attempt"]),
   targets: z.array(z.object({
     handle: line(CAMPAIGN_PLAY_LIMITS.handle),
-    kind: z.enum(["actor", "location", "route", "pressure"]),
+    kind: z.enum(["actor", "location", "route", "pressure", "possession"]),
   }).strict()).max(CAMPAIGN_PLAY_LIMITS.targets),
 }).strict();
 
@@ -571,6 +571,8 @@ function candidateBindings(
   frame.acceptedWorld.routes.forEach((route) => add("route", { kind: "route", id: route.id }));
   frame.acceptedWorld.pressures.forEach((pressure) =>
     add("pressure", { kind: "pressure", id: pressure.id }));
+  frame.possessions.forEach((possession) =>
+    add("possession", { kind: "possession", id: possession.possessionId }));
   const observations = handle.sqlite.prepare(`SELECT event_id AS eventId,
       public_entry_json AS publicEntryJson FROM campaign_play_observations
     WHERE campaign_id = ? ORDER BY observation_id`).all(
@@ -633,6 +635,11 @@ function buildPublicAuthority(input: {
     handle: pressure.handle,
     kind: "pressure",
     summary: `${pressure.label}: ${pressure.summary}`,
+  }));
+  packet.possessions.forEach((possession) => addFact({
+    handle: possession.handle,
+    kind: "possession",
+    summary: `${possession.name}: ${possession.quantity}`,
   }));
   const choiceBindings = narration.suggestedActions.map((suggestion) => {
     const available = packet.availableIntents.find((intent) =>

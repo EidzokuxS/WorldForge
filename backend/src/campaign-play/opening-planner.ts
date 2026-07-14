@@ -462,6 +462,7 @@ function entityExists(world: CampaignWorldReview, reference: CampaignPlayActorIn
     case "relation": return world.relations.some((value) => value.id === reference.id);
     case "goal": return world.goals.some((value) => value.id === reference.id);
     case "pressure": return world.pressures.some((value) => value.id === reference.id);
+    case "possession": return false;
     case "world_event": return false;
   }
 }
@@ -500,7 +501,8 @@ function targetLocationIds(
           .flatMap((actorId) => actorLocations(world, actorId)),
       ])];
     }
-    case "world_event": return [];
+    case "world_event":
+    case "possession": return [];
   }
 }
 

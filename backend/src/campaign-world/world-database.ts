@@ -2,8 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
+import { runForeignKeySafeMigrations } from "../db/migrate.js";
 import { getCampaignDir } from "../campaign/index.js";
 
 const CAMPAIGN_MIGRATIONS_FOLDER = path.resolve(
@@ -73,9 +73,9 @@ export function openCampaignWorldDatabase(
     const managedSchema = sqlite.prepare(`SELECT 1 AS found FROM sqlite_master
       WHERE type = 'table' AND name = '__drizzle_migrations'`).get() as {
         found: number;
-      } | undefined;
+    } | undefined;
     if (managedSchema) {
-      migrate(db, { migrationsFolder: CAMPAIGN_MIGRATIONS_FOLDER });
+      runForeignKeySafeMigrations(db, sqlite, CAMPAIGN_MIGRATIONS_FOLDER);
     }
 
     const tableRows = sqlite

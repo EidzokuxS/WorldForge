@@ -70,6 +70,7 @@ const state = {
   visibleActors: [],
   visibleRoutes: [],
   visiblePressures: [],
+  possessions: [],
   narration: null,
   consequences: [],
   activeTurn: null,
@@ -273,6 +274,13 @@ describe("Campaign Play API", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ ...state, projectionHash: "not-a-hash" })));
     await expect(loadCampaignPlayState("campaign-1"))
+      .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ...state,
+      possessions: [{ handle: "possession-one", name: "Brass key", quantity: 0 }],
+    })));
+    await expect(loadCampaignPlayState("campaign-one"))
       .rejects.toMatchObject({ code: "service_unavailable", invalidResponse: true });
 
     const longMultibyteText = "界".repeat(CAMPAIGN_PLAY_LIMITS.text);

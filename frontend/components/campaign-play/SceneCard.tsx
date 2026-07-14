@@ -2,6 +2,7 @@ import type {
   CampaignPlayConsequence,
   CampaignPlayVisibleActor,
   CampaignPlayVisibleLocation,
+  CampaignPlayVisiblePossession,
   CampaignPlayVisiblePressure,
   CampaignPlayVisibleRoute,
 } from "@worldforge/shared";
@@ -14,6 +15,7 @@ export interface SceneCardProps {
   actors: CampaignPlayVisibleActor[];
   routes: CampaignPlayVisibleRoute[];
   pressures: CampaignPlayVisiblePressure[];
+  possessions: CampaignPlayVisiblePossession[];
   consequences?: CampaignPlayConsequence[];
 }
 
@@ -38,7 +40,7 @@ function actorAccentStyle(accent: string): CSSProperties {
   return { "--campaign-play-actor-accent": color } as CSSProperties;
 }
 
-export function SceneCard({ location, actors, routes, pressures, consequences = [] }: SceneCardProps) {
+export function SceneCard({ location, actors, routes, pressures, possessions, consequences = [] }: SceneCardProps) {
   return (
     <section className="campaign-play-scene" aria-labelledby="campaign-play-location">
       <div className="campaign-play-scene-copy">
@@ -55,6 +57,20 @@ export function SceneCard({ location, actors, routes, pressures, consequences = 
               <li key={actor.handle} style={actorAccentStyle(actor.accent)}>
                 <span aria-hidden="true">{actor.monogram}</span>
                 <span><strong>{actor.name}</strong><small>{actor.descriptor}</small></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {possessions.length > 0 ? (
+        <section className="campaign-play-possessions" aria-labelledby="campaign-play-possessions-heading">
+          <h2 id="campaign-play-possessions-heading">Carrying</h2>
+          <ul>
+            {possessions.map((possession) => (
+              <li key={possession.handle}>
+                <strong>{possession.name}</strong>
+                <small>×{possession.quantity}</small>
               </li>
             ))}
           </ul>

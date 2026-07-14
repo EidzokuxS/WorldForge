@@ -63,6 +63,7 @@ function stateFixture(): CampaignPlayState {
     visibleActors: [],
     visibleRoutes: [],
     visiblePressures: [],
+    possessions: [],
     narration: null,
     consequences: [],
     activeTurn: null,

@@ -481,7 +481,7 @@ function judgeFixture(disposition: Disposition, compoundMovement = false) {
   const compiler = createCampaignPlayJudge();
   let selectedChoice: {
     kind: "observe" | "move" | "contact" | "wait" | "attempt";
-    targets: Array<{ handle: string; kind: "actor" | "location" | "route" | "pressure" }>;
+    targets: Array<{ handle: string; kind: "actor" | "location" | "route" | "pressure" | "possession" }>;
   } | null = null;
   return {
     selectChoice(binding: typeof selectedChoice) {

@@ -233,6 +233,7 @@ function rulebookFrame(handle: CampaignPlayDatabaseHandle): CampaignPlayRulebook
     acceptedWorld: loaded.acceptedReview,
     routeStates,
     actorConditions,
+    possessions: [],
     pressureStates,
     placements,
     relations,
@@ -984,6 +985,7 @@ describe("Campaign Play visibility service", () => {
         travelTimeLabel: `${route.travelCost} travel units`,
       })),
       visiblePressures: [],
+      possessions: [],
     };
 
     const syntheticOpeningSeed: CampaignPlayOpeningExposureSeed = {

@@ -18,10 +18,12 @@ import {
   projectCampaignPlayProtectedAudit,
   projectCampaignPlayPublicState,
   projectCampaignPlayRuntimeTruth,
+  deriveCampaignPlayPublicHandle,
   type CampaignPlayHumanMechanicalIdentity,
   type CampaignPlayLiveActorCondition,
   type CampaignPlayLiveGoal,
   type CampaignPlayLivePlacement,
+  type CampaignPlayLiveActorPossession,
   type CampaignPlayLivePressureState,
   type CampaignPlayLiveRelation,
   type CampaignPlayLiveRouteState,
@@ -429,6 +431,13 @@ function selectMechanicalProjection(
     objective: string;
     motivation: string;
   }>;
+  const possessions = sqlite.prepare(`
+    SELECT possession_id AS possessionId, actor_id AS actorId,
+      possession_key AS possessionKey, name, quantity
+    FROM campaign_play_actor_possessions
+    WHERE campaign_id = ?
+    ORDER BY actor_id, possession_key, possession_id
+  `).all(campaignId) as CampaignPlayLiveActorPossession[];
 
   const acceptedPlacements = review.placements.map((row) => ({
     placementId: row.id,
@@ -467,6 +476,7 @@ function selectMechanicalProjection(
     placements: baseRowsUnchanged ? [] : placements,
     relations: baseRowsUnchanged ? [] : relations,
     goals: baseRowsUnchanged ? [] : goals,
+    possessions,
   });
 }
 
@@ -716,6 +726,13 @@ function selectPublicState(
       createdAt: narration.createdAt,
     })
     : null;
+  const possessions = sqlite.prepare(`
+    SELECT p.possession_id AS possessionId, p.name AS name, p.quantity AS quantity
+    FROM campaign_play_actor_possessions p
+    JOIN actors a ON a.id = p.actor_id AND a.campaign_id = p.campaign_id
+    WHERE p.campaign_id = ? AND a.controller = 'human' AND p.quantity > 0
+    ORDER BY p.name, p.possession_id
+  `).all(campaignId) as Array<{ possessionId: string; name: string; quantity: number }>;
   return projectCampaignPlayPublicState({
     campaignId,
     acceptedWorldVersion: state.acceptedWorldVersion,
@@ -727,6 +744,11 @@ function selectPublicState(
     visibleActors: packet?.visibleActors ?? [],
     visibleRoutes: packet?.visibleRoutes ?? [],
     visiblePressures: packet?.visiblePressures ?? [],
+    possessions: possessions.map((possession) => ({
+      handle: deriveCampaignPlayPublicHandle("possession", campaignId, possession.possessionId),
+      name: possession.name,
+      quantity: possession.quantity,
+    })),
     consequences: packet?.consequences ?? [],
     journal: journalRows.map((row) => ({
       observationId: row.observationId,
@@ -1095,6 +1117,12 @@ export function loadCampaignPlayRulebookFrame(
     FROM actor_goals WHERE campaign_id = ? ORDER BY id`).all(
       campaignId,
     ) as CampaignPlayLiveGoal[];
+  const possessions = sqlite.prepare(`SELECT possession_id AS possessionId,
+      actor_id AS actorId, possession_key AS possessionKey, name, quantity
+    FROM campaign_play_actor_possessions
+    WHERE campaign_id = ? ORDER BY actor_id, possession_key, possession_id`).all(
+      campaignId,
+    ) as CampaignPlayLiveActorPossession[];
   return {
     campaignId,
     acceptedWorldVersion: state.authority.acceptedWorldVersion,
@@ -1110,5 +1138,6 @@ export function loadCampaignPlayRulebookFrame(
     placements,
     relations,
     goals,
+    possessions,
   };
 }
