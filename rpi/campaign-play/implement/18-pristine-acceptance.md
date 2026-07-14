@@ -1,6 +1,6 @@
 # Task 18: human playtest contract
 
-Status: ready to pilot after clean-world eligibility and accessibility preflight.
+Status: Lane A r04 frozen before action 1; Narrator opening repair verified locally and awaiting a fresh r05 live gate.
 
 ## Decision
 
@@ -146,3 +146,13 @@ The game-quality disposition is `REVISE`, not promotion. Twelve player actions c
 The action-10 human checkpoint rated comprehension `5`, prose readability `4`, agency `4`, world aliveness `4`, and desire to continue `3`. Aldo and Magda moved independently to other locations and their departures became visible without crowding Sorel's moment. Rendered inspection disproved an apparent duplicate-paragraph bug from the accessibility tree: transition layers duplicate nodes, while the visible scene renders each beat once. Detailed per-action and mechanical notes are retained under the ignored playtest session output.
 
 Humanizer/deslop review: the playtest note separates observed behavior, mechanical evidence, and interpretation; uses direct verbs; does not inflate a successful possession transaction into a claim that the whole game loop is ready; and records the latency, interrupted payment, suggestion drift, and coarse item identity without euphemism. Verdict: acceptable as diagnostic evidence.
+
+## Frozen Lane A r04: opening narration contract
+
+The next pristine materialization preserved the accepted `Lowwater Ledger` snapshot and began with Iona Pell, an itinerant leather and canvas repairer stranded by a cancelled ferry. The planner placed her on Glasswater Terrace beside a lift cage whose salt-iced canvas hatch-cover had split along a frayed seam. The situation was specific, relevant to her signed capability, and did not make her the centre of the world.
+
+Turn zero then interrupted at `visibility_projected` before any player action. Opening Planner completed one GLM 5.2 native-JSON attempt in `223164 ms`. Narrator completed one provider/schema-valid GLM 5.2 attempt in `45167 ms`, but `assertProposalForPacket` rejected the proposal as `narration_invalid`. No narration beats or suggested actions committed. The UI retained the visible consequence and recovery control in text, but disabled action submission. The operator did not use Resume; r04 remains frozen at zero completed actions.
+
+This was the second fresh opening in succession with the same semantic rejection. The Narrator instruction contained a direct conflict: the compiler requires the first opening beat to use `orientation`, while the prompt told the model both to put a visible consequence first and to use `consequence` for every visible result. The repair changes only the instruction. An opening consequence now belongs inside the required orientation beat; `consequence` remains the label for non-opening results. The semantic compiler, structured schema, one-attempt policy, provider selection, and recovery behavior are unchanged.
+
+The focused Narrator gate passed `11` tests and backend typecheck passed. Humanizer review kept the instruction literal and technical. Deslop review removed the competing generalization instead of adding explanation or repeated warnings. Verdict: the prompt is direct enough to retest unchanged in a new pristine r05; live completion still owns acceptance.

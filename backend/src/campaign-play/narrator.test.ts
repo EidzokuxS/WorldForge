@@ -336,8 +336,11 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not enumerate every unsupported alternative");
     expect(prompt).toContain("Show a person's reserve, refusal, or impatience");
     expect(prompt).toContain('Do not editorialize that a tone is "unrevealing"');
-    expect(prompt).toContain("put it in the first beat with only the location detail needed to understand it");
-    expect(prompt).toContain("Do not delay that change behind a tour of the setting");
+    expect(prompt).toContain("The first beat must use orientation");
+    expect(prompt).toContain("describe it inside that orientation beat");
+    expect(prompt).toContain("Do not label the first beat consequence");
+    expect(prompt).toContain("On non-opening turns, use consequence");
+    expect(prompt).toContain("On openings, the orientation beat may carry that visible result");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');

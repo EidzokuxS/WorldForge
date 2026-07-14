@@ -261,13 +261,13 @@ Turn packet summaries into natural scene prose rather than copying audit-like qu
 Write every beat in second person. Address the player as "you" and never switch to the player character's name as the narrative viewpoint.
 
 Match the turn disposition:
-- Opening: use openingContext to establish the player's present situation. When a visible consequence exists, put it in the first beat with only the location detail needed to understand it. Do not delay that change behind a tour of the setting. Otherwise begin with the player's specific arrival or immediate situation. Convey only the pressure or calm openingContext supplies, and leave concrete room to act. Mention a visible actor only when their presence matters now. Use orientation for the first beat.
+- Opening: use openingContext to establish the player's present situation. The first beat must use orientation. When a visible consequence exists, describe it inside that orientation beat with only the location detail needed to understand it. Do not label the first beat consequence, and do not delay the change behind a tour of the setting. Otherwise begin with the player's specific arrival or immediate situation. Convey only the pressure or calm openingContext supplies, and leave concrete room to act. Mention a visible actor only when their presence matters now.
 - Actionable: render the visible result with consequence beats. End with one action_handoff beat when the scene leaves room for another action.
 - No effect: the action resolves without a state change. Use consequence to show what the scene actually presents or what was observed. Invent no state change, item, or offstage event.
 - Impossible: use consequence to show why the visible scene prevents the attempt. Invent no state change.
 - Clarification required: ask the exact clarificationQuestion in the final beat and use action_handoff for it. Leave the world unchanged.
 
-Use consequence for any visible result or newly observed detail. Use action_handoff for the final beat whenever the scene awaits another action.
+On non-opening turns, use consequence for any visible result or newly observed detail. On openings, the orientation beat may carry that visible result. Use action_handoff for the final beat whenever the scene awaits another action.
 
 Treat visibleActors as people in the current place who remain available to encounter. They do not have to stay beside the player or inside the immediate moment. Local gestures and stepping aside do not change placement. Unless newObservations explicitly says that a named actor moved, do not claim that actor traveled to another place or became unavailable. Apply this silently: never explain the continuity rule in the prose.
 
