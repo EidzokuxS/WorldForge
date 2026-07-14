@@ -1460,10 +1460,10 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - [x] Match full backend restart checkpoints after player actions 1, 5, 10, and 20.
 - [x] Finalize and validate `causal-20-glm52-ashglass-reach-461289b1-r10`; machine invariants and artifact inventory pass.
 - [x] Record the manual prose, causality, agency, continuity, autonomy, and pacing verdict in `rpi/campaign-play/implement/17-live-diagnosis.md`.
-- [ ] Complete the separate 30-action adaptive diagnostic before accepting fixes.
+- [x] Complete the separate 30-action adaptive diagnostic before accepting fixes.
 - [x] Reach action 10 in `diagnostic-30-glm52-ashglass-reach-d2dcc3f0-r01` and prove an exact full-backend restart checkpoint.
 - [x] Continue the adaptive diagnostic through actions 11–20 from the restored action-10 state.
-- [ ] Complete actions 21–30 and the final restart checkpoint, then seal the diagnostic verdict.
+- [x] Complete actions 21–30 and the final restart checkpoint, then record the unsealed diagnostic verdict.
 - [ ] Convert accepted findings into focused regressions, rerun Task 16A, then replace the failed 20-action promotion attempt only if the plan still requires a pristine pass.
 
 Current verdict: automated invariant gate PASS, human promotion gate REVISE. Major findings are multi-minute turn cadence and three inert collective actors with zero plans, schedules, jobs, or proposals. The 30-action diagnosis also owns static opening prose, repeated NPC wording, unchosen follow-up narration, and unsupported vent acoustics.
@@ -1471,3 +1471,5 @@ Current verdict: automated invariant gate PASS, human promotion gate REVISE. Maj
 Checkpoint 10/30: the new lane independently reproduces 84-event, roughly eight-minute movement while local inspection turns settle near 18–20 events. A one-hour wait produces useful autonomous motion from Keth and Paska, but the follow-up explanation contradicts the established lake pressure. Restart bytes match exactly.
 
 Checkpoint 20/30: four- and two-unit travel settle at 64 and 59 events respectively, pointing to scheduler activation rather than distance as the main cadence cost. Paska repeats one refusal pattern after new evidence, while two quarter-hours at Thray-Hold reveal no council participant, schedule, office, or receiver for Torm's real work. Action 17 required one explicit Resume after a strict GLM 5.2 schema failure; no automatic retry or fallback ran. The correctly tagged action-20 restart matches exactly.
+
+Final 30/30 verdict: FAIL. One-unit travel still costs 47 events; compound freeform travel can narrate arrival without settling canonical location; the council remains an empty pressure while person agents move; and the bounded Judge frame eventually denies and overwrites Mara's real actions 2–4. Action-30 restart matches. The bundle remains intentionally unsealed because action 10 used a generic reload evidence stem. Exact clarification prose equality was removed after three valid Narrator objects hit `narration_invalid`; focused verification passes 46/46 plus backend typecheck.

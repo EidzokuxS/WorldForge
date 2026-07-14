@@ -291,8 +291,7 @@ function assertProposalForPacket(
   }
   if (
     packet.actionContext?.disposition === "clarification_required" &&
-    (proposal.beats.at(-1)?.purpose !== "action_handoff" ||
-      proposal.beats.at(-1)?.text !== packet.actionContext.clarificationQuestion)
+    proposal.beats.at(-1)?.purpose !== "action_handoff"
   ) {
     throw new CampaignPlayNarratorError("narration_invalid", null);
   }

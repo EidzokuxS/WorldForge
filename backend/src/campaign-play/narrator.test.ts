@@ -219,6 +219,37 @@ describe("Campaign Play narrator", () => {
     }
   });
 
+  it("accepts narrator wording for a clarification handoff", () => {
+    const narrator = createCampaignPlayNarrator();
+    const packet: CampaignPlayNarratorPacket = {
+      ...packetFixture(),
+      turnKind: "player_action",
+      openingContext: null,
+      sourceMoment: "Fine grit lies across the garden rows.",
+      actionContext: {
+        submittedText: "Check the bed I watered this morning.",
+        intentKind: "observe",
+        disposition: "clarification_required",
+        result: "no_effect",
+        clarificationQuestion: "Which previously watered bed do you mean?",
+      },
+    };
+    const proposal: CampaignPlayNarratorProposal = {
+      actionDetails: ["the watered garden bed"],
+      beats: [{
+        purpose: "action_handoff",
+        text: "Which garden bed did you water earlier?",
+      }],
+    };
+
+    expect(() => narrator.compile({
+      narrationId: "narration-clarification",
+      packet,
+      proposal,
+      createdAt: 1_000,
+    })).not.toThrow();
+  });
+
   it("requires opening context exactly for opening packets", () => {
     const narrator = createCampaignPlayNarrator();
     expect(() => narrator.compile({

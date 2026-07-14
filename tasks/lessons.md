@@ -127,6 +127,7 @@
 
 ## Evidence Handling
 
+- Pass the exact `--after-player-action N` marker for every declared restart checkpoint. A generic reload proof cannot be renamed or backfilled into a configured checkpoint later.
 - Preserve evidence that explains current mechanics or accepted behavior; remove raw duplicate logs and generated run debris.
 - Write structurally complete evidence even when a declared budget is exceeded, then fail promotion through validation. A policy failure must not destroy the diagnostic artifact.
 - Do not count old contaminated transcripts as pristine acceptance after a later fix.
