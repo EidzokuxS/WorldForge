@@ -85,7 +85,7 @@ describe("WorldReviewPage", () => {
     await renderPage();
 
     const tabs = await screen.findAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent?.replaceAll("2", "").replaceAll("1", "").trim())).toEqual([
+    expect(tabs.map((tab) => tab.textContent?.replace(/\s+\d+$/, "").trim())).toEqual([
       "Overview",
       "Locations",
       "Actors",
@@ -105,11 +105,11 @@ describe("WorldReviewPage", () => {
     await user.click(screen.getByRole("button", { name: "Route to Bell Platform, travel cost 2" }));
     expect(screen.getByLabelText("Bell Platform routes")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Connections 2" }));
+    await user.click(screen.getByRole("tab", { name: "Connections 6" }));
     const pressure = screen.getByRole("heading", { name: "Closing Route" }).closest("article");
-    fireEvent.click(within(pressure!).getByRole("button", { name: "The Signal Guild" }));
-    expect(screen.getByRole("tab", { name: "Actors 2" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("The Signal Guild details")).toBeInTheDocument();
+    fireEvent.click(within(pressure!).getByRole("button", { name: "Mara Venn" }));
+    expect(screen.getByRole("tab", { name: "Actors 6" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Mara Venn details")).toBeInTheDocument();
   });
 
   it("reloads the current projection after a stale acceptance conflict", async () => {

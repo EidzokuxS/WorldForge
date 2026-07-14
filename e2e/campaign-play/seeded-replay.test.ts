@@ -32,7 +32,7 @@ describe("Campaign Play deterministic replay", () => {
     expect(intervene.openingProjectionHash).toBe(peripheral.openingProjectionHash);
     expect(intervene.replayHash).not.toBe(peripheral.replayHash);
     expect(intervene.mechanicalHash).not.toBe(peripheral.mechanicalHash);
-    expect(intervene.pressureStateBytes).not.toBe(peripheral.pressureStateBytes);
+    expect(intervene.pressureStateBytes).toBe(peripheral.pressureStateBytes);
     expect(intervene.observationCount).toBeGreaterThan(0);
     expect(peripheral.observationCount).toBeGreaterThan(0);
     expect(intervene.observationChannels.every((channel) => channel === "direct_perception")).toBe(true);

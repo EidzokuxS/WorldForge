@@ -492,3 +492,15 @@ Verification covers the accepted-replan restart boundary: the database closes af
 The next playtest is formative and qualitative. Its decision is whether to retain or revise the cadence cap. The working hypothesis is that three opportunities and one accepted replan keep a turn bounded while still producing at least one understandable autonomous consequence. For each manual action, collect turn duration, admitted actor count, accepted replan count, visible autonomous consequence, causal coherence, and prose quality. Treat hidden mutation, more than one accepted replan, an accepted replan with no executed action, a world contradiction, or an inert background as a severe failure. A single fresh campaign can reveal those mechanisms but cannot show how common they are.
 
 Humanizer and deslop review: this note states measured test counts separately from the pending live claim. It uses direct technical language, preserves the hard-cut caveat, and makes no claim about prose or playability before the rendered GLM 5.2 run.
+
+#### Post-root deterministic promotion gate
+
+The first Task 16A rerun exposed a stale deterministic fixture. It still required a pressure handle on the first player action, but the current visibility contract correctly withholds pressure mechanics until an observation is earned. The fixture now compares two grounded public choices: lowering a visible signal gate to restrict the route, or remaining peripheral and recording the visible signal pattern. Both branches start from the same accepted snapshot and opening projection, produce different durable outcomes and replay hashes, and leave the hidden pressure state unchanged.
+
+Replay failures now include the stored interrupted stage and error code. This turned the generic action-one interruption into an exact `judged` / `provider_unavailable` fixture failure and prevented eight callers from obscuring one shared cause. No production provider, Rulebook, visibility, or narration fallback was added.
+
+The complete rerun passes the shared build; the 486-test Campaign World, Campaign Play, and mounted-route backend selection; all 493 frontend tests; all 33 Campaign Play evidence/replay tests; backend and frontend typechecks; and the production build. The fresh 10-, 30-, and 60-action runner bundles each completed twice with identical canonical bytes, SQLite `ok`, zero foreign-key violations, and `promotionEligible=true`. The 60-action bundle records replay hash `794f6a6e0a082236c1a9ea8755cb1a9d2501df6c270321828073ba903d9e9bc0`, 126 receipts, 918 runtime events, and 916 turn events.
+
+This closes the deterministic rerun required after the accepted diagnosis. Task 17 still requires a new human-chosen 20-action GLM 5.2 campaign; deterministic success does not establish prose quality, reader interest, living-world legibility, or acceptable interactive cadence.
+
+Humanizer and deslop review: the gate note preserves measured outcomes and the remaining manual boundary without promotional language or hidden qualification.

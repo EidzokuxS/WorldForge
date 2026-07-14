@@ -392,7 +392,7 @@ function playerNarratorFixture() {
   };
 }
 
-function judgeFixture() {
+function judgeFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
   const compiler = createCampaignPlayJudge();
   return {
     async judge(request: Parameters<ReturnType<typeof createCampaignPlayJudge>["judge"]>[0]) {
@@ -400,18 +400,33 @@ function judgeFixture() {
       const movementRouteHandle = frozenChoice?.kind === "move"
         ? frozenChoice.targets.find((target) => target.kind === "route")?.handle ?? null
         : null;
+      const intervening = !frozenChoice && policy === "intervene";
+      const interventionRouteHandle = intervening
+        ? request.frame.visibleFacts.find((fact) => fact.kind === "route")?.handle
+        : null;
+      if (intervening && !interventionRouteHandle) {
+        throw new Error("Deterministic Judge requires one visible route for intervention.");
+      }
       const ruling = compiler.compile(request.frame, request.input, {
-        kind: frozenChoice?.kind ?? "wait",
-        targets: frozenChoice?.targets ?? [],
-        method: "Wait and watch the visible situation",
-        stakes: "Learn what changes at the signal gate",
+        kind: frozenChoice?.kind ?? (intervening ? "attempt" : "wait"),
+        targets: frozenChoice?.targets ?? (interventionRouteHandle
+          ? [{ handle: interventionRouteHandle, kind: "route" as const }]
+          : []),
+        method: intervening
+          ? "Lower the visible signal gate and secure it against unsafe passage"
+          : "Wait and watch the visible situation",
+        stakes: intervening
+          ? "Restrict the visible route until the gate is safe"
+          : "Learn what changes at the signal gate",
         movementRouteHandle,
         disposition: "deterministic",
         citedVisibleFactHandles: [request.frame.locationHandle],
         resultBounds: { minimum: "success", maximum: "success" },
         elapsedBounds: { minimumMinutes: 1, maximumMinutes: 2 },
         uncertainty: { kind: "none" },
-        reason: "Waiting is possible from the current visible location.",
+        reason: intervening
+          ? "The visible route and its gate can be worked on from the current location."
+          : "Waiting is possible from the current visible location.",
         clarificationQuestion: null,
       });
       return {
@@ -432,19 +447,23 @@ function gameMasterFixture(policy: SeededCampaignPlayReplayOptions["policy"]) {
       if (!playerHandle) throw new Error("Deterministic Game Master requires the player binding.");
       const locationHandle = request.frame.visibleFacts.find((fact) => fact.kind === "location")?.handle;
       if (!locationHandle) throw new Error("Deterministic Game Master requires the current location binding.");
-      const pressureHandle = request.frame.visibleFacts.find((fact) => fact.kind === "pressure")?.handle;
-      if (!pressureHandle) throw new Error("Deterministic Game Master requires one visible pressure binding.");
+      const routeHandle = request.frame.visibleFacts.find((fact) => fact.kind === "route")?.handle;
       const consequenceEffects = policy === "intervene"
-        ? [{
-            kind: "advance_pressure" as const,
-            pressureHandle,
-            amount: 1,
-            resultStatus: "active" as const,
-            exposure: {
-              mode: "projectable" as const,
-              predicates: [{ channel: "direct_perception" as const, anchorHandle: locationHandle }],
-            },
-          }]
+        ? (() => {
+            if (!routeHandle) {
+              throw new Error("Deterministic Game Master requires one visible route binding.");
+            }
+            return [{
+              kind: "set_route_state" as const,
+              routeHandle,
+              state: "restricted" as const,
+              reason: "Mara lowers and secures the visible signal gate.",
+              exposure: {
+                mode: "projectable" as const,
+                predicates: [{ channel: "direct_perception" as const, anchorHandle: locationHandle }],
+              },
+            }];
+          })()
         : [{
             kind: "record_world_event" as const,
             eventClass: "scene" as const,
@@ -538,7 +557,7 @@ function turnRuntime(
     gameMasterModel: stageModel("fixture-game-master"),
     actorReplannerModel: stageModel("fixture-actor-replanner"),
     narratorModel: stageModel("fixture-narrator"),
-    judge: judgeFixture(),
+    judge: judgeFixture(policy),
     gameMaster: gameMasterFixture(policy),
     narrator: playerNarratorFixture(),
   });
@@ -618,7 +637,7 @@ export async function runAcceptedCampaignPlayReplay(
           expectedRuntimeRevision: state.runtimeRevision,
           source: "freeform",
           text: options.policy === "intervene"
-            ? `I intervene at the signal gate and stabilize the visible pressure ${actionNumber}.`
+            ? `I lower the visible signal gate and secure it against unsafe passage ${actionNumber}.`
             : `I remain at the visible edge of the signal gate and watch change ${actionNumber}.`,
         });
       }
@@ -636,7 +655,22 @@ export async function runAcceptedCampaignPlayReplay(
     await application.waitForIdle(campaignId);
     const turn = application.loadTurn(campaignId, admission.turnId);
     if (turn.turn.status !== "completed") {
-      throw new Error(`Player action ${actionNumber} ended in ${turn.turn.status}.`);
+      const diagnosticHandle = openCampaignPlayDatabase(campaignId);
+      try {
+        const stored = diagnosticHandle.sqlite.prepare(`SELECT stage,
+          interrupted_stage AS interruptedStage, error_code AS errorCode
+          FROM campaign_play_turns WHERE campaign_id = ? AND id = ?`).get(
+            campaignId,
+            admission.turnId,
+          ) as { stage: string; interruptedStage: string | null; errorCode: string | null };
+        throw new Error(
+          `Player action ${actionNumber} ended in ${stored.stage}`
+          + ` at ${stored.interruptedStage ?? "terminal"}`
+          + ` with ${stored.errorCode ?? "no error code"}.`,
+        );
+      } finally {
+        diagnosticHandle.close();
+      }
     }
     if (restartAfter.has(actionNumber)) {
       const beforeRestart = application.loadState(campaignId);

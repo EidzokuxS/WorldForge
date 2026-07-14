@@ -1464,7 +1464,8 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - [x] Reach action 10 in `diagnostic-30-glm52-ashglass-reach-d2dcc3f0-r01` and prove an exact full-backend restart checkpoint.
 - [x] Continue the adaptive diagnostic through actions 11–20 from the restored action-10 state.
 - [x] Complete actions 21–30 and the final restart checkpoint, then record the unsealed diagnostic verdict.
-- [ ] Convert accepted findings into focused regressions, rerun Task 16A, then replace the failed 20-action promotion attempt only if the plan still requires a pristine pass.
+- [x] Convert accepted findings into focused regressions and rerun Task 16A after all four root fixes.
+- [ ] Complete the replacement pristine 20-action manual campaign required by Task 17.
 
 Current verdict: automated invariant gate PASS, human promotion gate REVISE. Major findings are multi-minute turn cadence and three inert collective actors with zero plans, schedules, jobs, or proposals. The 30-action diagnosis also owns static opening prose, repeated NPC wording, unchosen follow-up narration, and unsupported vent acoustics.
 
@@ -1523,3 +1524,13 @@ Fresh Lowwater Ledger campaign:
 - The rendered result preserved the same fine, pale, thick crystal layering across clay, stone, wood, and plaster, stated that no visible difference was apparent, and invented no origin or hidden cause. The pristine manual lane now proves input-relevant history, compound movement, person-owned world motion, bounded scheduling, hidden-state visibility, and non-duplicated player movement together.
 - Focused verification after the scheduler repair passes 77/77 across actor scheduling, campaign database migration, world database ownership, turn runtime, and application recovery; backend typecheck passes. Standalone smoke additions remain `0`.
 - Humanizer and deslop review retained the new evidence as direct technical prose; no rewrite or factual compression was needed.
+
+Post-root deterministic promotion gate:
+
+- The first replay rerun exposed one stale fixture contract rather than a production failure. Its Game Master required a pressure handle on action one even though the current visibility contract correctly withholds pressure mechanics until the player earns an observation. The fixture now compares a visible-route intervention against peripheral waiting and no longer claims access to a hidden pressure.
+- The intervention lowers a visible signal gate to `restricted`; the peripheral branch records a local wait event. Their accepted snapshot and opening projection remain identical, their durable outcomes and replay hashes differ, and their pressure states remain identically unmodified. Replay failures now report the stored interrupted stage and error code instead of only the public terminal status.
+- World Review's route test now derives tab labels without assuming one-digit fixture counts and follows the current six-person/five-relation pressure fixture through `Connections 6` to `Mara Venn`; no product component changed.
+- Verification passes: shared build; Campaign World, Campaign Play, and mounted-route backend selection `486/486`; frontend `493/493`; Campaign Play evidence/replay tests `33/33`; backend and frontend typechecks; and the production build.
+- Fresh deterministic bundles pass twice at 10, 30, and 60 completed actions. The 60-action bundle records replay hash `794f6a6e0a082236c1a9ea8755cb1a9d2501df6c270321828073ba903d9e9bc0`, 126 receipts, 918 runtime events, 916 turn events, SQLite `ok`, zero foreign-key violations, and `promotionEligible=true` after 183,713 ms.
+- The gate proves deterministic contracts after the four root fixes. It does not replace the pending human-chosen 20-action GLM 5.2 lane and makes no new prose-quality or long-play claim. Standalone smoke additions remain `0`.
+- Humanizer and deslop review kept the gate note factual and separated deterministic evidence from the pending manual claim.
