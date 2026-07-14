@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   CAMPAIGN_PLAY_LIMITS,
   type CampaignPlayActionContext,
+  type CampaignPlayJournalEntry,
   type CampaignPlayNarration,
   type CampaignPlayNarratorPacket,
   type CampaignPlayTurnAdmissionRequest,
@@ -345,6 +346,80 @@ interface ObservationBindingRow {
   publicEntryJson: string;
 }
 
+interface HistoricalObservationRow extends ObservationBindingRow {
+  observationId: string;
+  worldTimeMinutes: number;
+}
+
+const RELEVANT_HISTORY_LIMIT = 6;
+const historySegmenter = new Intl.Segmenter("und", { granularity: "word" });
+
+function historyTerms(value: string): ReadonlySet<string> {
+  const terms = new Set<string>();
+  for (const part of historySegmenter.segment(value.normalize("NFKC").toLowerCase())) {
+    if (!part.isWordLike) continue;
+    const term = part.segment;
+    if (term.length < 3) continue;
+    terms.add(term);
+    if (term.length >= 7) terms.add(term.slice(0, 5));
+  }
+  return terms;
+}
+
+function relevantPlayerHistory(input: {
+  handle: CampaignPlayDatabaseHandle;
+  mechanicalFrame: CampaignPlayRulebookFrame;
+  human: HumanRow;
+  judgeInput: CampaignPlayJudgeInput;
+}): CampaignPlayJournalEntry[] {
+  const currentLocationId = input.mechanicalFrame.placements.find((placement) =>
+    placement.actorId === input.human.actorId && placement.placementKind === "present")?.locationId;
+  if (!currentLocationId) return [];
+  const rows = input.handle.sqlite.prepare(`SELECT observation_id AS observationId,
+      event_id AS eventId, world_time_minutes AS worldTimeMinutes,
+      public_entry_json AS publicEntryJson
+    FROM campaign_play_observations
+    WHERE campaign_id = ? AND human_actor_id = ? AND source_location_id = ?
+      AND json_extract(public_entry_json, '$.consequence.causalCue') = 'your_action'
+    ORDER BY world_time_minutes, observation_id`).all(
+      input.handle.campaignId,
+      input.human.actorId,
+      currentLocationId,
+    ) as HistoricalObservationRow[];
+  if (rows.length === 0) return [];
+
+  const queryTerms = historyTerms(input.judgeInput.originalText);
+  if (queryTerms.size === 0) return [];
+  const candidates = rows.map((row) => {
+    const entry = campaignPlayJournalEntrySchema.parse(JSON.parse(row.publicEntryJson));
+    return { row, entry, terms: historyTerms(`${entry.title} ${entry.text}`) };
+  });
+  const documentFrequency = new Map<string, number>();
+  for (const term of queryTerms) {
+    documentFrequency.set(term, candidates.filter((candidate) => candidate.terms.has(term)).length);
+  }
+  const discriminatingTerms = [...queryTerms].filter((term) => {
+    const frequency = documentFrequency.get(term) ?? 0;
+    return frequency > 0 && (candidates.length < 4 || frequency * 5 < candidates.length * 4);
+  });
+  if (discriminatingTerms.length === 0) return [];
+  return candidates
+    .map((candidate) => ({
+      ...candidate,
+      score: discriminatingTerms.reduce((total, term) => candidate.terms.has(term)
+        ? total + candidates.length - (documentFrequency.get(term) ?? 0) + 1
+        : total, 0),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score
+      || left.row.worldTimeMinutes - right.row.worldTimeMinutes
+      || left.row.observationId.localeCompare(right.row.observationId))
+    .slice(0, RELEVANT_HISTORY_LIMIT)
+    .sort((left, right) => left.row.worldTimeMinutes - right.row.worldTimeMinutes
+      || left.row.observationId.localeCompare(right.row.observationId))
+    .map((candidate) => candidate.entry);
+}
+
 function runtimeId(domain: string, value: unknown): string {
   return `${domain}:${hashCampaignPlayProjection({ domain, value }).slice(0, 40)}`;
 }
@@ -519,9 +594,10 @@ function buildPublicAuthority(input: {
   narration: CampaignPlayNarration;
   mechanicalFrame: CampaignPlayRulebookFrame;
   human: HumanRow;
+  judgeInput: CampaignPlayJudgeInput;
 }): Pick<CampaignPlayPlayerActionAdmissionFrame,
   "player" | "visibleFacts" | "handleBindings" | "choiceBindings" | "authority"> {
-  const { handle, packet, narration, mechanicalFrame, human } = input;
+  const { handle, packet, narration, mechanicalFrame, human, judgeInput } = input;
   const candidates = candidateBindings(handle, mechanicalFrame);
   const visibleFacts: CampaignPlayJudgeFrame["visibleFacts"] = [];
   const factByHandle = new Map<string, CampaignPlayJudgeFrame["visibleFacts"][number]>();
@@ -570,14 +646,25 @@ function buildPublicAuthority(input: {
     addFact({ handle: available.handle, kind: "choice", summary: suggestion.label });
     return choiceBindingSchema.parse({ ...available, label: suggestion.label });
   });
-  const observations = [...packet.newObservations, ...packet.continuity];
+  const observations = [
+    ...relevantPlayerHistory({ handle, mechanicalFrame, human, judgeInput }),
+    ...packet.newObservations,
+    ...packet.continuity,
+  ];
+  let admittedObservationCount = 0;
   for (const observation of observations) {
-    if (visibleFacts.length >= 40) break;
+    if (
+      visibleFacts.length >= 40
+      || admittedObservationCount >= CAMPAIGN_PLAY_LIMITS.newObservations
+        + CAMPAIGN_PLAY_LIMITS.continuityEntries
+    ) break;
+    if (factByHandle.has(observation.observationHandle)) continue;
     addFact({
       handle: observation.observationHandle,
       kind: "observation",
       summary: `${observation.title}: ${observation.text}`,
     });
+    admittedObservationCount += 1;
   }
   const visibleHandles = new Set(visibleFacts.map((fact) => fact.handle));
   for (const choice of choiceBindings) {
@@ -682,14 +769,15 @@ function buildAdmissionFrame(input: {
   }
   const mechanicalFrame = loadCampaignPlayRulebookFrame(input.handle);
   const human = humanPlayer(input.handle);
+  const judgeInput = resolveJudgeInput(input.request, moment.packet, moment.narration);
   const publicAuthority = buildPublicAuthority({
     handle: input.handle,
     packet: moment.packet,
     narration: moment.narration,
     mechanicalFrame,
     human,
+    judgeInput,
   });
-  const judgeInput = resolveJudgeInput(input.request, moment.packet, moment.narration);
   return playerActionAdmissionFrameSchema.parse({
     campaignId: input.handle.campaignId,
     turnId: input.turnId,
@@ -771,6 +859,7 @@ function currentGameMasterFrame(
     narration: admission.sourceNarration,
     mechanicalFrame: mechanical,
     human: humanPlayer(handle),
+    judgeInput: admission.judgeInput,
   });
   if (
     canonicalizeCampaignPlayProjection(rebuilt) !== canonicalizeCampaignPlayProjection({

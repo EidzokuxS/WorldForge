@@ -448,3 +448,13 @@ Humanizer and deslop review: this checkpoint separates model-contract interrupti
 Final human verdict: FAIL. The implementation phase now has four blocking roots: long-horizon retrieval of player-visible history, compound-action movement settlement, inert collective representation, and scheduler catch-up cadence. Static openings, repeated refusal voice, redundant scene inventory, unchosen follow-up actions, and broad sensory or spatial claims remain prose-quality work after those roots. The successful living-world chains, bounded physical observation, authority denial, and exact restart recovery should be preserved.
 
 Humanizer and deslop review: the final diagnosis leads with observed behavior and measured event counts, separates the one code change from unresolved product failures, and records both good and bad results. It does not prescribe canned NPC voice, hide the unsealed evidence bundle, or turn explicit Resume into an automatic fallback.
+
+#### Long-horizon player history retrieval
+
+The first implementation fix keeps the append-only observation ledger as truth and changes only admission retrieval. Before freezing a player action, Turn Runtime now searches prior `your_action` observations at the player's current location, ranks them against the submitted wording, and admits up to six relevant original journal entries with their existing world-event bindings. These entries take space inside the existing 20-observation authority budget; the Judge context does not grow, and no summary, rewritten fact, hidden retry, or model fallback is introduced.
+
+The focused regression fills both ordinary observation windows, proves that an old location action is absent from `newObservations` and `continuity`, then refers to its distinctive physical detail. The frozen admission contains the original observation handle again and remains within the existing authority limit. Turn Runtime and Campaign Play Application verification passes 40/40, backend typecheck passes, and `git diff --check` passes.
+
+This closes the concrete action-28 loss mechanism. It does not erase the contaminated action-30 negative record from the diagnostic campaign, and it does not count as live promotion until a fresh manual return-to-location sequence proves that Judge, Game Master, and Narrator preserve the old player action in rendered play.
+
+Humanizer and deslop review: this change adds no prompt or player-facing prose. The implementation note distinguishes durable truth, retrieval, and still-pending live proof without claiming that bounded retrieval is unlimited memory.

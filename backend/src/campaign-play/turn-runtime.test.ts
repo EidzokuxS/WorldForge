@@ -518,7 +518,7 @@ function judgeFixture(disposition: Disposition) {
   };
 }
 
-function gameMasterFixture(worldEventCount = 1) {
+function gameMasterFixture(worldEventCount = 1, includeSubmittedText = false) {
   const compiler = createCampaignPlayGameMaster();
   return {
     plan: vi.fn(async (request: Parameters<ReturnType<typeof createCampaignPlayGameMaster>["plan"]>[0]) => {
@@ -539,7 +539,9 @@ function gameMasterFixture(worldEventCount = 1) {
             effects: Array.from({ length: worldEventCount }, (_, index) => ({
               kind: "record_world_event",
               eventClass: "dialogue",
-              summary: worldEventCount === 1
+              summary: includeSubmittedText
+                ? `${request.ruling.normalizedIntent.originalText} (trace ${index + 1}).`
+                : worldEventCount === 1
                 ? "Mara tests the signal keepers' account against the ringing tower."
                 : `Mara tests signal account ${index + 1} against the ringing tower.`,
               affectedHandles: [playerHandle, locationHandle],
@@ -634,13 +636,14 @@ function admissionRequest(
     ? NonNullable<T>
     : never,
   idempotencyKey: string,
+  text = "I ask the signal keeper what changed at the gate.",
 ) {
   return {
     idempotencyKey,
     expectedWorldVersion: state.authority.worldVersion,
     expectedRuntimeRevision: state.authority.runtimeRevision,
     source: "freeform" as const,
-    text: "I ask the signal keeper what changed at the gate.",
+    text,
   };
 }
 
@@ -1435,27 +1438,62 @@ describe("Campaign Play player-action turn runtime", () => {
       handle,
       time,
       judgeFixture("deterministic"),
-      gameMasterFixture(7),
+      gameMasterFixture(7, true),
       { narrator: playerNarratorFixture() },
     );
 
+    const actionTexts = [
+      "Inspect the copper lantern alpha notch",
+      "Inspect the copper lantern beta notch",
+      "Inspect the copper lantern gamma notch",
+    ];
+    let firstObservationHandle: string | null = null;
     for (let index = 0; index < 3; index += 1) {
       const state = createCampaignPlayStateRepository(handle).loadState()!;
       const admission = runtime.admitAction({
-        request: admissionRequest(state, `observation-window-${index + 1}`),
+        request: admissionRequest(
+          state,
+          `observation-window-${index + 1}`,
+          actionTexts[index]!,
+        ),
         submittedAt: time.clock.now(),
       });
       await advanceUntilStage(runtime, time, admission.turnId, "completed");
+      if (index === 0) {
+        const stored = handle.sqlite.prepare(`SELECT observation.public_entry_json AS publicEntryJson
+          FROM campaign_play_observations observation
+          JOIN campaign_play_events event ON event.event_id = observation.event_id
+            AND event.campaign_id = observation.campaign_id
+          WHERE observation.campaign_id = ? AND event.turn_id = ?
+          ORDER BY observation.world_time_minutes, observation.observation_id LIMIT 1`).get(
+            CAMPAIGN_ID,
+            admission.turnId,
+          ) as { publicEntryJson: string };
+        firstObservationHandle = (JSON.parse(stored.publicEntryJson) as {
+          observationHandle: string;
+        }).observationHandle;
+      }
       time.advance();
     }
 
     const state = createCampaignPlayStateRepository(handle).loadState()!;
     const admission = runtime.admitAction({
-      request: admissionRequest(state, "observation-window-next-action"),
+      request: admissionRequest(
+        state,
+        "observation-window-next-action",
+        "Revisit the alpha notch on the copper lantern",
+      ),
       submittedAt: time.clock.now(),
     });
     const frame = loadCampaignPlayPlayerActionAdmissionFrame(runtime.loadTurn(admission.turnId)!);
 
+    expect(firstObservationHandle).not.toBeNull();
+    expect(frame.sourcePacket.newObservations.concat(frame.sourcePacket.continuity)
+      .some((entry) => entry.observationHandle === firstObservationHandle)).toBe(false);
+    expect(frame.visibleFacts).toContainEqual(expect.objectContaining({
+      handle: firstObservationHandle,
+      kind: "observation",
+    }));
     expect(frame.authority.knownWorldEventIds.length).toBeGreaterThan(16);
     expect(frame.authority.knownWorldEventIds.length).toBeLessThanOrEqual(
       CAMPAIGN_PLAY_LIMITS.newObservations + CAMPAIGN_PLAY_LIMITS.continuityEntries,

@@ -1473,3 +1473,11 @@ Checkpoint 10/30: the new lane independently reproduces 84-event, roughly eight-
 Checkpoint 20/30: four- and two-unit travel settle at 64 and 59 events respectively, pointing to scheduler activation rather than distance as the main cadence cost. Paska repeats one refusal pattern after new evidence, while two quarter-hours at Thray-Hold reveal no council participant, schedule, office, or receiver for Torm's real work. Action 17 required one explicit Resume after a strict GLM 5.2 schema failure; no automatic retry or fallback ran. The correctly tagged action-20 restart matches exactly.
 
 Final 30/30 verdict: FAIL. One-unit travel still costs 47 events; compound freeform travel can narrate arrival without settling canonical location; the council remains an empty pressure while person agents move; and the bounded Judge frame eventually denies and overwrites Mara's real actions 2–4. Action-30 restart matches. The bundle remains intentionally unsealed because action 10 used a generic reload evidence stem. Exact clarification prose equality was removed after three valid Narrator objects hit `narration_invalid`; focused verification passes 46/46 plus backend typecheck.
+
+Root-fix progress:
+
+- [x] Retrieve input-relevant, player-authored history from the current location into the frozen Judge authority without exceeding the existing observation budget.
+- [ ] Settle compound freeform movement before resolving the co-located action.
+- [ ] Replace inert collective actor shells with person/job/world-state behavior.
+- [ ] Remove serial actor-replan work from the player's critical-path cadence without hiding world mutation.
+- [ ] Prove all four roots through a fresh manual UI campaign before promotion.
