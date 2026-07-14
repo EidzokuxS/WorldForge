@@ -127,6 +127,8 @@
 - Protected actor continuity owns authorship and the actor's knowledge, but it cannot silently override the player's current visible placement or condition of a prop; require a later visible change.
 - Treat unknowns as output constraints, not prose requirements. Public summaries should lead with concrete evidence and use at most one decision-relevant uncertainty instead of reciting every unsupported interpretation.
 - Keep public aftermath sensory and deduplicated. Do not expose a hidden semantic classification through an observable-trace label, and do not project the same unchanged trace again under a new timestamp.
+- Commit one model-planned local actor action before Opening narration. A location card plus visible cast cannot produce an inciting moment by itself.
+- Judge ordinary contact by whether the exchange can occur, then let the Game Master simulate the reply from protected actor truth. Uncertain willingness or knowledge alone is not a dice check.
 
 ## Evidence Handling
 

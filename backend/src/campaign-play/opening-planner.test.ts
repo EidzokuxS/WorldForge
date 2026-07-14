@@ -346,6 +346,7 @@ function proposalFixture(): CampaignPlayOpeningProposal {
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
         locationId: "location-harbor",
+        openingActorId: "actor-courier",
         supportActorId: "actor-courier",
         pressureId: "pressure-harbor-lock",
         routeId: "route-harbor-reef",
@@ -357,7 +358,12 @@ function proposalFixture(): CampaignPlayOpeningProposal {
         "goal-keeper-map",
         ["goal-keeper-map", "goal-keeper-ledger"],
       ),
-      actorPlan("actor-courier", "goal-courier-deliver", ["goal-courier-deliver"]),
+      actorPlan(
+        "actor-courier",
+        "goal-courier-deliver",
+        ["goal-courier-deliver"],
+        [{ kind: "location", id: "location-harbor" }],
+      ),
       actorPlan(
         "actor-bell-tender",
         "goal-bells-explain",
@@ -446,6 +452,8 @@ describe("Campaign Play opening planner", () => {
       plan.actorId === "actor-council")).toBe(true);
     expect(first.artifact.actorSchedules.find((schedule) =>
       schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
+    expect(first.artifact.actorSchedules.find((schedule) =>
+      schedule.actorId === "actor-courier")?.nextActAtWorldTimeMinutes).toBe(0);
     expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(3);
     expect(first.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-explain");
     expect(first.artifact.exposureSeed.observableTrace).toBe(
@@ -500,6 +508,20 @@ describe("Campaign Play opening planner", () => {
         : placement
     );
     const proposal = proposalFixture();
+    proposal.scene.candidateId = deriveCampaignPlayOpeningSceneCandidateId({
+      locationId: "location-harbor",
+      openingActorId: "actor-background",
+      supportActorId: "actor-courier",
+      pressureId: "pressure-harbor-lock",
+      routeId: "route-harbor-reef",
+    });
+    const openingPlan = proposal.actorPlans.find((plan) =>
+      plan.actorId === "actor-background"
+    )!;
+    openingPlan.steps[0]!.intent.targets.push({
+      kind: "location",
+      id: "location-harbor",
+    });
     const courierPlan = proposal.actorPlans.find((plan) => plan.actorId === "actor-courier")!;
     courierPlan.steps[0]!.intent.targets.push({ kind: "route", id: "route-harbor-reef" });
 
@@ -544,6 +566,19 @@ describe("Campaign Play opening planner", () => {
       frameFixture(),
       chosenConditions,
       proposal,
+    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+  });
+
+  it("requires the selected opening actor to act at the exact start location", () => {
+    const proposal = proposalFixture();
+    const openingPlan = proposal.actorPlans.find((plan) =>
+      plan.actorId === "actor-courier"
+    )!;
+    openingPlan.steps[0]!.intent.targets = openingPlan.steps[0]!.intent.targets
+      .filter((target) => target.kind !== "location");
+
+    expect(() => createCampaignPlayOpeningPlanner().compile(
+      frameFixture(), chosenConditions, proposal,
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
@@ -658,11 +693,26 @@ describe("Campaign Play opening planner", () => {
       placement.actorId === "actor-courier"
     )!;
     courierPlacement.locationId = "location-harbor-tower";
+    const proposal = proposalFixture();
+    proposal.scene.candidateId = deriveCampaignPlayOpeningSceneCandidateId({
+      locationId: "location-harbor",
+      openingActorId: "actor-background",
+      supportActorId: "actor-courier",
+      pressureId: "pressure-harbor-lock",
+      routeId: "route-harbor-reef",
+    });
+    const openingPlan = proposal.actorPlans.find((plan) =>
+      plan.actorId === "actor-background"
+    )!;
+    openingPlan.steps[0]!.intent.targets.push({
+      kind: "location",
+      id: "location-harbor",
+    });
 
     expect(createCampaignPlayOpeningPlanner().compile(
       frameFixture(world),
       chosenConditions,
-      proposalFixture(),
+      proposal,
     ).artifact.narratorFacts.supportActor.id).toBe("actor-courier");
   });
 
@@ -897,7 +947,12 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("hidden category, or inferred function");
     expect(prompt).toContain('"sceneCandidates"');
     expect(prompt).toContain('"candidateId":"opening-scene:');
+    expect(prompt).toContain('"openingActorId":"actor-');
+    expect(prompt).toContain('"openingActorName":');
     expect(prompt).toContain("copy only its candidateId into scene.candidateId");
+    expect(prompt).toContain("openingActorId is the person whose first step creates the immediate local situation");
+    expect(prompt).toContain('{"kind":"location","id":selectedScene.locationId}');
+    expect(prompt).toContain("Do not turn this into a tour of the location");
     expect(prompt).toContain("single actorLocationId differs from selectedScene.locationId");
     expect(prompt).toContain("The compiler uses selectedScene.routeId");
     expect(prompt).toContain("The compiler uses selectedScene.supportActorId");

@@ -242,6 +242,9 @@ describe("Campaign Play Judge", () => {
     expect(sentPrompt).toContain("uncertainty.kind must be check");
     expect(sentPrompt).toContain("Outcome tiers never create trust");
     expect(sentPrompt).toContain("cap resultBounds.maximum at limited");
+    expect(sentPrompt).toContain("A contact action that only speaks, asks, listens, greets");
+    expect(sentPrompt).toContain("Do not roll merely because the actor's knowledge, willingness, trust, privacy, or eventual reply is uncertain");
+    expect(sentPrompt).toContain("A plain question claims only that the question is delivered");
     expect(sentPrompt).toContain("ACTOR_CONTINUITY outranks any conflicting earlier dialogue");
     expect(sentPrompt).toContain("movementRouteHandle is a separate mechanical decision");
     expect(sentPrompt).toContain("compound requests such as travel then contact");

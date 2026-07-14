@@ -32,6 +32,8 @@ function promptData(
           value.id === candidate.locationId)!;
         const support = frame.acceptedWorld.actors.find((value) =>
           value.id === candidate.supportActorId)!;
+        const openingActor = frame.acceptedWorld.actors.find((value) =>
+          value.id === candidate.openingActorId)!;
         const pressure = frame.acceptedWorld.pressures.find((value) =>
           value.id === candidate.pressureId)!;
         const route = frame.acceptedWorld.routes.find((value) =>
@@ -42,6 +44,8 @@ function promptData(
           ...candidate,
           locationName: location.name,
           locationDescription: location.description,
+          openingActorName: openingActor.name,
+          openingActorSummary: openingActor.summary,
           supportActorName: support.name,
           supportActorSummary: support.summary,
           pressureName: pressure.name,
@@ -80,9 +84,11 @@ END_OPENING_DATA
 
 Return one object matching the supplied schema.
 
-Choose one complete entry from openingConstraints.sceneCandidates and copy only its candidateId into scene.candidateId. The selected entry already binds a grounded location, a visibly present support person, a local pressure, and a directed route. Do not combine fields from different entries. With chosen starting conditions, copy the role, arrival mode, and immediate situation exactly. With delegated conditions, write all three values to suit the selected scene.
+Choose one complete entry from openingConstraints.sceneCandidates and copy only its candidateId into scene.candidateId. The selected entry already binds a grounded location, one person present in that exact place to begin the scene, a support person in the opening area, a local pressure, and a directed route. Do not combine fields from different entries. With chosen starting conditions, copy the role, arrival mode, and immediate situation exactly. With delegated conditions, write all three values to suit the selected scene.
 
 Create actorPlans with exactly openingConstraints.plannedActors.length items. Include every actorId listed there exactly once and no other actorId. Every listed person receives a plan regardless of role. Each actor proposal selects one active goal as primary and gives that person exactly one concrete next step. Actor replanning owns later steps after the world changes. For the step, write observableTrace as one concrete sensory result that could remain at the action location for another person to discover. State only visible or audible evidence. Describe material, shape, placement, sound, motion, or literal writing; do not label the trace by an administrative meaning, hidden category, or inferred function that a witness could not perceive from the trace itself. Do not name the acting person, reveal a goal or motive, assert an unseen cause, or address the player. Other active goals remain available for later replanning. Copy all actor, goal, location, route, relation, and pressure IDs character-for-character from OPENING_DATA. Invent no IDs.
+
+The selected scene's openingActorId is the person whose first step creates the immediate local situation. That actor's first-step targets must include exactly {"kind":"location","id":selectedScene.locationId}. Write a physical action that can happen in that place while the player arrives. Its observableTrace must leave the Narrator a concrete sight or sound to begin with. Do not turn this into a tour of the location or a summary of its description.
 
 Choose the hidden consequence source only from openingConstraints.plannedActors. Copy its actorId from an entry whose single actorLocationId differs from selectedScene.locationId. Call the chosen scene candidate selectedScene. The compiler takes the hidden location, goal, and observable trace from that person's present placement, selected primary goal, and first plan step. Omit locationId, goalId, and observableTrace from hiddenConsequence. Bind the hidden actor's first step to the exposure with one exact target:
 - For route_state, exposure contains exactly channel and triggers. The compiler uses selectedScene.routeId; include {"kind":"route","id":selectedScene.routeId} in the first step targets.

@@ -114,6 +114,7 @@ export type CampaignPlayOpeningStart = z.infer<typeof campaignPlayOpeningStartSc
 export interface CampaignPlayOpeningSceneCandidate {
   candidateId: string;
   locationId: string;
+  openingActorId: string;
   supportActorId: string;
   pressureId: string;
   routeId: string;
@@ -567,6 +568,12 @@ export function buildCampaignPlayOpeningSceneCandidates(
       ))
     .sort((left, right) => compareText(left.id, right.id));
   const candidatesByLocation = locations.map((location) => {
+    const openingActors = world.actors
+      .filter((actor) =>
+        actor.kind === "person"
+        && actor.controller === "agent"
+        && actorLocations(world, actor.id).includes(location.id))
+      .sort((left, right) => compareText(left.id, right.id));
     const supports = world.actors
       .filter((actor) =>
         actor.kind === "person"
@@ -583,19 +590,22 @@ export function buildCampaignPlayOpeningSceneCandidates(
         && world.locations.some((candidate) => candidate.id === route.toLocationId))
       .sort((left, right) => compareText(left.id, right.id));
     const candidates: CampaignPlayOpeningSceneCandidate[] = [];
-    for (const support of supports) {
-      for (const pressure of pressures) {
-        for (const route of routes) {
-          const identity = {
-            locationId: location.id,
-            supportActorId: support.id,
-            pressureId: pressure.id,
-            routeId: route.id,
-          };
-          candidates.push({
-            candidateId: deriveCampaignPlayOpeningSceneCandidateId(identity),
-            ...identity,
-          });
+    for (const openingActor of openingActors) {
+      for (const support of supports) {
+        for (const pressure of pressures) {
+          for (const route of routes) {
+            const identity = {
+              locationId: location.id,
+              openingActorId: openingActor.id,
+              supportActorId: support.id,
+              pressureId: pressure.id,
+              routeId: route.id,
+            };
+            candidates.push({
+              candidateId: deriveCampaignPlayOpeningSceneCandidateId(identity),
+              ...identity,
+            });
+          }
         }
       }
     }
@@ -665,6 +675,8 @@ function intentTargetKeys(intent: CampaignPlayActorIntent): Set<string> {
 function compilePlans(
   frame: CampaignPlayOpeningFrame,
   proposal: CampaignPlayOpeningProposal,
+  openingActorId: string,
+  startLocationId: string,
 ) {
   const world = frame.acceptedWorld;
   const actors = eligibleActors(world);
@@ -699,6 +711,12 @@ function compilePlans(
         fail("opening_proposal_invalid");
       }
     });
+    if (
+      actor.id === openingActorId
+      && !intentTargetKeys(proposed.steps[0]!.intent).has(`location:${startLocationId}`)
+    ) {
+      fail("opening_proposal_invalid");
+    }
 
     const primaryGoal = goals.find((goal) => goal.id === proposed.primaryGoalId)!;
     const planId = stableId("plan", {
@@ -735,7 +753,10 @@ function compilePlans(
       campaignId: frame.campaignId,
       actorId: actor.id,
       planId,
-      nextActAtWorldTimeMinutes: actor.id === hiddenActorId ? 0 : proposed.cadenceMinutes,
+      nextActAtWorldTimeMinutes:
+        actor.id === hiddenActorId || actor.id === openingActorId
+          ? 0
+          : proposed.cadenceMinutes,
       lastActAtWorldTimeMinutes: null,
       priority: primaryGoal.priority,
       agencyDebt: 0,
@@ -821,7 +842,11 @@ function compileScene(
   startingConditions: CampaignPlayResolvedStartingConditions,
   proposal: CampaignPlayOpeningProposal,
   candidates: readonly CampaignPlayOpeningSceneCandidate[],
-): { start: CampaignPlayOpeningStart; narratorFacts: CampaignPlayOpeningNarratorFacts } {
+): {
+  start: CampaignPlayOpeningStart;
+  openingActorId: string;
+  narratorFacts: CampaignPlayOpeningNarratorFacts;
+} {
   const world = frame.acceptedWorld;
   const scene = candidates.find((candidate) =>
     candidate.candidateId === proposal.scene.candidateId);
@@ -847,6 +872,10 @@ function compileScene(
     value.id === scene.supportActorId
     && value.kind === "person"
     && value.role === "support");
+  const openingActor = world.actors.find((value) =>
+    value.id === scene.openingActorId
+    && value.kind === "person"
+    && value.controller === "agent");
   const pressure = world.pressures.find((value) =>
     value.id === scene.pressureId
     && value.locationIds.includes(start.locationId));
@@ -861,6 +890,8 @@ function compileScene(
     && isActorPresentInOpeningArea(world, support.id, start.locationId);
   if (
     !location
+    || !openingActor
+    || !actorLocations(world, openingActor.id).includes(start.locationId)
     || !support
     || !supportPresent
     || !pressure
@@ -871,6 +902,7 @@ function compileScene(
   }
   return {
     start,
+    openingActorId: openingActor.id,
     narratorFacts: {
       location: { id: location.id, name: location.name, description: location.description },
       player: {
@@ -1070,13 +1102,18 @@ export function createCampaignPlayOpeningPlanner(
       parsedStartingConditions,
     );
     if (sceneCandidates.length === 0) fail("opening_frame_invalid");
-    const { start, narratorFacts } = compileScene(
+    const { start, openingActorId, narratorFacts } = compileScene(
       frame,
       parsedStartingConditions,
       proposal,
       sceneCandidates,
     );
-    const { plans, schedules } = compilePlans(frame, proposal);
+    const { plans, schedules } = compilePlans(
+      frame,
+      proposal,
+      openingActorId,
+      start.locationId,
+    );
     const exposureSeed = compileExposureSeed(frame, proposal, narratorFacts, plans);
     const frameHash = hashCampaignPlayProjection({
       domain: "campaign_play_opening_frame",

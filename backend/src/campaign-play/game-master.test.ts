@@ -241,6 +241,12 @@ describe("Campaign Play Game Master", () => {
     expect(String(options.prompt)).toContain(
       'ACTOR_CONTINUITY=[{"actorHandle":"guard","recentOwnActions":[{"summary":"Oren Tide inspected the passage latch before the traveler arrived.","observableTrace":"Fresh oil marks the passage latch."}]}]',
     );
+    expect(String(options.prompt)).toContain("ACTOR_DIRECTIVES is protected roleplay authority");
+    expect(String(options.prompt)).toContain("write the person's actual spoken reply, silence, gesture, or action");
+    expect(String(options.prompt)).toContain("Do not replace the exchange with audit labels");
+    expect(String(options.prompt)).toContain(
+      'ACTOR_DIRECTIVES=[{"handle":"guard","name":"Oren Tide","summary":"A guard at the northern gate.","traits":["observant"],"tags":["guard"],"conditions":[],"goals":[{"status":"active","priority":4,"objective":"Keep the route orderly.","motivation":"Protect the harbor."}],"relations":[{"direction":"from","counterpartName":"Unknown person","relationType":"association","intensity":1,"summary":"They have just met."}]}]',
+    );
     expect(String(options.prompt)).toContain("PLAYER_MOVEMENT is code-authoritative");
     expect(String(options.prompt)).toContain("put it first in effects");
     expect(String(options.prompt)).toContain("post-effect location");

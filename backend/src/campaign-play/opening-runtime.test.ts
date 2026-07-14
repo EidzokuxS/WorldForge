@@ -174,7 +174,12 @@ function openingProposal(): CampaignPlayOpeningProposal {
           { kind: "location" as const, id: "location-a" },
           { kind: "goal" as const, id: goalId },
         ]
-      : [{ kind: "goal" as const, id: goalId }];
+      : suffix === "c"
+        ? [
+            { kind: "location" as const, id: "location-c" },
+            { kind: "goal" as const, id: goalId },
+          ]
+        : [{ kind: "goal" as const, id: goalId }];
     const intent = {
       kind: "attempt" as const,
       targets,
@@ -203,6 +208,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
         locationId: "location-c",
+        openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
         routeId: "route-c",
@@ -289,6 +295,7 @@ function plannerFixture() {
           proposal.scene = {
             candidateId: deriveCampaignPlayOpeningSceneCandidateId({
               locationId: "location-a",
+              openingActorId: "actor-b",
               supportActorId: "actor-b",
               pressureId: "pressure-a",
               routeId: "route-a",

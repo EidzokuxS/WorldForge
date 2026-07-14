@@ -178,7 +178,12 @@ function openingProposal(): CampaignPlayOpeningProposal {
           { kind: "location" as const, id: "location-a" },
           { kind: "goal" as const, id: goalId },
         ]
-      : [{ kind: "goal" as const, id: goalId }];
+      : suffix === "c"
+        ? [
+            { kind: "location" as const, id: "location-c" },
+            { kind: "goal" as const, id: goalId },
+          ]
+        : [{ kind: "goal" as const, id: goalId }];
     const intent = {
       kind: "attempt" as const,
       targets,
@@ -207,6 +212,7 @@ function openingProposal(): CampaignPlayOpeningProposal {
     scene: {
       candidateId: deriveCampaignPlayOpeningSceneCandidateId({
         locationId: "location-c",
+        openingActorId: "actor-c",
         supportActorId: "actor-c",
         pressureId: "pressure-b",
         routeId: "route-c",
@@ -695,12 +701,14 @@ describe("Campaign Play mounted route", () => {
     const journalResponse = await app.request(`/${CAMPAIGN_ID}/play/journal?cursor=0&limit=20`);
     expect(journalResponse.status).toBe(200);
     const journal = campaignPlayJournalPageSchema.parse(await journalResponse.json());
-    expect(journal.entries).toHaveLength(1);
-    expect(journal.entries[0]).toMatchObject({
-      title: "Your action",
-      text: "Mara tests the signal keepers' account against the ringing tower.",
-      whereOrRoute: "Bell Island",
-    });
+    expect(journal.entries).toHaveLength(2);
+    expect(journal.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Your action",
+        text: "Mara tests the signal keepers' account against the ringing tower.",
+        whereOrRoute: "Bell Island",
+      }),
+    ]));
 
     const handle = openCampaignPlayDatabase(CAMPAIGN_ID);
     try {
