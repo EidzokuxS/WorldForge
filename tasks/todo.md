@@ -19,7 +19,7 @@ Planning review:
 - Accepted Review becomes immutable provenance. Mechanical world truth and operational runtime truth use separate version/hash contracts.
 - Opening is turn zero under the same idempotency, worker fencing, bootstrap/Rulebook, visibility, narration, and recovery boundaries as player actions.
 - The first playable gate proves one custom action, one peripheral wait/leave action, one sourced non-local consequence, and reload before longer runs.
-- Promotion counts completed player actions only: 20-action causal proof, 30-action diagnosis, two fresh plus one zero-turn clone/provenance 60-action human-chosen campaigns, and a 300-action soak. A separate 600-action run gates sustained-longplay wording.
+- Promotion counts completed player actions only: 20-action causal proof, 30-action diagnosis, two accepted-template plus one zero-turn clone/provenance 60-action human-chosen campaigns, and a 300-action soak. A separate 600-action run gates sustained-longplay wording.
 - Final PRE: Sol xhigh architecture aligned in round 4; Terra high gameplay aligned in round 2; Terra medium evidence aligned in round 3. Details: `rpi/campaign-play/plan/pre-review.md`.
 
 ## Current Execution: Campaign Play (2026-07-10)
@@ -58,7 +58,7 @@ Execution board:
 - [x] Task 16A: deterministic integration and promotion gate.
 - [x] Task 16B: first playable slice gate.
 - [x] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
-- [ ] Task 18: two fresh and one clone/provenance pristine 60-turn campaigns.
+- [ ] Task 18: two accepted-template and one clone/provenance pristine 60-turn campaigns.
 - [ ] Task 19: 300-turn long-horizon soak.
 - [ ] Task 20: documentation, independent audit, and handoff.
 

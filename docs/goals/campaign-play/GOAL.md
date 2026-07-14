@@ -22,6 +22,6 @@ Core rules:
 - Unmount `/game` and `/api/chat/*`; keep old gameplay and Campaign Kernel source outside the active import graph.
 - Add no standalone smoke suite. Use the focused regressions, seeded replay, real UI campaigns, and soak defined in the plan.
 - Count opening as turn zero and count only completed player actions as gameplay turns.
-- Capture the complete evidence bundle for the first playable slice, 20-turn proof, 30-turn diagnosis, two fresh and one clone/provenance pristine 60-turn campaigns, and 300-turn soak.
+- Capture the complete evidence bundle for the first playable slice, 20-turn proof, 30-turn diagnosis, two accepted-template and one clone/provenance pristine 60-turn campaigns, and 300-turn soak.
 - Reserve sustained-longplay wording for a separate passing 600-turn run.
 - Say `implemented but unproven` when target-perspective evidence is incomplete.
