@@ -56,8 +56,8 @@ Execution board:
 - [x] Task 14B: action, consequence, journal, and recovery surface.
 - [x] Task 15: product handoff and hard cutover.
 - [x] Task 16A: deterministic integration and promotion gate.
-- [ ] Task 16B: first playable slice gate.
-- [ ] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
+- [x] Task 16B: first playable slice gate.
+- [x] Task 17: real opening, custom action, 20-turn proof, and 30-turn diagnosis.
 - [ ] Task 18: two fresh and one clone/provenance pristine 60-turn campaigns.
 - [ ] Task 19: 300-turn long-horizon soak.
 - [ ] Task 20: documentation, independent audit, and handoff.
@@ -1439,7 +1439,7 @@ Goal: prove the first genuinely playable real-provider slice through the rendere
 - [x] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.
 - [x] Reach and identify one sourced non-local actor consequence through the player-visible UI.
 - [x] Reload with identical public scene/version/time/observation state and answer the five player-review questions.
-- [ ] Validate the complete first-playable bundle, repair accepted defects with focused regressions, then commit and push Task 16B.
+- [x] Validate the complete first-playable bundle, repair accepted defects with focused regressions, then commit Task 16B. Push remains an external publication step and is not required for the local gate.
 
 Stop condition: Task 16B remains open until a real-provider bundle and manual prose/living-world review pass. Deterministic or scripted narration cannot close it.
 
@@ -1467,7 +1467,7 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - [x] Convert accepted findings into focused regressions and rerun Task 16A after all four root fixes.
 - [x] Complete the replacement pristine 20-action manual campaign required by Task 17.
 
-Current verdict: automated invariant gate PASS, human promotion gate REVISE. The r04 replacement lane proves person-owned autonomous motion and closes the earlier inert-collective failure, but median action latency remains 216.8 seconds and the accepted prose/trace advisories still require repair before Task 18.
+Current verdict: PASS. The r04 replacement lane proves person-owned autonomous motion and closes the earlier inert-collective failure. The r07 prompt repair, r08 composition proof, and r09 five-action first-playable run close the accepted prose and trace advisories without adding prose rewrites, retries, fallbacks, provider switches, or model timeouts. GLM 5.2 wall-clock latency remains diagnostic evidence rather than a failure condition.
 
 Checkpoint 10/30: the new lane independently reproduces 84-event, roughly eight-minute movement while local inspection turns settle near 18–20 events. A one-hour wait produces useful autonomous motion from Keth and Paska, but the follow-up explanation contradicts the established lake pressure. Restart bytes match exactly.
 
@@ -1620,3 +1620,13 @@ r08 manual composition proof:
 - We chose `Ask Tomi Sunara about the protruding strand near the offerings`. Tomi responds in direct, role-specific speech, refuses interference through words and physical restraint, and reveals no protected goal or hidden cause. The player turn also uses two beats; its final handoff returns to the unresolved strand instead of recapping the UI. Human verdict: `PASS`, with `says evenly` retained as a minor prose advisory.
 - The finalized bundle at `output/playtests/campaign-play/content-proof-glm52-lowwater-ledger-f9b4d600-r08` validates with 1/1 action, exact reload hash `7a06ec5bfcaca46f53706d5d56de8d76d6c121fbc11e77a6f6c245f745e57f26`, replay hash `d8eb5127fc3b1266645122c153bd89c9e62dcade654ee0639ba68386606897ef`, full coverage, SQLite integrity, zero hard failures, and `promotionEligible=true`.
 - Opening planner, both Narrator calls, Judge, and Game Master each accepted one Z.AI Coding Plan GLM 5.2 attempt. The run used no retry, repair, text fallback, provider switch, or timeout. Humanizer/deslop review kept the note specific, preserved the minor advisory, and made no broader prevalence claim from one campaign. Standalone smoke additions remain `0`.
+
+r09 first-playable closure:
+
+- Clean accepted clone `a4d080a4-99e1-47ca-b779-455c0c0aba59` completed Opening and five manually chosen player actions through the rendered Play UI: one non-menu freeform inspection, a peripheral wait, travel from Drowned Gallery through Winch Shaft to Brine Wash, and a second peripheral wait. Every decision was signed before submission and bound to its durable completed turn.
+- The opening exposed only fresh score-marks and corrosion dust. The freeform inspection respected the no-touch constraint, and the first wait returned only locally audible ambient evidence. No turn invented an operator or leaked a protected actor goal.
+- While Sela travelled, Nessa Tallow independently re-lashed the Winch Shaft platform. Sela perceived the fresh tarred-hemp knots, loose cord-ends, and new-rope smell without being told who acted or why. Kael, Tomi, Magda, Piero, Harriet, and Vittorio also advanced work outside her view; their hidden events did not enter her narration.
+- During the final Brine Wash wait, Aldo Brecca acted from agency debt and nailed red-sealed household notices to the ward board. Rulebook accepted the actor command and Narrator exposed only its direct-perception trace. Sela saw the damp notices and household names but not Aldo's seizure rationale. This closes the sourced non-local consequence gate without centring the player.
+- Manual prose verdict: `PASS`. Scenes remained concrete, spatially coherent, and knowledge-bounded. Brief handoff repetition around the freshness or smell of the rope remains advisory only; it does not contradict state, leak hidden facts, or inventory the UI. Humanizer/deslop review kept the verdict direct and preserved that limitation.
+- The final bundle at `output/playtests/campaign-play/first-playable-glm52-lowwater-ledger-a4d080a4-r09` validates with 5/5 actions, exact final reload hash `0e622496b7ca0d5790e603b981e49f49baccec57b812cd15e14403a65e21c9e0`, replay hash `54438ad19d642d8100914f36b4e166c2ece38fe5f7894bf93181c4fb118ad6e9`, full receipt/runtime/turn coverage, zero hard failures, no issues, and `promotionEligible=true`.
+- All model stages used Z.AI Coding Plan `glm-5.2` and accepted attempt 1. No retry, fallback, provider switch, or model timeout ran. Standalone smoke additions remain `0`.
