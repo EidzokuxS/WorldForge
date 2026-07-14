@@ -1436,9 +1436,9 @@ Goal: prove the first genuinely playable real-provider slice through the rendere
 - [x] Add strict metered or subscription billing authority and require the live run config to match resolved provider, model, credentials, and billing before character creation.
 - [x] Configure and verify Z.AI Coding Plan Pro with `glm-5.2` for Generator, Judge, and Storyteller; freeze provider quota and subscription evidence before character creation.
 - [x] Build and accept one fresh eligible Campaign World through normal UI navigation.
-- [ ] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.
-- [ ] Reach and identify one sourced non-local actor consequence through the player-visible UI.
-- [ ] Reload with identical public scene/version/time/observation state and answer the five player-review questions.
+- [x] Complete Character, Opening, one non-menu freeform action, and one peripheral wait/leave action manually.
+- [x] Reach and identify one sourced non-local actor consequence through the player-visible UI.
+- [x] Reload with identical public scene/version/time/observation state and answer the five player-review questions.
 - [ ] Validate the complete first-playable bundle, repair accepted defects with focused regressions, then commit and push Task 16B.
 
 Stop condition: Task 16B remains open until a real-provider bundle and manual prose/living-world review pass. Deterministic or scripted narration cannot close it.
@@ -1465,9 +1465,9 @@ Stop condition: Task 16B remains open until a real-provider bundle and manual pr
 - [x] Continue the adaptive diagnostic through actions 11–20 from the restored action-10 state.
 - [x] Complete actions 21–30 and the final restart checkpoint, then record the unsealed diagnostic verdict.
 - [x] Convert accepted findings into focused regressions and rerun Task 16A after all four root fixes.
-- [ ] Complete the replacement pristine 20-action manual campaign required by Task 17.
+- [x] Complete the replacement pristine 20-action manual campaign required by Task 17.
 
-Current verdict: automated invariant gate PASS, human promotion gate REVISE. Major findings are multi-minute turn cadence and three inert collective actors with zero plans, schedules, jobs, or proposals. The 30-action diagnosis also owns static opening prose, repeated NPC wording, unchosen follow-up narration, and unsupported vent acoustics.
+Current verdict: automated invariant gate PASS, human promotion gate REVISE. The r04 replacement lane proves person-owned autonomous motion and closes the earlier inert-collective failure, but median action latency remains 216.8 seconds and the accepted prose/trace advisories still require repair before Task 18.
 
 Checkpoint 10/30: the new lane independently reproduces 84-event, roughly eight-minute movement while local inspection turns settle near 18–20 events. A one-hour wait produces useful autonomous motion from Keth and Paska, but the follow-up explanation contradicts the established lake pressure. Restart bytes match exactly.
 
@@ -1558,3 +1558,14 @@ Formal r03 manual lane and movement-contract diagnosis:
 - Action 3 attempted the naturally cued trip to the Well Mouths. Two explicit Judge attempts returned schema-valid GLM 5.2 objects but failed at the same semantic condition: `movementRouteHandle` named a visible route yet the proposal did not duplicate that route in `targets`. No world mutation occurred. r03 is diagnostic-only from this boundary; its two completed actions remain evidence, not a 20-action promotion claim.
 - The current contract now treats `movementRouteHandle` as the sole route authority for freeform and compound travel. `targets` retain semantic subjects or destination and no longer need to repeat the route. Judge still rejects non-visible routes, pure `move` without a route, and suggested choices that disagree with their frozen handles. Game Master still validates the route against the player's accepted origin and derives its destination from accepted topology.
 - Humanizer/deslop review kept the revised instruction direct and mechanical. It removes one redundant ID requirement without adding narrative phrasing, compatibility behavior, fallback, or hidden retry. Standalone smoke additions remain `0`.
+
+Formal r04 20-action manual lane:
+
+- Replacement clone `9f88bfcf-b5f6-44e8-8072-51eaeb97ce59` completed Opening and 20 manually chosen player actions through the rendered Play UI from source commit `a88ae1b0b1bdbbf2af5201ab6d254c83de98e28b`. The accepted Lowwater Ledger content hash remained `a6272027f23d32e562eac9c1c562274999e2b5b07f160ab22a4b45cb7b6fb060`.
+- Every model stage used Z.AI Coding Plan `glm-5.2` and accepted on attempt one: one Opening planner, 21 Narrator calls including Opening, 20 Judge calls, 20 Game Master calls, and 10 actor replans. The lane recorded no provider switch, automatic retry, repair, text fallback, timeout, duplicate input, restore, or backend-authored prose.
+- Actions exercised freeform and frozen-choice input, pure and compound movement, local inspection, uncertainty, NPC questioning, waiting, cross-scene memory, refusal, long travel, return-to-changed-location, and follow-up conversation. Remote actor work stayed hidden until Sela reached the affected location; Tomi, Kael, Nessa, Aldo, Harriet, Vittorio, and Yuna retained their own action continuity. Every key and support person settled at least one autonomous job; background work also progressed, subject to the explicit capacity deferrals.
+- Public-state reload checkpoints after actions 1, 5, 10, and 20 matched exactly. The final checkpoint hash is `bfc99edf72cb0083eb1409f142a317dc5ad55ddddbed68f98446351c1059b414`. The finalized replay hash is `60852d1d3c8cd4ebaac1aca28fe60335c91c0f51af0850d72b65e8de2a1eba85`.
+- `output/playtests/campaign-play/causal-20-glm52-lowwater-ledger-9f88bfcf-r04` validates with 20/20 actions, full receipt/runtime-event/turn-event coverage, SQLite integrity, stable provenance, zero hard failures, and `promotionEligible=true`.
+- Human verdict is `REVISE` despite the green machine gate. The lane is causally coherent and meaningfully world-centered, but action latency remains unplayable for the next acceptance tier: median 216.8 seconds, P95 379.7 seconds, maximum 469.5 seconds. Task 18's 12-second P95 threshold cannot be attempted honestly until the serial model-call path changes.
+- Three content advisories remain. Opening mostly restates the location card; action 11 exposes the semantic label `seizure-sigils` before inspection says their meaning is unknown; action 17 projects the same broken-seal aftermath twice with different timestamps. NPC prose is readable and consistent but sometimes explains characterization with phrases such as `tone stays clipped and unrevealing` instead of fully dramatizing it.
+- Humanizer/deslop review kept this note factual, separated machine eligibility from the human verdict, and retained the concrete prose examples needed for repair. Standalone smoke additions remain `0`.

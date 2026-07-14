@@ -126,6 +126,7 @@
 - Keep an autonomous action's private summary and public aftermath internally consistent: an object cannot be removed from a location and simultaneously remain in its discoverable trace.
 - Protected actor continuity owns authorship and the actor's knowledge, but it cannot silently override the player's current visible placement or condition of a prop; require a later visible change.
 - Treat unknowns as output constraints, not prose requirements. Public summaries should lead with concrete evidence and use at most one decision-relevant uncertainty instead of reciting every unsupported interpretation.
+- Keep public aftermath sensory and deduplicated. Do not expose a hidden semantic classification through an observable-trace label, and do not project the same unchanged trace again under a new timestamp.
 
 ## Evidence Handling
 
