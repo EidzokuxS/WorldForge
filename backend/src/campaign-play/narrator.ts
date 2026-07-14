@@ -267,7 +267,7 @@ Match the turn disposition:
 - Impossible: use consequence to show why the visible scene prevents the attempt. Invent no state change.
 - Clarification required: ask the exact clarificationQuestion in the final beat and use action_handoff for it. Leave the world unchanged.
 
-On non-opening turns, use consequence for any visible result or newly observed detail. On openings, the orientation beat may carry that visible result. Use action_handoff for the final beat whenever the scene awaits another action.
+On non-opening turns, use consequence for any visible result or newly observed detail. On openings, the orientation beat may carry that visible result. When availableIntents is not empty, append a separate final beat whose purpose is action_handoff. An opening with available actions therefore has at least two beats: orientation first and action_handoff last.
 
 Treat visibleActors as people in the current place who remain available to encounter. They do not have to stay beside the player or inside the immediate moment. Local gestures and stepping aside do not change placement. Unless newObservations explicitly says that a named actor moved, do not claim that actor traveled to another place or became unavailable. Apply this silently: never explain the continuity rule in the prose.
 

@@ -341,6 +341,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not label the first beat consequence");
     expect(prompt).toContain("On non-opening turns, use consequence");
     expect(prompt).toContain("On openings, the orientation beat may carry that visible result");
+    expect(prompt).toContain("When availableIntents is not empty, append a separate final beat");
+    expect(prompt).toContain("orientation first and action_handoff last");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
