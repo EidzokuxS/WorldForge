@@ -309,6 +309,9 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Return exactly one actionDetails entry");
     expect(prompt).toContain("grounded fragment of three to eight words");
     expect(prompt).toContain("never a sentence or explanation");
+    expect(prompt).toContain("Purposes label a beat's work. Do not emit one beat for every purpose");
+    expect(prompt).toContain("Default to one or two beats");
+    expect(prompt).toContain("Never add a moment beat to repeat sourceMoment");
     expect(prompt).toContain("wait uses a base-form verb phrase");
     expect(prompt).toContain('Address the player as "you"');
     expect(prompt).toContain("never switch to the player character's name");
@@ -318,7 +321,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("sourceMoment is the exact previous accepted player-visible scene");
     expect(prompt).toContain("Every concrete claim in a beat must be supported");
     expect(prompt).toContain("you may not decide that the ring is hollow or solid");
-    expect(prompt).toContain("An action_handoff may combine supported facts but must add no new fact");
+    expect(prompt).toContain("An action_handoff is the unresolved edge of the immediate scene");
+    expect(prompt).toContain("must not recap the scene or inventory visible actors, routes, objects, or available choices");
     expect(prompt).toContain("Support is location-scoped");
     expect(prompt).toContain("remains history at that place");
     expect(prompt).toContain("never transplant its dust, residue, objects, actors, sound, weather, temperature, or lighting");
@@ -331,7 +335,8 @@ describe("Campaign Play narrator", () => {
     expect(prompt).toContain("Do not enumerate every unsupported alternative");
     expect(prompt).toContain("Show a person's reserve, refusal, or impatience");
     expect(prompt).toContain('Do not editorialize that a tone is "unrevealing"');
-    expect(prompt).toContain("do not paraphrase its description as a standalone tour");
+    expect(prompt).toContain("put it in the first beat with only the location detail needed to understand it");
+    expect(prompt).toContain("Do not delay that change behind a tour of the setting");
     expect(prompt).toContain("Apply this silently");
     expect(prompt).toContain("Do not summarize the world");
     expect(prompt).toContain('"name":"Mara Venn"');
