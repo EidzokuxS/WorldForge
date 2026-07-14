@@ -211,11 +211,9 @@ function openingProposal(): CampaignPlayOpeningProposal {
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",
-      locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
       exposure: {
         channel: "local_aftermath",
-        locationId: "location-a",
         validUntilWorldTimeMinutes: 4,
       },
     },
@@ -302,11 +300,9 @@ function plannerFixture() {
             "A fresh warning notation contradicts the clear horizon.";
           proposal.hiddenConsequence = {
             actorId: "actor-c",
-            locationId: "location-c",
             summary: "The bell tender changes which warning reaches the harbor.",
             exposure: {
               channel: "local_aftermath",
-              locationId: "location-c",
               validUntilWorldTimeMinutes: 5,
             },
           };

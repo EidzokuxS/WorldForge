@@ -176,11 +176,9 @@ function openingProposal(): CampaignPlayOpeningProposal {
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",
-      locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
       exposure: {
         channel: "local_aftermath",
-        locationId: "location-a",
         validUntilWorldTimeMinutes: 4,
       },
     },
@@ -894,10 +892,16 @@ describe("Campaign Play visibility service", () => {
     const seed: CampaignPlayOpeningExposureSeed = {
       sourceActorId: proposal.hiddenConsequence.actorId,
       sourceGoalId: sourcePlan.primaryGoalId,
-      sourceLocationId: proposal.hiddenConsequence.locationId,
+      sourceLocationId: "location-a",
       summary: proposal.hiddenConsequence.summary,
       observableTrace: sourcePlan.steps[0]!.observableTrace,
-      predicate: structuredClone(proposal.hiddenConsequence.exposure),
+      predicate: {
+        channel: "local_aftermath",
+        locationId: "location-a",
+        validUntilWorldTimeMinutes: proposal.hiddenConsequence.exposure.channel === "local_aftermath"
+          ? proposal.hiddenConsequence.exposure.validUntilWorldTimeMinutes
+          : 4,
+      },
       discoverableWithinPlayerActions: 2,
     };
     const matching = {

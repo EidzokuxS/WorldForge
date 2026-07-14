@@ -222,11 +222,9 @@ function openingProposal(): CampaignPlayOpeningProposal {
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",
-      locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
       exposure: {
         channel: "local_aftermath",
-        locationId: "location-a",
         validUntilWorldTimeMinutes: 4,
       },
     },

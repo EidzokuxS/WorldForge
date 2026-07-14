@@ -52,12 +52,10 @@ const boundedText = (maximum: number) => z.string().min(1).max(maximum)
 const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
   z.object({
     channel: z.literal("local_aftermath"),
-    locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     validUntilWorldTimeMinutes: z.number().int().safe().min(0),
   }).strict(),
   z.object({
     channel: z.literal("route_state"),
-    routeId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     triggers: z.array(z.enum(["inspect", "attempt", "traverse"]))
       .min(1)
       .max(3)
@@ -65,7 +63,6 @@ const openingHiddenExposurePredicateSchema = z.discriminatedUnion("channel", [
   }).strict(),
   z.object({
     channel: z.literal("witness_report"),
-    witnessActorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
   }).strict(),
 ]);
 
@@ -97,7 +94,6 @@ export const campaignPlayOpeningProposalSchema = z.object({
     .max(OPENING_MAX_ELIGIBLE_ACTORS),
   hiddenConsequence: z.object({
     actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
     exposure: openingHiddenExposurePredicateSchema,
   }).strict(),
@@ -910,7 +906,7 @@ function compileExposureSeed(
   const actor = world.actors.find((value) =>
     value.id === hidden.actorId && value.controller === "agent" && value.kind === "person");
   const locationIds = actor ? actorLocations(world, actor.id) : [];
-  const locationId = hidden.locationId;
+  const locationId = locationIds.length === 1 ? locationIds[0]! : "";
   const plan = plans.find((value) => value.actorId === hidden.actorId);
   const firstStep = plan?.steps[0];
   const goal = plan
@@ -924,7 +920,7 @@ function compileExposureSeed(
     || !goal
     || !plan
     || !firstStep
-    || !locationIds.includes(locationId)
+    || locationIds.length !== 1
     || locationId === narratorFacts.location.id
   ) {
     fail("opening_proposal_invalid");
@@ -935,30 +931,30 @@ function compileExposureSeed(
   }
   const firstStepTargets = intentTargetKeys(firstStep.intent);
   let discoverableWithinPlayerActions: number;
+  let predicate: CampaignPlayExposurePredicate;
   switch (hidden.exposure.channel) {
     case "route_state": {
-      if (
-        hidden.exposure.routeId !== narratorFacts.route.id
-        || !firstStepTargets.has(`route:${hidden.exposure.routeId}`)
-      ) fail("opening_proposal_invalid");
+      const routeId = narratorFacts.route.id;
+      if (!firstStepTargets.has(`route:${routeId}`)) fail("opening_proposal_invalid");
+      predicate = {
+        channel: "route_state",
+        routeId,
+        triggers: hidden.exposure.triggers,
+      };
       discoverableWithinPlayerActions = 2;
       break;
     }
     case "witness_report": {
-      if (
-        hidden.exposure.witnessActorId !== narratorFacts.supportActor.id
-        || !firstStepTargets.has(`actor:${hidden.exposure.witnessActorId}`)
-      ) {
+      const witnessActorId = narratorFacts.supportActor.id;
+      if (!firstStepTargets.has(`actor:${witnessActorId}`)) {
         fail("opening_proposal_invalid");
       }
+      predicate = { channel: "witness_report", witnessActorId };
       discoverableWithinPlayerActions = 2;
       break;
     }
     case "local_aftermath": {
-      if (
-        hidden.exposure.locationId !== locationId
-        || !firstStepTargets.has(`location:${locationId}`)
-      ) fail("opening_proposal_invalid");
+      if (!firstStepTargets.has(`location:${locationId}`)) fail("opening_proposal_invalid");
       const distance = shortestDirectedDistance(world, narratorFacts.location.id, locationId);
       const travelMinutes = shortestDirectedTravelMinutes(
         world,
@@ -970,6 +966,11 @@ function compileExposureSeed(
         || travelMinutes === null
         || hidden.exposure.validUntilWorldTimeMinutes < travelMinutes
       ) fail("opening_proposal_invalid");
+      predicate = {
+        channel: "local_aftermath",
+        locationId,
+        validUntilWorldTimeMinutes: hidden.exposure.validUntilWorldTimeMinutes,
+      };
       discoverableWithinPlayerActions = 1 + distance;
       break;
     }
@@ -983,7 +984,7 @@ function compileExposureSeed(
     sourceLocationId: locationId,
     summary: hidden.summary,
     observableTrace,
-    predicate: structuredClone(hidden.exposure),
+    predicate,
     discoverableWithinPlayerActions,
   };
 }

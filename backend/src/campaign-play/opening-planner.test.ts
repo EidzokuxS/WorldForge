@@ -371,11 +371,9 @@ function proposalFixture(): CampaignPlayOpeningProposal {
     ],
     hiddenConsequence: {
       actorId: "actor-bell-tender",
-      locationId: "location-bells",
       summary: "A false storm signal changes how Bell Island receives travelers.",
       exposure: {
         channel: "local_aftermath",
-        locationId: "location-bells",
         validUntilWorldTimeMinutes: 720,
       },
     },
@@ -690,6 +688,7 @@ describe("Campaign Play opening planner", () => {
       ...fixture,
       hiddenConsequence: {
         ...fixture.hiddenConsequence,
+        locationId: "location-bells",
         goalId: fixture.actorPlans[2]!.primaryGoalId,
         observableTrace: fixture.actorPlans[2]!.steps[0]!.observableTrace,
       },
@@ -779,7 +778,6 @@ describe("Campaign Play opening planner", () => {
     );
     proposal.hiddenConsequence.exposure = {
       channel: "route_state",
-      routeId: "route-harbor-reef",
       triggers: ["inspect", "attempt", "traverse"],
     };
     const result = createCampaignPlayOpeningPlanner().compile(
@@ -799,7 +797,6 @@ describe("Campaign Play opening planner", () => {
     );
     proposal.hiddenConsequence.exposure = {
       channel: "witness_report",
-      witnessActorId: "actor-courier",
     };
     const result = createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
@@ -899,16 +896,15 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain('"sceneCandidates"');
     expect(prompt).toContain('"candidateId":"opening-scene:');
     expect(prompt).toContain("copy only its candidateId into scene.candidateId");
-    expect(prompt).toContain("The hidden location must differ from selectedScene.locationId");
-    expect(prompt).toContain("Set routeId to selectedScene.routeId");
-    expect(prompt).toContain("Set witnessActorId to selectedScene.supportActorId");
-    expect(prompt).toContain("Set locationId to hiddenConsequence.locationId");
-    expect(prompt).toContain("The compiler takes the hidden goal and observable trace");
-    expect(prompt).toContain("route_state, exposure contains exactly channel, routeId, and triggers");
-    expect(prompt).toContain("witness_report, exposure contains exactly channel and witnessActorId");
-    expect(prompt).toContain("local_aftermath, exposure contains exactly channel, locationId, and validUntilWorldTimeMinutes");
+    expect(prompt).toContain("single actorLocationId differs from selectedScene.locationId");
+    expect(prompt).toContain("The compiler uses selectedScene.routeId");
+    expect(prompt).toContain("The compiler uses selectedScene.supportActorId");
+    expect(prompt).toContain("The compiler takes the hidden location, goal, and observable trace");
+    expect(prompt).toContain("route_state, exposure contains exactly channel and triggers");
+    expect(prompt).toContain("witness_report, exposure contains exactly channel");
+    expect(prompt).toContain("local_aftermath, exposure contains exactly channel and validUntilWorldTimeMinutes");
     expect(prompt).toContain("Do not add validUntilWorldTimeMinutes to route_state or witness_report");
-    expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
+    expect(prompt).toContain('{"kind":"location","id":the hidden actor\'s single actorLocationId}');
     expect(prompt).toContain("The compiler uses that step's observableTrace as concrete evidence");
     expect(prompt).toContain("Do not name the hidden actor");
   });
