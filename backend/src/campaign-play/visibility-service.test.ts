@@ -819,6 +819,8 @@ describe("Campaign Play visibility service", () => {
     expect(result.packet.currentLocation.name).toBe("North Harbor");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
     expect(result.packet.visiblePressures).toEqual([]);
+    expect(result.packet.availableIntents.some((intent) => intent.kind === "attempt"))
+      .toBe(false);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
       .toHaveLength(5);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
@@ -1004,6 +1006,7 @@ describe("Campaign Play visibility service", () => {
     const intents = availableIntents(
       fixture.handle,
       "turn-route-guidance",
+      null,
       scene,
       "actor-player",
       syntheticOpeningSeed,
@@ -1014,6 +1017,71 @@ describe("Campaign Play visibility service", () => {
       route.handle === move?.targets[0]?.handle)?.destinationName;
     expect(destination).toBe("North Harbor");
     expect(destination).not.toBe("Aardvark Detour");
+
+    const actionContext = {
+      submittedText: "I follow the immediate work.",
+      intentKind: "attempt" as const,
+      disposition: "deterministic" as const,
+      result: "success" as const,
+      clarificationQuestion: null,
+    };
+    const continuation = availableIntents(
+      fixture.handle,
+      "turn-commitment-continuation",
+      actionContext,
+      scene,
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    expect(continuation.map((intent) => intent.kind)).toEqual([
+      "observe",
+      "attempt",
+      "move",
+      "wait",
+    ]);
+    expect(continuation.find((intent) => intent.kind === "attempt")?.targets).toEqual([{
+      handle: scene.currentLocation.handle,
+      kind: "location",
+    }]);
+
+    const withActor = availableIntents(
+      fixture.handle,
+      "turn-commitment-with-actor",
+      actionContext,
+      {
+        ...scene,
+        visibleActors: [{
+          handle: deriveCampaignPlayPublicHandle("actor", CAMPAIGN_ID, "actor-c"),
+          name: "Mara Venn",
+          monogram: "MV",
+          descriptor: "Person nearby",
+          accent: "slate",
+        }],
+      },
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    expect(withActor).toHaveLength(4);
+    expect(withActor.map((intent) => intent.kind)).toEqual([
+      "observe",
+      "attempt",
+      "move",
+      "contact",
+    ]);
+
+    const clarification = availableIntents(
+      fixture.handle,
+      "turn-clarification",
+      { ...actionContext, disposition: "clarification_required", result: "no_effect",
+        clarificationQuestion: "Which lashing do you mean?" },
+      scene,
+      "actor-player",
+      syntheticOpeningSeed,
+      1,
+    );
+    expect(clarification.some((intent) => intent.kind === "attempt")).toBe(false);
   });
 
   it("keeps route state protected when the committed interaction misses its trigger", () => {

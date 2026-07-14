@@ -709,7 +709,7 @@ export function campaignPlaySuggestedActionLabelPrefix(
   switch (intent.kind) {
     case "observe": return "Examine ";
     case "wait": return "Wait and ";
-    case "attempt": return "Try ";
+    case "attempt": return "Try to ";
     case "move": {
       const routeHandle = intent.targets.find((target) => target.kind === "route")?.handle;
       const route = packet.visibleRoutes.find((candidate) => candidate.handle === routeHandle);

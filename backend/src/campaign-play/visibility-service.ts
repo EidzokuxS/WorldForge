@@ -815,6 +815,7 @@ function visibleScene(
 export function availableIntents(
   handle: CampaignPlayDatabaseHandle,
   turnId: string,
+  actionContext: CampaignPlayActionContext | null,
   scene: ReturnType<typeof visibleScene>,
   humanActorId: string,
   openingExposureSeed: CampaignPlayOpeningExposureSeed,
@@ -827,6 +828,14 @@ export function availableIntents(
     kind: "observe",
     targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
   }];
+  if (actionContext !== null && actionContext.disposition !== "clarification_required") {
+    intents.push({
+      handle: publicHandle("choice", campaignId, `${turnId}:attempt`),
+      label: "Try the immediate next step",
+      kind: "attempt",
+      targets: [{ handle: scene.currentLocation.handle, kind: "location" }],
+    });
+  }
   const route = preferredOpeningExposureRoute(
     handle,
     scene,
@@ -1209,6 +1218,7 @@ export function createCampaignPlayVisibilityService(
         availableIntents: availableIntents(
           handle,
           turn.turnId,
+          actionContext,
           scene,
           human.id,
           openingExposureSeed,

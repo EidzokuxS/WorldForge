@@ -1,6 +1,6 @@
 # Task 19: contextual player actions
 
-Status: implemented and verified through a rendered diagnostic campaign.
+Status: implemented and verified through rendered GLM 5.2 playtests.
 
 ## Player-facing outcome
 
@@ -40,6 +40,24 @@ Prose verdict: the opening is atmospheric and actionable without making Wren imp
 
 Humanizer/deslop verdict: prompt instructions and code-owned label prefixes are concise and domain-specific. The first wait detail exposed a real grammar defect; the per-intent grammar revision fixed it on the next live narration. No additional rewrite was needed.
 
+## Repair contract: continue the current commitment
+
+The `Lowwater Ledger` possession playtest exposed a repeated player-facing failure. After Sorel signed a repair contract, received tools, failed a wrap, received the proper chafe guard, and passed inspection, the suggested actions continued to offer observation, one route, the first visible actor, and waiting. None could represent the immediate next step, so every meaningful continuation required freeform input.
+
+Outcome: after an ordinary actionable player turn, the frozen choice set contains one code-owned `attempt` at the current location, allowing Narrator to phrase a grounded continuation from the public packet.
+
+Acceptance criteria:
+
+1. A non-opening, non-clarification actionable turn publishes one `attempt` intent targeting the current visible location. Opening choices remain unchanged, clarification does not offer a competing attempt, handles and targets remain code-owned, and the set stays within four choices. This is required by the player's stated need for useful choose-your-own-adventure actions and preserves the affected frozen-choice contract.
+2. Narrator supplies only the bounded attempt detail already permitted by the current contract. The persisted label remains Judge's exact `originalText`, while the frozen `attempt` kind and location target remain authoritative. No prose parser, target reinterpretation, fallback, retry, or backend-authored outcome is added. This preserves the existing admission and model-authorship boundaries.
+3. In a rendered GLM 5.2 disposable-clone playtest, an immediate public commitment produces a suggested attempt that a real player can select to continue that commitment. This is the user-visible evidence the live failure requires.
+
+Non-goals: persistent quests, a player-goal table, semantic commitment extraction, inventory-condition repair, payment recovery, UI redesign, background-actor goals, legacy compatibility, or generic suggestion ranking.
+
+Architecture is unchanged. Visibility remains the owner of available intent kinds, handles, and targets; Narrator remains the owner of contextual action detail. The minimal change adds the missing attempt slot from already-frozen action disposition and current-location authority. When all five generic affordances are available, wait yields its slot to the more immediate attempt; freeform waiting remains available.
+
+Validation budget: focused visibility, narrator-contract, and turn-runtime tests; shared/backend typechecks only if the signature change reaches those surfaces; one short rendered GLM 5.2 disposable-clone playtest; at most one in-scope repair and no smoke or full-suite gate.
+
 ## Contract verification
 
 - Narrator tests cover aligned detail count, prompt constraints, and contextual label compilation.
@@ -47,3 +65,22 @@ Humanizer/deslop verdict: prompt instructions and code-owned label prefixes are 
 - Turn-runtime tests cover persistence of the rendered label while retaining the frozen mechanic.
 - Opening Planner and Judge tests cover the explicit prompt constraints discovered in live play.
 - Mounted route integration exercises opening and action narration fixtures under the new contract.
+
+## Commitment repair implementation
+
+Visibility now adds one current-location `attempt` after an actionable player turn. It does not add that intent to openings or clarification turns. Choice order remains observe, attempt, move, contact, wait, capped at four; wait yields when the other four affordances exist. The frozen handle, `attempt` kind, and location target remain mechanics-owned, while Narrator supplies only the bounded action detail.
+
+The first rendered clean clone, campaign `e7802029-13a4-4e56-9abd-96fb01a62aec`, reached a useful opening observation but stopped when Narrator's schema-valid output failed semantic compilation with `narration_invalid`. Opening Planner took 179.5 seconds and Narrator took 81.1 seconds. The attempt was not resumed or retried because that pre-existing opening failure is outside this repair.
+
+The user requested reuse of generated worlds, so the focused proof used an isolated copy of the last accepted `Lowwater Ledger` state at world version 36. The copy preserved the campaign ID and protected history hashes; only the admitted, mutation-free interrupted turn and its runtime events were removed, then the runtime head was restored to accepted revision 568. The source campaign was not modified.
+
+Two rendered player actions completed against Z.AI GLM 5.2 without fallback, provider switching, repair parsing, or model retry:
+
+1. Freeform sign-off request completed in 127.3 seconds and advanced world version 36 -> 37. The chief confirmed the wraps, directed Sorel to return the tools and chit, and promised the agreed forty marks. The next frozen choices included `Try stow the tools and chit in the locker`.
+2. Selecting that rendered choice persisted `source = suggested`, the exact choice handle and label as Judge input, and a frozen `attempt` binding targeting the current location. It completed in 117.9 seconds, advanced world version 37 -> 42, removed the chit, marlinspike, binding needle, and remaining cord from Carrying through rulebook changes, and offered the next unresolved step: `Try find the chief up-span for the forty`.
+
+The two consecutive suggestions followed the public commitment instead of resetting to generic observation. The second action also proved that choosing the suggestion drives the same authoritative turn pipeline as freeform input. Prose remained concise, spatially coherent, and aware that inspection had already happened. The repeated forms `Try stow` and `Try find` exposed a task-caused grammar defect in the code-owned prefix. The bounded repair changes that prefix from `Try ` to `Try to `; the model-authored detail and all mechanics remain unchanged.
+
+Humanizer/deslop verdict: `Try to <base-form action>` is ordinary, concise English and preserves the player's direct imperative register. No prompt rewrite, ornamental copy, semantic backend rewrite, or additional prose cleanup was warranted.
+
+Final focused validation: 33 contract tests, 11 Narrator tests, and 5 visibility tests passed (49 total); backend typecheck passed. The earlier full repair validation also passed turn-runtime coverage. No smoke test or full-suite gate was added.

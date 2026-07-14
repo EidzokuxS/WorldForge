@@ -59,6 +59,7 @@ import {
   CAMPAIGN_PLAY_WORLD_EVENT_KIND_VALUES,
   CAMPAIGN_PLAY_WORLD_EVENT_METADATA,
   CampaignPlayContractError,
+  buildCampaignPlaySuggestedActionLabel,
   campaignPlayActorJobSchema,
   campaignPlayActorDueSetSchema,
   campaignPlayActorKnowledgeSchema,
@@ -258,6 +259,15 @@ function narratorPacketFixture(): CampaignPlayNarratorPacket {
       kind: "observe",
       targets: [{ handle: "route_market", kind: "route" }],
     }],
+  };
+}
+
+function attemptIntentFixture() {
+  return {
+    handle: "choice_continue_work",
+    label: "Try the immediate next step",
+    kind: "attempt" as const,
+    targets: [{ handle: "location_bridge", kind: "location" as const }],
   };
 }
 
@@ -1672,6 +1682,14 @@ describe("Campaign Play shared public contracts", () => {
       },
       narratorPacketFixture(),
     )).toThrow(CampaignPlayContractError);
+  });
+
+  it("renders attempt choices as grammatical infinitives", () => {
+    expect(buildCampaignPlaySuggestedActionLabel(
+      narratorPacketFixture(),
+      attemptIntentFixture(),
+      "stow the tools and chit in the locker",
+    )).toBe("Try to stow the tools and chit in the locker");
   });
 
   it("rejects stale mechanical and runtime expectations contextually", () => {
