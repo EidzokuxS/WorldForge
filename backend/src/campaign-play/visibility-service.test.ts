@@ -176,10 +176,8 @@ function openingProposal(): CampaignPlayOpeningProposal {
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",
-      goalId: "goal-b",
       locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
-      observableTrace: "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
       exposure: {
         channel: "local_aftermath",
         locationId: "location-a",
@@ -891,12 +889,14 @@ describe("Campaign Play visibility service", () => {
 
   it("releases the opening observable trace only for its exact actor and earned predicate", () => {
     const proposal = openingProposal();
+    const sourcePlan = proposal.actorPlans.find((plan) =>
+      plan.actorId === proposal.hiddenConsequence.actorId)!;
     const seed: CampaignPlayOpeningExposureSeed = {
       sourceActorId: proposal.hiddenConsequence.actorId,
-      sourceGoalId: proposal.hiddenConsequence.goalId,
+      sourceGoalId: sourcePlan.primaryGoalId,
       sourceLocationId: proposal.hiddenConsequence.locationId,
       summary: proposal.hiddenConsequence.summary,
-      observableTrace: proposal.hiddenConsequence.observableTrace,
+      observableTrace: sourcePlan.steps[0]!.observableTrace,
       predicate: structuredClone(proposal.hiddenConsequence.exposure),
       discoverableWithinPlayerActions: 2,
     };

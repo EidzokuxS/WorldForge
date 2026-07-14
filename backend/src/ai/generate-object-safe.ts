@@ -5,7 +5,7 @@ import {
   type LanguageModel,
 } from "ai";
 import type { ZodType } from "zod";
-import { generateText } from "./raindrop-workshop.js";
+import { generateText, streamText } from "./raindrop-workshop.js";
 import { createLogger } from "../lib/index.js";
 import { extractReasoningText } from "./extract-reasoning-text.js";
 import {
@@ -691,6 +691,55 @@ function toTraceFromGenerateTextResult(
   };
 }
 
+interface ResolvedStreamTextResult {
+  text: string;
+  reasoningText?: string;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+    cachedInputTokens?: number;
+  };
+  response?: {
+    id?: string;
+    modelId?: string;
+    timestamp?: Date;
+    body?: unknown;
+  };
+  providerMetadata?: unknown;
+  finishReason?: string;
+}
+
+function toTraceFromResolvedStreamTextResult(
+  result: ResolvedStreamTextResult,
+  cleanedText: string,
+): SafeGenerateTrace {
+  return {
+    text: result.text,
+    cleanedText,
+    reasoningText: extractReasoningText(result),
+    usage: result.usage
+      ? {
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          totalTokens: result.usage.totalTokens,
+          reasoningTokens: result.usage.reasoningTokens,
+          cachedInputTokens: result.usage.cachedInputTokens,
+        }
+      : undefined,
+    response: {
+      id: result.response?.id,
+      modelId: result.response?.modelId,
+      timestamp: result.response?.timestamp instanceof Date
+        ? result.response.timestamp.toISOString()
+        : undefined,
+    },
+    providerMetadata: result.providerMetadata,
+    finishReason: result.finishReason,
+  };
+}
+
 function formatZodIssues(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string {
   return error.issues.slice(0, 8).map(i =>
     `[${i.path.map(String).join(".")}] ${i.message}`
@@ -872,6 +921,7 @@ async function attemptRepair<T>(
     model: opts.model,
     temperature: 0,
     maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
+    maxRetries: 0,
     timeout: opts.timeout,
     system: "You repair invalid JSON into schema-valid JSON. Return JSON only.",
     prompt: buildRepairPrompt(invalidJson, issues, schemaHint, opts.repairRedactor),
@@ -953,6 +1003,7 @@ function buildBaseCallOpts<T>(opts: SafeGenerateOpts<T>): Record<string, unknown
     model: opts.model,
     temperature: opts.temperature,
     maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
+    maxRetries: 0,
   };
   if (opts.timeout !== undefined) {
     callOpts.timeout = opts.timeout;
@@ -961,6 +1012,12 @@ function buildBaseCallOpts<T>(opts: SafeGenerateOpts<T>): Record<string, unknown
     callOpts.abortSignal = opts.abortSignal;
   }
   return callOpts;
+}
+
+function shouldStreamNativeJson(context: StrategyContext): boolean {
+  return context.metadata?.baseUrlFamily === "api.z.ai"
+    && context.metadata.protocol === "openai-compatible"
+    && context.metadata.transport === "chat-completions";
 }
 
 function applyPromptOptions<T>(
@@ -1227,23 +1284,59 @@ async function attemptNativeJsonGenerate<T>(
   applyPromptOptions(callOpts, opts);
   callOpts.output = Output.json();
 
-  const result = await generateText(
-    callOpts as Parameters<typeof generateText>[0]
-  );
-  const trace = applyStrategyTrace(
-    toTraceFromGenerateTextResult(result, result.text),
-    context,
-    "native_json",
-  );
+  let trace: SafeGenerateTrace;
   let rawOutput: unknown;
-  try {
-    rawOutput = (result as { output?: unknown }).output;
-  } catch (err) {
-    throw new SafeGenerateError(
-      `safeGenerateObject native JSON output was unavailable: ${formatNativeFailureReason(err)}`,
-      trace,
-      "native_output_unavailable",
+  if (shouldStreamNativeJson(context)) {
+    const result = streamText(
+      callOpts as Parameters<typeof streamText>[0]
     );
+    const [text, reasoningText, usage, response, providerMetadata, finishReason] = await Promise.all([
+      result.text,
+      result.reasoningText,
+      result.usage,
+      result.response,
+      result.providerMetadata,
+      result.finishReason,
+    ]);
+    trace = applyStrategyTrace(
+      toTraceFromResolvedStreamTextResult({
+        text,
+        reasoningText,
+        usage,
+        response,
+        providerMetadata,
+        finishReason,
+      }, text),
+      context,
+      "native_json",
+    );
+    try {
+      rawOutput = await result.output;
+    } catch (err) {
+      throw new SafeGenerateError(
+        `safeGenerateObject native JSON output was unavailable: ${formatNativeFailureReason(err)}`,
+        trace,
+        "native_output_unavailable",
+      );
+    }
+  } else {
+    const result = await generateText(
+      callOpts as Parameters<typeof generateText>[0]
+    );
+    trace = applyStrategyTrace(
+      toTraceFromGenerateTextResult(result, result.text),
+      context,
+      "native_json",
+    );
+    try {
+      rawOutput = (result as { output?: unknown }).output;
+    } catch (err) {
+      throw new SafeGenerateError(
+        `safeGenerateObject native JSON output was unavailable: ${formatNativeFailureReason(err)}`,
+        trace,
+        "native_output_unavailable",
+      );
+    }
   }
   const parsed = maybeCoerceToSchema(rawOutput, opts.schema, opts);
   const valid = parseGeneratedWithSchema(parsed, opts, trace);

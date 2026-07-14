@@ -227,10 +227,8 @@ function openingProposal(actorCadenceMinutes = 1): CampaignPlayOpeningProposal {
     actorPlans,
     hiddenConsequence: {
       actorId: "actor-b",
-      goalId: "goal-b",
       locationId: "location-a",
       summary: "A courier changes which ledger reaches the reef.",
-      observableTrace: "Fresh sealing wax and torn binding thread mark a ledger removed in haste.",
       exposure: {
         channel: "local_aftermath",
         locationId: "location-a",

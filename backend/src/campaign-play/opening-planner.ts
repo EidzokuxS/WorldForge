@@ -97,10 +97,8 @@ export const campaignPlayOpeningProposalSchema = z.object({
     .max(OPENING_MAX_ELIGIBLE_ACTORS),
   hiddenConsequence: z.object({
     actorId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
-    goalId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     locationId: boundedLine(CAMPAIGN_PLAY_LIMITS.id),
     summary: boundedText(CAMPAIGN_PLAY_LIMITS.text),
-    observableTrace: boundedText(CAMPAIGN_PLAY_LIMITS.text),
     exposure: openingHiddenExposurePredicateSchema,
   }).strict(),
 }).strict();
@@ -911,26 +909,31 @@ function compileExposureSeed(
   const hidden = proposal.hiddenConsequence;
   const actor = world.actors.find((value) =>
     value.id === hidden.actorId && value.controller === "agent" && value.kind === "person");
-  const goal = world.goals.find((value) =>
-    value.id === hidden.goalId && value.actorId === hidden.actorId && value.status === "active");
   const locationIds = actor ? actorLocations(world, actor.id) : [];
   const locationId = hidden.locationId;
   const plan = plans.find((value) => value.actorId === hidden.actorId);
+  const firstStep = plan?.steps[0];
+  const goal = plan
+    ? world.goals.find((value) =>
+        value.id === plan.goalId
+        && value.actorId === hidden.actorId
+        && value.status === "active")
+    : undefined;
   if (
     !actor
     || !goal
     || !plan
-    || plan.goalId !== goal.id
-    || plan.steps[0]?.observableTrace !== hidden.observableTrace
+    || !firstStep
     || !locationIds.includes(locationId)
     || locationId === narratorFacts.location.id
   ) {
     fail("opening_proposal_invalid");
   }
-  if (hidden.observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
+  const observableTrace = firstStep.observableTrace;
+  if (observableTrace.toLowerCase().includes(actor.name.toLowerCase())) {
     fail("opening_proposal_invalid");
   }
-  const firstStepTargets = intentTargetKeys(plan.steps[0]!.intent);
+  const firstStepTargets = intentTargetKeys(firstStep.intent);
   let discoverableWithinPlayerActions: number;
   switch (hidden.exposure.channel) {
     case "route_state": {
@@ -979,7 +982,7 @@ function compileExposureSeed(
     sourceGoalId: goal.id,
     sourceLocationId: locationId,
     summary: hidden.summary,
-    observableTrace: hidden.observableTrace,
+    observableTrace,
     predicate: structuredClone(hidden.exposure),
     discoverableWithinPlayerActions,
   };

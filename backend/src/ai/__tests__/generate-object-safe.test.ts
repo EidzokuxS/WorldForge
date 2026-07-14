@@ -8,6 +8,18 @@ import {
 } from "../structured-output-capabilities.js";
 
 const mockGenerateText = vi.fn();
+const mockStreamText = vi.fn((...args: unknown[]) => {
+  const result = Promise.resolve(mockGenerateText(...args));
+  return {
+    text: result.then((value) => value.text),
+    reasoningText: result.then((value) => value.reasoningText),
+    usage: result.then((value) => value.usage),
+    response: result.then((value) => value.response),
+    providerMetadata: result.then((value) => value.providerMetadata),
+    finishReason: result.then((value) => value.finishReason),
+    output: result.then((value) => value.output, () => undefined),
+  };
+});
 const mockOutputObject = vi.fn((input: unknown) => ({
   kind: "mock-output-object",
   input,
@@ -31,6 +43,7 @@ class MockNoObjectGeneratedError extends Error {
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mockGenerateText(...args),
+  streamText: (...args: unknown[]) => mockStreamText(...args),
   generateObject: vi.fn(),
   Output: {
     object: (input: unknown) => mockOutputObject(input),
@@ -201,6 +214,7 @@ describe("safeGenerateObject", () => {
       schema: expect.any(Object),
     }));
     expect(mockGenerateText).toHaveBeenCalledWith(expect.objectContaining({
+      maxRetries: 0,
       output: expect.objectContaining({
         kind: "mock-output-object",
       }),
@@ -346,6 +360,7 @@ describe("safeGenerateObject", () => {
     expect(mockOutputJson).toHaveBeenCalledTimes(1);
     expect(mockOutputObject).not.toHaveBeenCalled();
     expect(mockGenerateText).toHaveBeenCalledWith(expect.objectContaining({
+      maxRetries: 0,
       system: expect.stringContaining("valid JSON object"),
       output: expect.objectContaining({
         kind: "mock-output-json",
@@ -385,6 +400,12 @@ describe("safeGenerateObject", () => {
     expect(result.trace.primaryStrategy).toBe("native_json");
     expect(mockOutputJson).toHaveBeenCalledTimes(1);
     expect(mockOutputObject).not.toHaveBeenCalled();
+    expect(mockStreamText).toHaveBeenCalledWith(expect.objectContaining({
+      maxRetries: 0,
+      output: expect.objectContaining({
+        kind: "mock-output-json",
+      }),
+    }));
   });
 
   it("can disable text fallback for strict native JSON call sites", async () => {
@@ -1308,6 +1329,7 @@ describe("safeGenerateObject", () => {
     expect(mockGenerateText).toHaveBeenCalledTimes(2);
     expect(mockGenerateText.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
+        maxRetries: 0,
         temperature: 0,
         timeout: { totalMs: 1234 },
         prompt: expect.stringContaining("Validation errors:"),

@@ -11,6 +11,7 @@ const DEFAULT_LOCAL_DEBUGGER_WRITE_KEY = "worldforge-local-debugger";
 const MAX_EVENT_TEXT_CHARS = 8_000;
 const REDACTED_EVENT_PAYLOAD = "[redacted]";
 type GenerateTextArgs = Parameters<typeof ai.generateText>;
+type StreamTextArgs = Parameters<typeof ai.streamText>;
 
 function envFlagEnabled(value: string | undefined): boolean {
   if (!value) return false;
@@ -135,6 +136,7 @@ const tracedAi = raindropWorkshopClient
   : ai;
 
 const wrappedGenerateText = tracedAi.generateText;
+const wrappedStreamText = tracedAi.streamText;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -167,6 +169,33 @@ function withRaindropTelemetryPrivacy(args: GenerateTextArgs): GenerateTextArgs 
   ] as GenerateTextArgs;
 }
 
+function withRaindropStreamTelemetryPrivacy(args: StreamTextArgs): StreamTextArgs {
+  if (!raindropWorkshopClient || shouldCaptureFullRaindropPayloads()) return args;
+
+  const [options, ...rest] = args;
+  if (!isRecord(options)) return args;
+
+  const existingTelemetry = isRecord(options.experimental_telemetry)
+    ? options.experimental_telemetry
+    : {};
+  const { metadata: _metadata, ...telemetryWithoutMetadata } = existingTelemetry;
+  return [
+    {
+      ...options,
+      experimental_telemetry: {
+        ...telemetryWithoutMetadata,
+        isEnabled: true,
+        recordInputs: false,
+        recordOutputs: false,
+        metadata: {
+          payloadCapture: "redacted",
+        },
+      },
+    },
+    ...rest,
+  ] as StreamTextArgs;
+}
+
 export const generateText: typeof ai.generateText = (async (
   ...args: GenerateTextArgs
 ) => {
@@ -176,6 +205,9 @@ export const generateText: typeof ai.generateText = (async (
   }
   return result;
 }) as typeof ai.generateText;
+
+export const streamText: typeof ai.streamText = ((...args: StreamTextArgs) =>
+  wrappedStreamText(...withRaindropStreamTelemetryPrivacy(args))) as typeof ai.streamText;
 
 export async function flushRaindropWorkshopTelemetry(): Promise<void> {
   if (!raindropWorkshopClient) return;

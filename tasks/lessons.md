@@ -128,6 +128,8 @@
 
 ## Evidence Handling
 
+- When the product contract owns attempt count, set the AI SDK retry count explicitly to zero and test the provider call options; one wrapper attempt must not conceal SDK-level transport retries.
+- Prepare and persist the live evidence session before player bootstrap or opening admission. A manual zero-row check and clone manifest are useful diagnostics, but they do not replace the runner-owned eligibility freeze.
 - Pass the exact `--after-player-action N` marker for every declared restart checkpoint. A generic reload proof cannot be renamed or backfilled into a configured checkpoint later.
 - Preserve evidence that explains current mechanics or accepted behavior; remove raw duplicate logs and generated run debris.
 - Write structurally complete evidence even when a declared budget is exceeded, then fail promotion through validation. A policy failure must not destroy the diagnostic artifact.

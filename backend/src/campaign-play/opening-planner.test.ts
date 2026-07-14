@@ -371,10 +371,8 @@ function proposalFixture(): CampaignPlayOpeningProposal {
     ],
     hiddenConsequence: {
       actorId: "actor-bell-tender",
-      goalId: "goal-bells-explain",
       locationId: "location-bells",
       summary: "A false storm signal changes how Bell Island receives travelers.",
-      observableTrace: "The storm bell's fresh strike pattern conflicts with the clear horizon.",
       exposure: {
         channel: "local_aftermath",
         locationId: "location-bells",
@@ -451,6 +449,10 @@ describe("Campaign Play opening planner", () => {
     expect(first.artifact.actorSchedules.find((schedule) =>
       schedule.actorId === "actor-bell-tender")?.nextActAtWorldTimeMinutes).toBe(0);
     expect(first.artifact.exposureSeed.discoverableWithinPlayerActions).toBe(3);
+    expect(first.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-explain");
+    expect(first.artifact.exposureSeed.observableTrace).toBe(
+      "The storm bell's fresh strike pattern conflicts with the clear horizon.",
+    );
     expect(first.artifact.bootstrapCommands.map((command) => command.kind)).toEqual([
       "initialize_player_placement",
       "initialize_world_time",
@@ -682,6 +684,20 @@ describe("Campaign Play opening planner", () => {
     expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(false);
   });
 
+  it("rejects removed duplicated hidden consequence fields", () => {
+    const fixture = proposalFixture();
+    const proposal = {
+      ...fixture,
+      hiddenConsequence: {
+        ...fixture.hiddenConsequence,
+        goalId: fixture.actorPlans[2]!.primaryGoalId,
+        observableTrace: fixture.actorPlans[2]!.steps[0]!.observableTrace,
+      },
+    };
+
+    expect(campaignPlayOpeningProposalSchema.safeParse(proposal).success).toBe(false);
+  });
+
   it("rejects a hidden consequence without a directed exposure path", () => {
     const world = worldFixture();
     world.routes = world.routes.filter((route) => route.id !== "route-reef-bells");
@@ -703,14 +719,14 @@ describe("Campaign Play opening planner", () => {
 
   it("rejects an observable trace that reveals the hidden actor by name", () => {
     const proposal = proposalFixture();
-    proposal.hiddenConsequence.observableTrace =
+    proposal.actorPlans[2]!.steps[0]!.observableTrace =
       "Sel Bell left a fresh storm notation beside the bell rope.";
     expect(() => createCampaignPlayOpeningPlanner().compile(
       frameFixture(), chosenConditions, proposal,
     )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
   });
 
-  it("rejects a hidden consequence bound to a different goal than its actor plan", () => {
+  it("derives the hidden goal from the selected actor plan", () => {
     const world = worldFixture();
     world.goals.push({
       id: "goal-bells-maintain",
@@ -729,9 +745,10 @@ describe("Campaign Play opening planner", () => {
       [{ kind: "location", id: "location-bells" }],
     );
 
-    expect(() => createCampaignPlayOpeningPlanner().compile(
+    const result = createCampaignPlayOpeningPlanner().compile(
       frameFixture(world), chosenConditions, proposal,
-    )).toThrowError(expect.objectContaining({ code: "opening_proposal_invalid" }));
+    );
+    expect(result.artifact.exposureSeed.sourceGoalId).toBe("goal-bells-maintain");
   });
 
   it("keeps a person's home placement without changing their present plan", () => {
@@ -758,7 +775,7 @@ describe("Campaign Play opening planner", () => {
       "goal-bells-explain",
       ["goal-bells-explain"],
       [{ kind: "route", id: "route-harbor-reef" }],
-      proposal.hiddenConsequence.observableTrace,
+      proposal.actorPlans[2]!.steps[0]!.observableTrace,
     );
     proposal.hiddenConsequence.exposure = {
       channel: "route_state",
@@ -778,7 +795,7 @@ describe("Campaign Play opening planner", () => {
       "goal-bells-explain",
       ["goal-bells-explain"],
       [{ kind: "actor", id: "actor-courier" }],
-      proposal.hiddenConsequence.observableTrace,
+      proposal.actorPlans[2]!.steps[0]!.observableTrace,
     );
     proposal.hiddenConsequence.exposure = {
       channel: "witness_report",
@@ -886,13 +903,13 @@ describe("Campaign Play opening planner", () => {
     expect(prompt).toContain("Set routeId to selectedScene.routeId");
     expect(prompt).toContain("Set witnessActorId to selectedScene.supportActorId");
     expect(prompt).toContain("Set locationId to hiddenConsequence.locationId");
-    expect(prompt).toContain("Set hiddenConsequence.goalId to the primaryGoalId");
+    expect(prompt).toContain("The compiler takes the hidden goal and observable trace");
     expect(prompt).toContain("route_state, exposure contains exactly channel, routeId, and triggers");
     expect(prompt).toContain("witness_report, exposure contains exactly channel and witnessActorId");
     expect(prompt).toContain("local_aftermath, exposure contains exactly channel, locationId, and validUntilWorldTimeMinutes");
     expect(prompt).toContain("Do not add validUntilWorldTimeMinutes to route_state or witness_report");
     expect(prompt).toContain('{"kind":"location","id":hiddenConsequence.locationId}');
-    expect(prompt).toContain("hiddenConsequence.observableTrace");
+    expect(prompt).toContain("The compiler uses that step's observableTrace as concrete evidence");
     expect(prompt).toContain("Do not name the hidden actor");
   });
 

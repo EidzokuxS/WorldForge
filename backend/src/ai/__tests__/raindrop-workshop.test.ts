@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
+  streamText: vi.fn(),
   flush: vi.fn(),
   createRaindropAISDK: vi.fn(),
   wrapOptions: undefined as {
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => mocks.generateText(...args),
+  streamText: (...args: unknown[]) => mocks.streamText(...args),
 }));
 
 vi.mock("@raindrop-ai/ai-sdk", () => ({
@@ -31,6 +33,7 @@ async function importSubject() {
   vi.resetModules();
   mocks.wrapOptions = undefined;
   mocks.generateText.mockResolvedValue({ text: "ok" });
+  mocks.streamText.mockReturnValue({ text: Promise.resolve("ok") });
   mocks.flush.mockResolvedValue(undefined);
   mocks.createRaindropAISDK.mockReturnValue({
     wrap: (module: unknown, options: typeof mocks.wrapOptions) => {
@@ -142,5 +145,28 @@ describe("raindrop Workshop telemetry privacy", () => {
       },
     });
     expect(mocks.flush).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies remote telemetry privacy to streaming calls", async () => {
+    process.env.RAINDROP_WRITE_KEY = "remote-key";
+    const { streamText } = await importSubject();
+
+    streamText({
+      model: "mock-model",
+      prompt: "hidden streaming prompt",
+      experimental_telemetry: {
+        recordInputs: true,
+        recordOutputs: true,
+        metadata: { keep: "metadata" },
+      },
+    } as never);
+
+    const callOptions = mocks.streamText.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(callOptions.experimental_telemetry).toMatchObject({
+      isEnabled: true,
+      recordInputs: false,
+      recordOutputs: false,
+      metadata: { payloadCapture: "redacted" },
+    });
   });
 });
