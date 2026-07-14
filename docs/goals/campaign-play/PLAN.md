@@ -1330,7 +1330,7 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 
 **Parallel:** live lanes run sequentially against fresh campaign IDs.
 
-### Task 18: two accepted-template and one clone/provenance pristine 60-turn campaigns
+### Task 18: one reusable-template, one new-template, and one clone/provenance pristine 60-turn campaign
 
 **Files:** three complete `output/playtests/campaign-play/<run-id>/` bundles, `rpi/campaign-play/implement/18-pristine-acceptance.md`.
 
@@ -1338,17 +1338,18 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 
 **Work:**
 
-1. Materialize two lanes into isolated campaign roots from different accepted clean-world templates: one originally built from premise-only intake and one originally built from edited DNA plus saved research. Verify the reusable-world manifest and file hashes, apply current migrations without changing accepted world content, prove empty character/play/turn tables, then freeze a new lane eligibility manifest before each turn zero. Gameplay acceptance must not pay for world regeneration that has already passed its own acceptance gate.
-2. Create a third lane through the product clone operation from an accepted zero-turn campaign before character bootstrap. Record parent campaign, accepted snapshot/source hashes, clone operation metadata, empty child play tables before bootstrap, fresh child play-state identity, and eligibility manifest; complete the same 60-action policy.
-3. Keep one declared provider/model configuration per lane with zero provider swap, hidden retry, database edit, action resubmission, restore, or checkpoint rewind.
-4. Name one human player for each lane. That human manually chooses and signs every one of the 60 actions from player-visible information. Browser automation may only enter the chosen action and capture evidence; it may not select, rewrite, or substitute the action.
-5. Play actions 1-20 as discovery and goal formation. Follow genuine curiosity, role-play, caution, greed, duty, avoidance, or another player motive; do not choose an action merely to cover a test category. By action 10, record what the player is trying to achieve, what they expect, and which visible evidence supports that intention.
-6. Play actions 21-40 as pursuit and adaptation. Continue, revise, or abandon self-chosen goals in response to consequences. Include return visits when the player has a reason to check what changed, and record whether independent world motion changes the player's plan.
-7. Play actions 41-60 as payoff and continuation. Seek resolution, escalation, or a new commitment without forcing a predetermined ending. At actions 30 and 60, record whether the player wants another turn and why.
-8. Record the observed mix of freeform and suggested actions, movement, contact, observation, waits, refusals, peripheral play, secrecy questions, and return visits. Missing natural use is a discoverability or value finding, not a quota to repair inside a pristine lane. Impossible, ambiguous, adversarial, and systematic secrecy probes belong to a separate disposable diagnostic clone when the pristine run gives insufficient boundary evidence.
-9. Audit world truth every 10 turns and capture player-facing screenshots at 0, 1, 10, 30, and 60.
-10. Score opening grounding, comprehension, prose readability, consequence clarity, agency, actor distinctness, autonomy, continuity, curiosity, and desire to continue independently.
-11. Split each lane into signed human play sessions of at most 10 completed actions. Stop a sitting earlier when the player notices skimming, impatience with prose, memory substitution, or choosing an action merely to advance the protocol. At the next sitting, record what the player remembers before rereading and whether the product supports reorientation.
+1. Materialize Lane A into an isolated campaign root from the current-contract `Lowwater Ledger` clean-world template. Verify the reusable-world manifest and file hashes, apply current migrations without changing accepted world content, prove empty character/play/turn tables, then freeze a new lane eligibility manifest before turn zero.
+2. Build and accept one distinct Lane B world with the current person-only Campaign World contract, using edited DNA plus saved research. Before character bootstrap, snapshot it as a reusable clean-world template, materialize the play lane from that template, and freeze its eligibility manifest. Generate this world once; later playtests reuse the snapshot.
+3. Create Lane C through the product clone operation from an accepted zero-turn current-contract campaign before character bootstrap. Record parent campaign, accepted snapshot/source hashes, clone operation metadata, empty child play tables before bootstrap, fresh child play-state identity, and eligibility manifest; complete the same 60-action policy.
+4. Keep one declared provider/model configuration per lane with zero provider swap, hidden retry, database edit, action resubmission, restore, or checkpoint rewind.
+5. Name one human player for each lane. That human manually chooses and signs every one of the 60 actions from player-visible information. Browser automation may only enter the chosen action and capture evidence; it may not select, rewrite, or substitute the action.
+6. Play actions 1-20 as discovery and goal formation. Follow genuine curiosity, role-play, caution, greed, duty, avoidance, or another player motive; do not choose an action merely to cover a test category. By action 10, record what the player is trying to achieve, what they expect, and which visible evidence supports that intention.
+7. Play actions 21-40 as pursuit and adaptation. Continue, revise, or abandon self-chosen goals in response to consequences. Include return visits when the player has a reason to check what changed, and record whether independent world motion changes the player's plan.
+8. Play actions 41-60 as payoff and continuation. Seek resolution, escalation, or a new commitment without forcing a predetermined ending. At actions 30 and 60, record whether the player wants another turn and why.
+9. Record the observed mix of freeform and suggested actions, movement, contact, observation, waits, refusals, peripheral play, secrecy questions, and return visits. Missing natural use is a discoverability or value finding, not a quota to repair inside a pristine lane. Impossible, ambiguous, adversarial, and systematic secrecy probes belong to a separate disposable diagnostic clone when the pristine run gives insufficient boundary evidence.
+10. Audit world truth every 10 turns and capture player-facing screenshots at 0, 1, 10, 30, and 60.
+11. Score opening grounding, comprehension, prose readability, consequence clarity, agency, actor distinctness, autonomy, continuity, curiosity, and desire to continue independently.
+12. Split each lane into signed human play sessions of at most 10 completed actions. Stop a sitting earlier when the player notices skimming, impatience with prose, memory substitution, or choosing an action merely to advance the protocol. At the next sitting, record what the player remembers before rereading and whether the product supports reorientation.
 
 **Promotion thresholds:**
 
@@ -1369,8 +1370,8 @@ node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 **Verification:**
 
 ```powershell
-node --import tsx e2e/campaign-play/playtest-runner.ts --lane pristine-60 --run-config <fresh-premise-run.json>
-node --import tsx e2e/campaign-play/playtest-runner.ts --lane pristine-60 --run-config <fresh-dna-research-run.json>
+node --import tsx e2e/campaign-play/playtest-runner.ts --lane pristine-60 --run-config <reusable-template-run.json>
+node --import tsx e2e/campaign-play/playtest-runner.ts --lane pristine-60 --run-config <new-template-run.json>
 node --import tsx e2e/campaign-play/playtest-runner.ts --lane provenance-60 --run-config <zero-turn-clone-run.json>
 node --import tsx e2e/campaign-play/playtest-runner.ts --validate <bundle-path>
 ```

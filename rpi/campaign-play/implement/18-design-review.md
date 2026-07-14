@@ -11,8 +11,9 @@ The protocol owns human formative evidence through the rendered product. It does
 ## Evidence and assumptions
 
 - Verified: the five-action first playable completed through the rendered UI with preserved intent, sourced consequences, off-screen agency, clean reload, and readable prose.
-- Verified: accepted clean-world artifacts exist for premise-only and DNA-plus-research intake, and the project has a reusable-world snapshot/materialization tool.
-- Inference: those accepted worlds remain eligible after current migrations. This must be proved before turn zero without changing their accepted world content.
+- Verified: `Lowwater Ledger` has one current-contract, person-only, zero-character, zero-turn source and the project has a reusable-world snapshot/materialization tool.
+- Falsified assumption: the older `The Emberglass Ferries` and `New Birmingham Winter` accepted worlds remain eligible after current migrations. Their immutable accepted snapshots contain collective actors and old placement shapes, so current Campaign Play correctly rejects them. They remain historical evidence and receive no compatibility adapter.
+- Required new evidence: Lane B must build and accept one distinct current-contract world, save it as a clean template before character bootstrap, and reuse that snapshot thereafter.
 - Unknown by design: whether interest, comprehension, continuity, and agency survive sixty actions. Task 18 exists to collect that evidence.
 - Preference: three distinct starting stances improve discovery, but diversity alone is not a promotion threshold.
 
@@ -62,9 +63,9 @@ The protocol owns human formative evidence through the rendered product. It does
 
 - Severity: P1 major. Likelihood: medium. Urgency: before materialization. Confidence: high.
 - Location: reusable-world preparation.
-- Evidence: the accepted world artifacts predate the current Campaign Play schema.
+- Evidence: the two older accepted artifacts predate the person-only Campaign Play schema and fail accepted-snapshot parsing after migration.
 - Consequence: stale play state or a migration mutation could contaminate a supposedly pristine lane.
-- Required change: verify source hashes, migrate an isolated copy, prove empty character/play/turn tables, preserve accepted world content hash, and freeze a lane eligibility manifest.
+- Required change: reuse only current-contract clean worlds. Verify source hashes, prove empty character and turn tables with `character_required`, preserve accepted world content hash, and freeze a lane eligibility manifest. Build one new distinct world rather than adding compatibility code for old snapshots.
 - Owner: Campaign Play implementation. Exit: eligibility evidence passes before turn zero.
 - Gate impact: system consistency and recovery.
 

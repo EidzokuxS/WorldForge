@@ -38,13 +38,13 @@ Before opening, sign a compact character contract from player-visible world mate
 
 ## Three-lane structure
 
-- Lane A uses the accepted premise-only world `The Emberglass Ferries`. The player begins as a curious outsider with no institutional authority.
-- Lane B uses the accepted DNA-and-research world `New Birmingham Winter`. The player begins with a concrete personal need but remains outside the world's ruling structures.
+- Lane A uses the current-contract clean-world template `Lowwater Ledger`. The player begins as an outsider with an ordinary reason to be in Craghold and no institutional authority.
+- Lane B builds and accepts one distinct current-contract world from edited DNA plus saved research, snapshots it before character bootstrap, and then plays the materialized template. The player begins with a concrete personal need but remains outside the world's ruling structures.
 - Lane C uses the product clone operation on an accepted zero-turn world. The player may refuse the opening hook and pursue ordinary life, opportunism, travel, or another self-chosen direction.
 
 Actions 1-20 cover discovery and goal formation. Actions 21-40 cover pursuit, return, and adaptation. Actions 41-60 cover payoff, escalation, or a new commitment. These phases describe what we observe and do not prescribe actions.
 
-Before turn zero, verify the template manifest and database hash, apply current migrations without modifying accepted world content, prove that character, play-state, and turn history are empty, and freeze lane eligibility. Lane C must use the product clone operation rather than a filesystem copy after its eligible source exists.
+Before turn zero, verify the template manifest and database hash, apply current migrations without modifying accepted world content, prove that character and turn history are empty with setup phase `character_required`, and freeze lane eligibility. Lane C must use the product clone operation rather than a filesystem copy after its eligible source exists.
 
 Each lane is played in sittings of at most ten completed actions. End a sitting sooner if the operator starts skimming prose, forgetting what was actually visible, feeling pressure to make progress, or selecting actions for protocol coverage. At the next sitting, record the remembered situation and intended next action before rereading the UI, then record what the interface made easy or hard to recover. Fatigue is not evidence about the game's prose or agency, but the product's support for returning after a break is evidence.
 
