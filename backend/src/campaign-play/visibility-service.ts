@@ -534,6 +534,18 @@ export function renderCampaignPlayVisibleActorEvent(input: {
   return input.observableTrace;
 }
 
+function isHumanMovementEvent(
+  candidate: EpistemicCandidate,
+  humanActorId: string,
+): boolean {
+  const exposure = candidate.exposure;
+  if (exposure.eventKind !== "actor_moved" || exposure.commandKind !== "move_actor") {
+    return false;
+  }
+  const payload = parseRecord(exposure.commandPayloadJson, "Movement command payload");
+  return payload.actorId === humanActorId;
+}
+
 function publicEntry(
   handle: CampaignPlayDatabaseHandle,
   candidate: EpistemicCandidate,
@@ -713,15 +725,36 @@ function visibleScene(
       travelCost: number;
       state: "open" | "restricted" | "blocked";
     }>;
-  const pressures = handle.sqlite.prepare(`SELECT pressure.id, pressure.name, pressure.description
-    FROM world_pressure_locations anchor
-    JOIN world_pressures pressure ON pressure.id = anchor.pressure_id
-    JOIN campaign_play_pressure_states state ON state.pressure_id = pressure.id
-    WHERE anchor.campaign_id = ? AND anchor.location_id = ? AND state.status = 'active'
-    ORDER BY pressure.urgency DESC, pressure.name, pressure.id LIMIT 4`).all(
+  const pressures = handle.sqlite.prepare(`WITH observed_pressure AS (
+      SELECT pressure.id, pressure.name, pressure.urgency,
+        json_extract(observation.public_entry_json, '$.text') AS summary,
+        ROW_NUMBER() OVER (
+          PARTITION BY pressure.id
+          ORDER BY observation.world_time_minutes DESC,
+            observation.created_at DESC, observation.observation_id DESC
+        ) AS recency
+      FROM world_pressure_locations anchor
+      JOIN world_pressures pressure ON pressure.id = anchor.pressure_id
+      JOIN campaign_play_pressure_states state ON state.pressure_id = pressure.id
+      JOIN campaign_play_events event ON event.campaign_id = anchor.campaign_id
+        AND EXISTS (
+          SELECT 1 FROM json_each(event.affected_refs_json) affected
+          WHERE json_extract(affected.value, '$.kind') = 'pressure'
+            AND json_extract(affected.value, '$.id') = pressure.id
+        )
+      JOIN campaign_play_observations observation
+        ON observation.campaign_id = event.campaign_id
+        AND observation.event_id = event.event_id
+        AND observation.human_actor_id = ?
+      WHERE anchor.campaign_id = ? AND anchor.location_id = ? AND state.status = 'active'
+    )
+    SELECT id, name, summary FROM observed_pressure
+    WHERE recency = 1 AND typeof(summary) = 'text' AND length(summary) > 0
+    ORDER BY urgency DESC, name, id LIMIT 4`).all(
+      humanActorId,
       handle.campaignId,
       location.id,
-    ) as Array<{ id: string; name: string; description: string }>;
+    ) as Array<{ id: string; name: string; summary: string }>;
   return {
     currentLocation: {
       handle: publicHandle("location", handle.campaignId, location.id),
@@ -745,7 +778,7 @@ function visibleScene(
     visiblePressures: pressures.map((pressure) => ({
       handle: publicHandle("pressure", handle.campaignId, pressure.id),
       label: pressure.name,
-      summary: pressure.description,
+      summary: pressure.summary,
     })),
   };
 }
@@ -1064,6 +1097,7 @@ export function createCampaignPlayVisibilityService(
         .map((row) => `${row.eventId}\u0000${row.channel}\u0000${row.sourceHash}`));
       const observationPlans = candidates
         .filter((candidate) => candidate.actorId === human.id)
+        .filter((candidate) => !isHumanMovementEvent(candidate, human.id))
         .filter((candidate) => !existingObservations.has(
           `${candidate.exposure.eventId}\u0000${candidate.exposure.channel}\u0000${candidate.sourceHash}`,
         ))

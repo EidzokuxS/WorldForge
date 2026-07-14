@@ -135,5 +135,6 @@
 - Read user-supplied attachments from disk when they shape current work; summaries do not replace the artifact.
 - Oracle/Pro asks need actual case files: code paths, failing output, target contract, current diff, and proof artifacts.
 - If an Oracle/browser wrapper fails, distinguish tool failure from model advice.
+- Keep long browser-bound model requests attached to a live tab; poll durable server state outside the browser session so a controller timeout cannot abort the request.
 - Treat empty or zero-height browser message containers as extraction limits. Verify chat completeness through attachment/export/scroll evidence before describing missing content.
 - When a delegated analysis stalls past one focused status request and one bounded synthesis request, stop that worker, continue from verified local evidence, and use a fresh reviewer at the next decision gate.

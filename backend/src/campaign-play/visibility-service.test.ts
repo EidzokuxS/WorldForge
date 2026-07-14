@@ -815,6 +815,7 @@ describe("Campaign Play visibility service", () => {
       .not.toContain("Something changed here before you arrived.");
     expect(result.packet.currentLocation.name).toBe("North Harbor");
     expect(result.packet.visibleActors.map((actor) => actor.name)).not.toContain("Sel Bell");
+    expect(result.packet.visiblePressures).toEqual([]);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "your_action"))
       .toHaveLength(5);
     expect(result.packet.consequences.filter((entry) => entry.causalCue === "direct_perception"))
@@ -835,6 +836,8 @@ describe("Campaign Play visibility service", () => {
       "hidden-goal-token",
       "hidden-distant-token",
       "hidden-expired-token",
+      "Safe sea lanes close earlier after every eclipse.",
+      "North Harbor loses supply access within two route cycles.",
       "goal-a",
       "goal-b",
       "goal-c",

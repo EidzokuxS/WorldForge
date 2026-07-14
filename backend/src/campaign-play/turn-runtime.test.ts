@@ -1007,9 +1007,16 @@ describe("Campaign Play player-action turn runtime", () => {
       FROM campaign_play_narrations
       WHERE campaign_id = ? AND turn_id = ? AND status = 'complete'`)
       .get(CAMPAIGN_ID, admission.turnId) as { packetJson: string };
-    expect(JSON.parse(narration.packetJson).currentLocation).toMatchObject({
+    const packet = JSON.parse(narration.packetJson) as {
+      currentLocation: { name: string };
+      newObservations: Array<{ title: string; text: string }>;
+    };
+    expect(packet.currentLocation).toMatchObject({
       name: "North Harbor",
     });
+    expect(packet.newObservations.map((entry) => entry.title)).not.toContain("Player moved");
+    expect(packet.newObservations.map((entry) => entry.text))
+      .not.toContain("Player left for North Harbor.");
   });
 
   it("settles the exact current suggested action without Judge reinterpretation", async () => {
